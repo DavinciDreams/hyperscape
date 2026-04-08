@@ -1,7 +1,6 @@
 import {
   DeathState,
   EventType,
-  getDuelArenaConfig,
   isPositionInsideCombatArena,
   type World,
 } from "@hyperscape/shared";
@@ -112,43 +111,16 @@ function getSafeArenaEgressPosition(
   world: World,
   playerId: string,
 ): { x: number; y: number; z: number } {
-  const lobby = getDuelArenaConfig().lobbySpawnPoint;
-  const fallbackY = Number.isFinite(lobby.y) ? lobby.y : 0;
+  // Send ejected agents to the starter area center instead of near the arena
+  // lobby, which was causing re-entry loops (agent walks right back in).
   const seed = hashSeed(playerId);
-  const baseAngle = ((seed % 360) * Math.PI) / 180;
-  const radiusBias = seed % 3;
-
-  for (let ring = 0; ring < 6; ring++) {
-    const radius = 6 + radiusBias + ring * 4;
-    for (let step = 0; step < 8; step++) {
-      const angle = baseAngle + (step * Math.PI) / 4;
-      const x = lobby.x + Math.cos(angle) * radius;
-      const z = lobby.z + Math.sin(angle) * radius;
-      if (isPositionInsideCombatArena(x, z)) {
-        continue;
-      }
-      return {
-        x,
-        y: getGroundedY(world, x, z, fallbackY),
-        z,
-      };
-    }
-  }
-
-  if (!isPositionInsideCombatArena(lobby.x, lobby.z)) {
-    return {
-      x: lobby.x,
-      y: getGroundedY(world, lobby.x, lobby.z, fallbackY),
-      z: lobby.z,
-    };
-  }
-
-  const config = getDuelArenaConfig();
-  const x = config.baseX - 8;
-  const z = config.baseZ - 8;
+  const angle = ((seed % 360) * Math.PI) / 180;
+  const radius = 3 + (seed % 5);
+  const x = Math.cos(angle) * radius;
+  const z = Math.sin(angle) * radius;
   return {
     x,
-    y: getGroundedY(world, x, z, fallbackY),
+    y: getGroundedY(world, x, z, 0.42),
     z,
   };
 }
@@ -187,13 +159,9 @@ export function recoverAgentFromDeathLoop(
     return false;
   }
 
-  const lobby = getDuelArenaConfig().lobbySpawnPoint;
-  const fallbackY = Number.isFinite(lobby.y) ? lobby.y : 0;
-  const spawnPosition = {
-    x: lobby.x,
-    y: getGroundedY(world, lobby.x, lobby.z, fallbackY),
-    z: lobby.z,
-  };
+  // Send recovered agents to the starter area center, NOT the duel arena lobby.
+  // The lobby is adjacent to arenas — agents walk right back in and get ejected again.
+  const spawnPosition = getSafeArenaEgressPosition(world, playerId);
 
   const constitutionLevel = entity.data.skills?.constitution?.level;
   const restoredMaxHealth =
@@ -257,7 +225,7 @@ export function recoverAgentFromDeathLoop(
   });
 
   console.warn(
-    `[${source}] Recovered agent ${playerId} from dead-loop state at duel lobby`,
+    `[${source}] Recovered agent ${playerId} from dead-loop state → (${spawnPosition.x.toFixed(1)}, ${spawnPosition.z.toFixed(1)})`,
   );
   return true;
 }
@@ -312,6 +280,7 @@ export function ejectAgentFromCombatArena(
     playerId,
     position: egress,
     rotation: 0,
+    suppressEffect: true,
   });
 
   world.emit(EventType.ENTITY_MODIFIED, {
@@ -328,7 +297,7 @@ export function ejectAgentFromCombatArena(
   });
 
   console.warn(
-    `[${source}] Teleported non-dueling agent ${playerId} out of duel arena`,
+    `[${source}] Teleported non-dueling agent ${playerId} out of duel arena → (${egress.x.toFixed(1)}, ${egress.z.toFixed(1)})`,
   );
   return true;
 }

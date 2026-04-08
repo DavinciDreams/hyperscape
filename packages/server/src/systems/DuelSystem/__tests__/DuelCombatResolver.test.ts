@@ -330,6 +330,10 @@ describe("DuelCombatResolver", () => {
         loserName: "TestPlayer2",
         reason: "death",
         forfeit: false,
+        challengerId: "player1",
+        opponentId: "player2",
+        challengerStakeValue: 100000,
+        opponentStakeValue: 100000,
       });
     });
 

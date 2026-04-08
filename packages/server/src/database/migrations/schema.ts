@@ -10,6 +10,7 @@ import {
   unique,
   foreignKey,
   serial,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -266,6 +267,9 @@ export const agentMappings = pgTable(
     accountId: text("account_id").notNull(),
     characterId: text("character_id").notNull(),
     agentName: text("agent_name").notNull(),
+    streamingDuelEnabled: boolean("streaming_duel_enabled")
+      .default(true)
+      .notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),

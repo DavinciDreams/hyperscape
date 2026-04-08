@@ -25,6 +25,9 @@ interface NetworkWithSend {
 import { Logger } from "../ServerNetwork/services";
 import { v4 as uuidv4 } from "uuid";
 import { errMsg } from "../../shared/errMsg.js";
+
+/** Log once if agent_mappings.streaming_duel_enabled cannot be read (e.g. migration not applied). */
+let streamingDuelPrefReadWarningLogged = false;
 import {
   type StreamingDuelCycle,
   type AgentContestant,
@@ -155,6 +158,16 @@ export class StreamingDuelScheduler {
 
   /** Whether a graceful restart is pending (waits for current duel to end) */
   private _pendingGracefulRestart = false;
+
+  /** Embedded spar bots created from POST /admin/duels/debug-matchup (spawn mode). */
+  private debugSparbotSpawnIds = new Set<string>();
+
+  /** Standalone sparbots added to the matchmaking pool via /admin/sparbots. */
+  private standaloneSparbotIds = new Set<string>();
+  private standaloneSparbotMeta = new Map<
+    string,
+    { name: string; style: string; tier: string }
+  >();
 
   // ---- Streaming State Cache (Memory Optimization) ----
   /** Cached streaming state to avoid recreating objects every 500ms */
@@ -369,6 +382,90 @@ export class StreamingDuelScheduler {
     return databaseSystem?.getDb?.() ?? null;
   }
 
+  /**
+   * Register for streaming duels only when `agent_mappings.streaming_duel_enabled` is true.
+   * Missing DB row defaults to enabled.
+   */
+  private async registerAgentIfEligible(agentId: string): Promise<void> {
+    const db = this.getDatabase();
+    let enabled = true;
+    if (db) {
+      try {
+        const { agentMappings } = await import("../../database/schema.js");
+        const { eq, or } = await import("drizzle-orm");
+        const rows = await db
+          .select({ streamingDuelEnabled: agentMappings.streamingDuelEnabled })
+          .from(agentMappings)
+          .where(
+            or(
+              eq(agentMappings.characterId, agentId),
+              eq(agentMappings.agentId, agentId),
+            ),
+          )
+          .limit(1);
+        const row = rows[0];
+        if (row && row.streamingDuelEnabled === false) {
+          enabled = false;
+        }
+      } catch (err) {
+        if (!streamingDuelPrefReadWarningLogged) {
+          streamingDuelPrefReadWarningLogged = true;
+          Logger.warn(
+            "StreamingDuelScheduler",
+            `Could not read agent streaming duel preference (${errMsg(err)}). ` +
+              "If the column is missing, run `bun run db:migrate` in packages/server against the same DATABASE_URL as this server. Defaulting to duel-eligible.",
+          );
+        }
+        enabled = true;
+      }
+    }
+
+    if (!enabled) {
+      this.matchmaking.markStreamingDuelOptOut(agentId, true);
+      return;
+    }
+
+    this.matchmaking.markStreamingDuelOptOut(agentId, false);
+    this.matchmaking.registerAgent(agentId);
+  }
+
+  /** Agents already in the world when the scheduler starts (same rules as PLAYER_JOINED). */
+  private async scanForExistingAgentsWithEligibility(): Promise<void> {
+    const entities = this.world.entities as {
+      getAllEntities?: () => Map<string, unknown>;
+    };
+
+    if (!entities?.getAllEntities) {
+      return;
+    }
+
+    const allEntities = entities.getAllEntities();
+    let agentCount = 0;
+
+    for (const [id, entity] of allEntities) {
+      const entityAny = entity as {
+        type?: string;
+        isAgent?: boolean;
+        isEmbeddedAgent?: boolean;
+      };
+
+      if (
+        entityAny.type === "player" &&
+        (entityAny.isAgent === true || entityAny.isEmbeddedAgent === true)
+      ) {
+        await this.registerAgentIfEligible(id);
+        agentCount++;
+      }
+    }
+
+    if (agentCount > 0) {
+      Logger.info(
+        "StreamingDuelScheduler",
+        `Found ${agentCount} existing agent(s) during initialization`,
+      );
+    }
+  }
+
   // ============================================================================
   // Lifecycle
   // ============================================================================
@@ -468,7 +565,7 @@ export class StreamingDuelScheduler {
     this.subscribeToEvents();
 
     // Scan for any agents that were already spawned before we initialized
-    this.matchmaking.scanForExistingAgents();
+    void this.scanForExistingAgentsWithEligibility();
 
     // Start the main tick loop
     this.startTickLoop();
@@ -522,6 +619,7 @@ export class StreamingDuelScheduler {
     this.orchestrator.reset();
     this.camera.reset();
     this.matchmaking.reset();
+    this.debugSparbotSpawnIds.clear();
 
     Logger.info("StreamingDuelScheduler", "Streaming duel scheduler destroyed");
   }
@@ -540,7 +638,7 @@ export class StreamingDuelScheduler {
       };
 
       if (data.playerId && (data.isEmbeddedAgent || data.isAgent)) {
-        this.matchmaking.registerAgent(data.playerId);
+        void this.registerAgentIfEligible(data.playerId);
       }
     };
     this.world.on(EventType.PLAYER_JOINED, onPlayerJoined);
@@ -594,9 +692,26 @@ export class StreamingDuelScheduler {
   // Public API Delegates
   // ============================================================================
 
-  /** Register an agent for duel scheduling */
-  registerAgent(agentId: string): void {
+  /**
+   * Apply streaming duel participation from persisted preference (or DB PATCH).
+   * `agentId` must be the in-world player / character id (same as PLAYER_JOINED `playerId`),
+   * not the dashboard `agent_mappings.agent_id` mapping key.
+   */
+  applyStreamingDuelParticipation(agentId: string, enabled: boolean): void {
+    if (!enabled) {
+      this.matchmaking.markStreamingDuelOptOut(agentId, true);
+      return;
+    }
+    this.matchmaking.markStreamingDuelOptOut(agentId, false);
     this.matchmaking.registerAgent(agentId);
+  }
+
+  /** Register an agent for duel scheduling */
+  registerAgent(
+    agentId: string,
+    options?: { bypassStreamingDuelOptOut?: boolean },
+  ): void {
+    this.matchmaking.registerAgent(agentId, options);
   }
 
   /** Unregister an agent from duel scheduling */
@@ -927,6 +1042,16 @@ export class StreamingDuelScheduler {
       agent1: { id: agent1.characterId, name: agent1.name },
       agent2: { id: agent2.characterId, name: agent2.name },
       duration: STREAMING_TIMING.ANNOUNCEMENT_DURATION,
+    });
+
+    // Hyperbet / DuelBettingBridge: same payload shape as legacy DuelScheduler
+    this.world.emit("duel:scheduled", {
+      duelId,
+      agent1Id: agent1.characterId,
+      agent2Id: agent2.characterId,
+      agent1Name: agent1.name,
+      agent2Name: agent2.name,
+      startTime: betCloseTime,
     });
   }
 
@@ -1382,6 +1507,23 @@ export class StreamingDuelScheduler {
           : (this.currentCycle.agent2?.damageDealtThisFight ?? 0),
     });
 
+    // Pull per-fight AI stats (attacksLanded, healsUsed) captured in stopCombatAIs
+    const lastFightStats = this.orchestrator.getLastFightStats();
+    if (this.currentCycle.agent1) {
+      const s = lastFightStats.get(this.currentCycle.agent1.characterId);
+      if (s) {
+        this.currentCycle.agent1.attacksLanded = s.attacksLanded;
+        this.currentCycle.agent1.healsUsed = s.healsUsed;
+      }
+    }
+    if (this.currentCycle.agent2) {
+      const s = lastFightStats.get(this.currentCycle.agent2.characterId);
+      if (s) {
+        this.currentCycle.agent2.attacksLanded = s.attacksLanded;
+        this.currentCycle.agent2.healsUsed = s.healsUsed;
+      }
+    }
+
     Logger.info(
       "StreamingDuelScheduler",
       `Fight ended: ${winnerName} wins by ${winReason}`,
@@ -1405,6 +1547,8 @@ export class StreamingDuelScheduler {
 
     // Emit standard duel completed so agent plugins exit duel mode.
     // The duel-events listener sends duelCompleted to both agent sockets.
+    const a1 = this.currentCycle.agent1?.characterId ?? "";
+    const a2 = this.currentCycle.agent2?.characterId ?? "";
     this.world.emit(EventType.DUEL_COMPLETED, {
       duelId:
         this.currentCycle.duelId ?? `streaming-${this.currentCycle.cycleId}`,
@@ -1420,6 +1564,10 @@ export class StreamingDuelScheduler {
       winnerReceivesValue: 0,
       challengerStakes: [],
       targetStakes: [],
+      challengerId: a1,
+      opponentId: a2,
+      challengerStakeValue: 0,
+      opponentStakeValue: 0,
       summary: {
         duration: now - (this.currentCycle.cycleStartTime ?? now),
         rules: DEFAULT_DUEL_RULES,
@@ -1575,6 +1723,23 @@ export class StreamingDuelScheduler {
         agent1Name: cycleSnapshot.agent1?.name ?? null,
         agent2Name: cycleSnapshot.agent2?.name ?? null,
       });
+
+      // Teleport any agents that were already sent to the arena back to their
+      // original positions so they don't appear as ghost units in the next cycle.
+      for (const agent of [cycleSnapshot.agent1, cycleSnapshot.agent2]) {
+        if (!agent) continue;
+        const restorePos = this.orchestrator.sanitizeRestorePosition(
+          agent.originalPosition,
+          agent.characterId,
+        );
+        this.orchestrator.teleportPlayer(
+          agent.characterId,
+          restorePos,
+          undefined,
+          true, // suppressEffect — this is cleanup, not a dramatic teleport
+        );
+        this.orchestrator.stopCombat(agent.characterId);
+      }
     }
 
     this.orchestrator.clearDuelFlagsForCycle(cycleSnapshot);
@@ -1646,17 +1811,23 @@ export class StreamingDuelScheduler {
       return;
     }
 
-    // Update damage dealt for the attacker
+    // Update damage dealt and highest hit for the attacker
     if (
       attackerId === this.currentCycle.agent1?.characterId &&
       targetId === this.currentCycle.agent2?.characterId
     ) {
       this.currentCycle.agent1.damageDealtThisFight += damage;
+      if (damage > this.currentCycle.agent1.highestHit) {
+        this.currentCycle.agent1.highestHit = damage;
+      }
     } else if (
       attackerId === this.currentCycle.agent2?.characterId &&
       targetId === this.currentCycle.agent1?.characterId
     ) {
       this.currentCycle.agent2.damageDealtThisFight += damage;
+      if (damage > this.currentCycle.agent2.highestHit) {
+        this.currentCycle.agent2.highestHit = damage;
+      }
     }
 
     // Sync target HP immediately so the next broadcast reflects current health
@@ -2010,6 +2181,9 @@ export class StreamingDuelScheduler {
       existing.wins = agent.wins;
       existing.losses = agent.losses;
       existing.damageDealtThisFight = agent.damageDealtThisFight;
+      existing.highestHit = agent.highestHit;
+      existing.attacksLanded = agent.attacksLanded;
+      existing.healsUsed = agent.healsUsed;
       existing.rank = agent.rank;
       existing.headToHeadWins = agent.headToHeadWins;
       existing.headToHeadLosses = agent.headToHeadLosses;
@@ -2033,6 +2207,13 @@ export class StreamingDuelScheduler {
       existing.inventory = Array.isArray(agent.inventory)
         ? agent.inventory.slice(0, 28)
         : [];
+      if (!existing.itemIconPaths) {
+        existing.itemIconPaths = {};
+      }
+      for (const key of Object.keys(existing.itemIconPaths)) {
+        delete (existing.itemIconPaths as Record<string, unknown>)[key];
+      }
+      Object.assign(existing.itemIconPaths, agent.itemIconPaths ?? {});
       return existing;
     }
 
@@ -2049,11 +2230,31 @@ export class StreamingDuelScheduler {
     agent: AgentContestant,
   ): void {
     if (!cached) return;
+    this.orchestrator.refreshContestantLoadout(agent);
     cached.hp = agent.currentHp;
     cached.maxHp = agent.maxHp;
     cached.damageDealtThisFight = agent.damageDealtThisFight;
     cached.wins = agent.wins;
     cached.losses = agent.losses;
+    if (!cached.equipment) {
+      cached.equipment = {};
+    }
+    for (const key of Object.keys(
+      cached.equipment as Record<string, unknown>,
+    )) {
+      delete (cached.equipment as Record<string, unknown>)[key];
+    }
+    Object.assign(cached.equipment, agent.equipment);
+    cached.inventory = Array.isArray(agent.inventory)
+      ? agent.inventory.slice(0, 28)
+      : [];
+    if (!cached.itemIconPaths) {
+      cached.itemIconPaths = {};
+    }
+    for (const key of Object.keys(cached.itemIconPaths)) {
+      delete (cached.itemIconPaths as Record<string, unknown>)[key];
+    }
+    Object.assign(cached.itemIconPaths, agent.itemIconPaths ?? {});
   }
 
   // ============================================================================
@@ -2108,10 +2309,14 @@ export class StreamingDuelScheduler {
       wins: agent.wins,
       losses: agent.losses,
       damageDealtThisFight: agent.damageDealtThisFight,
+      highestHit: agent.highestHit,
+      attacksLanded: agent.attacksLanded,
+      healsUsed: agent.healsUsed,
       equipment: { ...(agent.equipment ?? {}) },
       inventory: Array.isArray(agent.inventory)
         ? agent.inventory.slice(0, 28)
         : [],
+      itemIconPaths: { ...(agent.itemIconPaths ?? {}) },
       rank: agent.rank,
       headToHeadWins: agent.headToHeadWins,
       headToHeadLosses: agent.headToHeadLosses,
@@ -2224,6 +2429,463 @@ export class StreamingDuelScheduler {
       insufficientWarnings: this.matchmaking.insufficientAgentWarningCount,
       currentPhase: this.currentCycle?.phase ?? null,
     };
+  }
+
+  /**
+   * Ensure users + characters rows exist for a freshly spawned embedded sparbot.
+   */
+  private async ensureEmbeddedCharacterRowForSparbot(
+    characterId: string,
+    accountId: string,
+    name: string,
+  ): Promise<void> {
+    const db = this.getDatabase();
+    if (!db) {
+      return;
+    }
+    const { users, characters } = await import("../../database/schema.js");
+    const { eq } = await import("drizzle-orm");
+
+    const existing = await db.query.characters.findFirst({
+      where: (chars, ops) => ops.eq(chars.id, characterId),
+    });
+    if (existing) {
+      return;
+    }
+
+    const existingUsers = (await db
+      .select()
+      .from(users)
+      .where(eq(users.id, accountId))) as Array<{ id: string }>;
+
+    if (existingUsers.length === 0) {
+      await db.insert(users).values({
+        id: accountId,
+        name,
+        roles: "player",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    await db.insert(characters).values({
+      id: characterId,
+      accountId,
+      name,
+      isAgent: 1,
+      createdAt: Date.now(),
+    });
+  }
+
+  /**
+   * Director/debug: spawn (or reuse) an opponent and pin the next duel pair.
+   */
+  async queueDebugMatchup(params: {
+    targetCharacterId: string;
+    opponentCharacterId?: string;
+    opponentName?: string;
+    spawnOpponent: boolean;
+    sparbotCombatStyle?: "auto" | "melee" | "ranged" | "mage" | "prayer";
+  }): Promise<{
+    mode: "spawned" | "existing";
+    opponent: { characterId: string; name: string };
+  }> {
+    const targetEntity = this.world.entities.get(params.targetCharacterId);
+    if (!targetEntity) {
+      throw new Error(`Target ${params.targetCharacterId} is not in the world`);
+    }
+
+    const { getAgentManager } = await import("../../eliza/index.js");
+    const agentManager = getAgentManager();
+    if (!agentManager) {
+      throw new Error("Agent system not initialized");
+    }
+
+    let opponentId: string;
+    let opponentName: string;
+
+    if (params.spawnOpponent) {
+      opponentId = `sparbot-${uuidv4()}`;
+      const accountId = `sparbot-account-${opponentId.slice(-24)}`;
+      opponentName =
+        params.opponentName?.trim() || `Sparbot ${opponentId.slice(-6)}`;
+
+      await this.ensureEmbeddedCharacterRowForSparbot(
+        opponentId,
+        accountId,
+        opponentName,
+      );
+
+      await agentManager.createAgent({
+        characterId: opponentId,
+        accountId,
+        name: opponentName,
+        scriptedRole: "combat",
+        autoStart: true,
+      });
+
+      this.debugSparbotSpawnIds.add(opponentId);
+
+      if (
+        params.sparbotCombatStyle === "melee" ||
+        params.sparbotCombatStyle === "ranged" ||
+        params.sparbotCombatStyle === "mage" ||
+        params.sparbotCombatStyle === "prayer"
+      ) {
+        this.orchestrator.setDebugCombatRoleOverride(
+          opponentId,
+          params.sparbotCombatStyle,
+        );
+      }
+    } else {
+      if (!params.opponentCharacterId) {
+        throw new Error(
+          "opponentCharacterId is required when reusing an agent",
+        );
+      }
+      opponentId = params.opponentCharacterId;
+      const oppEntity = this.world.entities.get(opponentId);
+      if (!oppEntity) {
+        throw new Error(`Opponent ${opponentId} is not in the world`);
+      }
+      const data = oppEntity.data as { name?: string };
+      opponentName = data.name ?? opponentId;
+    }
+
+    this.matchmaking.registerAgent(params.targetCharacterId, {
+      bypassStreamingDuelOptOut: true,
+    });
+    this.matchmaking.registerAgent(opponentId, {
+      bypassStreamingDuelOptOut: true,
+    });
+
+    this.matchmaking.nextDuelPair = {
+      agent1Id: params.targetCharacterId,
+      agent2Id: opponentId,
+      selectedAt: Date.now(),
+    };
+    this.notifyOnDeckAgents();
+
+    return {
+      mode: params.spawnOpponent ? "spawned" : "existing",
+      opponent: { characterId: opponentId, name: opponentName },
+    };
+  }
+
+  // ============================================================================
+  // Standalone Sparbot Management
+  // ============================================================================
+
+  private static readonly SPARBOT_NAME_POOL: readonly string[] = [
+    "Ashthorn",
+    "Bolvarg",
+    "Cragfist",
+    "Duskmantle",
+    "Emberveil",
+    "Frostknuckle",
+    "Grimshaw",
+    "Hollowbane",
+    "Ironpelt",
+    "Jadecut",
+    "Kniveholt",
+    "Lordshard",
+    "Mireborn",
+    "Nightbloom",
+    "Oakhaven",
+    "Pebblebrow",
+    "Quickslag",
+    "Ravenmere",
+    "Stonescar",
+    "Thistlevein",
+    "Umbercleft",
+    "Vaultbreaker",
+    "Whetmark",
+    "Xendral",
+    "Yarrowcrest",
+    "Zinderfall",
+    "Axethane",
+    "Blazewind",
+    "Coppergrip",
+    "Dreadclaw",
+    "Edgeborn",
+    "Flintmoss",
+    "Gravelstep",
+    "Harrowgate",
+    "Ironveil",
+    "Jaggrath",
+    "Keldrath",
+    "Lochfang",
+    "Mossback",
+    "Needlebrook",
+    "Obsidius",
+    "Pyrebrand",
+    "Quakeshield",
+    "Rustmantle",
+    "Steelroot",
+    "Thornvast",
+    "Umbralux",
+    "Voidshard",
+    "Wraithcroft",
+    "Yewmere",
+  ];
+
+  private pickSparbotName(): string {
+    const used = new Set(
+      [...this.standaloneSparbotMeta.values()].map((m) => m.name),
+    );
+    const available = StreamingDuelScheduler.SPARBOT_NAME_POOL.filter(
+      (n) => !used.has(n),
+    );
+    const pool =
+      available.length > 0
+        ? available
+        : StreamingDuelScheduler.SPARBOT_NAME_POOL;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /**
+   * Generate skill levels for a standalone sparbot based on style and tier.
+   * Adds variance (±5) so bots of the same tier feel distinct.
+   */
+  private static sparbotSkills(
+    style: "melee" | "ranged" | "mage" | "prayer",
+    tier: "novice" | "adept" | "expert",
+  ): {
+    attackLevel: number;
+    strengthLevel: number;
+    defenseLevel: number;
+    constitutionLevel: number;
+    rangedLevel: number;
+    magicLevel: number;
+    prayerLevel: number;
+    combatLevel: number;
+  } {
+    const base = tier === "novice" ? 35 : tier === "adept" ? 60 : 85;
+    const jitter = () => Math.floor(Math.random() * 10) - 5; // ±5
+
+    let atk = 1,
+      str = 1,
+      def = 1,
+      con = 10,
+      rng = 1,
+      mag = 1,
+      pry = 1;
+
+    switch (style) {
+      case "melee":
+        atk = base + jitter();
+        str = base + 5 + jitter();
+        def = Math.floor(base * 0.7) + jitter();
+        con = base + jitter();
+        rng = 1;
+        mag = 1;
+        pry = Math.floor(base * 0.2);
+        break;
+      case "ranged":
+        rng = base + 5 + jitter();
+        def = Math.floor(base * 0.6) + jitter();
+        con = base + jitter();
+        atk = 1;
+        str = 1;
+        mag = 1;
+        pry = Math.floor(base * 0.2);
+        break;
+      case "mage":
+        mag = base + 5 + jitter();
+        def = Math.floor(base * 0.7) + jitter();
+        con = base + jitter();
+        atk = 1;
+        str = 1;
+        rng = 1;
+        pry = Math.floor(base * 0.75) + jitter();
+        break;
+      case "prayer":
+        pry = base + 5 + jitter();
+        str = base + jitter();
+        atk = Math.floor(base * 0.8) + jitter();
+        def = Math.floor(base * 0.8) + jitter();
+        con = base + jitter();
+        rng = 1;
+        mag = 1;
+        break;
+    }
+
+    const clamp = (v: number, min = 1, max = 99) =>
+      Math.max(min, Math.min(max, v));
+    atk = clamp(atk);
+    str = clamp(str);
+    def = clamp(def);
+    con = clamp(con, 10);
+    rng = clamp(rng);
+    mag = clamp(mag);
+    pry = clamp(pry);
+
+    const combatLevel = Math.max(
+      3,
+      Math.min(126, Math.floor((atk + str + def + con) / 4)),
+    );
+    return {
+      attackLevel: atk,
+      strengthLevel: str,
+      defenseLevel: def,
+      constitutionLevel: con,
+      rangedLevel: rng,
+      magicLevel: mag,
+      prayerLevel: pry,
+      combatLevel,
+    };
+  }
+
+  /** Upsert skill stats into the characters table for a standalone sparbot. */
+  private async seedSparbotStats(
+    characterId: string,
+    skills: ReturnType<typeof StreamingDuelScheduler.sparbotSkills>,
+  ): Promise<void> {
+    const db = this.getDatabase();
+    if (!db) return;
+    const { characters } = await import("../../database/schema.js");
+    const { eq } = await import("drizzle-orm");
+    const pp = Math.min(99, Math.max(1, skills.prayerLevel * 10));
+    await db
+      .update(characters)
+      .set({
+        combatLevel: skills.combatLevel,
+        attackLevel: skills.attackLevel,
+        strengthLevel: skills.strengthLevel,
+        defenseLevel: skills.defenseLevel,
+        constitutionLevel: skills.constitutionLevel,
+        rangedLevel: skills.rangedLevel,
+        magicLevel: skills.magicLevel,
+        prayerLevel: skills.prayerLevel,
+        health: skills.constitutionLevel,
+        maxHealth: skills.constitutionLevel,
+        prayerPoints: pp,
+        prayerMaxPoints: pp,
+      })
+      .where(eq(characters.id, characterId));
+  }
+
+  /** Spawn standalone sparbots and add them to the matchmaking pool. */
+  async spawnStandaloneSparbots(
+    count: number,
+    style: "melee" | "ranged" | "mage" | "prayer",
+    tier: "novice" | "adept" | "expert" = "adept",
+    customNames?: string[],
+  ): Promise<Array<{ characterId: string; name: string; tier: string }>> {
+    const { getAgentManager } = await import("../../eliza/index.js");
+    const agentManager = getAgentManager();
+    if (!agentManager) {
+      throw new Error("Agent system not initialized");
+    }
+
+    const spawned: Array<{ characterId: string; name: string; tier: string }> =
+      [];
+
+    for (let i = 0; i < count; i++) {
+      const characterId = `sparbot-standalone-${uuidv4()}`;
+      const accountId = `sparbot-account-${characterId.slice(-24)}`;
+      const name =
+        customNames?.[i]?.trim() ||
+        `${this.pickSparbotName()} ${style.charAt(0).toUpperCase() + style.slice(1)}`;
+
+      await this.ensureEmbeddedCharacterRowForSparbot(
+        characterId,
+        accountId,
+        name,
+      );
+
+      const skills = StreamingDuelScheduler.sparbotSkills(style, tier);
+      await this.seedSparbotStats(characterId, skills);
+
+      await agentManager.createAgent({
+        characterId,
+        accountId,
+        name,
+        scriptedRole: "combat",
+        autoStart: true,
+      });
+
+      this.orchestrator.setDebugCombatRoleOverride(characterId, style);
+      this.standaloneSparbotIds.add(characterId);
+      this.standaloneSparbotMeta.set(characterId, { name, style, tier });
+
+      this.matchmaking.registerAgent(characterId, {
+        bypassStreamingDuelOptOut: true,
+      });
+
+      spawned.push({ characterId, name, tier });
+    }
+
+    return spawned;
+  }
+
+  /** List active standalone sparbots. */
+  listStandaloneSparbots(): Array<{
+    characterId: string;
+    name: string;
+    style: string;
+    tier: string;
+  }> {
+    return [...this.standaloneSparbotIds].map((id) => {
+      const meta = this.standaloneSparbotMeta.get(id);
+      return {
+        characterId: id,
+        name: meta?.name ?? id,
+        style: meta?.style ?? "melee",
+        tier: meta?.tier ?? "adept",
+      };
+    });
+  }
+
+  /** Remove standalone sparbots (all if ids omitted). Returns count removed. */
+  async removeStandaloneSparbots(ids?: string[]): Promise<number> {
+    const { getAgentManager } = await import("../../eliza/index.js");
+    const agentManager = getAgentManager();
+    const targets = ids
+      ? ids.filter((id) => this.standaloneSparbotIds.has(id))
+      : [...this.standaloneSparbotIds];
+
+    let removed = 0;
+    for (const id of targets) {
+      try {
+        if (agentManager) {
+          await agentManager.removeAgent(id);
+        }
+        this.matchmaking.unregisterAgent(id);
+        this.orchestrator.clearDebugCombatRoleOverride(id);
+        this.standaloneSparbotIds.delete(id);
+        this.standaloneSparbotMeta.delete(id);
+        removed++;
+      } catch (err) {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `removeStandaloneSparbots(${id}): ${errMsg(err)}`,
+        );
+      }
+    }
+    return removed;
+  }
+
+  /** Remove embedded spar bots spawned via queueDebugMatchup (spawn mode). */
+  async cleanupDebugSpawnedSparbots(): Promise<number> {
+    const { getAgentManager } = await import("../../eliza/index.js");
+    const agentManager = getAgentManager();
+    let removed = 0;
+    for (const id of [...this.debugSparbotSpawnIds]) {
+      try {
+        if (agentManager) {
+          await agentManager.removeAgent(id);
+        }
+        this.matchmaking.unregisterAgent(id);
+        removed++;
+      } catch (err) {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `cleanupDebugSpawnedSparbots(${id}): ${errMsg(err)}`,
+        );
+      }
+    }
+    this.debugSparbotSpawnIds.clear();
+    return removed;
   }
 }
 

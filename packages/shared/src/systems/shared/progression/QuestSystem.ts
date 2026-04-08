@@ -198,6 +198,70 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
       },
     );
 
+    // Track runecrafting (essence → runes)
+    this.subscribe(
+      EventType.RUNECRAFTING_COMPLETE,
+      (data: {
+        playerId: string;
+        runeItemId: string;
+        runesProduced: number;
+      }) => {
+        this.handleInteractStage(
+          data.playerId,
+          data.runeItemId,
+          data.runesProduced,
+        );
+      },
+    );
+
+    // Track crafting (leather → leather_gloves, etc.)
+    this.subscribe(
+      EventType.CRAFTING_COMPLETE,
+      (data: {
+        playerId: string;
+        outputItemId: string;
+        totalCrafted: number;
+      }) => {
+        this.handleInteractStage(
+          data.playerId,
+          data.outputItemId,
+          data.totalCrafted,
+        );
+      },
+    );
+
+    // Track fletching (logs → arrow_shaft, arrow_shaft+feathers → headless_arrow, etc.)
+    this.subscribe(
+      EventType.FLETCHING_COMPLETE,
+      (data: {
+        playerId: string;
+        outputItemId: string;
+        totalCrafted: number;
+      }) => {
+        this.handleInteractStage(
+          data.playerId,
+          data.outputItemId,
+          data.totalCrafted,
+        );
+      },
+    );
+
+    // Track tanning (cowhide → leather, etc.)
+    this.subscribe(
+      EventType.TANNING_COMPLETE,
+      (data: {
+        playerId: string;
+        outputItemId: string;
+        totalTanned: number;
+      }) => {
+        this.handleInteractStage(
+          data.playerId,
+          data.outputItemId,
+          data.totalTanned,
+        );
+      },
+    );
+
     this.logger.info(
       `QuestSystem initialized with ${this.questDefinitions.size} quests`,
     );

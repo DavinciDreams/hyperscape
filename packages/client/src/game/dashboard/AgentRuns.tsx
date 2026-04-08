@@ -1,26 +1,29 @@
 import React, { useState, useEffect } from "react";
 import {
   Activity,
-  Play,
-  CheckCircle,
-  XCircle,
-  Clock,
-  AlertCircle,
-  Filter,
+  Swords,
+  Skull,
+  TrendingUp,
+  Coins,
+  Pickaxe,
+  RefreshCw,
 } from "lucide-react";
 import type { Agent } from "./types";
 import { ELIZAOS_API } from "@/lib/api-config";
 
-interface AgentRun {
-  id: string;
-  agentId: string;
-  roomId: string;
-  status: "started" | "completed" | "timeout" | "error";
-  startedAt: number;
-  completedAt?: number;
-  duration?: number;
-  error?: string;
-  metadata?: Record<string, unknown>;
+interface RecentAction {
+  type: string;
+  description: string;
+  xpGained?: number;
+  timestamp: number;
+}
+
+interface SessionStats {
+  kills: number;
+  deaths: number;
+  totalXpGained: number;
+  goldEarned: number;
+  resourcesGathered: Record<string, number>;
 }
 
 interface AgentRunsProps {
@@ -28,90 +31,71 @@ interface AgentRunsProps {
 }
 
 export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
-  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [actions, setActions] = useState<RecentAction[]>([]);
+  const [stats, setStats] = useState<SessionStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchRuns();
-  }, [agent.id, statusFilter]);
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 10000);
+    return () => clearInterval(interval);
+  }, [agent.id]);
 
-  const fetchRuns = async () => {
+  const fetchActivity = async () => {
     try {
-      const params = new URLSearchParams({
-        limit: "50",
-      });
-
-      if (statusFilter !== "all") {
-        params.append("status", statusFilter);
-      }
-
       const response = await fetch(
-        `${ELIZAOS_API}/agents/${agent.id}/runs?${params.toString()}`,
+        `${ELIZAOS_API}/agents/${agent.id}/activity`,
       );
 
       if (!response.ok) {
-        setRuns([]);
-        setError("Runs unavailable right now");
+        setActions([]);
+        setError("Activity unavailable right now");
         return;
       }
 
       const data = await response.json();
 
-      setRuns(data.runs || []);
-      setTotal(data.total || 0);
-      setHasMore(data.hasMore || false);
+      if (!data.success) {
+        setActions([]);
+        setError(data.message || "Activity unavailable");
+        return;
+      }
+
+      setActions(data.recentActions || []);
+      setStats(data.sessionStats || null);
       setError(null);
     } catch {
-      setRuns([]);
-      setError("Runs unavailable right now");
+      setActions([]);
+      setError("Activity unavailable right now");
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <CheckCircle size={16} className="text-green-400" />;
-      case "error":
-        return <XCircle size={16} className="text-red-400" />;
-      case "timeout":
-        return <Clock size={16} className="text-orange-400" />;
-      case "started":
-        return <Play size={16} className="text-blue-400" />;
-      default:
-        return <Activity size={16} className="text-[#f2d08a]" />;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed":
-        return "border-green-500/30 bg-green-900/10";
-      case "error":
-        return "border-red-500/30 bg-red-900/10";
-      case "timeout":
-        return "border-orange-500/30 bg-orange-900/10";
-      case "started":
-        return "border-blue-500/30 bg-blue-900/10";
-      default:
-        return "border-[#8b4513]/30 bg-[#1a1005]";
-    }
-  };
-
-  const formatDuration = (ms?: number) => {
-    if (!ms) return "N/A";
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-
-    if (hours > 0) return `${hours}h ${minutes % 60}m`;
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-    return `${seconds}s`;
+  const getActionIcon = (type: string) => {
+    const t = type.toLowerCase();
+    if (t.includes("kill") || t.includes("combat") || t.includes("attack"))
+      return <Swords size={14} className="text-red-400" />;
+    if (t.includes("death") || t.includes("died"))
+      return <Skull size={14} className="text-gray-400" />;
+    if (t.includes("xp") || t.includes("level"))
+      return <TrendingUp size={14} className="text-green-400" />;
+    if (
+      t.includes("gold") ||
+      t.includes("coin") ||
+      t.includes("buy") ||
+      t.includes("sell")
+    )
+      return <Coins size={14} className="text-yellow-400" />;
+    if (
+      t.includes("gather") ||
+      t.includes("mine") ||
+      t.includes("chop") ||
+      t.includes("fish")
+    )
+      return <Pickaxe size={14} className="text-blue-400" />;
+    return <Activity size={14} className="text-[#f2d08a]" />;
   };
 
   if (loading) {
@@ -122,6 +106,10 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
     );
   }
 
+  const resourceEntries = stats
+    ? Object.entries(stats.resourcesGathered).filter(([, v]) => v > 0)
+    : [];
+
   return (
     <div className="flex flex-col h-full bg-[#0b0a15]/50 backdrop-blur-sm">
       {/* Header */}
@@ -129,74 +117,73 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <Activity className="text-[#f2d08a]" size={20} />
-            <h2 className="font-bold text-[#f2d08a]">Agent Runs</h2>
-            <span className="px-2 py-0.5 rounded text-[10px] bg-[#f2d08a]/10 text-[#f2d08a] border border-[#f2d08a]/20">
-              {total} Total
-            </span>
+            <h2 className="font-bold text-[#f2d08a]">Session Activity</h2>
           </div>
           <button
-            onClick={fetchRuns}
+            onClick={fetchActivity}
             className="p-2 hover:bg-[#f2d08a]/10 rounded-lg text-[#f2d08a] transition-colors"
             title="Refresh"
           >
-            <Activity size={18} />
+            <RefreshCw size={18} />
           </button>
         </div>
 
-        {/* Status Filters */}
-        <div className="flex items-center gap-2">
-          <Filter size={14} className="text-[#f2d08a]/40" />
-          <button
-            onClick={() => setStatusFilter("all")}
-            className={`px-3 py-1 text-xs rounded ${
-              statusFilter === "all"
-                ? "bg-[#f2d08a]/20 text-[#f2d08a]"
-                : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-[#f2d08a]"
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setStatusFilter("started")}
-            className={`px-3 py-1 text-xs rounded ${
-              statusFilter === "started"
-                ? "bg-blue-500/20 text-blue-400"
-                : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-blue-400"
-            }`}
-          >
-            Started
-          </button>
-          <button
-            onClick={() => setStatusFilter("completed")}
-            className={`px-3 py-1 text-xs rounded ${
-              statusFilter === "completed"
-                ? "bg-green-500/20 text-green-400"
-                : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-green-400"
-            }`}
-          >
-            Completed
-          </button>
-          <button
-            onClick={() => setStatusFilter("error")}
-            className={`px-3 py-1 text-xs rounded ${
-              statusFilter === "error"
-                ? "bg-red-500/20 text-red-400"
-                : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-red-400"
-            }`}
-          >
-            Errors
-          </button>
-          <button
-            onClick={() => setStatusFilter("timeout")}
-            className={`px-3 py-1 text-xs rounded ${
-              statusFilter === "timeout"
-                ? "bg-orange-500/20 text-orange-400"
-                : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-orange-400"
-            }`}
-          >
-            Timeout
-          </button>
-        </div>
+        {/* Session Stats */}
+        {stats && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-center">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <Swords size={14} className="text-red-400" />
+                <span className="text-xs text-[#f2d08a]/60">Kills</span>
+              </div>
+              <span className="text-lg font-bold text-[#e8ebf4]">
+                {stats.kills}
+              </span>
+            </div>
+            <div className="bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-center">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <Skull size={14} className="text-gray-400" />
+                <span className="text-xs text-[#f2d08a]/60">Deaths</span>
+              </div>
+              <span className="text-lg font-bold text-[#e8ebf4]">
+                {stats.deaths}
+              </span>
+            </div>
+            <div className="bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-center">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <TrendingUp size={14} className="text-green-400" />
+                <span className="text-xs text-[#f2d08a]/60">XP</span>
+              </div>
+              <span className="text-lg font-bold text-[#e8ebf4]">
+                {stats.totalXpGained.toLocaleString()}
+              </span>
+            </div>
+            <div className="bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 text-center">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <Coins size={14} className="text-yellow-400" />
+                <span className="text-xs text-[#f2d08a]/60">Gold</span>
+              </div>
+              <span className="text-lg font-bold text-[#e8ebf4]">
+                {stats.goldEarned.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {resourceEntries.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {resourceEntries.map(([resource, count]) => (
+              <span
+                key={resource}
+                className="px-2 py-1 text-xs bg-[#1a1005] border border-[#8b4513]/30 rounded text-[#e8ebf4]/80"
+              >
+                <Pickaxe size={10} className="inline mr-1 text-blue-400" />
+                {resource}: {count}
+              </span>
+            ))}
+          </div>
+        )}
+
         {error && (
           <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             {error}
@@ -204,75 +191,39 @@ export const AgentRuns: React.FC<AgentRunsProps> = ({ agent }) => {
         )}
       </div>
 
-      {/* Runs List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {runs.length === 0 ? (
+      {/* Recent Actions */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {actions.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-[#f2d08a]/40">
             <Activity size={48} className="mb-4" />
-            <p className="text-center">
-              {statusFilter === "all"
-                ? "No runs yet"
-                : `No ${statusFilter} runs`}
+            <p className="text-center">No recent actions</p>
+            <p className="text-xs mt-1">
+              Activity will appear here as the agent plays
             </p>
           </div>
         ) : (
-          <>
-            {runs.map((run) => (
-              <div
-                key={run.id}
-                className={`border rounded-lg p-4 transition-colors ${getStatusColor(
-                  run.status,
-                )}`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(run.status)}
-                    <span className="font-medium text-[#e8ebf4] text-sm capitalize">
-                      {run.status}
-                    </span>
-                  </div>
-                  <span className="text-xs text-[#f2d08a]/40">
-                    {new Date(run.startedAt).toLocaleString()}
-                  </span>
+          actions.map((action, i) => (
+            <div
+              key={`${action.timestamp}-${i}`}
+              className="flex items-start gap-3 bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-3 hover:border-[#f2d08a]/20 transition-colors"
+            >
+              <div className="mt-0.5">{getActionIcon(action.type)}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-[#e8ebf4]">{action.description}</p>
+                <div className="flex items-center gap-2 mt-1 text-xs text-[#f2d08a]/40">
+                  <span>{new Date(action.timestamp).toLocaleTimeString()}</span>
+                  {action.xpGained != null && action.xpGained > 0 && (
+                    <>
+                      <span>•</span>
+                      <span className="text-green-400">
+                        +{action.xpGained} XP
+                      </span>
+                    </>
+                  )}
                 </div>
-
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="text-[#f2d08a]/60">Duration:</span>
-                    <span className="ml-2 text-[#e8ebf4]">
-                      {formatDuration(run.duration)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[#f2d08a]/60">Room:</span>
-                    <span className="ml-2 text-[#e8ebf4] font-mono">
-                      {run.roomId.substring(0, 8)}...
-                    </span>
-                  </div>
-                </div>
-
-                {run.error && (
-                  <div className="mt-3 p-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                      <span>{run.error}</span>
-                    </div>
-                  </div>
-                )}
               </div>
-            ))}
-
-            {hasMore && (
-              <div className="text-center py-4">
-                <button
-                  onClick={fetchRuns}
-                  className="px-4 py-2 text-sm bg-[#f2d08a]/10 border border-[#f2d08a]/30 rounded-lg text-[#f2d08a] hover:bg-[#f2d08a]/20 transition-colors"
-                >
-                  Load More
-                </button>
-              </div>
-            )}
-          </>
+            </div>
+          ))
         )}
       </div>
     </div>

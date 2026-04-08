@@ -27,6 +27,7 @@ import type { World } from "../../types";
 import type { VRM } from "@pixiv/three-vrm";
 import { EQUIPMENT_SLOT_NAMES } from "../../constants/EquipmentConstants";
 import type { Entity } from "../../entities/Entity";
+import { AttackType } from "../../types/game/item-types";
 import {
   attachEquipmentVisualToVRM,
   removeEquipmentVisual,
@@ -89,6 +90,22 @@ export class EquipmentVisualSystem extends SystemBase {
   // Track players whose weapon is temporarily hidden during gathering
   // (e.g., fishing - weapon hidden while fishing rod is shown)
   private hiddenWeapons = new Set<string>();
+
+  // Track players whose weapon is hidden during non-melee combat (magic/ranged)
+  private hiddenWeaponsCombat = new Set<string>();
+
+  // Timers to restore weapon visibility after non-melee attack animation completes
+  private combatWeaponRestoreTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+
+  // Track item ID in weapon slot per player (to check if it's melee before hiding)
+  private playerWeaponItemIds = new Map<string, string>();
+
+  // How long to keep weapon hidden after the last non-melee attack (ms).
+  // Using ~4 ticks (2400ms) to cover the full attack animation at standard speed.
+  private static readonly COMBAT_WEAPON_RESTORE_DELAY_MS = 2400;
 
   constructor(world: World) {
     super(world, {
@@ -192,6 +209,14 @@ export class EquipmentVisualSystem extends SystemBase {
         this.handleGatheringToolHide(data);
       },
     );
+
+    // OSRS-STYLE: Hide melee weapon during magic/ranged attacks
+    this.subscribe(
+      EventType.COMBAT_PROJECTILE_LAUNCHED,
+      (data: { attackerId: string }) => {
+        this.handleCombatProjectileLaunched(data.attackerId);
+      },
+    );
   }
 
   private async handleEquipmentChange(data: {
@@ -253,6 +278,15 @@ export class EquipmentVisualSystem extends SystemBase {
       this.playerEquipment.set(playerId, {});
     }
     const equipment = this.playerEquipment.get(playerId)!;
+
+    // Track weapon slot item ID for combat visibility checks
+    if (slot.toLowerCase() === "weapon") {
+      if (itemId) {
+        this.playerWeaponItemIds.set(playerId, itemId);
+      } else {
+        this.playerWeaponItemIds.delete(playerId);
+      }
+    }
 
     // Handle unequip (itemId is null)
     if (!itemId) {
@@ -399,6 +433,57 @@ export class EquipmentVisualSystem extends SystemBase {
     }
   }
 
+  /**
+   * OSRS-STYLE: Hide melee weapon during magic/ranged attacks.
+   *
+   * When a non-melee projectile is launched, the attacker's equipped melee weapon
+   * should be hidden for the duration of the attack animation. Staffs and bows
+   * (ranged/magic attackType) are left visible since they ARE the attack weapon.
+   */
+  private handleCombatProjectileLaunched(attackerId: string): void {
+    const equipment = this.playerEquipment.get(attackerId);
+    if (!equipment?.weapon) return;
+
+    // Only hide if the equipped weapon is a melee weapon (sword, scimitar, etc.)
+    const weaponItemId = this.playerWeaponItemIds.get(attackerId);
+    if (weaponItemId) {
+      const itemData = getItem(weaponItemId);
+      // Staff, bow, crossbow, wand have non-melee attackType — leave them visible
+      if (itemData?.attackType && itemData.attackType !== AttackType.MELEE) {
+        return;
+      }
+    }
+
+    // Hide the melee weapon (avoid double-hiding)
+    if (equipment.weapon.visible) {
+      equipment.weapon.visible = false;
+    }
+    this.hiddenWeaponsCombat.add(attackerId);
+
+    // Reset restore timer — extends window if attacks keep firing
+    const existing = this.combatWeaponRestoreTimers.get(attackerId);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(() => {
+      this.restoreCombatHiddenWeapon(attackerId);
+    }, EquipmentVisualSystem.COMBAT_WEAPON_RESTORE_DELAY_MS);
+    this.combatWeaponRestoreTimers.set(attackerId, timer);
+  }
+
+  private restoreCombatHiddenWeapon(playerId: string): void {
+    this.combatWeaponRestoreTimers.delete(playerId);
+    if (!this.hiddenWeaponsCombat.has(playerId)) return;
+    this.hiddenWeaponsCombat.delete(playerId);
+
+    const equipment = this.playerEquipment.get(playerId);
+    if (!equipment?.weapon) return;
+
+    // Only restore if not also hidden by a gathering tool
+    if (!this.hiddenWeapons.has(playerId)) {
+      equipment.weapon.visible = true;
+    }
+  }
+
   private cleanupPlayerEquipment(playerId: string): void {
     const equipment = this.playerEquipment.get(playerId);
     if (!equipment) return;
@@ -411,8 +496,15 @@ export class EquipmentVisualSystem extends SystemBase {
     }
 
     this.playerEquipment.delete(playerId);
-    this.pendingEquipment.delete(playerId); // Clear pending equipment too
-    this.hiddenWeapons.delete(playerId); // Clear hidden weapon tracking
+    this.pendingEquipment.delete(playerId);
+    this.hiddenWeapons.delete(playerId);
+    this.hiddenWeaponsCombat.delete(playerId);
+    this.playerWeaponItemIds.delete(playerId);
+    const timer = this.combatWeaponRestoreTimers.get(playerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.combatWeaponRestoreTimers.delete(playerId);
+    }
   }
 
   /**
@@ -560,9 +652,17 @@ export class EquipmentVisualSystem extends SystemBase {
       this.cleanupPlayerEquipment(playerId);
     }
 
+    // Clear all timers
+    for (const timer of this.combatWeaponRestoreTimers.values()) {
+      clearTimeout(timer);
+    }
+
     // Clear cache and pending equipment
     this.weaponCache.clear();
     this.pendingEquipment.clear();
+    this.combatWeaponRestoreTimers.clear();
+    this.hiddenWeaponsCombat.clear();
+    this.playerWeaponItemIds.clear();
 
     super.destroy();
   }

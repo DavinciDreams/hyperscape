@@ -178,9 +178,10 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
       });
 
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       logs.push(`[${testName}] ✅ Agent created: ${agentId}`);
 
       // Save mapping
@@ -329,9 +330,10 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
       });
 
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       logs.push(`[${testName}] ✅ Agent created: ${agentId}`);
 
       // Save mapping
@@ -510,9 +512,10 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
       });
 
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       logs.push(`[${testName}] ✅ Agent created: ${agentId}`);
 
       // Fetch logs from ElizaOS API
@@ -639,9 +642,10 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
       });
 
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       logs.push(`[${testName}] ✅ Agent created: ${agentId}`);
 
       // Fetch agent details (like AgentViewport does)

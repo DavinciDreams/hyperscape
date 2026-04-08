@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Agent } from "./types";
 import { ELIZAOS_API } from "@/lib/api-config";
+import { apiClient } from "@/lib/api-client";
 
 /** Status notification type */
 type StatusType = "success" | "error" | "warning";
@@ -57,6 +58,10 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [notifications, setNotifications] = useState<StatusNotification[]>([]);
   const notificationIdRef = React.useRef(0);
+  const [streamingDuelEnabled, setStreamingDuelEnabled] = useState(true);
+  const [streamingDuelPrefLoaded, setStreamingDuelPrefLoaded] = useState(false);
+  const [hasHyperscapeMapping, setHasHyperscapeMapping] = useState(false);
+  const [savingStreamingDuel, setSavingStreamingDuel] = useState(false);
 
   // Show a status notification
   const showNotification = useCallback((message: string, type: StatusType) => {
@@ -105,26 +110,34 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.data) {
-            // Map ElizaOS agent data to settings format
-            const agentData = data.data;
+            const root = data.data as Record<string, unknown>;
+            const agentData =
+              root.agent && typeof root.agent === "object"
+                ? (root.agent as Record<string, unknown>)
+                : root;
             setSettings({
-              name: agentData.name,
-              username: agentData.username,
+              name: agentData.name as string | undefined,
+              username: agentData.username as string | undefined,
               bio: Array.isArray(agentData.bio)
-                ? agentData.bio.join("\n")
-                : agentData.bio || agentData.system,
-              lore: agentData.lore,
-              topics: agentData.topics,
-              style: agentData.style,
-              adjectives: agentData.adjectives,
-              modelProvider: agentData.settings?.model,
+                ? (agentData.bio as string[]).join("\n")
+                : (agentData.bio as string | undefined) ||
+                  (agentData.system as string | undefined),
+              lore: agentData.lore as AgentSettingsData["lore"],
+              topics: agentData.topics as AgentSettingsData["topics"],
+              style: agentData.style as AgentSettingsData["style"],
+              adjectives:
+                agentData.adjectives as AgentSettingsData["adjectives"],
+              modelProvider: (
+                agentData.settings as { model?: string } | undefined
+              )?.model,
             });
-            // Extract secrets (they come masked from the API)
-            if (agentData.settings?.secrets) {
+            const settingsSecrets = (
+              agentData.settings as { secrets?: Record<string, string> }
+            )?.secrets;
+            if (settingsSecrets) {
               const existingSecrets: SecretsData = {};
-              for (const key of Object.keys(agentData.settings.secrets)) {
-                // Show placeholder if secret exists but is masked
-                existingSecrets[key] = agentData.settings.secrets[key] || "";
+              for (const key of Object.keys(settingsSecrets)) {
+                existingSecrets[key] = settingsSecrets[key] || "";
               }
               setSecrets(existingSecrets);
             }
@@ -138,6 +151,68 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
     };
     fetchSettings();
   }, [agent.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadStreamingDuelPref = async () => {
+      try {
+        const result = await apiClient.get<{
+          success?: boolean;
+          streamingDuelEnabled?: boolean;
+        }>(`/api/agents/mapping/${encodeURIComponent(agent.id)}`, {
+          useFreshToken: true,
+        });
+        if (cancelled) return;
+        if (result.ok && result.data?.success) {
+          setHasHyperscapeMapping(true);
+          setStreamingDuelEnabled(result.data.streamingDuelEnabled !== false);
+        } else {
+          setHasHyperscapeMapping(false);
+        }
+      } catch {
+        if (!cancelled) setHasHyperscapeMapping(false);
+      } finally {
+        if (!cancelled) setStreamingDuelPrefLoaded(true);
+      }
+    };
+    void loadStreamingDuelPref();
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id]);
+
+  const saveStreamingDuelPreference = async (next: boolean) => {
+    setSavingStreamingDuel(true);
+    try {
+      const result = await apiClient.post<{
+        success?: boolean;
+        streamingDuelEnabled?: boolean;
+      }>(
+        `/api/agents/mappings/${encodeURIComponent(agent.id)}/streaming-duel`,
+        { streamingDuelEnabled: next },
+        { useFreshToken: true },
+      );
+      const payload = result.data;
+      if (
+        result.ok &&
+        payload &&
+        payload.success === true &&
+        typeof payload.streamingDuelEnabled === "boolean"
+      ) {
+        setStreamingDuelEnabled(payload.streamingDuelEnabled);
+        showNotification("Streaming duel preference saved.", "success");
+      } else {
+        showNotification(
+          result.error ?? "Could not update streaming duel setting.",
+          "error",
+        );
+      }
+    } catch {
+      showNotification("Could not update streaming duel setting.", "error");
+    } finally {
+      setSavingStreamingDuel(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!settings) return;
@@ -397,6 +472,61 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
                   <p className="text-xs text-[#f2d08a]/40">
                     System prompt defining agent behavior
                   </p>
+                </div>
+
+                <div className="rounded-lg border border-[#8b4513]/25 bg-[#1a1005]/40 p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-[#f2d08a]/90">
+                        Streaming duel arena
+                      </div>
+                      <p className="text-xs text-[#f2d08a]/45 mt-1 max-w-xl">
+                        When off, this agent is not matched or summoned into the
+                        streaming duel arena so you can debug normal world
+                        gameplay. Requires a Hyperscape agent mapping for this
+                        account.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={streamingDuelEnabled}
+                      disabled={
+                        !streamingDuelPrefLoaded ||
+                        !hasHyperscapeMapping ||
+                        savingStreamingDuel
+                      }
+                      onClick={() =>
+                        void saveStreamingDuelPreference(!streamingDuelEnabled)
+                      }
+                      className={`relative inline-flex h-8 w-14 flex-shrink-0 cursor-pointer rounded-full border transition-colors ${
+                        streamingDuelEnabled
+                          ? "bg-emerald-700/80 border-emerald-500/50"
+                          : "bg-[#2a2015] border-[#8b4513]/40"
+                      } ${
+                        !streamingDuelPrefLoaded ||
+                        !hasHyperscapeMapping ||
+                        savingStreamingDuel
+                          ? "opacity-40 cursor-not-allowed"
+                          : ""
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow transition-transform mt-0.5 ${
+                          streamingDuelEnabled
+                            ? "translate-x-6"
+                            : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  {streamingDuelPrefLoaded && !hasHyperscapeMapping && (
+                    <p className="text-xs text-amber-400/90">
+                      No Hyperscape mapping found for this agent. Link the agent
+                      from the dashboard (or create credentials) to enable this
+                      toggle.
+                    </p>
+                  )}
                 </div>
               </>
             )}

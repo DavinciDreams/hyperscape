@@ -358,6 +358,27 @@
       "when": 1772004258160,
       "tag": "0051_hesitant_texas_twister",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1772100000000,
+      "tag": "0052_add_streaming_duel_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1772200000000,
+      "tag": "0053_add_agent_streaming_duel_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1772300000000,
+      "tag": "0054_add_agent_thoughts",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,8 @@ import { SystemBase } from "../infrastructure/SystemBase";
 import { EntityManager } from "./EntityManager";
 import { TerrainSystem } from "../world/TerrainSystem";
 import type { TownSystem } from "../world/TownSystem";
+import { MobEntity } from "../../../entities/npc/MobEntity";
+import { MOB_CONSTANTS } from "../../../constants/GameConstants";
 
 // Types are now imported from shared type files
 
@@ -52,6 +54,10 @@ export class MobNPCSpawnerSystem extends SystemBase {
   private lastSpawnTime = 0;
   private readonly SPAWN_COOLDOWN = 5000; // 5 seconds between spawns
   private readonly BIOME_SPAWNS_PER_TILE = 3;
+
+  private static readonly banditCapIds = new Set<string>(
+    MOB_CONSTANTS.BANDIT_MOB_IDS_FOR_GLOBAL_CAP,
+  );
 
   constructor(world: World) {
     super(world, {
@@ -575,6 +581,27 @@ export class MobNPCSpawnerSystem extends SystemBase {
     };
   }
 
+  private countLiveBanditsWorldwide(): number {
+    const entityManager = this.world.getSystem<EntityManager>("entity-manager");
+    if (!entityManager) {
+      return 0;
+    }
+    const mobs = entityManager.getEntitiesByType(EntityType.MOB);
+    let count = 0;
+    for (const entity of mobs) {
+      if (!(entity instanceof MobEntity)) {
+        continue;
+      }
+      if (entity.isDead()) {
+        continue;
+      }
+      if (MobNPCSpawnerSystem.banditCapIds.has(entity.getMobData().type)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   private selectBossForHotspot(seed: number): NPCData | null {
     const bosses = Array.from(ALL_NPCS.values()).filter(
       (npc) => npc.category === "boss" && npc.spawnCategory === "world",
@@ -597,6 +624,14 @@ export class MobNPCSpawnerSystem extends SystemBase {
       this.townSystem.isInSafeZone(position.x, position.z)
     ) {
       return;
+    }
+
+    if (MobNPCSpawnerSystem.banditCapIds.has(mobData.id)) {
+      if (
+        this.countLiveBanditsWorldwide() >= MOB_CONSTANTS.MAX_BANDIT_MOBS_WORLD
+      ) {
+        return;
+      }
     }
 
     const resolvedRange =
@@ -857,8 +892,14 @@ export class MobNPCSpawnerSystem extends SystemBase {
       this.generateContentForTile(tileData, overlappingAreas);
     }
 
-    this.spawnBiomeMobsForTile(tileData);
-    this.spawnBossForTile(tileData);
+    // Don't spawn biome mobs or bosses inside safe zones (e.g. duel arena, lobby, hospital).
+    // generateMobSpawnsForArea already skips safe zones for manifest-defined spawns; this
+    // mirrors that check for terrain-based biome mobs which bypass the area filter entirely.
+    const tileInSafeZone = overlappingAreas.some((area) => area.safeZone);
+    if (!tileInSafeZone) {
+      this.spawnBiomeMobsForTile(tileData);
+      this.spawnBossForTile(tileData);
+    }
   }
 
   /**

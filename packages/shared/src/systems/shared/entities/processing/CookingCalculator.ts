@@ -55,14 +55,18 @@ export function calculateBurnChance(
     return 1;
   }
 
-  // Linear interpolation between levelRequired and stopBurnLevel
+  // Linear interpolation between levelRequired and stopBurnLevel.
+  // At levelRequired the burn chance starts at a capped maximum (not 100%)
+  // so that meeting the requirement guarantees some chance of success.
   const range = stopBurnLevel - levelRequired;
   if (range <= 0) {
     return 0; // Edge case: stopBurn <= levelRequired
   }
 
+  const MAX_BURN_CHANCE = 0.55; // ~55% burn at minimum level (OSRS-like)
   const progress = cookingLevel - levelRequired;
-  return Math.max(0, 1 - progress / range);
+  const rawBurn = 1 - progress / range;
+  return Math.max(0, Math.min(MAX_BURN_CHANCE, rawBurn));
 }
 
 /**

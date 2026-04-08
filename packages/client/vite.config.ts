@@ -461,6 +461,11 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.PLAYWRIGHT_TEST": JSON.stringify(
         process.env.PLAYWRIGHT_TEST === "true",
       ),
+      // True when game /ws is served on HTTP PORT (Fastify only). Skip dev port remap in api-config.
+      "import.meta.env.VITE_GAME_WS_ON_HTTP_PORT": JSON.stringify(
+        process.env.UWS_ENABLED === "false" ||
+          env.VITE_GAME_WS_ON_HTTP_PORT === "true",
+      ),
       "import.meta.env.PROD": mode === "production",
     },
     server: {
@@ -468,6 +473,19 @@ export default defineConfig(({ mode }) => {
       open: false,
       host: true,
       hmr: disableSharedWatch ? false : undefined,
+      // Do not proxy /env.js: public/env.js provides loopback defaults when the game server
+      // is down or restarting; proxying returned 502 and blocked bootstrap. Server still
+      // serves GET /env.js at PUBLIC_API_URL for direct use if needed.
+      ...(mode === "development"
+        ? {
+            proxy: {
+              "/game-assets": {
+                target: resolvedPublicApiUrl.replace(/\/$/, ""),
+                changeOrigin: true,
+              },
+            },
+          }
+        : {}),
       // Security headers for development server
       headers: {
         "X-Content-Type-Options": "nosniff",

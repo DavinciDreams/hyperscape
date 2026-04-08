@@ -879,8 +879,10 @@ export function CharacterSelectScreen({
                   agentResult,
                 );
 
-                // Extract agent ID from response - ElizaOS returns UUID in data.character.id
-                const agentId = agentResult.data?.character?.id;
+                // Embedded server: data.agent.id. Legacy Eliza: data.character.id
+                const agentId =
+                  agentResult.data?.agent?.id ??
+                  agentResult.data?.character?.id;
 
                 if (!agentId) {
                   console.error(

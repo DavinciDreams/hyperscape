@@ -52,27 +52,16 @@ import type { PxRigidStatic } from "../../types/systems/physics";
 import type { ParticleSystem } from "../shared/presentation/ParticleSystem";
 import type { FlatZone } from "../../types/world/terrain";
 import {
-  ARENA_BASE_X,
-  ARENA_BASE_Z,
-  ARENA_WIDTH,
-  ARENA_LENGTH,
-  ARENA_GAP,
-  ARENA_COUNT,
-  LOBBY_CENTER_X,
-  LOBBY_CENTER_Z,
-  LOBBY_WIDTH,
-  LOBBY_LENGTH,
-  HOSPITAL_CENTER_X,
-  HOSPITAL_CENTER_Z,
-  HOSPITAL_WIDTH,
-  HOSPITAL_LENGTH,
-} from "../../data/arena-layout";
+  getDuelArenaConfig,
+  type DuelArenaConfig,
+} from "../../data/duel-manifest";
 
-// ============================================================================
-// Arena Configuration (layout from arena-layout.ts)
-// ============================================================================
+// Arena grid size/position: getDuelArenaConfig() at runtime (see duel-manifest / ArenaPoolManager).
 
 const FENCE_HEIGHT = 1.5;
+/** PhysX wall boxes — must match fence footprint or agents slip through visuals. */
+const ARENA_WALL_THICKNESS = 0.55;
+const ARENA_WALL_HEIGHT = FENCE_HEIGHT + 0.75;
 const FENCE_POST_SPACING = 2.0;
 const FENCE_POST_SIZE = 0.2;
 const FENCE_RAIL_HEIGHT = 0.08;
@@ -120,21 +109,7 @@ const BANNER_COLORS: number[] = [
   0xcc3333, 0xcc3333, 0x3366cc, 0x3366cc, 0x33aa44, 0x33aa44,
 ];
 
-// Pre-computed instance counts
-const POSTS_PER_X_FENCE = Math.max(
-  2,
-  Math.floor(ARENA_WIDTH / FENCE_POST_SPACING) + 1,
-);
-const POSTS_PER_Z_FENCE = Math.max(
-  2,
-  Math.floor(ARENA_LENGTH / FENCE_POST_SPACING) + 1,
-);
-const TOTAL_FENCE_POSTS =
-  ARENA_COUNT * (2 * POSTS_PER_X_FENCE + 2 * POSTS_PER_Z_FENCE);
-const TOTAL_X_RAILS = ARENA_COUNT * 2 * FENCE_RAIL_HEIGHTS.length;
-const TOTAL_Z_RAILS = ARENA_COUNT * 2 * FENCE_RAIL_HEIGHTS.length;
-const TOTAL_PILLARS = ARENA_COUNT * 4 + 8; // 24 arena + 4 lobby + 4 hospital
-const TOTAL_ARENA_BRAZIERS = ARENA_COUNT * 4;
+// Instanced mesh counts (fence posts, rails, pillars) are derived from DuelArenaConfig at runtime.
 
 // ============================================================================
 // TSL Procedural Stone Functions
@@ -278,8 +253,28 @@ export class DuelArenaVisualsSystem extends System {
   // TSL time uniform for brazier glow animation (GPU-driven flicker)
   private timeUniform: any = null;
 
+  /** Matches server DuelSystem / getDuelArenaConfig() — do not hardcode arena grid separately. */
+  private arenaCfg!: DuelArenaConfig;
+
   constructor(world: World) {
     super(world);
+  }
+
+  /** Arena grid cell from linear index (same layout as ArenaPoolManager). */
+  private arenaCell(arenaIndex: number): {
+    row: number;
+    col: number;
+    cx: number;
+    cz: number;
+  } {
+    const cfg = this.arenaCfg;
+    const col = arenaIndex % cfg.columns;
+    const row = Math.floor(arenaIndex / cfg.columns);
+    const cx =
+      cfg.baseX + col * (cfg.arenaWidth + cfg.arenaGap) + cfg.arenaWidth / 2;
+    const cz =
+      cfg.baseZ + row * (cfg.arenaLength + cfg.arenaGap) + cfg.arenaLength / 2;
+    return { row, col, cx, cz };
   }
 
   isReady(): boolean {
@@ -319,6 +314,8 @@ export class DuelArenaVisualsSystem extends System {
   }
 
   start(): void {
+    this.arenaCfg = getDuelArenaConfig();
+
     this.terrainSystem = this.world.getSystem("terrain") as {
       getHeightAt?: (x: number, z: number) => number;
       getProceduralHeightAt?: (x: number, z: number) => number;
@@ -363,13 +360,9 @@ export class DuelArenaVisualsSystem extends System {
     const BLEND_RADIUS = 1.0;
     const CARVE_INSET = 1.0;
 
-    for (let i = 0; i < ARENA_COUNT; i++) {
-      const row = Math.floor(i / 2);
-      const col = i % 2;
-      const centerX =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const centerZ =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    const cfg = this.arenaCfg;
+    for (let i = 0; i < cfg.arenaCount; i++) {
+      const { cx: centerX, cz: centerZ } = this.arenaCell(i);
 
       const proceduralHeight = this.getProceduralTerrainHeight(
         centerX,
@@ -381,8 +374,8 @@ export class DuelArenaVisualsSystem extends System {
         id: zoneId,
         centerX,
         centerZ,
-        width: ARENA_WIDTH,
-        depth: ARENA_LENGTH,
+        width: cfg.arenaWidth,
+        depth: cfg.arenaLength,
         height: proceduralHeight + FLAT_ZONE_HEIGHT_OFFSET,
         blendRadius: BLEND_RADIUS,
         carveInset: CARVE_INSET,
@@ -435,7 +428,7 @@ export class DuelArenaVisualsSystem extends System {
     }
 
     console.log(
-      `[DuelArenaVisualsSystem] Registered ${this.flatZoneIds.length} flat zones (${ARENA_COUNT} arenas + lobby + hospital)`,
+      `[DuelArenaVisualsSystem] Registered ${this.flatZoneIds.length} flat zones (${this.arenaCfg.arenaCount} arenas + lobby + hospital)`,
     );
   }
 
@@ -466,9 +459,11 @@ export class DuelArenaVisualsSystem extends System {
 
     // Individual meshes (need unique userData/layers for raycasting)
     this.createArenaFloors();
+    this.createArenaWallCollisions();
     this.createLobbyFloor();
     this.createHospitalFloor();
     if (this.world.isClient) {
+      this.createArenaCenterRings();
       this.createForfeitPillars();
       this.createBannerCloths();
     }
@@ -693,6 +688,19 @@ export class DuelArenaVisualsSystem extends System {
    * 288 posts + 288 caps + 36 X-rails + 36 Z-rails → 4 draw calls.
    */
   private buildFenceInstances(): void {
+    const cfg = this.arenaCfg;
+    const postsPerX = Math.max(
+      2,
+      Math.floor(cfg.arenaWidth / FENCE_POST_SPACING) + 1,
+    );
+    const postsPerZ = Math.max(
+      2,
+      Math.floor(cfg.arenaLength / FENCE_POST_SPACING) + 1,
+    );
+    const totalFencePosts = cfg.arenaCount * (2 * postsPerX + 2 * postsPerZ);
+    const totalXRails = cfg.arenaCount * 2 * FENCE_RAIL_HEIGHTS.length;
+    const totalZRails = cfg.arenaCount * 2 * FENCE_RAIL_HEIGHTS.length;
+
     const postGeom = new THREE.BoxGeometry(
       FENCE_POST_SIZE,
       FENCE_HEIGHT,
@@ -707,7 +715,7 @@ export class DuelArenaVisualsSystem extends System {
     const postsIM = new THREE.InstancedMesh(
       postGeom,
       this.stoneFenceMat!,
-      TOTAL_FENCE_POSTS,
+      totalFencePosts,
     );
     postsIM.castShadow = true;
     postsIM.receiveShadow = false;
@@ -717,29 +725,24 @@ export class DuelArenaVisualsSystem extends System {
     const capsIM = new THREE.InstancedMesh(
       capGeom,
       this.stoneFenceMat!,
-      TOTAL_FENCE_POSTS,
+      totalFencePosts,
     );
     capsIM.layers.set(1);
 
     const matrix = new THREE.Matrix4();
     let postIdx = 0;
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
-      const halfW = ARENA_WIDTH / 2;
-      const halfL = ARENA_LENGTH / 2;
+      const halfW = cfg.arenaWidth / 2;
+      const halfL = cfg.arenaLength / 2;
 
       const sides: [number, number, number, "x" | "z"][] = [
-        [cx - halfW, cz - halfL, ARENA_WIDTH, "x"],
-        [cx - halfW, cz + halfL, ARENA_WIDTH, "x"],
-        [cx - halfW, cz - halfL, ARENA_LENGTH, "z"],
-        [cx + halfW, cz - halfL, ARENA_LENGTH, "z"],
+        [cx - halfW, cz - halfL, cfg.arenaWidth, "x"],
+        [cx - halfW, cz + halfL, cfg.arenaWidth, "x"],
+        [cx - halfW, cz - halfL, cfg.arenaLength, "z"],
+        [cx + halfW, cz - halfL, cfg.arenaLength, "z"],
       ];
 
       for (const [startX, startZ, length, axis] of sides) {
@@ -771,7 +774,7 @@ export class DuelArenaVisualsSystem extends System {
 
     // X-axis fence rails (north/south walls)
     const railXGeom = new THREE.BoxGeometry(
-      ARENA_WIDTH,
+      cfg.arenaWidth,
       FENCE_RAIL_HEIGHT,
       FENCE_RAIL_DEPTH,
     );
@@ -780,22 +783,17 @@ export class DuelArenaVisualsSystem extends System {
     const railsXIM = new THREE.InstancedMesh(
       railXGeom,
       this.stoneFenceMat!,
-      TOTAL_X_RAILS,
+      totalXRails,
     );
     railsXIM.castShadow = true;
     railsXIM.receiveShadow = false;
     railsXIM.layers.set(1);
 
     let railXIdx = 0;
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
-      const halfL = ARENA_LENGTH / 2;
+      const halfL = cfg.arenaLength / 2;
 
       for (const railY of FENCE_RAIL_HEIGHTS) {
         matrix.makeTranslation(cx, terrainY + railY, cz - halfL);
@@ -812,29 +810,24 @@ export class DuelArenaVisualsSystem extends System {
     const railZGeom = new THREE.BoxGeometry(
       FENCE_RAIL_DEPTH,
       FENCE_RAIL_HEIGHT,
-      ARENA_LENGTH,
+      cfg.arenaLength,
     );
     this.geometries.push(railZGeom);
 
     const railsZIM = new THREE.InstancedMesh(
       railZGeom,
       this.stoneFenceMat!,
-      TOTAL_Z_RAILS,
+      totalZRails,
     );
     railsZIM.castShadow = true;
     railsZIM.receiveShadow = false;
     railsZIM.layers.set(1);
 
     let railZIdx = 0;
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
-      const halfW = ARENA_WIDTH / 2;
+      const halfW = cfg.arenaWidth / 2;
 
       for (const railY of FENCE_RAIL_HEIGHTS) {
         matrix.makeTranslation(cx - halfW, terrainY + railY, cz);
@@ -853,6 +846,9 @@ export class DuelArenaVisualsSystem extends System {
    * 32 pillars (24 arena corners + 4 lobby + 4 hospital) × 3 parts → 3 draw calls.
    */
   private buildPillarInstances(): void {
+    const cfg = this.arenaCfg;
+    const totalPillars = cfg.arenaCount * 4 + 8; // arena corners + lobby + hospital
+
     const baseGeom = new THREE.BoxGeometry(
       PILLAR_BASE_SIZE,
       PILLAR_BASE_HEIGHT,
@@ -873,17 +869,17 @@ export class DuelArenaVisualsSystem extends System {
     const basesIM = new THREE.InstancedMesh(
       baseGeom,
       this.pillarStoneMat!,
-      TOTAL_PILLARS,
+      totalPillars,
     );
     const shaftsIM = new THREE.InstancedMesh(
       shaftGeom,
       this.pillarStoneMat!,
-      TOTAL_PILLARS,
+      totalPillars,
     );
     const capitalsIM = new THREE.InstancedMesh(
       capitalGeom,
       this.pillarStoneMat!,
-      TOTAL_PILLARS,
+      totalPillars,
     );
 
     for (const im of [basesIM, shaftsIM, capitalsIM]) {
@@ -898,17 +894,12 @@ export class DuelArenaVisualsSystem extends System {
     // Collect all pillar positions
     const positions: { x: number; z: number; terrainY: number }[] = [];
 
-    // Arena corner pillars (24)
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    // Arena corner pillars
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
-      const halfW = ARENA_WIDTH / 2;
-      const halfL = ARENA_LENGTH / 2;
+      const halfW = cfg.arenaWidth / 2;
+      const halfL = cfg.arenaLength / 2;
 
       positions.push(
         { x: cx - halfW, z: cz - halfL, terrainY },
@@ -983,6 +974,9 @@ export class DuelArenaVisualsSystem extends System {
    * 24 instances → 1 draw call. Replaces 24 PointLights.
    */
   private buildBrazierInstances(): void {
+    const cfg = this.arenaCfg;
+    const totalArenaBraziers = cfg.arenaCount * 4;
+
     const brazierGeom = new THREE.CylinderGeometry(
       TORCH_BRAZIER_RADIUS * 0.6,
       TORCH_BRAZIER_RADIUS,
@@ -994,24 +988,19 @@ export class DuelArenaVisualsSystem extends System {
     const braziersIM = new THREE.InstancedMesh(
       brazierGeom,
       this.brazierGlowMat!,
-      TOTAL_ARENA_BRAZIERS,
+      totalArenaBraziers,
     );
     braziersIM.layers.set(1);
 
     const matrix = new THREE.Matrix4();
     let idx = 0;
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
       const pillarTopY = terrainY + PILLAR_TOTAL_HEIGHT;
-      const halfW = ARENA_WIDTH / 2;
-      const halfL = ARENA_LENGTH / 2;
+      const halfW = cfg.arenaWidth / 2;
+      const halfL = cfg.arenaLength / 2;
 
       for (const corner of [
         { x: cx - halfW, z: cz - halfL },
@@ -1033,8 +1022,9 @@ export class DuelArenaVisualsSystem extends System {
    * 12 N/S + 12 E/W → 2 draw calls.
    */
   private buildBorderInstances(): void {
-    const floorWidth = ARENA_WIDTH - 1;
-    const floorLength = ARENA_LENGTH - 1;
+    const cfg = this.arenaCfg;
+    const floorWidth = cfg.arenaWidth - 1;
+    const floorLength = cfg.arenaLength - 1;
 
     const nsGeom = new THREE.BoxGeometry(
       floorWidth,
@@ -1046,7 +1036,7 @@ export class DuelArenaVisualsSystem extends System {
     const nsIM = new THREE.InstancedMesh(
       nsGeom,
       this.borderMat!,
-      ARENA_COUNT * 2,
+      cfg.arenaCount * 2,
     );
     nsIM.layers.set(1);
 
@@ -1060,7 +1050,7 @@ export class DuelArenaVisualsSystem extends System {
     const ewIM = new THREE.InstancedMesh(
       ewGeom,
       this.borderMat!,
-      ARENA_COUNT * 2,
+      cfg.arenaCount * 2,
     );
     ewIM.layers.set(1);
 
@@ -1068,13 +1058,8 @@ export class DuelArenaVisualsSystem extends System {
     let nsIdx = 0;
     let ewIdx = 0;
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getProceduralTerrainHeight(cx, cz);
       const floorY = terrainY + FLOOR_HEIGHT_OFFSET;
       const borderY = floorY + FLOOR_THICKNESS / 2 + BORDER_HEIGHT / 2;
@@ -1103,6 +1088,7 @@ export class DuelArenaVisualsSystem extends System {
    * Build banner poles as InstancedMesh. 12 poles → 1 draw call.
    */
   private buildBannerPoleInstances(): void {
+    const cfg = this.arenaCfg;
     const poleGeom = new THREE.CylinderGeometry(
       BANNER_POLE_RADIUS,
       BANNER_POLE_RADIUS,
@@ -1114,7 +1100,7 @@ export class DuelArenaVisualsSystem extends System {
     const polesIM = new THREE.InstancedMesh(
       poleGeom,
       this.bannerPoleMat!,
-      ARENA_COUNT * 2,
+      cfg.arenaCount * 2,
     );
     polesIM.castShadow = true;
     polesIM.layers.set(1);
@@ -1122,15 +1108,10 @@ export class DuelArenaVisualsSystem extends System {
     const matrix = new THREE.Matrix4();
     let idx = 0;
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
-      const halfW = ARENA_WIDTH / 2;
+      const halfW = cfg.arenaWidth / 2;
 
       matrix.makeTranslation(
         cx - halfW + 0.2,
@@ -1160,18 +1141,14 @@ export class DuelArenaVisualsSystem extends System {
    * and layer 0+2 for click-to-move raycasting). Shares one geometry + material.
    */
   private createArenaFloors(): void {
-    const floorWidth = ARENA_WIDTH - 1;
-    const floorLength = ARENA_LENGTH - 1;
+    const cfg = this.arenaCfg;
+    const floorWidth = cfg.arenaWidth - 1;
+    const floorLength = cfg.arenaLength - 1;
 
     let floorGeom: THREE.BoxGeometry | null = null;
 
-    for (let i = 0; i < ARENA_COUNT; i++) {
-      const row = Math.floor(i / 2);
-      const col = i % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    for (let i = 0; i < cfg.arenaCount; i++) {
+      const { cx, cz } = this.arenaCell(i);
       const terrainY = this.getProceduralTerrainHeight(cx, cz);
       const floorY = terrainY + FLOOR_HEIGHT_OFFSET;
 
@@ -1215,6 +1192,44 @@ export class DuelArenaVisualsSystem extends System {
   }
 
   /**
+   * Subtle bronze floor ring at each arena center — helps players judge spacing and duels read better on stream.
+   */
+  private createArenaCenterRings(): void {
+    if (!this.world.isClient || !this.arenaGroup) return;
+
+    const cfg = this.arenaCfg;
+    const innerR = 2.0;
+    const outerR = 2.45;
+    const ringGeom = new THREE.RingGeometry(innerR, outerR, 64);
+    ringGeom.rotateX(-Math.PI / 2);
+    this.geometries.push(ringGeom);
+
+    const ringMat = new MeshStandardNodeMaterial({
+      color: 0xd4a574,
+      emissive: 0x6b4420,
+      emissiveIntensity: 0.22,
+      roughness: 0.52,
+      metalness: 0.22,
+      side: THREE.DoubleSide,
+    });
+    this.materials.push(ringMat);
+
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
+      const terrainY = this.getProceduralTerrainHeight(cx, cz);
+      const floorY =
+        terrainY + FLOOR_HEIGHT_OFFSET + FLOOR_THICKNESS / 2 + 0.02;
+
+      const mesh = new THREE.Mesh(ringGeom, ringMat);
+      mesh.position.set(cx, floorY, cz);
+      mesh.layers.set(1);
+      mesh.name = `ArenaDuelRing_${a + 1}`;
+      mesh.receiveShadow = true;
+      this.arenaGroup.add(mesh);
+    }
+  }
+
+  /**
    * Create 12 forfeit pillars as individual meshes (need unique entityId
    * userData for interaction raycasting). Shares one geometry + material.
    */
@@ -1227,18 +1242,14 @@ export class DuelArenaVisualsSystem extends System {
     );
     this.geometries.push(geom);
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    const cfg = this.arenaCfg;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
 
       const cornerOffset = {
-        x: ARENA_WIDTH / 2 - 2,
-        z: ARENA_LENGTH / 2 - 2,
+        x: cfg.arenaWidth / 2 - 2,
+        z: cfg.arenaLength / 2 - 2,
       };
 
       for (const [label, sx, sz] of [
@@ -1289,16 +1300,15 @@ export class DuelArenaVisualsSystem extends System {
       return m;
     });
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    const cfg = this.arenaCfg;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
-      const halfW = ARENA_WIDTH / 2;
-      const matIndex = Math.floor(a / 2);
+      const halfW = cfg.arenaWidth / 2;
+      const matIndex = Math.min(
+        Math.floor(a / cfg.columns),
+        clothMats.length - 1,
+      );
       const mat = clothMats[matIndex];
 
       for (const pos of [
@@ -1531,17 +1541,13 @@ export class DuelArenaVisualsSystem extends System {
       | undefined;
     if (!particleSystem) return;
 
-    for (let a = 0; a < ARENA_COUNT; a++) {
-      const row = Math.floor(a / 2);
-      const col = a % 2;
-      const cx =
-        ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-      const cz =
-        ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+    const cfg = this.arenaCfg;
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
       const terrainY = this.getTerrainHeight(cx, cz);
       const pillarTopY = terrainY + PILLAR_TOTAL_HEIGHT;
-      const halfW = ARENA_WIDTH / 2;
-      const halfL = ARENA_LENGTH / 2;
+      const halfW = cfg.arenaWidth / 2;
+      const halfL = cfg.arenaLength / 2;
 
       for (const corner of [
         { x: cx - halfW, z: cz - halfL, label: "nw" },
@@ -1681,20 +1687,16 @@ export class DuelArenaVisualsSystem extends System {
 
       const margin = 1.0;
 
-      for (let i = 0; i < ARENA_COUNT; i++) {
-        const row = Math.floor(i / 2);
-        const col = i % 2;
-        const centerX =
-          ARENA_BASE_X + col * (ARENA_WIDTH + ARENA_GAP) + ARENA_WIDTH / 2;
-        const centerZ =
-          ARENA_BASE_Z + row * (ARENA_LENGTH + ARENA_GAP) + ARENA_LENGTH / 2;
+      const cfg = this.arenaCfg;
+      for (let i = 0; i < cfg.arenaCount; i++) {
+        const { cx: centerX, cz: centerZ } = this.arenaCell(i);
 
         exclusionManager.addRectangularBlocker(
           `duel_arena_${i + 1}`,
           centerX,
           centerZ,
-          ARENA_WIDTH + margin * 2,
-          ARENA_LENGTH + margin * 2,
+          cfg.arenaWidth + margin * 2,
+          cfg.arenaLength + margin * 2,
           0,
           0.5,
         );
@@ -1721,7 +1723,7 @@ export class DuelArenaVisualsSystem extends System {
       );
 
       console.log(
-        `[DuelArenaVisualsSystem] Registered ${ARENA_COUNT + 2} grass exclusion zones (arenas + lobby + hospital)`,
+        `[DuelArenaVisualsSystem] Registered ${this.arenaCfg.arenaCount + 2} grass exclusion zones (arenas + lobby + hospital)`,
       );
     } catch (error) {
       console.warn(
@@ -1735,12 +1737,88 @@ export class DuelArenaVisualsSystem extends System {
   // Physics Collision
   // ============================================================================
 
+  /**
+   * Solid perimeter walls so PhysX characters cannot pass through fence visuals.
+   * (CollisionMatrix tiles alone do not block capsule controllers.)
+   */
+  private createArenaWallCollisions(): void {
+    const cfg = this.arenaCfg;
+    const wallT = ARENA_WALL_THICKNESS;
+    const wallH = ARENA_WALL_HEIGHT;
+
+    for (let a = 0; a < cfg.arenaCount; a++) {
+      const { cx, cz } = this.arenaCell(a);
+      const terrainY = this.getProceduralTerrainHeight(cx, cz);
+      const floorCenterY = terrainY + FLOOR_HEIGHT_OFFSET;
+      const wallCenterY = floorCenterY + FLOOR_THICKNESS / 2 + wallH / 2;
+      const halfW = cfg.arenaWidth / 2;
+      const halfL = cfg.arenaLength / 2;
+
+      this.createBoxCollision(
+        cx,
+        wallCenterY,
+        cz - halfL - wallT / 2,
+        cfg.arenaWidth,
+        wallH,
+        wallT,
+        `arena_wall_${a + 1}_n`,
+      );
+      this.createBoxCollision(
+        cx,
+        wallCenterY,
+        cz + halfL + wallT / 2,
+        cfg.arenaWidth,
+        wallH,
+        wallT,
+        `arena_wall_${a + 1}_s`,
+      );
+      this.createBoxCollision(
+        cx - halfW - wallT / 2,
+        wallCenterY,
+        cz,
+        wallT,
+        wallH,
+        cfg.arenaLength,
+        `arena_wall_${a + 1}_w`,
+      );
+      this.createBoxCollision(
+        cx + halfW + wallT / 2,
+        wallCenterY,
+        cz,
+        wallT,
+        wallH,
+        cfg.arenaLength,
+        `arena_wall_${a + 1}_e`,
+      );
+    }
+  }
+
   private createFloorCollision(
     centerX: number,
     centerY: number,
     centerZ: number,
     width: number,
     length: number,
+    tag: string,
+  ): void {
+    this.createBoxCollision(
+      centerX,
+      centerY,
+      centerZ,
+      width,
+      FLOOR_THICKNESS,
+      length,
+      tag,
+    );
+  }
+
+  private createBoxCollision(
+    centerX: number,
+    centerY: number,
+    centerZ: number,
+    sizeX: number,
+    sizeY: number,
+    sizeZ: number,
     tag: string,
   ): void {
     const PHYSX = getPhysX();
@@ -1778,11 +1856,7 @@ export class DuelArenaVisualsSystem extends System {
     }
 
     try {
-      const halfExtents = new PHYSX.PxVec3(
-        width / 2,
-        FLOOR_THICKNESS / 2,
-        length / 2,
-      );
+      const halfExtents = new PHYSX.PxVec3(sizeX / 2, sizeY / 2, sizeZ / 2);
       const geometry = new PHYSX.PxBoxGeometry(
         halfExtents.x,
         halfExtents.y,

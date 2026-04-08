@@ -46,6 +46,7 @@ port.on("message", (msg: MainToWorkerMessage) => {
           agent.resourceSystemAvailable = shared.resourceSystemAvailable;
           agent.spawnAnchors = shared.spawnAnchors;
           agent.worldResources = shared.worldResources;
+          agent.stationPositions = shared.stationPositions;
         }
         const results = processAgentTicks(msg.agents);
         send({ type: "tickResults", results });

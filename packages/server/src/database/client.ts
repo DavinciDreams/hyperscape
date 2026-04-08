@@ -102,6 +102,28 @@ function getMigrationErrorMessage(error: unknown): string {
   return String(error);
 }
 
+/**
+ * Ensure additive columns exist when the live DB lags behind drizzle-kit migrate
+ * (e.g. SKIP_MIGRATIONS, wrong DATABASE_URL for CLI migrate, or partial apply).
+ * Matches migration 0053_add_agent_streaming_duel_enabled.sql.
+ */
+async function ensureAgentMappingsStreamingDuelColumn(
+  pool: pg.Pool,
+): Promise<void> {
+  try {
+    await pool.query(`
+      ALTER TABLE "agent_mappings"
+      ADD COLUMN IF NOT EXISTS "streaming_duel_enabled" boolean DEFAULT true NOT NULL;
+    `);
+    console.log("[DB] ✓ Ensured agent_mappings.streaming_duel_enabled");
+  } catch (error) {
+    console.warn(
+      "[DB] Could not ensure agent_mappings.streaming_duel_enabled:",
+      getMigrationErrorMessage(error),
+    );
+  }
+}
+
 function isMigrationExistingObjectError(error: unknown): boolean {
   const hasCode = Boolean(
     error &&
@@ -424,6 +446,8 @@ export async function initializeDatabase(connectionString: string) {
       console.log("[DB] ✓ Required public tables verified after recovery");
     }
   }
+
+  await ensureAgentMappingsStreamingDuelColumn(pool);
 
   dbInstance = db;
   poolInstance = pool;
