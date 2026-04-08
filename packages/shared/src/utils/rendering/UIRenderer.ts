@@ -37,6 +37,37 @@ export interface NameTagOptions {
   padding?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Canvas pool — reuse DOM canvas elements to reduce GPU memory churn.
+// Canvases are keyed by dimension so we only reuse when size matches exactly.
+// ---------------------------------------------------------------------------
+const _canvasPool: HTMLCanvasElement[] = [];
+const MAX_POOLED_CANVASES = 64;
+
+function acquireCanvas(width: number, height: number): HTMLCanvasElement {
+  // Try to find a canvas with matching dimensions
+  for (let i = _canvasPool.length - 1; i >= 0; i--) {
+    const c = _canvasPool[i];
+    if (c.width === width && c.height === height) {
+      _canvasPool.splice(i, 1);
+      const ctx = c.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, width, height);
+      return c;
+    }
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+/** Return a canvas to the pool for reuse. Call when the sprite is destroyed. */
+export function releaseCanvas(canvas: HTMLCanvasElement): void {
+  if (_canvasPool.length < MAX_POOLED_CANVASES) {
+    _canvasPool.push(canvas);
+  }
+}
+
 export class UIRenderer {
   /**
    * Create and render a health bar on a canvas
@@ -109,6 +140,7 @@ export class UIRenderer {
 
   /**
    * Create a name tag canvas
+   * Renders at 4× internal resolution for crisp texture quality in 3D scenes.
    */
   static createNameTag(
     name: string,
@@ -125,11 +157,13 @@ export class UIRenderer {
       padding: _padding = 8,
     } = options;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    // Render at 4× resolution so the canvas texture is crisp when used as a
+    // Three.js sprite (avoids blocky/pixelated text at typical viewing distances)
+    const scale = 4;
+    const canvas = acquireCanvas(width * scale, height * scale);
 
     const context = canvas.getContext("2d")!;
+    context.setTransform(scale, 0, 0, scale, 0, 0);
 
     // Draw background with rounded corners
     this.drawRoundedRect(
@@ -173,9 +207,7 @@ export class UIRenderer {
     );
     const totalHeight = nameTagHeight + healthBarHeight + spacing;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = totalWidth;
-    canvas.height = totalHeight;
+    const canvas = acquireCanvas(totalWidth, totalHeight);
 
     const context = canvas.getContext("2d")!;
 
@@ -186,6 +218,7 @@ export class UIRenderer {
       height: nameTagHeight,
     });
     context.drawImage(nameCanvas, 0, 0);
+    releaseCanvas(nameCanvas); // Return sub-canvas immediately
 
     // Draw health bar
     const healthCanvas = this.createHealthBar(currentHealth, maxHealth, {
@@ -194,6 +227,7 @@ export class UIRenderer {
       height: healthBarHeight,
     });
     context.drawImage(healthCanvas, 0, nameTagHeight + spacing);
+    releaseCanvas(healthCanvas); // Return sub-canvas immediately
 
     return canvas;
   }

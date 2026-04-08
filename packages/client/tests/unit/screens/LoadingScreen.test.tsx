@@ -65,10 +65,10 @@ describe("LoadingScreen", () => {
     );
 
     const progressHandler = (
-      (world.on as unknown as ReturnType<typeof vi.fn>).mock.calls.find(
-        ([event]) => event === EventType.ASSETS_LOADING_PROGRESS,
-      )?.[1] as ((payload: unknown) => void) | undefined
-    );
+      world.on as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.find(
+      ([event]) => event === EventType.ASSETS_LOADING_PROGRESS,
+    )?.[1] as ((payload: unknown) => void) | undefined;
 
     expect(progressHandler).toBeDefined();
 

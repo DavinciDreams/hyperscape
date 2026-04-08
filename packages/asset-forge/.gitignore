@@ -162,6 +162,11 @@ gdd-assets/*
 !gdd-assets/.gitkeep
 temp-images/*
 !temp-images/.gitkeep
+temp-shells/*
+!temp-shells/.gitkeep
+
+# Symlinked game assets (developer-local, do not commit)
+public/game-assets/avatars
 
 # Lock files (optional - some teams commit these)
 # Uncomment if you don't want to commit lock files

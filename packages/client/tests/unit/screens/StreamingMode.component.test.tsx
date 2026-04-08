@@ -122,10 +122,14 @@ vi.mock("../../../src/components/streaming/StreamingOverlay", () => ({
     state,
   }: {
     state: { cycle?: { phase?: string } } | null;
-  }) => <div data-testid="streaming-overlay">{state?.cycle?.phase ?? "NONE"}</div>,
+  }) => (
+    <div data-testid="streaming-overlay">{state?.cycle?.phase ?? "NONE"}</div>
+  ),
 }));
 
-function createStreamingState(phase: "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" = "FIGHTING") {
+function createStreamingState(
+  phase: "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" = "FIGHTING",
+) {
   return {
     type: "STREAMING_STATE_UPDATE" as const,
     cycle: {
@@ -196,13 +200,17 @@ describe("StreamingMode component", () => {
         json: async () => createStreamingState(),
       })),
     );
-    (window as Window & {
-      __HYPERSCAPE_STREAM_READY__?: boolean;
-      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
-    }).__HYPERSCAPE_STREAM_READY__ = false;
-    (window as Window & {
-      __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
-    }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+    (
+      window as Window & {
+        __HYPERSCAPE_STREAM_READY__?: boolean;
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+      }
+    ).__HYPERSCAPE_STREAM_READY__ = false;
+    (
+      window as Window & {
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+      }
+    ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
   });
 
   afterEach(() => {
@@ -240,19 +248,23 @@ describe("StreamingMode component", () => {
 
     await waitFor(() => {
       expect(
-        (window as Window & {
-          __HYPERSCAPE_STREAM_READY__?: boolean;
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
-            degradedReason?: string | null;
-          } | null;
-        }).__HYPERSCAPE_STREAM_READY__,
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_READY__?: boolean;
+            __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+              degradedReason?: string | null;
+            } | null;
+          }
+        ).__HYPERSCAPE_STREAM_READY__,
       ).toBe(false);
       expect(
-        (window as Window & {
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
-            degradedReason?: string | null;
-          } | null;
-        }).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: {
+              degradedReason?: string | null;
+            } | null;
+          }
+        ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__?.degradedReason,
       ).toBe("initialization_failed");
     });
   });

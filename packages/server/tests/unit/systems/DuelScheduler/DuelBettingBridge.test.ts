@@ -72,7 +72,9 @@ describe("DuelBettingBridge streaming reconciliation", () => {
   let world: ReturnType<typeof createMockWorld>;
   let bridge: DuelBettingBridge;
   let bridgeHarness: DuelBettingBridgeTestHarness;
-  let scheduler: { getCurrentCycle: () => ReturnType<typeof makeCycle> | null } | null;
+  let scheduler: {
+    getCurrentCycle: () => ReturnType<typeof makeCycle> | null;
+  } | null;
 
   beforeEach(() => {
     vi.useFakeTimers();

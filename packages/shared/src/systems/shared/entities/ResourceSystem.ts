@@ -880,8 +880,100 @@ export class ResourceSystem extends SystemBase {
 
     if (spawnPoints.length === 0) return;
 
-    // Only spawn actual entities on the server (authoritative)
     if (!this.world.isServer) {
+      for (const spawnPoint of spawnPoints) {
+        const resource = this.createResourceFromSpawnPoint(spawnPoint);
+        if (!resource) continue;
+
+        const rid = createResourceID(resource.id);
+        this.resources.set(rid, resource);
+        if (isManifest) this.manifestResourceIds.add(rid);
+
+        const yRotation = spawnPoint.rotation ?? Math.random() * Math.PI * 2;
+        const footprint: ResourceFootprint = resource.footprint || "standard";
+        const anchorTile = worldToTile(
+          resource.position.x,
+          resource.position.z,
+        );
+        const occupiedTiles = this.getOccupiedTiles(anchorTile, footprint);
+        const baseScale = this.getScaleForResource(
+          resource.type,
+          spawnPoint.subType,
+        );
+        const scaleVariation = spawnPoint.scale ?? 1.0;
+        const finalScale = baseScale * scaleVariation;
+        const baseDepletedScale = this.getDepletedScaleForResource(
+          resource.type,
+          spawnPoint.subType,
+        );
+        const finalDepletedScale = baseDepletedScale * scaleVariation;
+
+        const entityData = {
+          id: resource.id,
+          type: "resource" as const,
+          name: resource.name,
+          position: [
+            resource.position.x,
+            resource.position.y,
+            resource.position.z,
+          ] as [number, number, number],
+          quaternion: [
+            0,
+            Math.sin(yRotation / 2),
+            0,
+            Math.cos(yRotation / 2),
+          ] as [number, number, number, number],
+          scale: { x: 1, y: 1, z: 1 },
+          visible: true,
+          interactable: true,
+          interactionType: "harvest",
+          interactionDistance: 3,
+          description: `${resource.name} - Requires level ${resource.levelRequired} ${resource.skillRequired}`,
+          model: this.getModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          properties: {},
+          resourceType: resource.type === "ore" ? "mining_rock" : resource.type,
+          resourceId: spawnPoint.subType
+            ? `${resource.type}_${spawnPoint.subType}`
+            : `${resource.type}_normal`,
+          harvestSkill: resource.skillRequired,
+          requiredLevel: resource.levelRequired,
+          harvestTime: 3000,
+          harvestYield: resource.drops.map((drop) => ({
+            itemId: drop.itemId,
+            quantity: drop.quantity,
+            chance: drop.chance,
+          })),
+          respawnTime: resource.respawnTime,
+          depleted: false,
+          depletedModelPath: this.getDepletedModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          modelScale: finalScale,
+          depletedModelScale: finalDepletedScale,
+          lod1Model: this.getLod1ModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          lod1ModelScale: finalScale,
+          procgenPreset: this.getProcgenPresetForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          modelVariants: this.getModelVariantsForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          footprint,
+          anchorTile,
+          occupiedTiles,
+        };
+
+        this.world.entities.add(entityData);
+      }
       return;
     }
 
@@ -1023,6 +1115,11 @@ export class ResourceSystem extends SystemBase {
             spawnPoint.subType,
           ),
           lod1ModelScale: finalScale, // Same scale variation as main model
+          lod2Model: this.getLod2ModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          lod2ModelScale: finalScale, // Same scale variation as main model
           // Procgen preset for runtime procedural tree generation
           procgenPreset: this.getProcgenPresetForResource(
             resource.type,
@@ -1163,6 +1260,27 @@ export class ResourceSystem extends SystemBase {
     }
 
     return manifestData.lod1ModelPath ?? null;
+  }
+
+  /**
+   * Get LOD2 model path for resource type from manifest
+   * Returns null if not specified (LOD1/full model used until imposter)
+   */
+  private getLod2ModelPathForResource(
+    type: string,
+    subType?: string,
+  ): string | null {
+    const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
+    const manifestData = getExternalResource(variantKey);
+
+    if (!manifestData) {
+      throw new Error(
+        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
+          `Ensure resources.json is loaded and contains this resource type.`,
+      );
+    }
+
+    return manifestData.lod2ModelPath ?? null;
   }
 
   /**

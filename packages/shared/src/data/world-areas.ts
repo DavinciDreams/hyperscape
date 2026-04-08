@@ -25,6 +25,12 @@ import type {
   DangerSource,
   WildernessBoundary,
 } from "../types/world/world-types";
+import {
+  ZONE_BOUNDS_MIN_X,
+  ZONE_BOUNDS_MAX_X,
+  ZONE_BOUNDS_MIN_Z,
+  ZONE_BOUNDS_MAX_Z,
+} from "./arena-layout";
 
 // Re-export types from core
 export type {
@@ -49,36 +55,6 @@ export type {
  * DEFAULT: If JSON is empty, use this hardcoded starter area
  */
 export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
-  starter_area: {
-    id: "starter_area",
-    name: "Starter Area",
-    description: "A peaceful area for new adventurers",
-    difficultyLevel: 0,
-    bounds: {
-      minX: -50,
-      maxX: 50,
-      minZ: -50,
-      maxZ: 50,
-    },
-    biomeType: "plains",
-    safeZone: true,
-    npcs: [
-      {
-        id: "bank_clerk",
-        type: "bank",
-        position: { x: 5, y: 0, z: -5 },
-        // All other NPC data (name, services, model, description) comes from npcs.json
-      },
-    ],
-    resources: [
-      // Resources are now defined in world-areas.json manifest only
-      // Do not add hardcoded resources here
-    ],
-    mobSpawns: [
-      // Starter area is a safe zone - no mob spawns
-      // The default test goblin is spawned by MobNPCSpawnerSystem near origin
-    ],
-  },
   // Wilderness test zone - PvP enabled area for testing player vs player combat
   wilderness_test: {
     id: "wilderness_test",
@@ -110,11 +86,10 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
       "A gladiatorial arena where players can engage in honorable combat. Stake items and fight!",
     difficultyLevel: 0,
     bounds: {
-      // Encompasses all arenas, lobby, and hospital
-      minX: 35, // Hospital left edge (65 - 15)
-      maxX: 145, // Lobby right edge (105 + 20 + some margin)
-      minZ: 37, // Lobby/hospital bottom edge (62 - 12.5)
-      maxZ: 140, // Arena 6 top edge
+      minX: ZONE_BOUNDS_MIN_X,
+      maxX: ZONE_BOUNDS_MAX_X,
+      minZ: ZONE_BOUNDS_MIN_Z,
+      maxZ: ZONE_BOUNDS_MAX_Z,
     },
     biomeType: "plains",
     safeZone: true, // Lobby area is safe
@@ -129,9 +104,7 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
 /**
  * Starter Towns - Populated by DataManager from world-areas.json
  */
-export const STARTER_TOWNS: Record<string, WorldArea> = {
-  starter_area: ALL_WORLD_AREAS["starter_area"],
-};
+export const STARTER_TOWNS: Record<string, WorldArea> = {};
 
 /**
  * Helper Functions

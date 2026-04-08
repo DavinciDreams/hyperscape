@@ -4,6 +4,7 @@ import {
   Wrench,
   Hand,
   Shield,
+  Gem,
   Shuffle,
   Building2,
   FileJson,
@@ -66,6 +67,7 @@ const NAV_ITEMS = [
   { route: ROUTES.WORLD_EDITOR, label: "World Editor", icon: Gamepad2 },
   { route: ROUTES.WORLD_STUDIO, label: "World Studio", icon: Map },
   { route: ROUTES.MANIFESTS, label: "Manifests", icon: FileJson },
+  { route: ROUTES.ARMOR_PIPELINE, label: "Armor v2", icon: Gem },
 ] as const;
 
 const ACTIVE_BG = "bg-[rgba(99,102,241,0.15)] text-primary";

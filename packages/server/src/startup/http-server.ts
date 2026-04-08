@@ -36,6 +36,10 @@ import fs from "fs-extra";
 import path from "path";
 import type { ServerConfig } from "./config.js";
 import {
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicAppUrl,
+} from "../shared/public-ws-url.js";
+import {
   getGlobalRateLimit,
   isRateLimitEnabled,
 } from "../infrastructure/rate-limit/rate-limit-config.js";
@@ -135,19 +139,14 @@ export async function createHttpServer(
   });
   console.log(`[HTTP] ✅ trustProxy=${trustProxy}`);
 
-  // Configure CORS for development and production
-  // Frontend: Cloudflare Pages (hyperscape.club)
-  // Backend: Railway (hyperscape-production.up.railway.app)
   const elizaOSUrl =
     process.env.ELIZAOS_URL ||
     process.env.ELIZAOS_API_URL ||
-    (process.env.NODE_ENV === "production"
-      ? "https://hyperscape-production.up.railway.app"
-      : "http://localhost:4001");
+    getDefaultElizaOsApiUrl();
   const clientUrl =
     process.env.CLIENT_URL ||
     process.env.PUBLIC_APP_URL ||
-    "http://localhost:3333";
+    getDefaultPublicAppUrl();
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
 
   const allowedOrigins = [
@@ -305,6 +304,17 @@ export async function createHttpServer(
     console.log("[HTTP] ✅ CSRF protection enabled");
   } else {
     console.log("[HTTP] ⚠️  CSRF protection disabled (development mode)");
+    // Still expose GET /api/csrf-token so the dashboard API client does not 404.
+    // CSRF validation is skipped when Authorization: Bearer is present (see middleware/csrf.ts).
+    fastify.get("/api/csrf-token", async (_request, reply) => {
+      return reply.send({
+        token: "dev-csrf-disabled",
+        csrfToken: "dev-csrf-disabled",
+      });
+    });
+    console.log(
+      "[HTTP] ✅ Dev CSRF token stub registered (validation still off unless CSRF_ENABLED=true)",
+    );
   }
 
   // Serve index.html for root path (SPA routing)
@@ -765,9 +775,14 @@ function setAssetHeaders(
     res.setHeader("Content-Type", "model/gltf-binary");
   }
 
-  // Aggressive caching for assets (immutable, 1 year)
-  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-  res.setHeader("Expires", new Date(Date.now() + 31536000000).toUTCString());
+  // Production: aggressive immutable caching (1 year).
+  // Dev: short cache with revalidation so file changes are picked up on refresh.
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Expires", new Date(Date.now() + 31536000000).toUTCString());
+  } else {
+    res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
+  }
 
   // CORS headers so cross-origin clients (e.g. Vite dev on :3333, RTMP bridge
   // browser) can fetch assets served from :5555 without triggering CORP blocks.

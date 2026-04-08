@@ -17,7 +17,7 @@ import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
 import type { InventorySlotViewItem, RightPanelMode } from "../types";
 import { InventoryPanel } from "../../InventoryPanel";
 import { EquipmentPanel } from "../../EquipmentPanel";
-import type { ClientWorld } from "../../../types";
+import type { ClientWorld } from "../../../../types";
 
 export interface RightPanelProps {
   mode: RightPanelMode;
@@ -26,7 +26,7 @@ export interface RightPanelProps {
   // Inventory data
   inventory: InventorySlotViewItem[];
   coins: number;
-  world: ClientWorld;
+  world?: ClientWorld;
 
   // Equipment data
   equipment?: import("@hyperscape/shared").PlayerEquipmentItems | null;

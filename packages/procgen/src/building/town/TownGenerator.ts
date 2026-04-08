@@ -37,6 +37,7 @@ import {
   WATER_CHECK_DIRECTIONS,
   WATER_CHECK_MAX_DISTANCE,
   WATER_CHECK_STEP,
+  DEFAULT_WATER_THRESHOLD,
 } from "./constants";
 
 // Import grid alignment utilities from building generator
@@ -211,7 +212,8 @@ export class TownGenerator {
     const terrain = createTerrainProviderFromGenerator(terrainGenerator);
 
     // Extract water threshold from terrain generator if available
-    const waterThreshold = terrainGenerator.getWaterThreshold?.() ?? 5.4;
+    const waterThreshold =
+      terrainGenerator.getWaterThreshold?.() ?? DEFAULT_WATER_THRESHOLD;
 
     return new TownGenerator({
       ...options,

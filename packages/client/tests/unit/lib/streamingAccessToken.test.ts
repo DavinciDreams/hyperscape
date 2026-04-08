@@ -131,6 +131,8 @@ describe("streamingAccessToken", () => {
       },
     } as unknown as Window;
 
-    expect(primeStreamingAccessTokenFromWindow(freshWindow)).toBe("fresh-token");
+    expect(primeStreamingAccessTokenFromWindow(freshWindow)).toBe(
+      "fresh-token",
+    );
   });
 });

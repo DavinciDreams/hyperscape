@@ -26,7 +26,7 @@
  * - Combat events → Agent can make decisions
  *
  * **Configuration:**
- * - url: WebSocket server URL (ws://localhost:5555/ws)
+ * - url: WebSocket server URL (ws://localhost:5556/ws)
  * - gameRole: Agent's role in game ('player', 'npc', 'merchant')
  * - agentId: Unique agent identifier
  * - runtime: ElizaOS agent runtime instance
@@ -41,7 +41,7 @@
  * ```ts
  * const client = new HyperscapeClientInterface({
  *   runtime: agentRuntime,
- *   url: 'ws://localhost:5555/ws',
+ *   url: 'ws://localhost:5556/ws',
  *   gameRole: 'player',
  *   agentId: 'agent_123'
  * });

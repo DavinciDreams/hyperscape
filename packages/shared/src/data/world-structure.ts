@@ -137,7 +137,7 @@ export function getTerrainHeight(_x: number, _z: number): number {
 export const WORLD_STRUCTURE_CONSTANTS = {
   GRID_SIZE: 4, // Block size for grid-based movement
   DEFAULT_SPAWN_HEIGHT: 2,
-  WATER_LEVEL: 0,
+  WATER_LEVEL: 16, // Must match TERRAIN_CONSTANTS.WATER_THRESHOLD
   MAX_BUILD_HEIGHT: 100,
   SAFE_ZONE_RADIUS: 15, // Radius around starter towns with no hostile mobs
   // Note: Death/respawn timing constants are in COMBAT_CONSTANTS (tick-based)

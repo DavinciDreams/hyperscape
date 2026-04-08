@@ -37,66 +37,123 @@ import {
   abs,
   sin,
   cos,
+  pow,
+  clamp,
   max as tslMax,
+  floor,
+  normalize,
   Fn,
   output,
   type ShaderNode,
 } from "../../../extras/three/three";
 import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { applyTerrainSunShade } from "./GPUMaterials";
 import { MINE_BIOME_PALETTES, ROAD_COLORS } from "../../../world/biome-colors";
+import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
 
 export const TERRAIN_SHADER_CONSTANTS = {
   TRIPLANAR_SCALE: 0.5,
-  SNOW_HEIGHT: 50.0,
+  SNOW_HEIGHT: 90.0,
   NOISE_SCALE: 0.0008,
-  DIRT_THRESHOLD: 0.5,
+  DIRT_THRESHOLD: 0.43,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
-  WATER_LEVEL: 5.0,
+  WATER_LEVEL: TERRAIN_CONSTANTS.WATER_THRESHOLD,
+  DISTORT_NOISE_SCALE: 0.067,
+  VARIATION_NOISE_SCALE: 0.0015,
+  ROCK_DISTORT_STRENGTH: 0.5,
+  HEIGHT_DISTORT_STRENGTH: 8.0,
+  SATURATION_BOOST: 1.35,
 };
 
-const TERRAIN_TEX_TILE = 0.08;
+/**
+ * Half-lambert anime shade: wraps N·L to [0,1] for soft fill, then
+ * tints the shadow side with a cool blue-teal hue shift (Genshin-style).
+ * Applied to albedo before PBR so the colour shift survives lighting.
+ */
+export const TERRAIN_SHADE = {
+  TINT_COLOR: SUN_SHADE.TINT_COLOR,
+  STRENGTH: 0.7,
+  FRESNEL_POWER: 3.0,
+  FRESNEL_INTENSITY: 0.2,
+};
+
+/**
+ * Shared TSL anime shading: half-lambert cool tint + fresnel rim highlight.
+ * Used by both terrain and grass so the shading stays in sync.
+ */
+export function applyAnimeShade(
+  baseColor: any,
+  normal: any,
+  sunDirNode: any,
+): any {
+  const sDir = normalize(vec3(sunDirNode));
+  const NdotL = dot(normal, sDir);
+  const halfLambert = add(mul(NdotL, float(0.5)), float(0.5));
+  const shadeFactor = sub(float(1.0), halfLambert);
+  const coolTint = vec3(...TERRAIN_SHADE.TINT_COLOR);
+  const tintedBase = mul(baseColor, coolTint);
+  const shaded = mix(
+    baseColor,
+    tintedBase,
+    mul(shadeFactor, float(TERRAIN_SHADE.STRENGTH)),
+  );
+
+  const viewDir = normalize(sub(positionWorld, cameraPosition));
+  const rim = clamp(
+    add(float(1.0), dot(viewDir, normal)),
+    float(0.0),
+    float(1.0),
+  );
+  const fresnelRim = mul(
+    pow(rim, float(TERRAIN_SHADE.FRESNEL_POWER)),
+    float(TERRAIN_SHADE.FRESNEL_INTENSITY),
+  );
+  return add(shaded, vec3(fresnelRim, fresnelRim, fresnelRim));
+}
+
+const TERRAIN_TEX_TILE = 0.3;
 const TERRAIN_TEX_DIR = "textures/terrain-biomes";
 
 const TERRAIN_BIOME_TEXTURES = {
   grass: {
     file: "grass.png",
-    fallback: [0.3, 0.58, 0.15] as [number, number, number],
+    fallback: [0.28, 0.63, 0.2] as [number, number, number],
   },
   dirt: {
     file: "dirt.png",
-    fallback: [0.35, 0.24, 0.12] as [number, number, number],
+    fallback: [0.55, 0.48, 0.36] as [number, number, number],
   },
   cliff: {
     file: "cliff.png",
-    fallback: [0.4, 0.38, 0.32] as [number, number, number],
+    fallback: [0.71, 0.67, 0.6] as [number, number, number],
   },
   desertGrass: {
     file: "desertGrass.png",
-    fallback: [0.82, 0.52, 0.28] as [number, number, number],
+    fallback: [0.51, 0.41, 0.28] as [number, number, number],
   },
   desertDirt: {
     file: "desertDirt.png",
-    fallback: [0.62, 0.28, 0.15] as [number, number, number],
+    fallback: [0.54, 0.42, 0.32] as [number, number, number],
   },
   desertCliff: {
-    file: "desertCliff.png",
-    fallback: [0.72, 0.38, 0.18] as [number, number, number],
+    file: "desertDirt.png",
+    fallback: [0.54, 0.42, 0.32] as [number, number, number],
   },
   snowGrass: {
     file: "snowgrass.png",
-    fallback: [0.78, 0.82, 0.85] as [number, number, number],
+    fallback: [0.79, 0.8, 0.8] as [number, number, number],
   },
   snowDirt: {
     file: "snowdirt.png",
-    fallback: [0.55, 0.55, 0.58] as [number, number, number],
+    fallback: [0.78, 0.82, 0.84] as [number, number, number],
   },
   snowCliff: {
     file: "snowdirt.png",
-    fallback: [0.5, 0.52, 0.56] as [number, number, number],
+    fallback: [0.78, 0.82, 0.84] as [number, number, number],
   },
 };
 
@@ -167,6 +224,8 @@ function createTerrainBiomeTex(
 // --- Tundra palette: snowy white-blue with frozen grey stone ---
 const TUNDRA_GRASS = vec3(0.78, 0.82, 0.85);
 const TUNDRA_GRASS_DARK = vec3(0.65, 0.7, 0.75);
+const TUNDRA_GRASS_HIGH = vec3(0.68, 0.72, 0.78);
+const TUNDRA_VARIATION = vec3(0.6, 0.64, 0.7);
 const TUNDRA_DIRT = vec3(0.55, 0.55, 0.58);
 const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
 const TUNDRA_CLIFF = vec3(0.5, 0.52, 0.56);
@@ -175,18 +234,24 @@ const TUNDRA_CLIFF_DARK = vec3(0.38, 0.4, 0.44);
 // --- Forest palette: vibrant energetic greens with warm brown earth ---
 const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
 const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
-const FOREST_DIRT = vec3(0.35, 0.24, 0.12);
-const FOREST_DIRT_DARK = vec3(0.22, 0.15, 0.08);
+const FOREST_GRASS_HIGH = vec3(0.24, 0.45, 0.18);
+const FOREST_VARIATION = vec3(0.15, 0.35, 0.1);
+const FOREST_DIRT = vec3(0.26, 0.19, 0.11);
+const FOREST_DIRT_DARK = vec3(0.17, 0.12, 0.07);
 const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
 const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
 
 // --- Canyon palette: red-orange sand with deep crimson rock ---
 const CANYON_SAND = vec3(0.82, 0.52, 0.28);
 const CANYON_SAND_DARK = vec3(0.72, 0.42, 0.2);
+const CANYON_SAND_HIGH = vec3(0.62, 0.38, 0.22);
+const CANYON_VARIATION = vec3(0.58, 0.34, 0.16);
 const CANYON_ROCK = vec3(0.62, 0.28, 0.15);
 const CANYON_ROCK_DARK = vec3(0.48, 0.2, 0.1);
 const CANYON_CLIFF = vec3(0.72, 0.38, 0.18);
 const CANYON_CLIFF_DARK = vec3(0.55, 0.25, 0.12);
+
+const CLIFF_TINT = vec3(0.28, 0.3, 0.36);
 
 // Legacy aliases used by road overlay and other shader sections (default = forest)
 const GRASS_GREEN = FOREST_GRASS;
@@ -202,27 +267,41 @@ const WATER_EDGE = vec3(0.08, 0.06, 0.04);
 
 /**
  * Compute the procedural terrain base color at a world position.
- * This is the exact same logic the terrain shader uses (height + slope + noise),
- * extracted so the tree shader can call it for ground-blending.
- *
- * @param height - positionWorld.y
- * @param slope  - 1 - abs(normalWorld.y)  (0 = flat, 1 = vertical)
- * @param noiseVal - primary Perlin noise sample (noiseTex @ worldXZ * NOISE_SCALE)
- * @param noiseVal2 - derived noise: sin(noiseVal * 6.28) * 0.3 + 0.5
- * @param forestWeight - biome weight for forest [0..1]
- * @param canyonWeight - biome weight for canyon [0..1]
+ * Uses noise-distorted coordinate mapping (ported from reference) for organic
+ * cliff/dirt/shoreline boundaries instead of clean smoothstep bands.
  */
 export function computeTerrainBaseColor(
-  height: ShaderNode,
-  slope: ShaderNode,
-  noiseVal: ShaderNode,
-  noiseVal2: ShaderNode,
-  forestWeight?: ShaderNode,
-  canyonWeight?: ShaderNode,
+  height: any,
+  slope: any,
+  noiseVal: any,
+  noiseVal2: any,
+  distortNoise: any,
+  variationNoise: any,
+  forestWeight?: any,
+  canyonWeight?: any,
 ) {
   const fW = forestWeight ?? float(0.0);
   const dW = canyonWeight ?? float(0.0);
   const tW = sub(float(1.0), add(fW, dW));
+
+  // Distorted slope: offset normalY by noise for organic cliff edges
+  const distortedNY = add(
+    sub(float(1.0), slope),
+    mul(
+      sub(distortNoise, float(0.5)),
+      float(TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH),
+    ),
+  );
+  const dSlope = sub(float(1.0), distortedNY);
+
+  // Distorted height for organic sand/shoreline boundaries
+  const dHeight = add(
+    height,
+    mul(
+      sub(distortNoise, float(0.5)),
+      float(TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH),
+    ),
+  );
 
   // Biome-blended grass
   const grassVariation = smoothstep(float(0.4), float(0.6), noiseVal2);
@@ -234,13 +313,30 @@ export function computeTerrainBaseColor(
     mul(canyonGrass, dW),
   );
 
-  // Biome-blended dirt
-  const dirtPatchFactor = smoothstep(
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
-    noiseVal,
+  // Height-based ground color gradient (subtle shift at altitude)
+  const heightGrad = mul(
+    smoothstep(float(25.0), float(55.0), height),
+    float(0.3),
   );
-  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
+  const grassHigh = add(
+    add(mul(TUNDRA_GRASS_HIGH, tW), mul(FOREST_GRASS_HIGH, fW)),
+    mul(CANYON_SAND_HIGH, dW),
+  );
+  c = mix(c, grassHigh, heightGrad);
+
+  // Low-frequency ground variation overlay (patchy color areas)
+  const gVar = clamp(
+    pow(add(variationNoise, float(0.3)), float(5.0)),
+    float(0.0),
+    float(1.0),
+  );
+  const varColor = add(
+    add(mul(TUNDRA_VARIATION, tW), mul(FOREST_VARIATION, fW)),
+    mul(CANYON_VARIATION, dW),
+  );
+  c = mix(c, varColor, mul(gVar, float(0.25)));
+
+  // Biome-blended dirt
   const dirtVariation = smoothstep(float(0.3), float(0.7), noiseVal2);
   const tundraDirt = mix(TUNDRA_DIRT, TUNDRA_DIRT_DARK, dirtVariation);
   const forestDirt = mix(FOREST_DIRT, FOREST_DIRT_DARK, dirtVariation);
@@ -249,50 +345,69 @@ export function computeTerrainBaseColor(
     add(mul(tundraDirt, tW), mul(forestDirt, fW)),
     mul(canyonDirt, dW),
   );
-  c = mix(c, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
-  // Slope-based dirt — fades out at steep slopes where cliff color takes over
-  const dirtSlopeFactor = mul(
-    smoothstep(float(0.15), float(0.4), slope),
-    smoothstep(float(0.6), float(0.3), slope),
-  );
-  c = mix(c, dirtColor, mul(dirtSlopeFactor, float(0.6)));
-
-  // Per-biome cliff color on steep slopes (terrace sides, rock faces)
+  // Per-biome cliff color with rock texture variation
   const cliffVariation = smoothstep(float(0.3), float(0.7), noiseVal);
   const tundraCliff = mix(TUNDRA_CLIFF, TUNDRA_CLIFF_DARK, cliffVariation);
   const forestCliff = mix(FOREST_CLIFF, FOREST_CLIFF_DARK, cliffVariation);
   const canyonCliff = mix(CANYON_CLIFF, CANYON_CLIFF_DARK, cliffVariation);
-  const cliffColor = add(
+  let cliffColor: any = add(
     add(mul(tundraCliff, tW), mul(forestCliff, fW)),
     mul(canyonCliff, dW),
   );
-  c = mix(c, cliffColor, smoothstep(float(0.3), float(0.55), slope));
+  const rockTexVar = mul(pow(distortNoise, float(0.5)), float(0.3));
+  cliffColor = mix(cliffColor, CLIFF_TINT, rockTexVar);
 
-  // Sand near water (flat areas, stronger in canyon)
+  // Noise-driven dirt patches on flat areas (using distorted slope)
+  const nDirtFactor = mul(
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
+      noiseVal,
+    ),
+    smoothstep(float(0.3), float(0.05), dSlope),
+  );
+  c = mix(c, dirtColor, nDirtFactor);
+
+  // Dirt on moderate slopes (bell curve, using distorted slope)
+  const dirtSlopeF = mul(
+    smoothstep(float(0.15), float(0.4), dSlope),
+    smoothstep(float(0.6), float(0.3), dSlope),
+  );
+  c = mix(c, dirtColor, mul(dirtSlopeF, float(0.6)));
+
+  // Cliff on steep slopes (using distorted slope)
+  c = mix(c, cliffColor, smoothstep(float(0.3), float(0.55), dSlope));
+
+  // Sand near water (flat areas, stronger in canyon — using distorted height)
   const sandBlend = mul(
-    smoothstep(float(10.0), float(6.0), height),
+    smoothstep(float(18.0), float(12.0), dHeight),
     smoothstep(float(0.25), float(0.0), slope),
   );
   const sandStrength = mix(float(0.6), float(0.9), dW);
   c = mix(c, SAND_YELLOW, mul(sandBlend, sandStrength));
 
-  // Shoreline transitions
+  // Shoreline transitions (using distorted height)
   c = mix(
     c,
     DIRT_DARK,
-    mul(smoothstep(float(14.0), float(8.0), height), float(0.4)),
+    mul(smoothstep(float(22.0), float(14.0), dHeight), float(0.4)),
   );
   c = mix(
     c,
     MUD_BROWN,
-    mul(smoothstep(float(9.0), float(6.0), height), float(0.7)),
+    mul(smoothstep(float(15.0), float(10.0), dHeight), float(0.7)),
   );
   c = mix(
     c,
     WATER_EDGE,
-    mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
+    mul(smoothstep(float(11.0), float(7.0), dHeight), float(0.9)),
   );
+
+  // Saturation boost: pull color away from grey
+  const luma = dot(c, vec3(0.299, 0.587, 0.114));
+  const grey = vec3(luma, luma, luma);
+  c = mix(grey, c, float(TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST));
 
   return c;
 }
@@ -620,6 +735,295 @@ export function calculateSlope(
 }
 
 // ============================================================================
+// CPU TERRAIN COLOR — mirrors computeTerrainBaseColor() for grass placement
+// ============================================================================
+
+type RGB = { r: number; g: number; b: number };
+
+// sRGB channel → linear.  GPU auto-converts SRGBColorSpace textures to linear
+// before any math.  All CPU constants must also be in linear so the blending
+// (mixRGB / blendBiome / darken) produces identical results to the GPU shader.
+function srgbCh(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+const lin = (r: number, g: number, b: number): RGB => ({
+  r: srgbCh(r),
+  g: srgbCh(g),
+  b: srgbCh(b),
+});
+
+// GPU shader darkens textures by multiplying with TEX_DARKEN (0.65).
+const TEX_DARKEN_CPU = 0.65;
+const darken = (c: RGB): RGB => ({
+  r: c.r * TEX_DARKEN_CPU,
+  g: c.g * TEX_DARKEN_CPU,
+  b: c.b * TEX_DARKEN_CPU,
+});
+
+// Texture-matching constants: sRGB fallback values → linear via lin().
+// Non-texture constants: raw linear values matching GPU vec3() exactly.
+
+// Tundra/snow — snowgrass.png avg sRGB (0.79, 0.80, 0.80)
+const _TUNDRA_GRASS: RGB = lin(0.79, 0.8, 0.8);
+const _TUNDRA_GRASS_DARK: RGB = darken(_TUNDRA_GRASS);
+const _TUNDRA_GRASS_HIGH: RGB = { r: 0.68, g: 0.72, b: 0.78 };
+const _TUNDRA_VARIATION: RGB = { r: 0.6, g: 0.64, b: 0.7 };
+// snowdirt.png avg sRGB (0.78, 0.82, 0.84)
+const _TUNDRA_DIRT: RGB = lin(0.78, 0.82, 0.84);
+const _TUNDRA_DIRT_DARK: RGB = darken(_TUNDRA_DIRT);
+const _TUNDRA_CLIFF: RGB = lin(0.78, 0.82, 0.84);
+const _TUNDRA_CLIFF_DARK: RGB = darken(_TUNDRA_CLIFF);
+
+// Forest — grass.png avg sRGB (0.39, 0.52, 0.24)
+const _FOREST_GRASS: RGB = lin(0.39, 0.52, 0.24);
+const _FOREST_GRASS_DARK: RGB = darken(_FOREST_GRASS);
+const _FOREST_GRASS_HIGH: RGB = { r: 0.24, g: 0.45, b: 0.18 };
+const _FOREST_VARIATION: RGB = { r: 0.15, g: 0.35, b: 0.1 };
+// dirt.png avg sRGB (0.55, 0.48, 0.36)
+const _FOREST_DIRT: RGB = lin(0.55, 0.48, 0.36);
+const _FOREST_DIRT_DARK: RGB = darken(_FOREST_DIRT);
+// cliff.png avg sRGB (0.71, 0.67, 0.60)
+const _FOREST_CLIFF: RGB = lin(0.71, 0.67, 0.6);
+const _FOREST_CLIFF_DARK: RGB = darken(_FOREST_CLIFF);
+
+// Canyon/desert — desertGrass.png avg sRGB (0.51, 0.41, 0.28)
+const _CANYON_SAND: RGB = lin(0.51, 0.41, 0.28);
+const _CANYON_SAND_DARK: RGB = darken(_CANYON_SAND);
+const _CANYON_SAND_HIGH: RGB = { r: 0.62, g: 0.38, b: 0.22 };
+const _CANYON_VARIATION: RGB = { r: 0.58, g: 0.34, b: 0.16 };
+// desertDirt.png avg sRGB (0.54, 0.42, 0.32)
+const _CANYON_ROCK: RGB = lin(0.54, 0.42, 0.32);
+const _CANYON_ROCK_DARK: RGB = darken(_CANYON_ROCK);
+const _CANYON_CLIFF: RGB = lin(0.54, 0.42, 0.32);
+const _CANYON_CLIFF_DARK: RGB = darken(_CANYON_CLIFF);
+
+const _CLIFF_TINT: RGB = { r: 0.28, g: 0.3, b: 0.36 };
+const _SAND_YELLOW: RGB = { r: 0.7, g: 0.6, b: 0.38 };
+const _DIRT_DARK_CPU: RGB = { r: 0.22, g: 0.15, b: 0.08 };
+const _MUD_BROWN: RGB = { r: 0.18, g: 0.12, b: 0.08 };
+const _WATER_EDGE: RGB = { r: 0.08, g: 0.06, b: 0.04 };
+
+function mixRGB(a: RGB, b: RGB, t: number): RGB {
+  return {
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+  };
+}
+
+function blendBiome(
+  tundra: RGB,
+  forest: RGB,
+  canyon: RGB,
+  tW: number,
+  fW: number,
+  dW: number,
+): RGB {
+  return {
+    r: tundra.r * tW + forest.r * fW + canyon.r * dW,
+    g: tundra.g * tW + forest.g * fW + canyon.g * dW,
+    b: tundra.b * tW + forest.b * fW + canyon.b * dW,
+  };
+}
+
+function sampleNoiseCPU(worldX: number, worldZ: number, scale: number): number {
+  const tex = cachedNoiseTexture;
+  if (tex?.image?.data) {
+    const data = tex.image.data as Uint8Array;
+    const u = worldX * scale;
+    const v = worldZ * scale;
+    // Bilinear sample matching GPU's LinearFilter + RepeatWrapping
+    const px = (((u % 1) + 1) % 1) * NOISE_SIZE - 0.5;
+    const py = (((v % 1) + 1) % 1) * NOISE_SIZE - 0.5;
+    const x0 = Math.floor(px);
+    const y0 = Math.floor(py);
+    const fx = px - x0;
+    const fy = py - y0;
+    const ix0 = ((x0 % NOISE_SIZE) + NOISE_SIZE) % NOISE_SIZE;
+    const iy0 = ((y0 % NOISE_SIZE) + NOISE_SIZE) % NOISE_SIZE;
+    const ix1 = (ix0 + 1) % NOISE_SIZE;
+    const iy1 = (iy0 + 1) % NOISE_SIZE;
+    const v00 = data[(iy0 * NOISE_SIZE + ix0) * 4] / 255;
+    const v10 = data[(iy0 * NOISE_SIZE + ix1) * 4] / 255;
+    const v01 = data[(iy1 * NOISE_SIZE + ix0) * 4] / 255;
+    const v11 = data[(iy1 * NOISE_SIZE + ix1) * 4] / 255;
+    return (
+      v00 * (1 - fx) * (1 - fy) +
+      v10 * fx * (1 - fy) +
+      v01 * (1 - fx) * fy +
+      v11 * fx * fy
+    );
+  }
+  // Fallback: direct computation if texture not yet generated
+  if (!cachedPerm) cachedPerm = createPermutation(12345);
+  const u = worldX * scale;
+  const v = worldZ * scale;
+  const wu = u - Math.floor(u);
+  const wv = v - Math.floor(v);
+  return (seamlessFbm(wu, wv, cachedPerm, 4) + 1) * 0.5;
+}
+
+/**
+ * CPU mirror of the GPU `computeTerrainBaseColor()`.
+ * Returns the procedural terrain color AND a grassWeight (0-1) indicating
+ * how much of the surface is "grass texture" vs dirt/cliff/sand/shoreline.
+ */
+export function computeTerrainColorCPU(
+  worldX: number,
+  worldZ: number,
+  height: number,
+  slope: number,
+  forestW: number,
+  canyonW: number,
+): { r: number; g: number; b: number; grassWeight: number } {
+  const fW = forestW;
+  const dW = canyonW;
+  const tW = 1 - fW - dW;
+
+  const noiseVal = sampleNoiseCPU(
+    worldX,
+    worldZ,
+    TERRAIN_SHADER_CONSTANTS.NOISE_SCALE,
+  );
+  const noiseVal2 = Math.sin(noiseVal * 6.28) * 0.3 + 0.5;
+  const distortN = sampleNoiseCPU(
+    worldX,
+    worldZ,
+    TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE,
+  );
+  const variationN = sampleNoiseCPU(
+    worldX,
+    worldZ,
+    TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE,
+  );
+
+  const distortedNY =
+    1 -
+    slope +
+    (distortN - 0.5) * TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH;
+  const dSlope = 1 - distortedNY;
+  const dHeight =
+    height +
+    (distortN - 0.5) * TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH;
+
+  // Biome-blended grass
+  const grassVar = smoothstepCPU(0.4, 0.6, noiseVal2);
+  const tundraGrass = mixRGB(_TUNDRA_GRASS, _TUNDRA_GRASS_DARK, grassVar);
+  const forestGrass = mixRGB(_FOREST_GRASS, _FOREST_GRASS_DARK, grassVar);
+  const canyonGrass = mixRGB(_CANYON_SAND, _CANYON_SAND_DARK, grassVar);
+  let c = blendBiome(tundraGrass, forestGrass, canyonGrass, tW, fW, dW);
+
+  // Height-based gradient
+  const heightGrad = smoothstepCPU(25, 55, height) * 0.3;
+  const grassHigh = blendBiome(
+    _TUNDRA_GRASS_HIGH,
+    _FOREST_GRASS_HIGH,
+    _CANYON_SAND_HIGH,
+    tW,
+    fW,
+    dW,
+  );
+  c = mixRGB(c, grassHigh, heightGrad);
+
+  // Low-frequency variation
+  const gVar = Math.max(0, Math.min(1, Math.pow(variationN + 0.3, 5)));
+  const varColor = blendBiome(
+    _TUNDRA_VARIATION,
+    _FOREST_VARIATION,
+    _CANYON_VARIATION,
+    tW,
+    fW,
+    dW,
+  );
+  c = mixRGB(c, varColor, gVar * 0.25);
+
+  // Biome-blended dirt
+  const dirtVar = smoothstepCPU(0.3, 0.7, noiseVal2);
+  const dirtColor = blendBiome(
+    mixRGB(_TUNDRA_DIRT, _TUNDRA_DIRT_DARK, dirtVar),
+    mixRGB(_FOREST_DIRT, _FOREST_DIRT_DARK, dirtVar),
+    mixRGB(_CANYON_ROCK, _CANYON_ROCK_DARK, dirtVar),
+    tW,
+    fW,
+    dW,
+  );
+
+  // Biome-blended cliff
+  const cliffVar = smoothstepCPU(0.3, 0.7, noiseVal);
+  let cliffColor = blendBiome(
+    mixRGB(_TUNDRA_CLIFF, _TUNDRA_CLIFF_DARK, cliffVar),
+    mixRGB(_FOREST_CLIFF, _FOREST_CLIFF_DARK, cliffVar),
+    mixRGB(_CANYON_CLIFF, _CANYON_CLIFF_DARK, cliffVar),
+    tW,
+    fW,
+    dW,
+  );
+  const rockTexV = Math.pow(distortN, 0.5) * 0.3;
+  cliffColor = mixRGB(cliffColor, _CLIFF_TINT, rockTexV);
+
+  // Track grass weight: starts at 1, reduced by each non-grass layer
+  let grassWeight = 1.0;
+
+  // Dirt patches on flat areas
+  const nDirtF =
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05,
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15,
+      noiseVal,
+    ) * smoothstepCPU(0.3, 0.05, dSlope);
+  c = mixRGB(c, dirtColor, nDirtF);
+  grassWeight -= nDirtF;
+
+  // Dirt on moderate slopes
+  const dirtSlopeF =
+    smoothstepCPU(0.15, 0.4, dSlope) * smoothstepCPU(0.6, 0.3, dSlope) * 0.6;
+  c = mixRGB(c, dirtColor, dirtSlopeF);
+  grassWeight -= dirtSlopeF;
+
+  // Cliff on steep slopes
+  const cliffF = smoothstepCPU(0.3, 0.55, dSlope);
+  c = mixRGB(c, cliffColor, cliffF);
+  grassWeight -= cliffF;
+
+  // Sand near water
+  const sandBlend =
+    smoothstepCPU(18, 12, dHeight) * smoothstepCPU(0.25, 0.0, slope);
+  const sandStr = 0.6 + (0.9 - 0.6) * dW;
+  const sandF = sandBlend * sandStr;
+  c = mixRGB(c, _SAND_YELLOW, sandF);
+  grassWeight -= sandF;
+
+  // Shoreline transitions
+  const shore1 = smoothstepCPU(22, 14, dHeight) * 0.4;
+  c = mixRGB(c, _DIRT_DARK_CPU, shore1);
+  grassWeight -= shore1;
+
+  const shore2 = smoothstepCPU(15, 10, dHeight) * 0.7;
+  c = mixRGB(c, _MUD_BROWN, shore2);
+  grassWeight -= shore2;
+
+  const shore3 = smoothstepCPU(11, 7, dHeight) * 0.9;
+  c = mixRGB(c, _WATER_EDGE, shore3);
+  grassWeight -= shore3;
+
+  // Saturation boost
+  const luma = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  const sat = TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST;
+  c = {
+    r: luma + (c.r - luma) * sat,
+    g: luma + (c.g - luma) * sat,
+    b: luma + (c.b - luma) * sat,
+  };
+
+  return {
+    r: c.r,
+    g: c.g,
+    b: c.b,
+    grassWeight: Math.max(0, Math.min(1, grassWeight)),
+  };
+}
+
+// ============================================================================
 // TERRAIN MATERIAL - OSRS Style (No Textures)
 // ============================================================================
 
@@ -632,9 +1036,9 @@ export const MAX_VERTEX_LIGHTS = 8;
 export type TerrainUniforms = {
   sunPosition: { value: THREE.Vector3 };
   sunDirection: { value: THREE.Vector3 };
-  shadeColor: { value: THREE.Color };
   time: { value: number };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
+  dayIntensity: { value: number }; // 0 = night, 1 = day
   // Vertex lighting uniforms (lampposts, etc.)
   vertexLightPositions: { value: THREE.Vector3 }[]; // Array of 8 light positions
   vertexLightColors: { value: THREE.Vector3 }[]; // Array of 8 light colors
@@ -689,8 +1093,7 @@ export function createTerrainMaterial(): THREE.Material & {
   const noiseTex = generateNoiseTexture();
 
   const sunPositionUniform = uniform(vec3(100, 100, 100));
-  const sunDirectionUniform = uniform(vec3(0.5, 0.8, 0.3));
-  const shadeColorUniform = uniform(vec3(0.7, 1.08, 1.22));
+  const sunDirectionUniform = uniform(vec3(...SUN_LIGHT.DEFAULT_DIRECTION));
   const timeUniform = uniform(float(0));
   const noiseScale = uniform(float(TERRAIN_SHADER_CONSTANTS.NOISE_SCALE));
 
@@ -732,6 +1135,20 @@ export function createTerrainMaterial(): THREE.Material & {
     float(0.5),
   );
 
+  // Distortion noise (high-freq) for organic cliff/shoreline edges
+  const distortNoiseUV = mul(
+    vec2(worldPos.x, worldPos.z),
+    float(TERRAIN_SHADER_CONSTANTS.DISTORT_NOISE_SCALE),
+  );
+  const distortNoise = texture(noiseTex, distortNoiseUV).r;
+
+  // Variation noise (low-freq) for large-scale ground color patches
+  const variationNoiseUV = mul(
+    vec2(worldPos.x, worldPos.z),
+    float(TERRAIN_SHADER_CONSTANTS.VARIATION_NOISE_SCALE),
+  );
+  const variationNoise = texture(noiseTex, variationNoiseUV).r;
+
   // Fine detail noise (LOD-gated)
   const closeEnough = smoothstep(float(12000.0), float(8000.0), distSq);
   const noiseUV3 = mul(vec2(worldPos.x, worldPos.z), float(0.12));
@@ -766,11 +1183,18 @@ export function createTerrainMaterial(): THREE.Material & {
   const tSnowDirt = loadBiomeTex("snowDirt");
   const tSnowCliff = loadBiomeTex("snowCliff");
 
-  // UV projections (top-down for grass/dirt, triplanar for cliffs)
+  // UV projections — dual-scale blend to break visible texture tiling.
+  // Sample at primary scale and a non-harmonic secondary scale (×0.27),
+  // blend 50/50 with noise so the two grids never visually align.
   const tileScale = float(TERRAIN_TEX_TILE);
+  const tileScale2 = float(TERRAIN_TEX_TILE * 0.13);
   const uvFlat = mul(vec2(worldPos.x, worldPos.z), tileScale);
   const uvFront = mul(vec2(worldPos.x, worldPos.y), tileScale);
   const uvSide = mul(vec2(worldPos.z, worldPos.y), tileScale);
+  const uvFlat2 = mul(vec2(worldPos.x, worldPos.z), tileScale2);
+  const uvFront2 = mul(vec2(worldPos.x, worldPos.y), tileScale2);
+  const uvSide2 = mul(vec2(worldPos.z, worldPos.y), tileScale2);
+  const tileBlend = smoothstep(float(0.2), float(0.8), noiseValue);
 
   // Triplanar blend weights for cliff textures (^4 sharpening)
   const tnx = abs(worldNormal.x);
@@ -784,25 +1208,52 @@ export function createTerrainMaterial(): THREE.Material & {
   const twY = div(tw4y, twSum);
   const twZ = div(tw4z, twSum);
 
-  // Flat textures sampled top-down (grass/dirt on mostly-flat surfaces)
-  const sGrass = texture(tGrass, uvFlat).rgb;
-  const sDirt = texture(tDirt, uvFlat).rgb;
-  const sDesertGrass = texture(tDesertGrass, uvFlat).rgb;
-  const sDesertDirt = texture(tDesertDirt, uvFlat).rgb;
-  const sSnowGrass = texture(tSnowGrass, uvFlat).rgb;
-  const sSnowDirt = texture(tSnowDirt, uvFlat).rgb;
+  // Flat textures — blend two scales per biome texture
+  const dualFlat = (t: THREE.Texture) =>
+    mix(texture(t, uvFlat).rgb, texture(t, uvFlat2).rgb, tileBlend);
+  const sGrass = dualFlat(tGrass);
+  const sDirt = dualFlat(tDirt);
+  const sDesertGrass = dualFlat(tDesertGrass);
+  const sDesertDirt = dualFlat(tDesertDirt);
+  const sSnowGrass = dualFlat(tSnowGrass);
+  const sSnowDirt = dualFlat(tSnowDirt);
 
-  // Cliff textures sampled triplanarly (avoids stretching on steep faces)
-  const triCliff = (t: THREE.Texture) =>
-    add(
+  // Cliff textures — triplanar with dual-scale blend
+  const triCliff = (t: THREE.Texture) => {
+    const s1 = add(
       add(mul(texture(t, uvFlat).rgb, twY), mul(texture(t, uvSide).rgb, twX)),
       mul(texture(t, uvFront).rgb, twZ),
     );
+    const s2 = add(
+      add(mul(texture(t, uvFlat2).rgb, twY), mul(texture(t, uvSide2).rgb, twX)),
+      mul(texture(t, uvFront2).rgb, twZ),
+    );
+    return mix(s1, s2, tileBlend);
+  };
   const sCliff = triCliff(tCliff);
   const sDesertCliff = triCliff(tDesertCliff);
   const sSnowCliff = triCliff(tSnowCliff);
 
   const TEX_DARKEN = float(0.65);
+
+  // Distorted slope: offset normalY by noise for organic cliff edges
+  const distortedNY = add(
+    abs(worldNormal.y),
+    mul(
+      sub(distortNoise, float(0.5)),
+      float(TERRAIN_SHADER_CONSTANTS.ROCK_DISTORT_STRENGTH),
+    ),
+  );
+  const dSlope = sub(float(1.0), distortedNY);
+
+  // Distorted height for organic sand/shoreline boundaries
+  const dHeight = add(
+    height,
+    mul(
+      sub(distortNoise, float(0.5)),
+      float(TERRAIN_SHADER_CONSTANTS.HEIGHT_DISTORT_STRENGTH),
+    ),
+  );
 
   // Biome-blended grass (textured)
   const grassVar = smoothstep(float(0.4), float(0.6), noiseValue2);
@@ -818,13 +1269,30 @@ export function createTerrainMaterial(): THREE.Material & {
     mul(canyonGrassC, dW),
   );
 
-  // Biome-blended dirt patches
-  const dirtPatchFactor = smoothstep(
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
-    noiseValue,
+  // Height-based ground color gradient (subtle shift at altitude)
+  const heightGrad = mul(
+    smoothstep(float(25.0), float(55.0), height),
+    float(0.3),
   );
-  const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
+  const grassHighC = add(
+    add(mul(TUNDRA_GRASS_HIGH, tW), mul(FOREST_GRASS_HIGH, fW)),
+    mul(CANYON_SAND_HIGH, dW),
+  );
+  baseColor = mix(baseColor, grassHighC, heightGrad);
+
+  // Low-frequency ground variation overlay (patchy color areas)
+  const gVariation = clamp(
+    pow(add(variationNoise, float(0.3)), float(5.0)),
+    float(0.0),
+    float(1.0),
+  );
+  const varColorC = add(
+    add(mul(TUNDRA_VARIATION, tW), mul(FOREST_VARIATION, fW)),
+    mul(CANYON_VARIATION, dW),
+  );
+  baseColor = mix(baseColor, varColorC, mul(gVariation, float(0.25)));
+
+  // Biome-blended dirt
   const dirtVar = smoothstep(float(0.3), float(0.7), noiseValue2);
   const tundraDirtC = mix(sSnowDirt, mul(sSnowDirt, TEX_DARKEN), dirtVar);
   const forestDirtC = mix(sDirt, mul(sDirt, TEX_DARKEN), dirtVar);
@@ -833,16 +1301,8 @@ export function createTerrainMaterial(): THREE.Material & {
     add(mul(tundraDirtC, tW), mul(forestDirtC, fW)),
     mul(canyonDirtC, dW),
   );
-  baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
-  // Slope-based dirt
-  const dirtSlopeFactor = mul(
-    smoothstep(float(0.15), float(0.4), slope),
-    smoothstep(float(0.6), float(0.3), slope),
-  );
-  baseColor = mix(baseColor, dirtColor, mul(dirtSlopeFactor, float(0.6)));
-
-  // Per-biome cliff on steep slopes (triplanar textured)
+  // Per-biome cliff with rock texture variation
   const cliffVar = smoothstep(float(0.3), float(0.7), noiseValue);
   const tundraCliffC = mix(sSnowCliff, mul(sSnowCliff, TEX_DARKEN), cliffVar);
   const forestCliffC = mix(sCliff, mul(sCliff, TEX_DARKEN), cliffVar);
@@ -851,39 +1311,68 @@ export function createTerrainMaterial(): THREE.Material & {
     mul(sDesertCliff, TEX_DARKEN),
     cliffVar,
   );
-  const cliffColor = add(
+  let cliffColor: any = add(
     add(mul(tundraCliffC, tW), mul(forestCliffC, fW)),
     mul(canyonCliffC, dW),
   );
+  const rockTexVarC = mul(pow(distortNoise, float(0.5)), float(0.3));
+  cliffColor = mix(cliffColor, CLIFF_TINT, rockTexVarC);
+
+  // Noise-driven dirt patches on flat areas (using distorted slope)
+  const dirtPatchFactor = smoothstep(
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
+    noiseValue,
+  );
+  const flatnessFactor = smoothstep(float(0.3), float(0.05), dSlope);
+  baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
+
+  // Dirt on moderate slopes (bell curve, using distorted slope)
+  const dirtSlopeFactor = mul(
+    smoothstep(float(0.15), float(0.4), dSlope),
+    smoothstep(float(0.6), float(0.3), dSlope),
+  );
+  baseColor = mix(baseColor, dirtColor, mul(dirtSlopeFactor, float(0.6)));
+
+  // Cliff on steep slopes (using distorted slope)
   baseColor = mix(
     baseColor,
     cliffColor,
-    smoothstep(float(0.3), float(0.55), slope),
+    smoothstep(float(0.3), float(0.55), dSlope),
   );
 
-  // Sand near water (keep flat color - no sand texture)
+  // Sand near water (flat areas, stronger in canyon — using distorted height)
   const sandBlend = mul(
-    smoothstep(float(10.0), float(6.0), height),
+    smoothstep(float(18.0), float(12.0), dHeight),
     smoothstep(float(0.25), float(0.0), slope),
   );
   const sandStrength = mix(float(0.6), float(0.9), dW);
   baseColor = mix(baseColor, SAND_YELLOW, mul(sandBlend, sandStrength));
 
-  // Shoreline transitions (keep flat colors)
+  // Shoreline transitions (using distorted height)
   baseColor = mix(
     baseColor,
     DIRT_DARK,
-    mul(smoothstep(float(14.0), float(8.0), height), float(0.4)),
+    mul(smoothstep(float(22.0), float(14.0), dHeight), float(0.4)),
   );
   baseColor = mix(
     baseColor,
     MUD_BROWN,
-    mul(smoothstep(float(9.0), float(6.0), height), float(0.7)),
+    mul(smoothstep(float(15.0), float(10.0), dHeight), float(0.7)),
   );
   baseColor = mix(
     baseColor,
     WATER_EDGE,
-    mul(smoothstep(float(6.5), float(5.0), height), float(0.9)),
+    mul(smoothstep(float(11.0), float(7.0), dHeight), float(0.9)),
+  );
+
+  // Saturation boost: pull color away from grey
+  const lumaB = dot(baseColor, vec3(0.299, 0.587, 0.114));
+  const greyB = vec3(lumaB, lumaB, lumaB);
+  baseColor = mix(
+    greyB,
+    baseColor,
+    float(TERRAIN_SHADER_CONSTANTS.SATURATION_BOOST),
   );
 
   // === RIVER BED / BANK COLORING ===
@@ -1165,6 +1654,14 @@ export function createTerrainMaterial(): THREE.Material & {
   // Blend mine floor onto terrain
   const baseWithMines = mix(baseWithRoads, mineFloorFinal, mineEdgeMask);
 
+  // Half-lambert cool tint + fresnel rim — tints the ALBEDO before PBR.
+  // PBR then adds a single Lambert N·L + shadow on top.
+  const animeBase = applyAnimeShade(
+    baseWithMines,
+    worldNormal,
+    sunDirectionUniform,
+  );
+
   // ============================================================================
   // VERTEX LIGHTING (lampposts, torches, etc.)
   // Simple additive point lights with smooth attenuation
@@ -1301,7 +1798,7 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Apply vertex lighting additively (multiply base by (1 + lightAccum))
   // This brightens terrain near lights without washing out colors
-  const litTerrain = mul(baseWithMines, add(vec3(1, 1, 1), lightAccum));
+  const litTerrain = mul(animeBase, add(vec3(1, 1, 1), lightAccum));
 
   // === DISTANCE FOG (smoothstep with squared distances — avoids per-fragment sqrt) ===
   const baseFogFactor = smoothstep(
@@ -1313,6 +1810,9 @@ export function createTerrainMaterial(): THREE.Material & {
   const fogColor = fogTexNode.rgb;
 
   // === CREATE MATERIAL ===
+  // Base color + vertex lights only.  PBR handles Lambert N·L + shadow.
+  const dayIntensityUniform = uniform(1.0);
+
   const material = new MeshStandardNodeMaterial();
   material.colorNode = litTerrain;
   material.roughness = 1.0;
@@ -1320,27 +1820,16 @@ export function createTerrainMaterial(): THREE.Material & {
   material.side = THREE.FrontSide;
   material.fog = false;
 
-  // Apply sun shade + fog AFTER PBR lighting via outputNode
   material.outputNode = Fn(() => {
-    const litColor = output;
-
-    // Sun shade: shared function (identical to tree shader terrain blend)
-    const shaded = applyTerrainSunShade(
-      litColor.rgb,
-      normalWorld,
-      vec3(sunDirectionUniform),
-      vec3(shadeColorUniform),
-    );
-
-    return vec4(mix(shaded, fogColor, fogFactor), litColor.a);
+    return vec4(mix(output.rgb, fogColor, fogFactor), output.a);
   })();
 
   const terrainUniforms: TerrainUniforms = {
     sunPosition: sunPositionUniform,
     sunDirection: sunDirectionUniform as unknown as { value: THREE.Vector3 },
-    shadeColor: shadeColorUniform as unknown as { value: THREE.Color },
     time: timeUniform,
     fogEnabled: fogEnabledUniform,
+    dayIntensity: dayIntensityUniform as unknown as { value: number },
     // Vertex lighting arrays
     vertexLightPositions: vertexLightPositionUniforms.map(
       (u) => u as unknown as { value: THREE.Vector3 },

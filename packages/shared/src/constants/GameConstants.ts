@@ -83,7 +83,7 @@ export const TERRAIN_CONSTANTS = {
    * Terrain below this height is underwater and impassable.
    * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
    */
-  WATER_THRESHOLD: 8.0,
+  WATER_THRESHOLD: 16,
 
   /**
    * Buffer distance above water where vegetation shouldn't spawn.
@@ -102,9 +102,9 @@ export const TERRAIN_CONSTANTS = {
   /**
    * Maximum slope for walkable terrain (tan of angle).
    * Slopes steeper than this block movement.
-   * 1.5 ≈ 56 degree angle.
+   * 2.5 ≈ 68 degree angle.
    */
-  MAX_WALKABLE_SLOPE: 1.5,
+  MAX_WALKABLE_SLOPE: 2.5,
 
   /**
    * Distance to sample for slope calculation (in meters).
@@ -225,6 +225,10 @@ export { GATHERING_CONSTANTS };
 export const MOB_CONSTANTS = {
   SPAWN_RADIUS: 20,
   MAX_MOBS_PER_AREA: 10,
+  /** Max concurrent bandit-type mobs world-wide (matches manifest npc ids, e.g. bandit). */
+  MAX_BANDIT_MOBS_WORLD: 100,
+  /** Mob ids counted toward {@link MAX_BANDIT_MOBS_WORLD} (extend if you add variants). */
+  BANDIT_MOB_IDS_FOR_GLOBAL_CAP: ["bandit", "desert_bandit"] as const,
   // Derived from tick-based constant for consistency (25 ticks * 600ms = 15000ms)
   MOB_RESPAWN_TIME:
     COMBAT_CONSTANTS.DEFAULTS.NPC.RESPAWN_TICKS *

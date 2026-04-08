@@ -255,14 +255,20 @@ export interface BiomeTreeConfig {
   enabled: boolean;
   /** Per-tree spawn weight + placement rules, keyed by TreeId */
   trees: Record<string, import("../../constants/TreeTypes").TreeSpawnConfig>;
-  /** Trees per 64m tile (base density, modified by resourceDensity) */
+  /** Target tree count per terrain tile (100m). Actual count depends on terrain filters and Poisson disk packing. */
   density: number;
   /** Minimum spacing between trees in meters */
   minSpacing: number;
   /** Whether trees should cluster together */
   clustering: boolean;
-  /** Cluster size if clustering is enabled */
+  /** Whether snow-capable trees in this biome receive snow coverage */
+  enableSnow?: boolean;
+  /** Average number of trees per cluster (default: 4) */
   clusterSize?: number;
+  /** Radius of each cluster in meters (default: clusterSize * minSpacing) */
+  clusterRadius?: number;
+  /** Minimum distance between cluster centers in meters (default: clusterRadius * 2) */
+  clusterSpacing?: number;
   /** Scale variation range [min, max] multiplier (default: [0.8, 1.2]) */
   scaleVariation?: [number, number];
   /** Maximum terrain slope for tree placement (gradient magnitude, default: 1.5) */
@@ -517,6 +523,8 @@ export interface WorldArea {
       arenaLayout?: string;
       arenaSize?: { width: number; length: number };
       arenaGap?: number;
+      /** `alongLength` (default): spawns ±Z. `alongWidth`: spawns ±X (east/west). */
+      spawnLayout?: "alongLength" | "alongWidth";
     }
   >;
 }

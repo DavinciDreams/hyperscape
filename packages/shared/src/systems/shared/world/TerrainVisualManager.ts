@@ -74,11 +74,15 @@ export class TerrainVisualManager implements QuadTreeListener {
   private cancelledNodeIds = new Set<number>();
   /** Tracks generation failure count per node ID for bounded retry */
   private failedAttempts = new Map<number, number>();
+  /** Whether initial sync bootstrap has run for the current tree structure */
+  private syncBootstrapped = false;
 
   private maxSyncChunksPerFrame: number;
   private maxAssembliesPerFrame: number;
 
-  private static MAX_GENERATION_RETRIES = 3;
+  private framesSinceInit = 0;
+  private static BURST_FRAMES = 30;
+  private static MAX_GENERATION_RETRIES = 5;
 
   constructor(
     config: Partial<QuadTreeConfig>,
@@ -116,9 +120,24 @@ export class TerrainVisualManager implements QuadTreeListener {
   update(playerX: number, playerZ: number): void {
     this.playerX = playerX;
     this.playerZ = playerZ;
-    this.quadTree.update(playerX, playerZ);
+    const structureChanged = this.quadTree.update(playerX, playerZ);
+    if (structureChanged) {
+      this.framesSinceInit = 0;
+      this.syncBootstrapped = false;
+    }
+
+    if (
+      !this.syncBootstrapped &&
+      this.framesSinceInit >= 1 &&
+      this.chunks.size === 0 &&
+      this.pendingNodeIds.size > 0
+    ) {
+      this.syncBootstrapNearbyChunks();
+    }
+
     this.processSettledResults();
     this.processSyncQueue();
+    this.framesSinceInit++;
   }
 
   dispose(): void {
@@ -168,6 +187,37 @@ export class TerrainVisualManager implements QuadTreeListener {
   ): void {
     this.workerBiomeCenters = biomeCenters;
     this.workerBiomes = biomes;
+  }
+
+  /**
+   * Invalidate quad-tree chunks that overlap a world-space AABB.
+   * Destroys affected chunks so they get regenerated on the next update
+   * with current flat-zone / road data. Called when flat zones are
+   * registered after initial terrain generation.
+   */
+  invalidateRegion(
+    minX: number,
+    minZ: number,
+    maxX: number,
+    maxZ: number,
+  ): void {
+    for (const [key, chunk] of this.chunks) {
+      const node = chunk.node;
+      const half = node.size * 0.5;
+      const nMinX = node.centerX - half;
+      const nMaxX = node.centerX + half;
+      const nMinZ = node.centerZ - half;
+      const nMaxZ = node.centerZ + half;
+
+      if (nMaxX < minX || nMinX > maxX || nMaxZ < minZ || nMinZ > maxZ) {
+        continue;
+      }
+
+      this.removeMeshFromScene(chunk);
+      this.chunks.delete(key);
+      node.visualChunkKey = null;
+      node.terrainNeedsUpdate = true;
+    }
   }
 
   // =========================================================================
@@ -240,7 +290,24 @@ export class TerrainVisualManager implements QuadTreeListener {
   private processSettledResults(): void {
     if (this.settledResults.length === 0) return;
 
-    const batch = this.settledResults.splice(0, this.maxAssembliesPerFrame);
+    // Sort by distance to player (nearest first) for minimal visible holes.
+    const px = this.playerX;
+    const pz = this.playerZ;
+    this.settledResults.sort((a, b) => {
+      const da = (a.node.centerX - px) ** 2 + (a.node.centerZ - pz) ** 2;
+      const db = (b.node.centerX - px) ** 2 + (b.node.centerZ - pz) ** 2;
+      return da - db;
+    });
+
+    // During initial burst or when many results are pending, process all
+    // of them to avoid prolonged holes.
+    const isBurst =
+      this.framesSinceInit < TerrainVisualManager.BURST_FRAMES ||
+      this.settledResults.length > this.maxAssembliesPerFrame * 3;
+    const limit = isBurst
+      ? this.settledResults.length
+      : this.maxAssembliesPerFrame;
+    const batch = this.settledResults.splice(0, limit);
 
     for (const entry of batch) {
       if (this.cancelledNodeIds.has(entry.nodeId)) {
@@ -265,15 +332,70 @@ export class TerrainVisualManager implements QuadTreeListener {
   private processSyncQueue(): void {
     if (this.syncQueue.length === 0) return;
 
+    const px = this.playerX;
+    const pz = this.playerZ;
+    this.syncQueue.sort((a, b) => {
+      const da = (a.centerX - px) ** 2 + (a.centerZ - pz) ** 2;
+      const db = (b.centerX - px) ** 2 + (b.centerZ - pz) ** 2;
+      return da - db;
+    });
+
+    const isBurst =
+      this.framesSinceInit < TerrainVisualManager.BURST_FRAMES ||
+      this.syncQueue.length > this.maxSyncChunksPerFrame * 3;
+    const limit = isBurst ? this.syncQueue.length : this.maxSyncChunksPerFrame;
+
     let generated = 0;
-    while (
-      this.syncQueue.length > 0 &&
-      generated < this.maxSyncChunksPerFrame
-    ) {
+    while (this.syncQueue.length > 0 && generated < limit) {
       const node = this.syncQueue.shift()!;
       if (!node.isFinal || node.visualChunkKey !== null) continue;
       this.generateChunkSync(node);
       generated++;
+    }
+  }
+
+  // =========================================================================
+  // Sync bootstrap — generate nearest chunks synchronously to avoid holes
+  // during initial load while workers are still spinning up.
+  // =========================================================================
+
+  private static SYNC_BOOTSTRAP_MAX = 30;
+  private static SYNC_BOOTSTRAP_RADIUS_SQ = 1200 * 1200;
+
+  private syncBootstrapNearbyChunks(): void {
+    this.syncBootstrapped = true;
+
+    const leafNodes = this.quadTree
+      .getFinalNodes()
+      .filter((n) => n.isFinal && n.visualChunkKey === null);
+
+    if (leafNodes.length === 0) return;
+
+    const px = this.playerX;
+    const pz = this.playerZ;
+    leafNodes.sort((a, b) => {
+      const da = (a.centerX - px) ** 2 + (a.centerZ - pz) ** 2;
+      const db = (b.centerX - px) ** 2 + (b.centerZ - pz) ** 2;
+      return da - db;
+    });
+
+    const radiusSq = TerrainVisualManager.SYNC_BOOTSTRAP_RADIUS_SQ;
+    const maxCount = TerrainVisualManager.SYNC_BOOTSTRAP_MAX;
+    let count = 0;
+
+    for (const node of leafNodes) {
+      if (count >= maxCount) break;
+      const dx = node.centerX - px;
+      const dz = node.centerZ - pz;
+      if (dx * dx + dz * dz > radiusSq) break;
+
+      if (this.pendingNodeIds.has(node.id)) {
+        this.cancelledNodeIds.add(node.id);
+        this.pendingNodeIds.delete(node.id);
+      }
+
+      this.generateChunkSync(node);
+      count++;
     }
   }
 

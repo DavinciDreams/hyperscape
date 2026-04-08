@@ -67,6 +67,9 @@ export interface AgentInfo {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
+  highestHit: number;
+  attacksLanded: number;
+  healsUsed: number;
   equipment: Record<string, string>;
   inventory: Array<{ itemId: string; quantity: number } | null>;
   rank: number;
@@ -240,7 +243,7 @@ export function StreamingMode() {
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
-    const baseWsUrl = GAME_WS_URL || "ws://localhost:5555/ws";
+    const baseWsUrl = GAME_WS_URL;
     const url = new URL(baseWsUrl, window.location.href);
     url.searchParams.set("mode", "streaming");
     if (streamAccessToken) {
@@ -500,7 +503,7 @@ export function StreamingMode() {
     let warnedOnce = false;
 
     // Try to fetch initial state via HTTP. Keep retrying until WS/state arrives.
-    const baseApiUrl = GAME_API_URL || "http://localhost:5555";
+    const baseApiUrl = GAME_API_URL;
     const stateUrl = `${baseApiUrl}/api/streaming/state`;
     const fetchState = () => {
       if (!mounted) return;

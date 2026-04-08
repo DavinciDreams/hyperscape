@@ -68,11 +68,25 @@ function generateArenaConfig(arenaId: number): Arena {
     },
   };
 
-  // Calculate spawn points (north and south)
-  const spawnPoints: [ArenaSpawnPoint, ArenaSpawnPoint] = [
-    { x: centerX, y: config.baseY, z: centerZ - config.spawnOffset }, // North spawn
-    { x: centerX, y: config.baseY, z: centerZ + config.spawnOffset }, // South spawn
-  ];
+  // Spawn on opposite ends: along arena length (±Z) or width (±X)
+  const spawnPoints: [ArenaSpawnPoint, ArenaSpawnPoint] =
+    config.spawnLayout === "alongWidth"
+      ? [
+          {
+            x: centerX - config.spawnOffset,
+            y: config.baseY,
+            z: centerZ,
+          },
+          {
+            x: centerX + config.spawnOffset,
+            y: config.baseY,
+            z: centerZ,
+          },
+        ]
+      : [
+          { x: centerX, y: config.baseY, z: centerZ - config.spawnOffset },
+          { x: centerX, y: config.baseY, z: centerZ + config.spawnOffset },
+        ];
 
   return {
     arenaId,

@@ -41,6 +41,7 @@ import { DockGenPage } from "./pages/DockGenPage";
 import { BridgeGenPage } from "./pages/BridgeGenPage";
 import { LandmarkGenPage } from "./pages/LandmarkGenPage";
 import { WorldStudioPage } from "./pages/WorldStudioPage";
+import { ArmorPipelinePage } from "./pages/ArmorPipelinePage";
 
 /** Redirects to /sign-in if the user is not authenticated */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -138,6 +139,10 @@ function AppLayout() {
             <Route path={ROUTES.WORLD_BUILDER} element={<WorldBuilderPage />} />
             <Route path={ROUTES.WORLD_EDITOR} element={<WorldEditorPage />} />
             <Route path={ROUTES.MANIFESTS} element={<ManifestsPage />} />
+            <Route
+              path={ROUTES.ARMOR_PIPELINE}
+              element={<ArmorPipelinePage />}
+            />
 
             {/* Procedural Generators */}
             <Route path={ROUTES.BUILDING_GEN} element={<BuildingGenPage />} />

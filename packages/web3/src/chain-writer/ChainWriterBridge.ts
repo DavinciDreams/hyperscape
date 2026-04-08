@@ -47,11 +47,15 @@ interface DuelCompletedPayload {
   duelId: string;
   winnerId: string;
   loserId: string;
-  challengerId: string;
-  opponentId: string;
+  challengerId?: string;
+  opponentId?: string;
   forfeit?: boolean;
-  winnerStakeValue?: number;
-  loserStakeValue?: number;
+  challengerStakeValue?: number;
+  opponentStakeValue?: number;
+  summary?: {
+    challengerStakeValue?: number;
+    targetStakeValue?: number;
+  };
 }
 
 /**
@@ -290,6 +294,7 @@ export class ChainWriterBridge {
         killedBy?: string;
       };
       if (data.entityType !== "player") return;
+      if (!data.entityId) return;
       if (!this.shouldMirrorPlayer(data.entityId)) return;
       this.chainWriter.queueDeath(data.entityId);
     });
@@ -310,16 +315,19 @@ export class ChainWriterBridge {
     // Duel completion (EventType.DUEL_COMPLETED = "duel:completed")
     world.on("duel:completed", (payload: unknown) => {
       const data = payload as DuelCompletedPayload;
-      if (
-        !data.duelId ||
-        !data.winnerId ||
-        !data.challengerId ||
-        !data.opponentId
-      )
-        return;
+      if (!data.duelId || !data.winnerId || !data.loserId) return;
 
-      const challengerWallet = this.playerWalletMap.get(data.challengerId);
-      const opponentWallet = this.playerWalletMap.get(data.opponentId);
+      const challengerId = data.challengerId;
+      const opponentId = data.opponentId;
+      if (!challengerId || !opponentId) {
+        console.log(
+          "[ChainWriterBridge] Skipping duel record - missing challengerId/opponentId on payload",
+        );
+        return;
+      }
+
+      const challengerWallet = this.playerWalletMap.get(challengerId);
+      const opponentWallet = this.playerWalletMap.get(opponentId);
       const winnerWallet = this.playerWalletMap.get(data.winnerId);
 
       if (!challengerWallet || !opponentWallet || !winnerWallet) {
@@ -329,15 +337,24 @@ export class ChainWriterBridge {
         return;
       }
 
+      const cStake =
+        typeof data.challengerStakeValue === "number"
+          ? data.challengerStakeValue
+          : (data.summary?.challengerStakeValue ?? 0);
+      const oStake =
+        typeof data.opponentStakeValue === "number"
+          ? data.opponentStakeValue
+          : (data.summary?.targetStakeValue ?? 0);
+
       this.chainWriter.queueDuelRecord(
         data.duelId,
         challengerWallet,
         opponentWallet,
         winnerWallet,
-        data.challengerId,
-        data.opponentId,
-        data.winnerStakeValue ?? 0,
-        data.loserStakeValue ?? 0,
+        challengerId,
+        opponentId,
+        cStake,
+        oStake,
         data.forfeit ?? false,
       );
     });

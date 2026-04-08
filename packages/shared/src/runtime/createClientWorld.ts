@@ -314,7 +314,7 @@ export function createClientWorld() {
 
   world.register("towns", TownSystem);
   world.register("pois", POISystem);
-  world.register("roads", RoadNetworkSystem);
+  // world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM
@@ -369,7 +369,6 @@ export function createClientWorld() {
   // ============================================================================
   // DOCK SYSTEM
   // ============================================================================
-  // Procedural docks for ponds and lakes — collision + mesh on client
   world.register("docks", ProceduralDocks);
 
   // ============================================================================

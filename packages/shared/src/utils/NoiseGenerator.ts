@@ -235,6 +235,33 @@ export class NoiseGenerator {
     return (this.fractal2D(x * 0.002, y * 0.002, 4) + 1) * 0.5;
   }
 
+  /**
+   * Simplex-based FBM matching the reference's createFbmNoise.
+   * Returns raw sum + offset (not normalized).
+   */
+  simplexFbm2D(
+    x: number,
+    y: number,
+    octaves: number,
+    amplitude: number,
+    frequency: number,
+    gain: number,
+    lacunarity: number,
+    offset: number,
+  ): number {
+    let value = 0;
+    let amp = amplitude;
+    let fx = x * frequency;
+    let fy = y * frequency;
+    for (let i = 0; i < octaves; i++) {
+      value += amp * this.simplex2D(fx, fy);
+      fx *= lacunarity;
+      fy *= lacunarity;
+      amp *= gain;
+    }
+    return value + offset;
+  }
+
   // Helper functions
   private fade(t: number): number {
     return t * t * t * (t * (t * 6 - 15) + 10);
@@ -480,4 +507,32 @@ export class TerrainFeatureGenerator {
       ? heightmap[pixelY][pixelX]
       : 0;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Standalone math utilities for per-biome terrain generation
+// ---------------------------------------------------------------------------
+
+export function smoothstep(x: number, edge0: number, edge1: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+export function mapRangeSmooth(
+  val: number,
+  a1: number,
+  a2: number,
+  b1: number,
+  b2: number,
+): number {
+  return b1 + smoothstep(val, a1, a2) * (b2 - b1);
+}
+
+export function normalizeFbmRange(fbmNoise: number): number {
+  return Math.min(1, Math.max(0, (fbmNoise + 0.4) / 1.3));
+}
+
+export function pingpong(x: number, length: number): number {
+  const t = x % (length * 2);
+  return length - Math.abs(t - length);
 }

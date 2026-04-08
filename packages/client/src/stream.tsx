@@ -6,6 +6,8 @@ import { Buffer } from "buffer";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { StreamingMode } from "./screens/StreamingMode";
+import { refreshApiConfig } from "./lib/api-config";
+import { ensurePublicRuntimeEnv } from "./lib/publicEnv";
 
 type GlobalFlags = typeof globalThis & {
   Buffer?: typeof Buffer;
@@ -61,8 +63,11 @@ globalFlags.Buffer = Buffer;
 globalFlags.isBrowser = true;
 globalFlags.isServer = false;
 
-// Early CDN URL initialization to prevent PhysX WASM loading race condition
-if (typeof window !== "undefined") {
+function syncRuntimeAssetBaseUrls(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   const windowWithEnv = window as Window & {
     env?: { PUBLIC_CDN_URL?: string };
     __CDN_URL?: string;
@@ -80,6 +85,9 @@ if (typeof window !== "undefined") {
     windowWithEnv.__ASSETS_URL = resolvedCdn;
   }
 }
+
+// Early CDN URL initialization to prevent PhysX WASM loading race condition
+syncRuntimeAssetBaseUrls();
 
 installThreeJSExtensions();
 
@@ -160,6 +168,9 @@ async function resetLocalStreamingCaches(): Promise<void> {
 }
 
 async function bootstrapStreamApp(): Promise<void> {
+  await ensurePublicRuntimeEnv();
+  refreshApiConfig();
+  syncRuntimeAssetBaseUrls();
   await resetLocalStreamingCaches();
   mountStreamApp();
 }

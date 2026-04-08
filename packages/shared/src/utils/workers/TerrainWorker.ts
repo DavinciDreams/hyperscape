@@ -13,7 +13,6 @@ import { WorkerPool } from "./WorkerPool";
 import {
   buildGetBaseHeightAtJS,
   buildComputeBiomeWeightsJS,
-  buildApplyLandscapeFeaturesJS,
   MAX_HEIGHT,
   WATER_LEVEL_NORMALIZED,
 } from "../../systems/shared/world/TerrainHeightParams";
@@ -22,8 +21,8 @@ import {
   buildNoiseGeneratorJS,
   buildHeightHelpersJS,
   buildBiomeInfluencesJS,
+  buildCreateBiomeNoiseSetsJS,
 } from "./TerrainWorkerShared";
-import { buildApplyRiverCarvingJS } from "../../systems/shared/world/RiverUtils";
 
 // Types for terrain generation
 // MUST match TerrainSystem.CONFIG exactly for height and biome calculation
@@ -47,32 +46,6 @@ export interface TerrainWorkerConfig {
   SHORELINE_LAND_MAX_MULTIPLIER: number;
   SHORELINE_UNDERWATER_BAND: number;
   UNDERWATER_DEPTH_MULTIPLIER: number;
-  landscapeFeatures?: Array<{
-    type: string;
-    x: number;
-    z: number;
-    radius: number;
-    strength: number;
-    layers: number;
-    shapePower: number;
-    edgeSharpness: number;
-    layerSlope: number;
-    noiseScale: number;
-    noiseAmount: number;
-  }>;
-  riverFeatures?: Array<{
-    x: number;
-    z: number;
-    halfWidth: number;
-    depth: number;
-    surfaceY?: number;
-  }>;
-  riverAABBs?: Array<{
-    minX: number;
-    maxX: number;
-    minZ: number;
-    maxZ: number;
-  }>;
 }
 
 export interface TerrainWorkerInput {
@@ -161,15 +134,12 @@ function generateHeightmap(input) {
   // HEIGHT FUNCTIONS — generated from TerrainHeightParams.ts (single source of truth)
   // ============================================
 
-  var landscapeFeatures = (config.landscapeFeatures || []);
-  var riverFeatures = (config.riverFeatures || []);
-  var riverAABBs = (config.riverAABBs || []);
-
   ${buildComputeBiomeWeightsJS()}
-  ${buildApplyRiverCarvingJS(MAX_HEIGHT)}
-  ${buildApplyLandscapeFeaturesJS()}
 
   ${buildGetBaseHeightAtJS()}
+  ${buildCreateBiomeNoiseSetsJS()}
+  var biomeNoiseSets = createBiomeNoiseSets(seed);
+
   ${buildHeightHelpersJS()}
   ${buildBiomeInfluencesJS()}
 
@@ -266,21 +236,6 @@ function generateHeightmap(input) {
         colorR = colorR + (0.545 - colorR) * shoreFactor;
         colorG = colorG + (0.451 - colorG) * shoreFactor;
         colorB = colorB + (0.333 - colorB) * shoreFactor;
-      }
-
-      // River proximity: 1.0 = in channel, smoothstep to 0.0 at bank edge
-      var rProj = projectOntoRiverJS(worldX, worldZ);
-      if (rProj && rProj.surfaceY === rProj.surfaceY) { // NaN check
-        var rDist = rProj.dist;
-        var rHW = rProj.halfWidth;
-        var rBankWidth = rHW * 2; // bank zone = halfWidth * (valleyMultiplier - 1)
-
-        if (rDist < rHW) {
-          riverProximity[idx] = 1.0; // in channel
-        } else if (rDist < rHW + rBankWidth) {
-          var rBankT = (rDist - rHW) / rBankWidth;
-          riverProximity[idx] = 1.0 - rBankT * rBankT * (3.0 - 2.0 * rBankT); // smoothstep falloff
-        }
       }
 
       colorData[idx * 3] = colorR;

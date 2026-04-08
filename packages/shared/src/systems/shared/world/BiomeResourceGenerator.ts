@@ -29,6 +29,198 @@ import {
 import type { TreePlacementRules } from "../../../constants/TreeTypes";
 import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
 
+// ---------------------------------------------------------------------------
+// Bridson's Poisson Disk Sampling — O(n) blue-noise point generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate well-spaced 2D points using Bridson's algorithm.
+ * Points are guaranteed to be at least `minDistance` apart while packing
+ * as densely as possible (blue noise distribution).
+ *
+ * An optional `padding` expands the sampling area beyond the output bounds
+ * so that points near tile edges respect spacing against hypothetical
+ * neighbors, reducing cross-tile clumping.
+ */
+function poissonDiskSample2D(
+  width: number,
+  height: number,
+  minDistance: number,
+  rng: () => number,
+  padding = 0,
+  k = 30,
+): Array<{ x: number; z: number }> {
+  if (width <= 0 || height <= 0 || minDistance <= 0) return [];
+
+  const r2 = minDistance * minDistance;
+  const cellSize = minDistance / Math.SQRT2;
+
+  const xMin = -padding;
+  const zMin = -padding;
+  const xMax = width + padding;
+  const zMax = height + padding;
+  const sampleW = xMax - xMin;
+  const sampleH = zMax - zMin;
+
+  const cols = Math.ceil(sampleW / cellSize);
+  const rows = Math.ceil(sampleH / cellSize);
+  const grid = new Int32Array(cols * rows).fill(-1);
+
+  const samplesX: number[] = [];
+  const samplesZ: number[] = [];
+  const active: number[] = [];
+
+  const addSample = (x: number, z: number): void => {
+    const idx = samplesX.length;
+    samplesX.push(x);
+    samplesZ.push(z);
+    active.push(idx);
+    const ix = Math.floor((x - xMin) / cellSize);
+    const iz = Math.floor((z - zMin) / cellSize);
+    grid[iz * cols + ix] = idx;
+  };
+
+  const isFarEnough = (x: number, z: number): boolean => {
+    const ix = Math.floor((x - xMin) / cellSize);
+    const iz = Math.floor((z - zMin) / cellSize);
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = ix + dx;
+        const nz = iz + dz;
+        if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
+        const si = grid[nz * cols + nx];
+        if (si === -1) continue;
+        const ddx = x - samplesX[si];
+        const ddz = z - samplesZ[si];
+        if (ddx * ddx + ddz * ddz < r2) return false;
+      }
+    }
+    return true;
+  };
+
+  addSample(xMin + rng() * sampleW, zMin + rng() * sampleH);
+
+  const twoPi = Math.PI * 2;
+  while (active.length > 0) {
+    const ai = Math.floor(rng() * active.length);
+    const pi = active[ai];
+    const px = samplesX[pi];
+    const pz = samplesZ[pi];
+
+    let found = false;
+    for (let i = 0; i < k; i++) {
+      const radius = minDistance * Math.sqrt(1 + 3 * rng());
+      const theta = rng() * twoPi;
+      const x = px + radius * Math.cos(theta);
+      const z = pz + radius * Math.sin(theta);
+
+      if (x < xMin || x >= xMax || z < zMin || z >= zMax) continue;
+      if (!isFarEnough(x, z)) continue;
+
+      addSample(x, z);
+      found = true;
+      break;
+    }
+
+    if (!found) {
+      active[ai] = active[active.length - 1];
+      active.pop();
+    }
+  }
+
+  const result: Array<{ x: number; z: number }> = [];
+  for (let i = 0; i < samplesX.length; i++) {
+    const x = samplesX[i];
+    const z = samplesZ[i];
+    if (x >= 0 && x < width && z >= 0 && z < height) {
+      result.push({ x, z });
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Species zoning — smooth 2D value noise so nearby trees tend to be the same type
+// ---------------------------------------------------------------------------
+
+const SPECIES_ZONE_SCALE = 0.012; // ~80m species zones
+const SPECIES_ZONE_BOOST = 3.0; // preferred species gets 3x weight
+const WATER_PROXIMITY_BOOST = 20.0; // water-affinity trees get 20x weight near water
+const WATER_HEIGHT_PRECHECK = 35; // only run expensive water search within this height above water
+
+const DENSITY_NOISE_SCALE = 0.006; // ~170m dense/sparse zones
+const DENSITY_NOISE_MIN = 0.15; // sparse zones still get 15% of trees
+const DENSITY_NOISE_POWER = 1.5; // push noise toward extremes
+
+function intHash2D(ix: number, iz: number): number {
+  let h = (ix * 374761393 + iz * 668265263) | 0;
+  h = ((h ^ (h >>> 13)) * 1274126177) | 0;
+  h = (h ^ (h >>> 16)) | 0;
+  return (h & 0x7fffffff) / 0x7fffffff;
+}
+
+function speciesNoise2D(x: number, z: number): number {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  const h00 = intHash2D(ix, iz);
+  const h10 = intHash2D(ix + 1, iz);
+  const h01 = intHash2D(ix, iz + 1);
+  const h11 = intHash2D(ix + 1, iz + 1);
+  return (
+    h00 * (1 - ux) * (1 - uz) +
+    h10 * ux * (1 - uz) +
+    h01 * (1 - ux) * uz +
+    h11 * ux * uz
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Distance-to-water sampling — 8-direction radial search for nearest shoreline
+// ---------------------------------------------------------------------------
+
+const WATER_SEARCH_DIRECTIONS = 8;
+const WATER_SEARCH_STEP = 5; // meters between samples
+
+/**
+ * Find the horizontal distance from (worldX, worldZ) to the nearest water cell.
+ * Casts rays in 8 directions, stepping every WATER_SEARCH_STEP meters.
+ * Returns the distance in meters, or Infinity if no water found within searchRadius.
+ */
+function distanceToWater(
+  worldX: number,
+  worldZ: number,
+  getHeightAt: (x: number, z: number) => number,
+  waterThreshold: number,
+  searchRadius: number,
+): number {
+  let nearest = Infinity;
+  const angleStep = (Math.PI * 2) / WATER_SEARCH_DIRECTIONS;
+  const maxSteps = Math.ceil(searchRadius / WATER_SEARCH_STEP);
+
+  for (let dir = 0; dir < WATER_SEARCH_DIRECTIONS; dir++) {
+    const angle = dir * angleStep;
+    const dx = Math.cos(angle) * WATER_SEARCH_STEP;
+    const dz = Math.sin(angle) * WATER_SEARCH_STEP;
+
+    for (let step = 1; step <= maxSteps; step++) {
+      const dist = step * WATER_SEARCH_STEP;
+      if (dist >= nearest) break; // can't beat current best
+      const sx = worldX + dx * step;
+      const sz = worldZ + dz * step;
+      if (getHeightAt(sx, sz) < waterThreshold) {
+        nearest = dist;
+        break; // this direction found water, move to next
+      }
+    }
+  }
+
+  return nearest;
+}
+
 /**
  * Context provided by TerrainSystem for resource generation.
  */
@@ -145,116 +337,97 @@ export function generateTrees(
     return [];
   }
 
-  const resources: ResourceNode[] = [];
-
-  // Calculate tree count based on density and tile size
   const tileArea = (ctx.tileSize / 100) * (ctx.tileSize / 100);
   const baseCount = Math.floor(treeConfig.density * tileArea);
-
-  if (baseCount === 0) {
-    return [];
-  }
+  if (baseCount === 0) return [];
 
   const maxSlope = treeConfig.maxSlope ?? Infinity;
-
-  // Use deterministic RNG for reproducible placement
   const rng = ctx.createRng("trees");
 
-  // Pre-compute tile-level distribution from the merged trees map
   const tileTreeMap = treeConfig.trees;
   const tileTreeTypes = Object.keys(tileTreeMap);
-  if (tileTreeTypes.length === 0) {
-    return [];
-  }
+  if (tileTreeTypes.length === 0) return [];
   const tileTotalWeight = Object.values(tileTreeMap).reduce(
     (sum, cfg) => sum + cfg.weight,
     0,
   );
-  if (tileTotalWeight === 0) {
-    return [];
-  }
+  if (tileTotalWeight === 0) return [];
 
-  // Generate tree positions
-  const placedPositions: Array<{ x: number; z: number }> = [];
+  // --- Phase 1: Generate well-spaced candidate positions via Poisson disk ---
   const minSpacing = treeConfig.minSpacing;
-  const minSpacingSq = minSpacing * minSpacing;
+  let candidates = poissonDiskSample2D(
+    ctx.tileSize,
+    ctx.tileSize,
+    minSpacing,
+    rng,
+    minSpacing,
+  );
 
-  // If clustering is enabled, generate cluster centers first
-  const clusterCenters: Array<{ x: number; z: number }> = [];
-  if (treeConfig.clustering && treeConfig.clusterSize) {
-    const numClusters = Math.max(
-      1,
-      Math.ceil(baseCount / treeConfig.clusterSize),
+  // Clustering: place well-spaced cluster centers via Poisson disk, then keep
+  // only candidates within a cluster radius. Creates natural groves with clearings.
+  if (treeConfig.clustering) {
+    const treesPerCluster = treeConfig.clusterSize ?? 4;
+    const numClusters = Math.max(1, Math.ceil(baseCount / treesPerCluster));
+    const clusterRadius =
+      treeConfig.clusterRadius ?? treesPerCluster * minSpacing;
+    const clusterSpacing = treeConfig.clusterSpacing ?? clusterRadius * 2;
+    const clusterRadiusSq = clusterRadius * clusterRadius;
+
+    const centers = poissonDiskSample2D(
+      ctx.tileSize,
+      ctx.tileSize,
+      clusterSpacing,
+      rng,
+      clusterSpacing,
     );
-    for (let i = 0; i < numClusters; i++) {
-      clusterCenters.push({
-        x: rng() * ctx.tileSize,
-        z: rng() * ctx.tileSize,
-      });
+    // Shuffle and trim to desired cluster count
+    for (let i = centers.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = centers[i];
+      centers[i] = centers[j];
+      centers[j] = tmp;
     }
+    centers.length = Math.min(centers.length, numClusters);
+
+    candidates = candidates.filter((p) => {
+      for (const c of centers) {
+        const dx = p.x - c.x;
+        const dz = p.z - c.z;
+        if (dx * dx + dz * dz < clusterRadiusSq) return true;
+      }
+      return false;
+    });
   }
 
-  let treesPlaced = 0;
-  const maxAttempts = baseCount * 10;
-  let attempts = 0;
+  // Shuffle candidates so terrain-filter order doesn't create spatial bias
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = candidates[i];
+    candidates[i] = candidates[j];
+    candidates[j] = tmp;
+  }
 
-  while (treesPlaced < baseCount && attempts < maxAttempts) {
-    attempts++;
+  // --- Phase 2: Filter candidates through terrain + biome rules ---
+  const resources: ResourceNode[] = [];
+  const [minScale, maxScale] = treeConfig.scaleVariation ?? [0.8, 1.2];
 
-    // Generate position (clustered or uniform)
-    let localX: number;
-    let localZ: number;
+  for (const pos of candidates) {
+    if (resources.length >= baseCount) break;
 
-    if (treeConfig.clustering && clusterCenters.length > 0) {
-      // Pick a random cluster center and scatter around it
-      const cluster = clusterCenters[Math.floor(rng() * clusterCenters.length)];
-      const scatterRadius = treeConfig.clusterSize! * 3;
-      const angle = rng() * Math.PI * 2;
-      const distance = rng() * scatterRadius;
-      localX = cluster.x + Math.cos(angle) * distance;
-      localZ = cluster.z + Math.sin(angle) * distance;
-    } else {
-      // Uniform random placement
-      localX = rng() * ctx.tileSize;
-      localZ = rng() * ctx.tileSize;
-    }
-
-    // Clamp to tile bounds
-    localX = Math.max(0, Math.min(ctx.tileSize, localX));
-    localZ = Math.max(0, Math.min(ctx.tileSize, localZ));
-
-    // Convert to world coordinates for height lookup
+    const localX = pos.x;
+    const localZ = pos.z;
     const worldX = ctx.tileX * ctx.tileSize + localX;
     const worldZ = ctx.tileZ * ctx.tileSize + localZ;
     const height = ctx.getHeightAt(worldX, worldZ);
 
-    // Skip if underwater (ocean or river/pond)
-    if (height < ctx.waterThreshold) {
-      continue;
-    }
+    if (height < ctx.waterThreshold) continue;
     if (ctx.getWaterSurfaceAt) {
       const waterY = ctx.getWaterSurfaceAt(worldX, worldZ);
-      if (height <= waterY + 1.0) continue; // 1m buffer above water surface
+      if (height <= waterY + 1.0) continue;
     }
 
-    // Check minimum spacing
-    let tooClose = false;
-    for (const pos of placedPositions) {
-      const dx = localX - pos.x;
-      const dz = localZ - pos.z;
-      if (dx * dx + dz * dz < minSpacingSq) {
-        tooClose = true;
-        break;
-      }
-    }
-    if (tooClose) continue;
+    if (ctx.isOnRoad?.(worldX, worldZ)) continue;
 
-    // Check if on road
-    if (ctx.isOnRoad?.(worldX, worldZ)) {
-      continue;
-    }
-
-    // Reject steep slopes — sample 4 neighbors to estimate gradient magnitude
     if (maxSlope < Infinity) {
       const sd = 1.0;
       const dhdx =
@@ -268,12 +441,19 @@ export function generateTrees(
       if (dhdx * dhdx + dhdz * dhdz > maxSlope * maxSlope) continue;
     }
 
-    // Resolve the tree map for THIS position. If we have a per-position
-    // biome callback, use it to get the actual biome here instead of
-    // relying on the single tile-center biome.
+    // Density noise — natural dense groves and sparse clearings
+    const rawDensity = speciesNoise2D(
+      (worldX + 500) * DENSITY_NOISE_SCALE,
+      (worldZ + 500) * DENSITY_NOISE_SCALE,
+    );
+    const densityChance =
+      DENSITY_NOISE_MIN +
+      (1 - DENSITY_NOISE_MIN) * Math.pow(rawDensity, DENSITY_NOISE_POWER);
+    if (rng() > densityChance) continue;
+
+    // Per-position biome override at biome boundaries
     let activeTreeMap = tileTreeMap;
     let treeTypes = tileTreeTypes;
-    let totalWeight = tileTotalWeight;
 
     if (ctx.getDominantBiome) {
       const positionBiome = ctx.getDominantBiome(worldX, worldZ);
@@ -282,20 +462,79 @@ export function generateTrees(
       if (posConfig && posConfig.trees !== tileTreeMap) {
         activeTreeMap = posConfig.trees;
         treeTypes = Object.keys(activeTreeMap);
-        totalWeight = Object.values(activeTreeMap).reduce(
+        const tw = Object.values(activeTreeMap).reduce(
           (sum, cfg) => sum + cfg.weight,
           0,
         );
-        if (totalWeight === 0 || treeTypes.length === 0) continue;
+        if (tw === 0 || treeTypes.length === 0) continue;
       }
     }
 
-    // Select tree type based on weighted distribution
+    // Water proximity (cached per-position)
+    const heightAboveWater = height - ctx.waterThreshold;
+    let posDistToWater = Infinity;
+    let waterChecked = false;
+
+    if (heightAboveWater <= WATER_HEIGHT_PRECHECK) {
+      let maxSearch = 0;
+      for (const treeType of treeTypes) {
+        const cfg = activeTreeMap[treeType];
+        if (cfg.waterAffinity && cfg.waterAffinity > 0) {
+          maxSearch = Math.max(maxSearch, cfg.waterSearchRadius ?? 40);
+        }
+      }
+      if (maxSearch > 0) {
+        posDistToWater = distanceToWater(
+          worldX,
+          worldZ,
+          ctx.getHeightAt,
+          ctx.waterThreshold,
+          maxSearch,
+        );
+        waterChecked = true;
+      }
+    }
+
+    const nearWater = waterChecked && posDistToWater < Infinity;
+
+    // Species selection — weight-proportional zoning + water proximity boost
+    const zoneVal = speciesNoise2D(
+      worldX * SPECIES_ZONE_SCALE,
+      worldZ * SPECIES_ZONE_SCALE,
+    );
+    let activeTotalWeight = 0;
+    for (const tt of treeTypes) activeTotalWeight += activeTreeMap[tt].weight;
+    const scaledZone = zoneVal * activeTotalWeight;
+    let zoneAccum = 0;
+    let preferredSpecies = treeTypes[0];
+    for (const tt of treeTypes) {
+      zoneAccum += activeTreeMap[tt].weight;
+      if (scaledZone < zoneAccum) {
+        preferredSpecies = tt;
+        break;
+      }
+    }
+
+    let boostedTotal = 0;
+    for (const treeType of treeTypes) {
+      let w = activeTreeMap[treeType].weight;
+      if (treeType === preferredSpecies) w *= SPECIES_ZONE_BOOST;
+      if (nearWater && activeTreeMap[treeType].waterAffinity) {
+        w *= WATER_PROXIMITY_BOOST;
+      }
+      boostedTotal += w;
+    }
+
     let selectedTreeId = treeTypes[0];
-    const roll = rng() * totalWeight;
+    const roll = rng() * boostedTotal;
     let cumulative = 0;
     for (const treeType of treeTypes) {
-      cumulative += activeTreeMap[treeType].weight;
+      let w = activeTreeMap[treeType].weight;
+      if (treeType === preferredSpecies) w *= SPECIES_ZONE_BOOST;
+      if (nearWater && activeTreeMap[treeType].waterAffinity) {
+        w *= WATER_PROXIMITY_BOOST;
+      }
+      cumulative += w;
       if (roll < cumulative) {
         selectedTreeId = treeType;
         break;
@@ -303,11 +542,9 @@ export function generateTrees(
     }
     const selectedType = treeIdToSubType(selectedTreeId);
 
-    // Apply per-tree placement rules from the merged config
+    // Per-tree placement rules (height, water affinity, etc.)
     const rules: TreePlacementRules | undefined = activeTreeMap[selectedTreeId];
     if (rules) {
-      const heightAboveWater = height - ctx.waterThreshold;
-
       if (rules.minHeight !== undefined && height < rules.minHeight) continue;
       if (rules.maxHeight !== undefined && height > rules.maxHeight) continue;
 
@@ -318,39 +555,43 @@ export function generateTrees(
         continue;
 
       if (rules.waterAffinity && rules.waterAffinity > 0) {
-        const proximityLimit = rules.waterProximityHeight ?? 10;
-        if (heightAboveWater > proximityLimit) {
-          if (rng() < rules.waterAffinity) continue;
+        const maxDist = rules.waterMaxDistance ?? 30;
+        let dist = posDistToWater;
+        if (!waterChecked) {
+          const searchRadius = rules.waterSearchRadius ?? 40;
+          dist = distanceToWater(
+            worldX,
+            worldZ,
+            ctx.getHeightAt,
+            ctx.waterThreshold,
+            searchRadius,
+          );
+        }
+        if (dist === Infinity) continue;
+        if (dist > maxDist) {
+          if (rules.waterAffinity >= 0.5 || rng() < rules.waterAffinity)
+            continue;
         }
       }
     }
 
-    // Generate random scale within variation range
-    const [minScale, maxScale] = treeConfig.scaleVariation ?? [0.8, 1.2];
     const scale = minScale + rng() * (maxScale - minScale);
-
-    // Generate random Y-axis rotation
     const rotation = rng() * Math.PI * 2;
 
-    // Create resource node
-    const resource: ResourceNode = {
-      id: `${ctx.tileKey}_tree_${treesPlaced}`,
+    resources.push({
+      id: `${ctx.tileKey}_tree_${resources.length}`,
       type: "tree",
       subType: selectedType as ResourceSubType,
       position: { x: localX, y: height, z: localZ },
       mesh: null,
       health: 100,
       maxHealth: 100,
-      respawnTime: 300000, // 5 minutes
+      respawnTime: 300000,
       harvestable: true,
       requiredLevel: getTreeLevelRequirement(selectedType),
       scale,
       rotation,
-    };
-
-    resources.push(resource);
-    placedPositions.push({ x: localX, z: localZ });
-    treesPlaced++;
+    });
   }
 
   return resources;

@@ -14,8 +14,6 @@
 import type { World } from "../../../types";
 import { SystemBase } from "../infrastructure/SystemBase";
 import { ISLAND_BRIDGES, type BridgeDefinition } from "./BridgeDefinition";
-import { ISLAND_RIVER } from "./RiverDefinition";
-import { findRiverCenterAtX } from "./RiverUtils";
 import { CollisionFlag } from "../movement/CollisionFlags";
 import type { TerrainSystem } from "./TerrainSystem";
 import THREE from "../../../extras/three/three";
@@ -190,7 +188,6 @@ export class BridgeSystem extends SystemBase {
   private deckHeights: Map<number, number> = new Map();
   private bridgeMeshes: THREE.Object3D[] = [];
   private bridgesRegistered = false;
-  /** Bridge definitions with Z endpoints auto-fitted to the actual river. */
   private adjustedBridges: BridgeDefinition[] | null = null;
   /**
    * Cached endpoint heights per bridge (startY, endY, waterY).
@@ -417,40 +414,18 @@ export class BridgeSystem extends SystemBase {
     }
   }
 
-  /**
-   * Get bridge definitions with Z endpoints auto-fitted to the actual river.
-   * Computed lazily on first call — ISLAND_RIVER.waypoints must already be
-   * subdivided by TerrainSystem (which calls registerBridgeCollision, triggering this).
-   */
+  /** Get bridge definitions — uses positions as defined in BridgeDefinition. */
   private getBridges(): BridgeDefinition[] {
     if (!this.adjustedBridges) {
-      this.adjustedBridges = ISLAND_BRIDGES.map((bridge) => {
-        const rAt = findRiverCenterAtX(bridge.startX, ISLAND_RIVER);
-        if (!rAt) return bridge;
-        return {
-          ...bridge,
-          startZ: rAt.z - rAt.halfWidth - BRIDGE_BANK_APPROACH,
-          endZ: rAt.z + rAt.halfWidth + BRIDGE_BANK_APPROACH,
-        };
-      });
+      this.adjustedBridges = [...ISLAND_BRIDGES];
     }
     return this.adjustedBridges;
   }
 
-  /** Get the river water surface Y at a given X coordinate. Returns 0 if unknown. */
-  private getRiverSurfaceYAtX(x: number): number {
-    const wps = ISLAND_RIVER.waypoints;
-    for (let i = 0; i < wps.length - 1; i++) {
-      const a = wps[i];
-      const b = wps[i + 1];
-      if ((a.x <= x && x <= b.x) || (b.x <= x && x <= a.x)) {
-        const dx = b.x - a.x;
-        if (Math.abs(dx) < 1e-6) continue;
-        const t = (x - a.x) / dx;
-        return (a.surfaceY ?? 0) + ((b.surfaceY ?? 0) - (a.surfaceY ?? 0)) * t;
-      }
-    }
-    return 0;
+  /** Get water surface Y at a bridge position. Returns water threshold from terrain. */
+  private getRiverSurfaceYAtX(_x: number): number {
+    const terrain = this.world.getSystem("terrain") as TerrainSystem | null;
+    return terrain?.getWaterBodyRegistry()?.getOceanLevel() ?? 0;
   }
 
   async start(): Promise<void> {

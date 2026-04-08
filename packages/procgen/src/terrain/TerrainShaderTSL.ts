@@ -55,7 +55,7 @@ export const TERRAIN_CONSTANTS = {
   DIRT_THRESHOLD: 0.5,
   LOD_FULL_DETAIL: 100.0,
   LOD_MEDIUM_DETAIL: 200.0,
-  WATER_LEVEL: 5.0,
+  WATER_LEVEL: 16, // Overridden at runtime by game; standalone default for procgen previews
   FOG_COLOR: new THREE.Color(0xd4c8b8),
 } as const;
 

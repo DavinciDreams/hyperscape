@@ -599,7 +599,10 @@ describe("TradingSystem Integration Tests", () => {
       );
 
       // Simulate death
-      mockWorld.emit("player:died", { playerId: "player-1" });
+      mockWorld.emit("entity:death", {
+        entityId: "player-1",
+        entityType: "player",
+      });
 
       expect(tradingSystem.isPlayerInTrade("player-1")).toBe(false);
       expect(tradingSystem.isPlayerInTrade("player-2")).toBe(false);
@@ -1251,7 +1254,10 @@ describe("TradingSystem Integration Tests", () => {
       createActiveTrade(tradingSystem);
       emittedEvents = [];
 
-      mockWorld.emit("player:died", { playerId: "player-2" });
+      mockWorld.emit("entity:death", {
+        entityId: "player-2",
+        entityType: "player",
+      });
 
       const cancelEvent = emittedEvents.find(
         (e) => e.event === "trade:cancelled",

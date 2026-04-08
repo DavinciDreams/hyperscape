@@ -1,5 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import { apiClient } from "@/lib/api-client";
+import {
+  formatDashboardAgentReply,
+  formatDashboardAgentReplyMetaLine,
+  type DashboardMessageApiPayload,
+} from "@/lib/formatDashboardAgentReply";
 import { Send, Bot, User, MoreVertical, Mic } from "lucide-react";
 import type { Agent } from "./types";
 import { QuickActionMenu } from "./QuickActionMenu";
@@ -11,10 +16,13 @@ interface Message {
   timestamp: Date;
 }
 
-interface ElizaOSResponse {
-  text?: string;
-  content?: string;
-  [key: string]: unknown;
+function agentReplyText(data: DashboardMessageApiPayload | null): string {
+  const main = formatDashboardAgentReply(data);
+  const metaLine = formatDashboardAgentReplyMetaLine(data);
+  if (metaLine) {
+    return `${main}\n${metaLine}`;
+  }
+  return main;
 }
 
 interface AgentChatProps {
@@ -50,38 +58,59 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
     setIsTyping(true);
 
     try {
-      const result = await apiClient.post<ElizaOSResponse | ElizaOSResponse[]>(
+      const result = await apiClient.post<
+        DashboardMessageApiPayload | DashboardMessageApiPayload[]
+      >(
         `/api/agents/${agent.id}/message`,
         {
           content: userMessage.text,
-          userId: localStorage.getItem("privy_user_id") || "anonymous-user",
         },
+        { useFreshToken: true },
       );
 
       if (!result.ok) {
         throw new Error(result.error || `HTTP ${result.status}`);
       }
 
-      // ElizaOS returns an array of messages
-      const responses = Array.isArray(result.data)
-        ? result.data
-        : [result.data];
+      const payload = result.data;
+      if (!payload) {
+        throw new Error("Empty response from server");
+      }
 
-      responses.forEach((resp: ElizaOSResponse | null, index: number) => {
+      // Game server: { success, text, message, meta }; legacy: array
+      if (!Array.isArray(payload)) {
+        const single = payload as DashboardMessageApiPayload;
         const agentMessage: Message = {
-          id: (Date.now() + index).toString(),
+          id: Date.now().toString(),
           sender: "agent",
-          text: resp?.text || resp?.content || "No response",
+          text: agentReplyText(single),
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, agentMessage]);
-      });
+        return;
+      }
+
+      payload.forEach(
+        (resp: DashboardMessageApiPayload | null, index: number) => {
+          const agentMessage: Message = {
+            id: (Date.now() + index).toString(),
+            sender: "agent",
+            text: agentReplyText(resp),
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, agentMessage]);
+        },
+      );
     } catch (error) {
       console.error("Failed to send message:", error);
+      const errText =
+        error instanceof Error
+          ? error.message
+          : "Failed to send message to agent";
       const errorMessage: Message = {
         id: Date.now().toString(),
         sender: "agent",
-        text: "⚠️ Failed to send message to agent. Is ElizaOS running?",
+        text: `⚠️ ${errText}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -156,7 +185,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
                 </span>
               </div>
               <div
-                className={`p-3 rounded-lg text-sm leading-relaxed ${
+                className={`p-3 rounded-lg text-sm leading-relaxed whitespace-pre-wrap ${
                   msg.sender === "user"
                     ? "bg-[#f2d08a]/10 text-[#e8ebf4] border border-[#f2d08a]/20 rounded-tr-none"
                     : "bg-[#1a1005] text-[#e8ebf4] border border-[#8b4513]/30 rounded-tl-none shadow-lg"
@@ -211,34 +240,48 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agent }) => {
                 setIsTyping(true);
                 try {
                   const result = await apiClient.post<
-                    ElizaOSResponse | ElizaOSResponse[]
-                  >(`/api/agents/${agent.id}/message`, {
-                    content: command,
-                    userId:
-                      localStorage.getItem("privy_user_id") || "anonymous-user",
-                  });
+                    DashboardMessageApiPayload | DashboardMessageApiPayload[]
+                  >(
+                    `/api/agents/${agent.id}/message`,
+                    { content: command },
+                    { useFreshToken: true },
+                  );
 
-                  if (result.ok && result.data) {
+                  if (!result.ok) {
+                    throw new Error(result.error || `HTTP ${result.status}`);
+                  }
+
+                  if (result.data) {
                     const responses = Array.isArray(result.data)
                       ? result.data
                       : [result.data];
-                    responses.forEach(
-                      (
-                        resp: { text?: string; content?: string } | null,
-                        index: number,
-                      ) => {
-                        const agentMessage: Message = {
-                          id: (Date.now() + index).toString(),
-                          sender: "agent",
-                          text: resp?.text || resp?.content || "Command sent",
-                          timestamp: new Date(),
-                        };
-                        setMessages((prev) => [...prev, agentMessage]);
-                      },
-                    );
+                    responses.forEach((resp, index: number) => {
+                      const agentMessage: Message = {
+                        id: (Date.now() + index).toString(),
+                        sender: "agent",
+                        text: agentReplyText(
+                          resp as DashboardMessageApiPayload | null,
+                        ),
+                        timestamp: new Date(),
+                      };
+                      setMessages((prev) => [...prev, agentMessage]);
+                    });
                   }
                 } catch (err) {
                   console.error("Failed to send command:", err);
+                  const errText =
+                    err instanceof Error
+                      ? err.message
+                      : "Failed to send command";
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: Date.now().toString(),
+                      sender: "agent" as const,
+                      text: `⚠️ ${errText}`,
+                      timestamp: new Date(),
+                    },
+                  ]);
                 } finally {
                   setIsTyping(false);
                   setInputValue("");

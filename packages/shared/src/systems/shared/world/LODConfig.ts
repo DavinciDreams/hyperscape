@@ -63,78 +63,78 @@ export interface LODDistancesWithSq extends LODDistances {
  * Categories can be customized based on object size and visual importance.
  */
 export const LOD_DISTANCES: Record<string, LODDistances> = {
-  // Large vegetation - aggressive LOD for performance
+  // Large vegetation
   tree: {
-    lod1Distance: 30,
-    lod2Distance: 60,
-    imposterDistance: 100,
-    fadeDistance: 180,
+    lod1Distance: 800,
+    lod2Distance: 1000,
+    imposterDistance: 1200,
+    fadeDistance: 1800,
   },
 
   // Medium vegetation
   bush: {
-    lod1Distance: 40,
-    lod2Distance: 80,
-    imposterDistance: 120,
-    fadeDistance: 200,
+    lod1Distance: 350,
+    lod2Distance: 500,
+    imposterDistance: 650,
+    fadeDistance: 1000,
   },
   fern: {
-    lod1Distance: 30,
-    lod2Distance: 55,
-    imposterDistance: 80,
-    fadeDistance: 120,
+    lod1Distance: 250,
+    lod2Distance: 400,
+    imposterDistance: 500,
+    fadeDistance: 800,
   },
   rock: {
-    lod1Distance: 50,
-    lod2Distance: 100,
-    imposterDistance: 150,
-    fadeDistance: 250,
+    lod1Distance: 400,
+    lod2Distance: 600,
+    imposterDistance: 800,
+    fadeDistance: 1200,
   },
   fallen_tree: {
-    lod1Distance: 45,
-    lod2Distance: 90,
-    imposterDistance: 130,
-    fadeDistance: 200,
+    lod1Distance: 350,
+    lod2Distance: 500,
+    imposterDistance: 650,
+    fadeDistance: 1000,
   },
 
-  // Small vegetation (aggressive culling - skip LOD2, go straight to impostor)
+  // Small vegetation
   flower: {
-    lod1Distance: 25,
-    lod2Distance: 45, // Same as imposter - skip LOD2
-    imposterDistance: 60,
-    fadeDistance: 100,
+    lod1Distance: 200,
+    lod2Distance: 300,
+    imposterDistance: 400,
+    fadeDistance: 650,
   },
   mushroom: {
-    lod1Distance: 15,
-    lod2Distance: 30, // Same as imposter - skip LOD2
-    imposterDistance: 40,
-    fadeDistance: 80,
+    lod1Distance: 180,
+    lod2Distance: 280,
+    imposterDistance: 350,
+    fadeDistance: 550,
   },
   grass: {
-    lod1Distance: 10,
-    lod2Distance: 20, // Same as imposter - skip LOD2
-    imposterDistance: 30,
-    fadeDistance: 60,
+    lod1Distance: 150,
+    lod2Distance: 220,
+    imposterDistance: 280,
+    fadeDistance: 450,
   },
 
   // Resources (harvestable objects)
   resource: {
-    lod1Distance: 45,
-    lod2Distance: 85,
-    imposterDistance: 120,
-    fadeDistance: 200,
+    lod1Distance: 380,
+    lod2Distance: 550,
+    imposterDistance: 700,
+    fadeDistance: 1100,
   },
   tree_resource: {
-    lod1Distance: 25, // Switch to LOD1 very early
-    lod2Distance: 50,
-    imposterDistance: 80, // Switch to impostor ASAP
-    fadeDistance: 150, // Fade out earlier
+    lod1Distance: 400,
+    lod2Distance: 550,
+    imposterDistance: 700,
+    fadeDistance: 1000,
   },
   rock_resource: {
-    lod1Distance: 50,
-    lod2Distance: 100,
-    imposterDistance: 150,
-    fadeDistance: 250,
+    lod1Distance: 400,
+    lod2Distance: 600,
+    imposterDistance: 800,
+    fadeDistance: 1200,
   },
 
   // Buildings - simple geometry, skip intermediate LODs and go directly to impostor
@@ -418,4 +418,55 @@ export function inferLOD1Path(lod0Path: string): string {
  */
 export function inferLOD2Path(lod0Path: string): string {
   return lod0Path.replace(/\.glb$/i, "_lod2.glb");
+}
+
+function normalizeExplicitLODPath(
+  explicitPath?: string | null,
+): string | null | undefined {
+  if (explicitPath === undefined) {
+    return undefined;
+  }
+
+  if (explicitPath === null) {
+    return null;
+  }
+
+  const trimmed = explicitPath.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Resolve the effective LOD1 model path.
+ * - `undefined`: infer by convention from the lod0 path
+ * - `null` or empty string: disable LOD1 path resolution
+ * - non-empty string: use the explicit path
+ */
+export function resolveLOD1ModelPath(
+  lod0Path: string,
+  explicitPath?: string | null,
+): string | null {
+  const normalized = normalizeExplicitLODPath(explicitPath);
+  if (normalized === null) {
+    return null;
+  }
+
+  return normalized ?? inferLOD1Path(lod0Path);
+}
+
+/**
+ * Resolve the effective LOD2 model path.
+ * - `undefined`: infer by convention from the lod0 path
+ * - `null` or empty string: disable LOD2 path resolution
+ * - non-empty string: use the explicit path
+ */
+export function resolveLOD2ModelPath(
+  lod0Path: string,
+  explicitPath?: string | null,
+): string | null {
+  const normalized = normalizeExplicitLODPath(explicitPath);
+  if (normalized === null) {
+    return null;
+  }
+
+  return normalized ?? inferLOD2Path(lod0Path);
 }

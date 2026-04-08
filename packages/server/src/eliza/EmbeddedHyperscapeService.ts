@@ -12,6 +12,7 @@ import {
   EventType,
   getDuelArenaConfig,
   getItem,
+  isPositionInsideCombatArena,
   ALL_WORLD_AREAS,
   type World,
 } from "@hyperscape/shared";
@@ -154,6 +155,21 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   }> = [];
   private playerEntityId: string | null = null;
   private isActive: boolean = false;
+  /** When set, all executeMove targets are clamped to this XZ rectangle. */
+  private _arenaBounds: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  } | null = null;
+  /**
+   * When false, the AgentBehaviorTicker skips this agent's autonomous tick.
+   * Set to false while the agent is in the duel arena so it doesn't wander
+   * off to do quests or explore between DuelCombatAI ticks.
+   */
+  private _autonomousEnabled: boolean = true;
+  /** Set after we re-emit PLAYER_REGISTERED to bootstrap quest state. */
+  private _questStateBootstrapEmitted: boolean = false;
   /** Reusable buffer for getNearbyEntities to reduce per-tick allocations. */
   private nearbyBuffer: NearbyEntityData[] = [];
 
@@ -232,6 +248,12 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       this.playerEntityId = this.characterId;
       this.isActive = true;
       this.subscribeToWorldEvents();
+      // Emit PLAYER_REGISTERED so QuestSystem (and other systems) load state
+      // for this agent. The normal entities.add() path emits this, but when
+      // the entity already exists we skip that path entirely.
+      this.emitDualChannel("player:registered", {
+        playerId: this.characterId,
+      });
       return;
     }
 
@@ -451,6 +473,15 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
     // Subscribe to world events
     this.subscribeToWorldEvents();
+
+    // Explicitly emit PLAYER_REGISTERED on both channels so QuestSystem,
+    // CoinPouchSystem, etc. load this agent's persisted state from the DB.
+    // Entities.addEntity() already emits this via emitTypedEvent, but we
+    // re-emit to guarantee it reaches EventBus subscribers even if there
+    // was a race during entity creation.
+    this.emitDualChannel("player:registered", {
+      playerId: this.characterId,
+    });
   }
 
   /**
@@ -644,6 +675,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     return this.world;
   }
 
+  invalidateNearbyEntityCache(): void {
+    this._nearbyCacheTick = -1;
+  }
+
   getGameState(): EmbeddedGameState | null {
     if (!this.playerEntityId || !this.isActive) {
       return null;
@@ -717,6 +752,44 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     return this._gameStateCache;
   }
 
+  /**
+   * Facing yaw for dashboard scripted intents (attack/gather target cone).
+   * Prefer live entity node euler Y; fall back to serialized quaternion in data.
+   */
+  getPlayerYaw(): number | null {
+    if (!this.playerEntityId || !this.isActive) {
+      return null;
+    }
+    const player = this.world.entities.get(this.playerEntityId);
+    if (!player) {
+      return null;
+    }
+
+    const node = (
+      player as {
+        node?: { rotation?: { y?: number } };
+      }
+    ).node;
+    const eulerY = node?.rotation?.y;
+    if (typeof eulerY === "number" && Number.isFinite(eulerY)) {
+      return eulerY;
+    }
+
+    const quat = (player as { data?: { quaternion?: number[] } }).data
+      ?.quaternion;
+    if (
+      Array.isArray(quat) &&
+      quat.length >= 4 &&
+      quat.every((v) => typeof v === "number" && Number.isFinite(v))
+    ) {
+      const [x, y, z, w] = quat as [number, number, number, number];
+      // Y-axis yaw from quaternion (Y-up, consistent with Three.js body yaw)
+      return Math.atan2(2 * (w * y + x * z), 1 - 2 * (y * y + z * z));
+    }
+
+    return null;
+  }
+
   // ============================================================================
   // Local Chat Methods
   // ============================================================================
@@ -730,10 +803,37 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   }
 
   /**
+   * Owner message from POST /api/agents/:id/message (dashboard / viewport).
+   * Cannot rely on CHAT_MESSAGE alone: Chat emits playerId = Privy account id,
+   * which is not a world entity id, so handleChatMessage drops it before the buffer.
+   */
+  ingestOwnerDashboardMessage(text: string, ownerAccountId: string): void {
+    const trimmed = text.trim();
+    if (!trimmed || !this.isActive) {
+      return;
+    }
+    this.localChatBuffer.unshift({
+      from: "Dashboard",
+      fromId: ownerAccountId,
+      text: trimmed,
+      timestamp: Date.now(),
+      distance: 0,
+    });
+    if (
+      this.localChatBuffer.length >
+      EmbeddedHyperscapeService.LOCAL_CHAT_BUFFER_SIZE
+    ) {
+      this.localChatBuffer.length =
+        EmbeddedHyperscapeService.LOCAL_CHAT_BUFFER_SIZE;
+    }
+  }
+
+  /**
    * Send a chat message from this agent
    * Message will be broadcast to all clients and appear as overhead bubble
+   * @returns The chat message id (for dashboard / API callers)
    */
-  async sendChatMessage(text: string): Promise<void> {
+  async sendChatMessage(text: string): Promise<string> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
     }
@@ -788,6 +888,8 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         networkSystem.send("chatAdded", chatMessage);
       }
     }
+
+    return chatMessage.id;
   }
 
   getNearbyEntities(): NearbyEntityData[] {
@@ -915,6 +1017,37 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     return this._nearbyCache;
   }
 
+  /** Emit a processing event via EventBus (which ProcessingSystem subscribes to) with EventEmitter fallback */
+  private emitProcessingEvent(
+    eventType: string,
+    data: Record<string, unknown>,
+  ): void {
+    if (this.world.$eventBus) {
+      this.world.$eventBus.emitEvent(
+        eventType,
+        data,
+        "EmbeddedHyperscapeService",
+      );
+    } else {
+      this.world.emit(eventType, data);
+    }
+  }
+
+  /** Emit on both EventBus AND EventEmitter — needed when different systems listen on different channels */
+  private emitDualChannel(
+    eventType: string,
+    data: Record<string, unknown>,
+  ): void {
+    if (this.world.$eventBus) {
+      this.world.$eventBus.emitEvent(
+        eventType,
+        data,
+        "EmbeddedHyperscapeService",
+      );
+    }
+    this.world.emit(eventType, data);
+  }
+
   private findNearbyObjectIdByKeyword(keyword: string): string | null {
     const normalizedKeyword = keyword.toLowerCase();
     const station = this.getNearbyEntities().find((entity) => {
@@ -925,12 +1058,71 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     return station?.id ?? null;
   }
 
+  setArenaBounds(bounds: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  }): void {
+    this._arenaBounds = bounds;
+    // Also store on entity data so TileMovementManager.movePlayerToward() can
+    // clamp ALL movement paths (combat follow, pending attack walk, etc.) —
+    // not just the ones routed through executeMove().
+    if (this.playerEntityId) {
+      const entity = this.world.entities.get(this.playerEntityId);
+      if (entity) {
+        (entity.data as Record<string, unknown>).arenaBounds = bounds;
+      }
+    }
+  }
+
+  clearArenaBounds(): void {
+    this._arenaBounds = null;
+    if (this.playerEntityId) {
+      const entity = this.world.entities.get(this.playerEntityId);
+      if (entity) {
+        (entity.data as Record<string, unknown>).arenaBounds = null;
+      }
+    }
+  }
+
+  /**
+   * Disable or re-enable the agent's autonomous behavior loop.
+   * Called by DuelOrchestrator when placing agents in the arena (disable) or
+   * returning them to the overworld (re-enable), ensuring agents never try to
+   * wander off to quests while a DuelCombatAI is running.
+   */
+  setAutonomousBehaviorEnabled(enabled: boolean): void {
+    this._autonomousEnabled = enabled;
+  }
+
+  isAutonomousEnabled(): boolean {
+    return this._autonomousEnabled;
+  }
+
   async executeMove(
     target: [number, number, number],
     runMode: boolean = false,
   ): Promise<void> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
+    }
+
+    // Clamp movement target to arena bounds when in arena mode.
+    // This prevents out-of-bounds moves at the source, avoiding the need for
+    // reactive correction teleports that produce unwanted visual effects.
+    if (this._arenaBounds) {
+      const b = this._arenaBounds;
+      const PAD = 2.0;
+      target = [
+        Math.min(b.maxX - PAD, Math.max(b.minX + PAD, target[0])),
+        target[1],
+        Math.min(b.maxZ - PAD, Math.max(b.minZ + PAD, target[2])),
+      ];
+    } else if (isPositionInsideCombatArena(target[0], target[2])) {
+      // Not in a duel — reject moves into combat arenas to prevent
+      // the agent from walking into arenas and triggering ejection loops.
+      return;
     }
 
     if (this.requestNetworkMove(target, runMode)) {
@@ -963,6 +1155,17 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
     const targetEntity = this.world.entities.get(targetId);
     if (!targetEntity) return;
+
+    // Guard: don't chase targets inside combat arenas when not in a duel
+    if (!this._arenaBounds) {
+      const targetPos = this.getEntityPosition(targetEntity);
+      if (
+        targetPos &&
+        isPositionInsideCombatArena(targetPos[0], targetPos[2])
+      ) {
+        return;
+      }
+    }
 
     // Guard: abort if target is dead (race condition between tick check and attack)
     const te = targetEntity as unknown as {
@@ -1006,6 +1209,17 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   async executeGather(resourceId: string): Promise<void> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
+    }
+
+    // Guard: don't gather resources inside combat arenas when not in a duel
+    if (!this._arenaBounds) {
+      const resEntity = this.world.entities.get(resourceId);
+      if (resEntity) {
+        const resPos = this.getEntityPosition(resEntity);
+        if (resPos && isPositionInsideCombatArena(resPos[0], resPos[2])) {
+          return;
+        }
+      }
     }
 
     // Use PendingGatherManager which handles cardinal tile pathfinding,
@@ -1105,7 +1319,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     }
   }
 
-  async executePrayer(prayerId: string): Promise<void> {
+  async executePrayer(prayerId: string): Promise<boolean> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
     }
@@ -1118,12 +1332,13 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
     if (prayerSystem?.togglePrayer) {
       prayerSystem.togglePrayer(this.playerEntityId, prayerId);
-    } else {
-      console.warn("[EmbeddedHyperscapeService] Prayer system not available");
+      return true;
     }
+    console.warn("[EmbeddedHyperscapeService] Prayer system not available");
+    return false;
   }
 
-  async executeChat(message: string): Promise<void> {
+  async executeChat(message: string): Promise<boolean> {
     if (!this.playerEntityId || !this.isActive) {
       throw new Error("Agent not spawned");
     }
@@ -1158,9 +1373,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         },
         true,
       );
-    } else {
-      console.warn("[EmbeddedHyperscapeService] Chat system not available");
+      return true;
     }
+    console.warn("[EmbeddedHyperscapeService] Chat system not available");
+    return false;
   }
 
   async executeStop(): Promise<void> {
@@ -1293,7 +1509,8 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   async executeBankOpen(bankId: string): Promise<boolean> {
     if (!this.playerEntityId || !this.isActive) return false;
 
-    this.world.emit(EventType.BANK_OPEN, {
+    // Bank events need both EventBus (BankingSystem) and EventEmitter (InteractionSessionManager)
+    this.emitDualChannel(EventType.BANK_OPEN, {
       playerId: this.playerEntityId,
       bankId,
     });
@@ -1307,7 +1524,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (!this.playerEntityId || !this.isActive) return false;
     if (!itemId) return false;
 
-    this.world.emit(EventType.BANK_DEPOSIT, {
+    this.emitDualChannel(EventType.BANK_DEPOSIT, {
       playerId: this.playerEntityId,
       itemId,
       quantity,
@@ -1322,7 +1539,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (!this.playerEntityId || !this.isActive) return false;
     if (!itemId) return false;
 
-    this.world.emit(EventType.BANK_WITHDRAW, {
+    this.emitDualChannel(EventType.BANK_WITHDRAW, {
       playerId: this.playerEntityId,
       itemId,
       quantity,
@@ -1333,8 +1550,48 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
   async executeBankDepositAll(): Promise<boolean> {
     if (!this.playerEntityId || !this.isActive) return false;
 
-    this.world.emit(EventType.BANK_DEPOSIT_ALL, {
+    // Find the nearest bank — try nearby entities first, then search world entities directly
+    let bankId = this.findNearbyObjectIdByKeyword("bank");
+
+    if (!bankId) {
+      // Search all world entities for the closest bank entity
+      const player = this.world.entities.get(this.playerEntityId);
+      if (!player) return false;
+      const playerPos = this.getEntityPosition(player);
+      if (!playerPos) return false;
+
+      let bestDist = Infinity;
+      for (const [id, entity] of this.world.entities.items.entries()) {
+        const data = (entity as { data?: Record<string, unknown> }).data;
+        if (!data) continue;
+        const typeStr = String(data.type || "").toLowerCase();
+        const nameStr = String(data.name || "").toLowerCase();
+        if (typeStr !== "bank" && !nameStr.includes("bank")) continue;
+        const pos = this.getEntityPosition(entity);
+        if (!pos) continue;
+        const dx = pos[0] - playerPos[0];
+        const dz = pos[2] - playerPos[2];
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bankId = id;
+        }
+      }
+      // Only use if within reasonable range
+      if (!bankId || bestDist > 15) return false;
+    }
+
+    // Open the bank first (BankingSystem requires an open bank to deposit)
+    this.emitDualChannel(EventType.BANK_OPEN, {
       playerId: this.playerEntityId,
+      bankId,
+    });
+
+    // BANK_OPEN handler runs synchronously via EventBus, so the bank is
+    // already open by the time we reach here — no delay needed.
+    this.emitDualChannel(EventType.BANK_DEPOSIT_ALL, {
+      playerId: this.playerEntityId,
+      bankId,
     });
     return true;
   }
@@ -1351,6 +1608,25 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (!this.playerEntityId || !this.isActive) return false;
     if (!storeId || !itemId) return false;
 
+    // Agents bypass the socket-based store handler and add items directly
+    // via the InventorySystem. No coin deduction (agents are NPCs).
+    const inventorySystem = this.world.getSystem("inventory") as {
+      addItemDirect?: (
+        playerId: string,
+        params: { itemId: string; quantity: number },
+      ) => Promise<boolean>;
+    } | null;
+
+    if (inventorySystem?.addItemDirect) {
+      const added = await inventorySystem.addItemDirect(this.playerEntityId, {
+        itemId,
+        quantity,
+      });
+      return added;
+    } else {
+    }
+
+    // Fallback: emit event (may not be handled)
     this.world.emit(EventType.STORE_BUY, {
       playerId: this.playerEntityId,
       storeId,
@@ -1385,11 +1661,85 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     if (!this.playerEntityId || !this.isActive) return false;
     if (!itemId) return false;
 
-    this.world.emit(EventType.COOKING_REQUEST, {
-      playerId: this.playerEntityId,
-      itemId,
-    });
-    return true;
+    // Find the inventory slot containing the raw food
+    const inventory = this.getInventoryItems();
+    const slot = inventory.find((s) => s.itemId === itemId);
+    if (!slot) return false;
+
+    // Find a nearby cooking station (range, fire station, or player-lit fire)
+    const stationId =
+      this.findNearbyObjectIdByKeyword("range") ??
+      this.findNearbyObjectIdByKeyword("cooking") ??
+      this.findNearbyObjectIdByKeyword("fire");
+
+    if (stationId) {
+      // Permanent stations use sourceType "range" so ProcessingSystem skips activeFires check
+      const isPermanent =
+        stationId.startsWith("station_") || stationId.includes("range");
+      this.emitProcessingEvent(EventType.PROCESSING_COOKING_REQUEST, {
+        playerId: this.playerEntityId,
+        fishSlot: slot.slot,
+        ...(isPermanent
+          ? { rangeId: stationId, sourceType: "range" as const }
+          : { fireId: stationId, sourceType: "fire" as const }),
+      });
+      return true;
+    }
+
+    // No station entity found — check for player-lit fires in ProcessingSystem
+    const processingSystem = this.world.getSystem("processing") as {
+      getPlayerFires?: (
+        playerId: string,
+      ) => Array<{ id: string; isActive: boolean }>;
+      getActiveFires?: () => Map<
+        string,
+        {
+          id: string;
+          isActive: boolean;
+          position: { x: number; y: number; z: number };
+        }
+      >;
+    } | null;
+
+    if (processingSystem?.getPlayerFires) {
+      const myFires = processingSystem.getPlayerFires(this.playerEntityId);
+      const activeFire = myFires.find((f) => f.isActive);
+      if (activeFire) {
+        this.emitProcessingEvent(EventType.PROCESSING_COOKING_REQUEST, {
+          playerId: this.playerEntityId,
+          fishSlot: slot.slot,
+          fireId: activeFire.id,
+          sourceType: "fire" as const,
+        });
+        return true;
+      }
+    }
+
+    // Also check all active fires (maybe another player lit one nearby)
+    if (processingSystem?.getActiveFires) {
+      const playerEntity = this.world.entities.get(this.playerEntityId);
+      if (playerEntity?.position) {
+        const px = playerEntity.position.x;
+        const pz = playerEntity.position.z;
+        for (const [, fire] of processingSystem.getActiveFires()) {
+          if (!fire.isActive) continue;
+          const dx = px - fire.position.x;
+          const dz = pz - fire.position.z;
+          if (dx * dx + dz * dz < 25) {
+            // within ~5 tiles
+            this.emitProcessingEvent(EventType.PROCESSING_COOKING_REQUEST, {
+              playerId: this.playerEntityId,
+              fishSlot: slot.slot,
+              fireId: fire.id,
+              sourceType: "fire" as const,
+            });
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   async executeSmelt(recipe: string): Promise<boolean> {
@@ -1399,7 +1749,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     const furnaceId =
       this.findNearbyObjectIdByKeyword("furnace") ?? "unknown-furnace";
 
-    this.world.emit(EventType.SMELTING_REQUEST, {
+    this.emitProcessingEvent(EventType.PROCESSING_SMELTING_REQUEST, {
       playerId: this.playerEntityId,
       barItemId: recipe,
       furnaceId,
@@ -1415,7 +1765,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     const anvilId =
       this.findNearbyObjectIdByKeyword("anvil") ?? "unknown-anvil";
 
-    this.world.emit(EventType.SMITHING_REQUEST, {
+    this.emitProcessingEvent(EventType.PROCESSING_SMITHING_REQUEST, {
       playerId: this.playerEntityId,
       recipeId: recipe,
       anvilId,
@@ -1447,11 +1797,83 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
       : inventory.find((i) => logTypes.includes(i.itemId));
     if (!logsSlot) return false;
 
-    this.world.emit(EventType.PROCESSING_FIREMAKING_REQUEST, {
+    this.emitProcessingEvent(EventType.PROCESSING_FIREMAKING_REQUEST, {
       playerId: this.playerEntityId,
       logsId: logsSlot.itemId,
       logsSlot: logsSlot.slot,
       tinderboxSlot: tinderboxSlot.slot,
+    });
+    return true;
+  }
+
+  async executeRunecraft(runeType: string): Promise<boolean> {
+    if (!this.playerEntityId || !this.isActive) return false;
+
+    const inventory = this.getInventoryItems();
+    const hasEssence = inventory.some((i) => i.itemId === "rune_essence");
+    if (!hasEssence) {
+      return false;
+    }
+
+    const altarId =
+      this.findNearbyObjectIdByKeyword("runecrafting") ??
+      this.findNearbyObjectIdByKeyword("altar");
+    if (!altarId) {
+      return false;
+    }
+
+    // Look up the altar entity to get the authoritative runeType (like the client handler does)
+    const altarEntity = this.world.entities.get(altarId);
+    const altarRuneType = altarEntity
+      ? (altarEntity as unknown as { runeType?: string }).runeType
+      : undefined;
+
+    this.emitProcessingEvent(EventType.RUNECRAFTING_INTERACT, {
+      playerId: this.playerEntityId,
+      altarId,
+      runeType: altarRuneType || runeType,
+    });
+    return true;
+  }
+
+  async executeCraft(recipeId: string, quantity: number = 1): Promise<boolean> {
+    if (!this.playerEntityId || !this.isActive) return false;
+    if (!recipeId) return false;
+
+    this.emitDualChannel(EventType.PROCESSING_CRAFTING_REQUEST, {
+      playerId: this.playerEntityId,
+      recipeId,
+      quantity,
+    });
+    return true;
+  }
+
+  async executeFletch(
+    recipeId: string,
+    quantity: number = 1,
+  ): Promise<boolean> {
+    if (!this.playerEntityId || !this.isActive) return false;
+    if (!recipeId) return false;
+
+    this.emitProcessingEvent(EventType.PROCESSING_FLETCHING_REQUEST, {
+      playerId: this.playerEntityId,
+      recipeId,
+      quantity,
+    });
+    return true;
+  }
+
+  async executeTan(
+    inputItemId: string,
+    quantity: number = 1,
+  ): Promise<boolean> {
+    if (!this.playerEntityId || !this.isActive) return false;
+    if (!inputItemId) return false;
+
+    this.emitProcessingEvent(EventType.TANNING_REQUEST, {
+      playerId: this.playerEntityId,
+      inputItemId,
+      quantity,
     });
     return true;
   }
@@ -1728,6 +2150,17 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     }
 
     const activeQuests = questSystem.getActiveQuests(this.playerEntityId);
+
+    // If QuestSystem returned empty, it may not have loaded this agent's state.
+    // Re-emit PLAYER_REGISTERED once so the async DB load runs; by the next
+    // behavior tick (8s later) the data will be available.
+    if (activeQuests.length === 0 && !this._questStateBootstrapEmitted) {
+      this._questStateBootstrapEmitted = true;
+      this.emitDualChannel("player:registered", {
+        playerId: this.playerEntityId,
+      });
+    }
+
     return activeQuests.map((progress) => {
       const definition = questSystem.getQuestDefinition!(progress.questId);
       const currentStage = definition?.stages.find(
@@ -2140,6 +2573,124 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     return result;
   }
 
+  /**
+   * Compact world-map lines for dashboard LLM prompts (chat + character vision).
+   * Uses player position when spawned to sort nearest towns/POIs/resources.
+   */
+  formatMapAwarenessForLlm(): string {
+    const map = this.getWorldMap();
+    if (!map) {
+      return "(World map summary unavailable.)";
+    }
+    const total =
+      map.towns.length +
+      map.pois.length +
+      map.resources.length +
+      map.stations.length +
+      map.npcs.length;
+    if (total === 0) {
+      return "(No static map entries loaded.)";
+    }
+
+    const pos = this.getGameState()?.position;
+    const distSq = (
+      a: [number, number, number],
+      b: { x: number; y: number; z: number },
+    ): number => {
+      const dx = a[0] - b.x;
+      const dy = a[1] - b.y;
+      const dz = a[2] - b.z;
+      return dx * dx + dy * dy + dz * dz;
+    };
+
+    const lines: string[] = [];
+
+    if (pos) {
+      const nearestTowns = map.towns
+        .map((t) => ({ t, d: distSq(pos, t.position) }))
+        .sort((x, y) => x.d - y.d)
+        .slice(0, 6);
+      if (nearestTowns.length > 0) {
+        lines.push(
+          `Nearest towns: ${nearestTowns
+            .map(
+              ({ t, d }) =>
+                `${t.name} (~${Math.sqrt(d).toFixed(0)}m, ${t.biome})`,
+            )
+            .join("; ")}`,
+        );
+      }
+
+      const nearestPois = map.pois
+        .map((p) => ({ p, d: distSq(pos, p.position) }))
+        .sort((x, y) => x.d - y.d)
+        .slice(0, 5);
+      if (nearestPois.length > 0) {
+        lines.push(
+          `Nearest POIs: ${nearestPois
+            .map(
+              ({ p, d }) =>
+                `${p.name} [${p.category}] (~${Math.sqrt(d).toFixed(0)}m)`,
+            )
+            .join("; ")}`,
+        );
+      }
+
+      const nearestRes = map.resources
+        .map((r) => ({ r, d: distSq(pos, r.position) }))
+        .sort((x, y) => x.d - y.d)
+        .slice(0, 5);
+      if (nearestRes.length > 0) {
+        lines.push(
+          `Nearest resource nodes: ${nearestRes
+            .map(
+              ({ r, d }) =>
+                `${r.type}/${r.resourceId} (~${Math.sqrt(d).toFixed(0)}m, ${r.areaId})`,
+            )
+            .join("; ")}`,
+        );
+      }
+
+      const nearestSt = map.stations
+        .map((s) => ({ s, d: distSq(pos, s.position) }))
+        .sort((x, y) => x.d - y.d)
+        .slice(0, 4);
+      if (nearestSt.length > 0) {
+        lines.push(
+          `Nearest stations: ${nearestSt
+            .map(
+              ({ s, d }) =>
+                `${s.id} [${s.type}] (~${Math.sqrt(d).toFixed(0)}m)`,
+            )
+            .join("; ")}`,
+        );
+      }
+    } else {
+      if (map.towns.length > 0) {
+        lines.push(
+          `Towns (sample): ${map.towns
+            .slice(0, 8)
+            .map((t) => `${t.name} (${t.biome})`)
+            .join(", ")}`,
+        );
+      }
+      if (map.pois.length > 0) {
+        lines.push(
+          `POIs (sample): ${map.pois
+            .slice(0, 6)
+            .map((p) => `${p.name} [${p.category}]`)
+            .join(", ")}`,
+        );
+      }
+    }
+
+    lines.push(
+      `World map counts: ${map.towns.length} towns, ${map.pois.length} POIs, ${map.resources.length} resources, ${map.stations.length} stations, ${map.npcs.length} manifest NPCs.`,
+    );
+
+    return lines.join("\n");
+  }
+
   // =========================================================================
   // Combat Advanced
   // =========================================================================
@@ -2231,6 +2782,11 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
   getPlayerId(): string | null {
     return this.playerEntityId;
+  }
+
+  /** Expose the world instance for global entity queries (e.g. findGlobalMobTarget). */
+  getWorld(): World {
+    return this.world;
   }
 
   onGameEvent(event: string, handler: EventHandler): void {

@@ -23,8 +23,13 @@ export interface AgentContestant {
   maxHp: number;
   originalPosition: [number, number, number];
   damageDealtThisFight: number;
+  highestHit: number;
+  attacksLanded: number;
+  healsUsed: number;
   equipment: Record<string, string>;
   inventory: Array<{ itemId: string; quantity: number } | null>;
+  /** itemId → manifest iconPath; streaming client resolves URLs (may lack local ITEMS). */
+  itemIconPaths: Record<string, string>;
   rank: number;
   headToHeadWins: number;
   headToHeadLosses: number;
@@ -117,8 +122,12 @@ export interface StreamingCycleAgent {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
+  highestHit: number;
+  attacksLanded: number;
+  healsUsed: number;
   equipment: Record<string, string>;
   inventory: Array<{ itemId: string; quantity: number } | null>;
+  itemIconPaths: Record<string, string>;
   rank: number;
   headToHeadWins: number;
   headToHeadLosses: number;

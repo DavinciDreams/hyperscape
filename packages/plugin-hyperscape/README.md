@@ -51,8 +51,10 @@ bun install @hyperscape/plugin-hyperscape
 ### Environment Variables
 
 ```bash
-# Hyperscape server WebSocket URL (default: ws://localhost:5555/ws)
-HYPERSCAPE_SERVER_URL=ws://localhost:5555/ws
+# Hyperscape server WebSocket URL
+# Local dev default: ws://localhost:5556/ws
+# Production default: wss://hyperscape.gg/ws
+HYPERSCAPE_SERVER_URL=ws://localhost:5556/ws
 
 # Automatically reconnect on disconnect (default: true)
 HYPERSCAPE_AUTO_RECONNECT=true
@@ -67,7 +69,7 @@ Add the plugin to your ElizaOS character configuration:
   "name": "WoodcutterBot",
   "plugins": ["@hyperscape/plugin-hyperscape"],
   "settings": {
-    "HYPERSCAPE_SERVER_URL": "ws://localhost:5555/ws",
+    "HYPERSCAPE_SERVER_URL": "ws://localhost:5556/ws",
     "HYPERSCAPE_AUTO_RECONNECT": "true"
   }
 }

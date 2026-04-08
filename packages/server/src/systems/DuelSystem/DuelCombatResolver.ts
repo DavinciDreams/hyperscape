@@ -195,6 +195,15 @@ export class DuelCombatResolver {
       .update(hashData)
       .digest("hex");
 
+    const challengerStakeValue = session.challengerStakes.reduce(
+      (s, i) => s + i.value,
+      0,
+    );
+    const opponentStakeValue = session.targetStakes.reduce(
+      (s, i) => s + i.value,
+      0,
+    );
+
     // Emit duel completed event
     try {
       this.world.emit("duel:completed", {
@@ -211,6 +220,10 @@ export class DuelCombatResolver {
         winnerReceivesValue,
         challengerStakes: session.challengerStakes,
         targetStakes: session.targetStakes,
+        challengerId: session.challengerId,
+        opponentId: session.targetId,
+        challengerStakeValue,
+        opponentStakeValue,
         summary: {
           duration:
             session.finishedAt! - (session.fightStartedAt || session.createdAt),
