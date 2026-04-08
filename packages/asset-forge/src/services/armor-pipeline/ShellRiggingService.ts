@@ -276,6 +276,11 @@ export class ShellRiggingService {
       body: formData,
     });
 
+    if (!resp.ok) {
+      const text = await resp.text();
+      return { success: false, error: `HTTP ${resp.status}: ${text}` };
+    }
+
     return resp.json();
   }
 

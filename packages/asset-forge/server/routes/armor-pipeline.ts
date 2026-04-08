@@ -11,12 +11,15 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { ShellTextureService } from "../services/armor-pipeline/ShellTextureService";
 
-function parseBonuses(raw: string | undefined): Record<string, number> {
+/** Only allow alphanumeric, hyphens, and underscores in path segments */
+const SAFE_PATH_RE = /^[a-zA-Z0-9_-]+$/;
+
+function parseBonuses(raw: string | undefined): Record<string, number> | null {
   if (!raw) return {};
   try {
     return JSON.parse(raw);
   } catch {
-    return {};
+    return null;
   }
 }
 
@@ -81,7 +84,7 @@ export const createArmorPipelineRoutes = (
         },
         {
           body: t.Object({
-            file: t.File(),
+            file: t.File({ maxSize: "20m" }),
             prompt: t.String(),
             name: t.Optional(t.String()),
             aiModel: t.Optional(t.String()),
@@ -131,6 +134,17 @@ export const createArmorPipelineRoutes = (
               set.status = 400;
               return { success: false, error: "Invalid tiers JSON" };
             }
+            if (!Array.isArray(tiers) || tiers.length === 0) {
+              set.status = 400;
+              return {
+                success: false,
+                error: "tiers must be a non-empty array",
+              };
+            }
+            if (tiers.length > 10) {
+              set.status = 400;
+              return { success: false, error: "Maximum 10 tiers per batch" };
+            }
             const aiModel = body.aiModel || "meshy-6";
             const enablePBR = body.enablePBR === "true";
             // Global fallback style image (used when tiers don't specify their own)
@@ -169,7 +183,7 @@ export const createArmorPipelineRoutes = (
         },
         {
           body: t.Object({
-            file: t.File(),
+            file: t.File({ maxSize: "20m" }),
             tiers: t.String(), // JSON-encoded array of {tierId, prompt, styleImageUrl?}[]
             name: t.Optional(t.String()),
             aiModel: t.Optional(t.String()),
@@ -267,11 +281,15 @@ export const createArmorPipelineRoutes = (
       // Security: restricted to localhost requests only (writes to game server filesystem)
       .post(
         "/publish-to-game",
-        async ({ body, set, request }) => {
-          // Only allow requests from localhost
-          const url = new URL(request.url);
-          const host = url.hostname;
-          if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+        async ({ body, set, request, server }) => {
+          // Only allow requests from localhost — check actual socket IP, not Host header
+          const remoteAddr = server?.requestIP(request)?.address;
+          const isLocal =
+            !remoteAddr ||
+            remoteAddr === "127.0.0.1" ||
+            remoteAddr === "::1" ||
+            remoteAddr === "::ffff:127.0.0.1";
+          if (!isLocal) {
             set.status = 403;
             return {
               success: false,
@@ -285,6 +303,17 @@ export const createArmorPipelineRoutes = (
 
             const itemId = body.itemId;
             const slot = body.slot;
+
+            // Validate path segments to prevent directory traversal
+            if (!SAFE_PATH_RE.test(itemId) || !SAFE_PATH_RE.test(slot)) {
+              set.status = 400;
+              return {
+                success: false,
+                error:
+                  "itemId and slot must contain only alphanumeric characters, hyphens, and underscores",
+              };
+            }
+
             const itemName = body.itemName || itemId.replace(/_/g, " ");
             const tier = body.tier || "bronze";
 
@@ -364,7 +393,13 @@ export const createArmorPipelineRoutes = (
               examine: `A piece of ${tier} armor.`,
               tradeable: true,
               rarity: "common",
-              bonuses: parseBonuses(body.bonuses),
+              bonuses: (() => {
+                const parsed = parseBonuses(body.bonuses);
+                if (parsed === null) {
+                  throw new Error("Invalid bonuses JSON");
+                }
+                return parsed;
+              })(),
             };
 
             if (existingIndex >= 0) {
@@ -400,7 +435,7 @@ export const createArmorPipelineRoutes = (
         },
         {
           body: t.Object({
-            file: t.File(),
+            file: t.File({ maxSize: "20m" }),
             itemId: t.String(),
             slot: t.String(),
             itemName: t.Optional(t.String()),

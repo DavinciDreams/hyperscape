@@ -228,6 +228,54 @@ export const ShellPreviewViewer = forwardRef<
       mounted = false;
       cancelAnimationFrame(animationIdRef.current);
       resizeObserver.disconnect();
+
+      // Dispose OrbitControls
+      controlsRef.current?.dispose();
+      controlsRef.current = null;
+
+      // Stop animation mixer
+      if (mixerRef.current) {
+        mixerRef.current.stopAllAction();
+        mixerRef.current = null;
+      }
+
+      // Dispose all objects in the scene (geometries, materials, textures)
+      sceneRef.current?.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.SkinnedMesh) {
+          obj.geometry?.dispose();
+          const materials = Array.isArray(obj.material)
+            ? obj.material
+            : [obj.material];
+          for (const mat of materials) {
+            if (!mat) continue;
+            // Dispose any textures on the material
+            for (const value of Object.values(mat)) {
+              if (value instanceof THREE.Texture) {
+                value.dispose();
+              }
+            }
+            mat.dispose();
+          }
+        }
+      });
+
+      // Clear scene children
+      if (sceneRef.current) {
+        sceneRef.current.clear();
+      }
+
+      // Clear group refs (children already removed via scene.clear())
+      avatarGroupRef.current = new THREE.Group();
+      overlayGroupRef.current = new THREE.Group();
+
+      // Clear other refs
+      armorPiecesRef.current.clear();
+      boneAttachmentsRef.current.clear();
+      vrmRef.current = null;
+      vrmSceneRef.current = null;
+      cameraRef.current = null;
+
+      // Dispose renderer last (after scene traversal that may need GL state)
       if (rendererRef.current) {
         rendererRef.current.dispose();
         rendererRef.current = null;

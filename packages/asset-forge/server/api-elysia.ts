@@ -253,7 +253,8 @@ const app = new Elysia()
 
   // Static file serving - temp images for Meshy AI (custom handler since plugin is disabled)
   .get("/temp-images/:filename", async ({ params, set }) => {
-    const filePath = path.join(ROOT_DIR, "temp-images", params.filename);
+    const safeName = path.basename(params.filename);
+    const filePath = path.join(ROOT_DIR, "temp-images", safeName);
 
     try {
       const file = Bun.file(filePath);
@@ -265,7 +266,7 @@ const app = new Elysia()
       }
 
       // Set appropriate content type based on file extension
-      const ext = path.extname(params.filename).toLowerCase();
+      const ext = path.extname(safeName).toLowerCase();
       const contentTypes: Record<string, string> = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -281,7 +282,7 @@ const app = new Elysia()
 
       return file;
     } catch (error) {
-      console.error(`Error serving temp image ${params.filename}:`, error);
+      console.error(`Error serving temp image ${safeName}:`, error);
       set.status = 500;
       return { error: "Internal server error" };
     }

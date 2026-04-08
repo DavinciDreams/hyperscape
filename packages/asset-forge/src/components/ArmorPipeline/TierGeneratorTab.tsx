@@ -141,6 +141,12 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
       return;
     }
 
+    // Clear any previous polling interval to avoid leaks
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+
     setStage("extracting");
     setError(null);
     setLogs([]);
@@ -318,6 +324,9 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
     enabledTiers,
     tierPrompts,
     extractionResult,
+    sharedExtraction,
+    onExtract,
+    detailLevel,
     addLog,
   ]);
 

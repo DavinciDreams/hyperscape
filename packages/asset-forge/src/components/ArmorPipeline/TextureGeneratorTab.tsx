@@ -272,6 +272,12 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
     const slots = Array.from(selectedSlots);
     if (slots.length === 0) return;
 
+    // Clear any previous polling interval to avoid leaks
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+
     setStage("extracting");
     setError(null);
     setProgress(0);
@@ -633,9 +639,12 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
     avatarUrl,
     selectedSlots,
     selectedBulk,
+    customThicknessMm,
     textureMethod,
+    selectedPreset,
     metalness,
     roughness,
+    detailLevel,
     extractionResult,
     sharedExtraction,
     onExtract,

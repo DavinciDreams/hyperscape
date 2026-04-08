@@ -73,7 +73,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
         },
         {
           body: t.Object({
-            file: t.File(),
+            file: t.File({ maxSize: "20m" }),
             name: t.Optional(t.String()),
           }),
           detail: {
@@ -212,7 +212,7 @@ export const createTripoPipelineRoutes = (tripoService: TripoService) => {
         },
         {
           body: t.Object({
-            file: t.File(),
+            file: t.File({ maxSize: "20m" }),
             name: t.Optional(t.String()),
             quality: t.Optional(t.String()),
           }),
