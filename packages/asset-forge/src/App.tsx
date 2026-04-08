@@ -27,6 +27,7 @@ import { VegetationGenPage } from "./pages/VegetationGenPage";
 import { VFXPage } from "./pages/VFXPage";
 import { WorldBuilderPage } from "./pages/WorldBuilderPage";
 import { WorldEditorPage } from "./pages/WorldEditorPage";
+import { ArmorPipelinePage } from "./pages/ArmorPipelinePage";
 
 function AppLayout() {
   return (
@@ -77,6 +78,10 @@ function AppLayout() {
             <Route path={ROUTES.WORLD_BUILDER} element={<WorldBuilderPage />} />
             <Route path={ROUTES.WORLD_EDITOR} element={<WorldEditorPage />} />
             <Route path={ROUTES.MANIFESTS} element={<ManifestsPage />} />
+            <Route
+              path={ROUTES.ARMOR_PIPELINE}
+              element={<ArmorPipelinePage />}
+            />
 
             {/* Procedural Generators */}
             <Route path={ROUTES.BUILDING_GEN} element={<BuildingGenPage />} />

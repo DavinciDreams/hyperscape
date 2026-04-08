@@ -4,6 +4,7 @@ import {
   Wrench,
   Hand,
   Shield,
+  Gem,
   Shuffle,
   Building2,
   FileJson,
@@ -160,6 +161,14 @@ const Navigation: React.FC = () => {
           >
             <Shield size={18} />
             <span>Armor</span>
+          </Link>
+
+          <Link
+            to={ROUTES.ARMOR_PIPELINE}
+            className={navLinkClass(ROUTES.ARMOR_PIPELINE)}
+          >
+            <Gem size={18} />
+            <span>Armor v2</span>
           </Link>
 
           <Link
