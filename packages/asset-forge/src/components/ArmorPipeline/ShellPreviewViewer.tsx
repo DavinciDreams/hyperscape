@@ -412,385 +412,375 @@ export const ShellPreviewViewer = forwardRef<
     [],
   );
 
-  useImperativeHandle(ref, () => ({
-    showTexturedResult(scene: THREE.Object3D) {
-      // Detach VRM/loaded scenes (don't dispose their shared textures)
-      detachGroup(avatarGroupRef.current);
-      disposeGroup(overlayGroupRef.current);
+  useImperativeHandle(
+    ref,
+    () => ({
+      showTexturedResult(scene: THREE.Object3D) {
+        // Detach VRM/loaded scenes (don't dispose their shared textures)
+        detachGroup(avatarGroupRef.current);
+        disposeGroup(overlayGroupRef.current);
 
-      avatarGroupRef.current.add(scene);
-      frameCamera(scene);
-    },
+        avatarGroupRef.current.add(scene);
+        frameCamera(scene);
+      },
 
-    setAvatarScene(vrmScene: THREE.Object3D) {
-      // Detach previous scene without disposing (textures are loader-managed)
-      detachGroup(avatarGroupRef.current);
+      setAvatarScene(vrmScene: THREE.Object3D) {
+        // Detach previous scene without disposing (textures are loader-managed)
+        detachGroup(avatarGroupRef.current);
 
-      avatarGroupRef.current.add(vrmScene);
+        avatarGroupRef.current.add(vrmScene);
 
-      // Keep original VRM materials — just ensure double-sided rendering
-      vrmScene.traverse((child) => {
-        if (child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => {
-              m.side = THREE.DoubleSide;
-            });
-          } else if (child.material) {
-            child.material.side = THREE.DoubleSide;
+        // Keep original VRM materials — just ensure double-sided rendering
+        vrmScene.traverse((child) => {
+          if (
+            child instanceof THREE.Mesh ||
+            child instanceof THREE.SkinnedMesh
+          ) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach((m) => {
+                m.side = THREE.DoubleSide;
+              });
+            } else if (child.material) {
+              child.material.side = THREE.DoubleSide;
+            }
           }
-        }
-      });
+        });
 
-      frameCamera(vrmScene);
-    },
+        frameCamera(vrmScene);
+      },
 
-    showRegions(skinnedMesh, regions, processedGeometry) {
-      disposeGroup(overlayGroupRef.current);
-      // Use processedGeometry when available — region indices reference it
-      // (marching triangles adds extra isoline vertices beyond the original mesh)
-      const srcGeo = processedGeometry ?? skinnedMesh.geometry;
-      const srcPos = srcGeo.attributes.position as THREE.BufferAttribute;
-      const srcNorm = srcGeo.attributes.normal as THREE.BufferAttribute;
-      const REGION_OFFSET = 0.002; // 2mm outward to prevent Z-fighting
-      const COINCIDENT_PRECISION = 10000; // 0.1mm
+      showRegions(skinnedMesh, regions, processedGeometry) {
+        disposeGroup(overlayGroupRef.current);
+        // Use processedGeometry when available — region indices reference it
+        // (marching triangles adds extra isoline vertices beyond the original mesh)
+        const srcGeo = processedGeometry ?? skinnedMesh.geometry;
+        const srcPos = srcGeo.attributes.position as THREE.BufferAttribute;
+        const srcNorm = srcGeo.attributes.normal as THREE.BufferAttribute;
+        const REGION_OFFSET = 0.002; // 2mm outward to prevent Z-fighting
+        const COINCIDENT_PRECISION = 10000; // 0.1mm
 
-      for (const [slotName, region] of regions) {
-        if (region.triangleIndices.length === 0) continue;
+        for (const [slotName, region] of regions) {
+          if (region.triangleIndices.length === 0) continue;
 
-        const usedVerts = new Set<number>();
-        for (const idx of region.triangleIndices) usedVerts.add(idx);
-        const sortedVerts = Array.from(usedVerts).sort((a, b) => a - b);
+          const usedVerts = new Set<number>();
+          for (const idx of region.triangleIndices) usedVerts.add(idx);
+          const sortedVerts = Array.from(usedVerts).sort((a, b) => a - b);
 
-        const oldToNew = new Map<number, number>();
-        sortedVerts.forEach((v, i) => oldToNew.set(v, i));
+          const oldToNew = new Map<number, number>();
+          sortedVerts.forEach((v, i) => oldToNew.set(v, i));
 
-        // Copy body normals first
-        const normals = new Float32Array(sortedVerts.length * 3);
-        for (let i = 0; i < sortedVerts.length; i++) {
-          const vi = sortedVerts[i];
-          normals[i * 3] = srcNorm.getX(vi);
-          normals[i * 3 + 1] = srcNorm.getY(vi);
-          normals[i * 3 + 2] = srcNorm.getZ(vi);
-        }
-
-        // Find & average coincident vertex normals (fixes UV seam cracks)
-        const posMap = new Map<string, number[]>();
-        for (let i = 0; i < sortedVerts.length; i++) {
-          const vi = sortedVerts[i];
-          const x = Math.round(srcPos.getX(vi) * COINCIDENT_PRECISION);
-          const y = Math.round(srcPos.getY(vi) * COINCIDENT_PRECISION);
-          const z = Math.round(srcPos.getZ(vi) * COINCIDENT_PRECISION);
-          const key = `${x},${y},${z}`;
-          let group = posMap.get(key);
-          if (!group) {
-            group = [];
-            posMap.set(key, group);
+          // Copy body normals first
+          const normals = new Float32Array(sortedVerts.length * 3);
+          for (let i = 0; i < sortedVerts.length; i++) {
+            const vi = sortedVerts[i];
+            normals[i * 3] = srcNorm.getX(vi);
+            normals[i * 3 + 1] = srcNorm.getY(vi);
+            normals[i * 3 + 2] = srcNorm.getZ(vi);
           }
-          group.push(i);
-        }
-        for (const group of posMap.values()) {
-          if (group.length < 2) continue;
-          let ax = 0,
-            ay = 0,
-            az = 0;
-          for (const vi of group) {
-            ax += normals[vi * 3];
-            ay += normals[vi * 3 + 1];
-            az += normals[vi * 3 + 2];
+
+          // Find & average coincident vertex normals (fixes UV seam cracks)
+          const posMap = new Map<string, number[]>();
+          for (let i = 0; i < sortedVerts.length; i++) {
+            const vi = sortedVerts[i];
+            const x = Math.round(srcPos.getX(vi) * COINCIDENT_PRECISION);
+            const y = Math.round(srcPos.getY(vi) * COINCIDENT_PRECISION);
+            const z = Math.round(srcPos.getZ(vi) * COINCIDENT_PRECISION);
+            const key = `${x},${y},${z}`;
+            let group = posMap.get(key);
+            if (!group) {
+              group = [];
+              posMap.set(key, group);
+            }
+            group.push(i);
           }
-          const len = Math.sqrt(ax * ax + ay * ay + az * az);
-          if (len < 1e-8) continue;
-          ax /= len;
-          ay /= len;
-          az /= len;
-          for (const vi of group) {
-            normals[vi * 3] = ax;
-            normals[vi * 3 + 1] = ay;
-            normals[vi * 3 + 2] = az;
+          for (const group of posMap.values()) {
+            if (group.length < 2) continue;
+            let ax = 0,
+              ay = 0,
+              az = 0;
+            for (const vi of group) {
+              ax += normals[vi * 3];
+              ay += normals[vi * 3 + 1];
+              az += normals[vi * 3 + 2];
+            }
+            const len = Math.sqrt(ax * ax + ay * ay + az * az);
+            if (len < 1e-8) continue;
+            ax /= len;
+            ay /= len;
+            az /= len;
+            for (const vi of group) {
+              normals[vi * 3] = ax;
+              normals[vi * 3 + 1] = ay;
+              normals[vi * 3 + 2] = az;
+            }
           }
-        }
 
-        // Apply positions with offset along averaged normals
-        const positions = new Float32Array(sortedVerts.length * 3);
-        for (let i = 0; i < sortedVerts.length; i++) {
-          const vi = sortedVerts[i];
-          positions[i * 3] = srcPos.getX(vi) + normals[i * 3] * REGION_OFFSET;
-          positions[i * 3 + 1] =
-            srcPos.getY(vi) + normals[i * 3 + 1] * REGION_OFFSET;
-          positions[i * 3 + 2] =
-            srcPos.getZ(vi) + normals[i * 3 + 2] * REGION_OFFSET;
-        }
-
-        // Snap coincident groups to average position
-        for (const group of posMap.values()) {
-          if (group.length < 2) continue;
-          let cx = 0,
-            cy = 0,
-            cz = 0;
-          for (const vi of group) {
-            cx += positions[vi * 3];
-            cy += positions[vi * 3 + 1];
-            cz += positions[vi * 3 + 2];
+          // Apply positions with offset along averaged normals
+          const positions = new Float32Array(sortedVerts.length * 3);
+          for (let i = 0; i < sortedVerts.length; i++) {
+            const vi = sortedVerts[i];
+            positions[i * 3] = srcPos.getX(vi) + normals[i * 3] * REGION_OFFSET;
+            positions[i * 3 + 1] =
+              srcPos.getY(vi) + normals[i * 3 + 1] * REGION_OFFSET;
+            positions[i * 3 + 2] =
+              srcPos.getZ(vi) + normals[i * 3 + 2] * REGION_OFFSET;
           }
-          cx /= group.length;
-          cy /= group.length;
-          cz /= group.length;
-          for (const vi of group) {
-            positions[vi * 3] = cx;
-            positions[vi * 3 + 1] = cy;
-            positions[vi * 3 + 2] = cz;
+
+          // Snap coincident groups to average position
+          for (const group of posMap.values()) {
+            if (group.length < 2) continue;
+            let cx = 0,
+              cy = 0,
+              cz = 0;
+            for (const vi of group) {
+              cx += positions[vi * 3];
+              cy += positions[vi * 3 + 1];
+              cz += positions[vi * 3 + 2];
+            }
+            cx /= group.length;
+            cy /= group.length;
+            cz /= group.length;
+            for (const vi of group) {
+              positions[vi * 3] = cx;
+              positions[vi * 3 + 1] = cy;
+              positions[vi * 3 + 2] = cz;
+            }
           }
+
+          const indices = new Uint32Array(region.triangleIndices.length);
+          for (let i = 0; i < region.triangleIndices.length; i++) {
+            indices[i] = oldToNew.get(region.triangleIndices[i])!;
+          }
+
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+          geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+          geo.setIndex(new THREE.BufferAttribute(indices, 1));
+
+          const mat = new THREE.MeshStandardMaterial({
+            color: SLOT_COLORS[slotName] ?? 0xffffff,
+            transparent: true,
+            opacity: opacityRef.current,
+            side: THREE.DoubleSide,
+            wireframe: wireframeRef.current,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
+          });
+
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.name = `region_${slotName}`;
+          overlayGroupRef.current.add(mesh);
         }
+      },
 
-        const indices = new Uint32Array(region.triangleIndices.length);
-        for (let i = 0; i < region.triangleIndices.length; i++) {
-          indices[i] = oldToNew.get(region.triangleIndices[i])!;
-        }
-
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-        geo.setIndex(new THREE.BufferAttribute(indices, 1));
-
+      showShell(shell) {
         const mat = new THREE.MeshStandardMaterial({
-          color: SLOT_COLORS[slotName] ?? 0xffffff,
+          color: SLOT_COLORS[shell.slotName] ?? 0x4488ff,
           transparent: true,
           opacity: opacityRef.current,
           side: THREE.DoubleSide,
           wireframe: wireframeRef.current,
+          metalness: 0.3,
+          roughness: 0.5,
           polygonOffset: true,
           polygonOffsetFactor: -1,
           polygonOffsetUnits: -1,
         });
 
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.name = `region_${slotName}`;
-        overlayGroupRef.current.add(mesh);
-      }
-    },
-
-    showShell(shell) {
-      const mat = new THREE.MeshStandardMaterial({
-        color: SLOT_COLORS[shell.slotName] ?? 0x4488ff,
-        transparent: true,
-        opacity: opacityRef.current,
-        side: THREE.DoubleSide,
-        wireframe: wireframeRef.current,
-        metalness: 0.3,
-        roughness: 0.5,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      });
-
-      // Clone geometry to avoid disposing the original ShellMesh data
-      const mesh = new THREE.Mesh(shell.geometry.clone(), mat);
-      mesh.name = `shell_${shell.slotName}_${shell.bulkClass}`;
-      overlayGroupRef.current.add(mesh);
-    },
-
-    showShells(shells) {
-      disposeGroup(overlayGroupRef.current);
-      for (const [_key, shell] of shells) {
-        const mat = new THREE.MeshStandardMaterial({
-          color: SLOT_COLORS[shell.slotName] ?? 0x4488ff,
-          transparent: true,
-          opacity: Math.max(0.1, opacityRef.current - 0.1),
-          side: THREE.DoubleSide,
-          wireframe: wireframeRef.current,
-          metalness: 0.2,
-          roughness: 0.6,
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-          polygonOffsetUnits: -1,
-        });
         // Clone geometry to avoid disposing the original ShellMesh data
         const mesh = new THREE.Mesh(shell.geometry.clone(), mat);
         mesh.name = `shell_${shell.slotName}_${shell.bulkClass}`;
         overlayGroupRef.current.add(mesh);
-      }
-    },
+      },
 
-    clearOverlays() {
-      disposeGroup(overlayGroupRef.current);
-    },
-
-    clear() {
-      // Stop animation
-      if (mixerRef.current) {
-        mixerRef.current.stopAllAction();
-        mixerRef.current = null;
-      }
-      // Clear bone attachments before removing VRM (bones go away with VRM)
-      boneAttachmentsRef.current.clear();
-      vrmRef.current = null;
-      vrmSceneRef.current = null;
-      armorPiecesRef.current.clear();
-
-      // Detach loaded scenes (VRM/GLTF) — don't dispose their shared textures
-      detachGroup(avatarGroupRef.current);
-      // Overlays are ours to dispose (fresh materials, no shared textures)
-      disposeGroup(overlayGroupRef.current);
-    },
-
-    setWireframe(enabled) {
-      wireframeRef.current = enabled;
-      overlayGroupRef.current.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshStandardMaterial).wireframe = enabled;
+      showShells(shells) {
+        disposeGroup(overlayGroupRef.current);
+        for (const [_key, shell] of shells) {
+          const mat = new THREE.MeshStandardMaterial({
+            color: SLOT_COLORS[shell.slotName] ?? 0x4488ff,
+            transparent: true,
+            opacity: Math.max(0.1, opacityRef.current - 0.1),
+            side: THREE.DoubleSide,
+            wireframe: wireframeRef.current,
+            metalness: 0.2,
+            roughness: 0.6,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
+          });
+          // Clone geometry to avoid disposing the original ShellMesh data
+          const mesh = new THREE.Mesh(shell.geometry.clone(), mat);
+          mesh.name = `shell_${shell.slotName}_${shell.bulkClass}`;
+          overlayGroupRef.current.add(mesh);
         }
-      });
-    },
+      },
 
-    setOverlayOpacity(opacity) {
-      opacityRef.current = opacity;
-      overlayGroupRef.current.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          (child.material as THREE.MeshStandardMaterial).opacity = opacity;
+      clearOverlays() {
+        disposeGroup(overlayGroupRef.current);
+      },
+
+      clear() {
+        // Stop animation
+        if (mixerRef.current) {
+          mixerRef.current.stopAllAction();
+          mixerRef.current = null;
         }
-      });
-    },
+        // Clear bone attachments before removing VRM (bones go away with VRM)
+        boneAttachmentsRef.current.clear();
+        vrmRef.current = null;
+        vrmSceneRef.current = null;
+        armorPiecesRef.current.clear();
 
-    // ── Bone Attachments (rigid meshes parented to bones) ──────────────
+        // Detach loaded scenes (VRM/GLTF) — don't dispose their shared textures
+        detachGroup(avatarGroupRef.current);
+        // Overlays are ours to dispose (fresh materials, no shared textures)
+        disposeGroup(overlayGroupRef.current);
+      },
 
-    addBoneAttachment(
-      key: string,
-      object: THREE.Object3D,
-      boneName: string,
-      offset?: THREE.Vector3,
-      rotation?: THREE.Euler,
-      scale?: number,
-    ) {
-      const vrm = vrmRef.current;
-      if (!vrm) {
-        console.warn(
-          "[ShellPreviewViewer] Cannot add bone attachment — no VRM loaded. Call setupAvatar first.",
-        );
-        return;
-      }
-
-      // Remove existing attachment with same key
-      const existing = boneAttachmentsRef.current.get(key);
-      if (existing) {
-        existing.object.parent?.remove(existing.object);
-        existing.object.traverse((child) => {
+      setWireframe(enabled) {
+        wireframeRef.current = enabled;
+        overlayGroupRef.current.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            child.geometry?.dispose();
-            if (Array.isArray(child.material))
-              child.material.forEach((m) => m.dispose());
-            else child.material?.dispose();
+            (child.material as THREE.MeshStandardMaterial).wireframe = enabled;
           }
         });
-      }
+      },
 
-      // Try to find the bone: first try raw bone (actual scene node),
-      // then fall back to normalized bone node.
-      // Raw bones work better for attachments because they're in world space.
-      let bone: THREE.Object3D | null = null;
-
-      // Search the VRM scene for a bone node matching the name
-      const vrmScene = vrmSceneRef.current;
-      if (vrmScene) {
-        vrmScene.traverse((child) => {
-          if (bone) return;
-          const childName = child.name.toLowerCase();
-          const target = boneName.toLowerCase();
-          // Match common bone naming patterns:
-          // "leftShoulder" → "leftshoulder", "Left_Shoulder", "J_Bip_L_Shoulder", etc.
-          if (
-            childName === target ||
-            childName.includes(target) ||
-            childName.replace(/[_\-\s]/g, "") === target
-          ) {
-            bone = child;
+      setOverlayOpacity(opacity) {
+        opacityRef.current = opacity;
+        overlayGroupRef.current.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            (child.material as THREE.MeshStandardMaterial).opacity = opacity;
           }
         });
-      }
+      },
 
-      // Fallback to normalized bone node
-      if (!bone) {
-        bone =
-          vrm.humanoid?.getNormalizedBoneNode(
-            boneName as Parameters<
-              typeof vrm.humanoid.getNormalizedBoneNode
-            >[0],
-          ) ?? null;
-      }
+      // ── Bone Attachments (rigid meshes parented to bones) ──────────────
 
-      if (!bone) {
-        console.warn(
-          `[ShellPreviewViewer] Bone "${boneName}" not found in scene or VRM humanoid`,
+      addBoneAttachment(
+        key: string,
+        object: THREE.Object3D,
+        boneName: string,
+        offset?: THREE.Vector3,
+        rotation?: THREE.Euler,
+        scale?: number,
+      ) {
+        const vrm = vrmRef.current;
+        if (!vrm) {
+          console.warn(
+            "[ShellPreviewViewer] Cannot add bone attachment — no VRM loaded. Call setupAvatar first.",
+          );
+          return;
+        }
+
+        // Remove existing attachment with same key
+        const existing = boneAttachmentsRef.current.get(key);
+        if (existing) {
+          existing.object.parent?.remove(existing.object);
+          existing.object.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              child.geometry?.dispose();
+              if (Array.isArray(child.material))
+                child.material.forEach((m) => m.dispose());
+              else child.material?.dispose();
+            }
+          });
+        }
+
+        // Try to find the bone: first try raw bone (actual scene node),
+        // then fall back to normalized bone node.
+        // Raw bones work better for attachments because they're in world space.
+        let bone: THREE.Object3D | null = null;
+
+        // Search the VRM scene for a bone node matching the name
+        const vrmScene = vrmSceneRef.current;
+        if (vrmScene) {
+          vrmScene.traverse((child) => {
+            if (bone) return;
+            const childName = child.name.toLowerCase();
+            const target = boneName.toLowerCase();
+            // Match common bone naming patterns:
+            // "leftShoulder" → "leftshoulder", "Left_Shoulder", "J_Bip_L_Shoulder", etc.
+            if (
+              childName === target ||
+              childName.includes(target) ||
+              childName.replace(/[_\-\s]/g, "") === target
+            ) {
+              bone = child;
+            }
+          });
+        }
+
+        // Fallback to normalized bone node
+        if (!bone) {
+          bone =
+            vrm.humanoid?.getNormalizedBoneNode(
+              boneName as Parameters<
+                typeof vrm.humanoid.getNormalizedBoneNode
+              >[0],
+            ) ?? null;
+        }
+
+        if (!bone) {
+          console.warn(
+            `[ShellPreviewViewer] Bone "${boneName}" not found in scene or VRM humanoid`,
+          );
+          return;
+        }
+
+        // Log bone world position for debugging
+        const boneWorldPos = new THREE.Vector3();
+        bone.getWorldPosition(boneWorldPos);
+        console.log(
+          `[ShellPreviewViewer] Attaching "${key}" to bone "${bone.name}" at world pos`,
+          boneWorldPos.toArray().map((v) => v.toFixed(3)),
         );
-        return;
-      }
 
-      // Log bone world position for debugging
-      const boneWorldPos = new THREE.Vector3();
-      bone.getWorldPosition(boneWorldPos);
-      console.log(
-        `[ShellPreviewViewer] Attaching "${key}" to bone "${bone.name}" at world pos`,
-        boneWorldPos.toArray().map((v) => v.toFixed(3)),
-      );
+        // Apply transform
+        if (offset) object.position.copy(offset);
+        if (rotation) object.rotation.copy(rotation);
+        if (scale !== undefined) object.scale.setScalar(scale);
 
-      // Apply transform
-      if (offset) object.position.copy(offset);
-      if (rotation) object.rotation.copy(rotation);
-      if (scale !== undefined) object.scale.setScalar(scale);
-
-      // Ensure double-sided materials and visible rendering
-      object.traverse((child) => {
-        if (child instanceof THREE.Mesh && child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => {
-              m.side = THREE.DoubleSide;
-              m.depthWrite = true;
-              m.depthTest = true;
-            });
-          } else {
-            child.material.side = THREE.DoubleSide;
-            child.material.depthWrite = true;
-            child.material.depthTest = true;
+        // Ensure double-sided materials and visible rendering
+        object.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach((m) => {
+                m.side = THREE.DoubleSide;
+                m.depthWrite = true;
+                m.depthTest = true;
+              });
+            } else {
+              child.material.side = THREE.DoubleSide;
+              child.material.depthWrite = true;
+              child.material.depthTest = true;
+            }
           }
-        }
-      });
+        });
 
-      object.name = `attachment_${key}`;
-      bone.add(object);
-      boneAttachmentsRef.current.set(key, { object, boneName: bone.name });
-    },
+        object.name = `attachment_${key}`;
+        bone.add(object);
+        boneAttachmentsRef.current.set(key, { object, boneName: bone.name });
+      },
 
-    updateAttachmentTransform(
-      key: string,
-      offset: THREE.Vector3,
-      rotation: THREE.Euler,
-      scale: number,
-    ) {
-      const entry = boneAttachmentsRef.current.get(key);
-      if (!entry) return;
-      entry.object.position.copy(offset);
-      entry.object.rotation.copy(rotation);
-      entry.object.scale.setScalar(scale);
-    },
+      updateAttachmentTransform(
+        key: string,
+        offset: THREE.Vector3,
+        rotation: THREE.Euler,
+        scale: number,
+      ) {
+        const entry = boneAttachmentsRef.current.get(key);
+        if (!entry) return;
+        entry.object.position.copy(offset);
+        entry.object.rotation.copy(rotation);
+        entry.object.scale.setScalar(scale);
+      },
 
-    removeBoneAttachment(key: string) {
-      const entry = boneAttachmentsRef.current.get(key);
-      if (!entry) return;
+      removeBoneAttachment(key: string) {
+        const entry = boneAttachmentsRef.current.get(key);
+        if (!entry) return;
 
-      entry.object.parent?.remove(entry.object);
-      entry.object.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry?.dispose();
-          if (Array.isArray(child.material))
-            child.material.forEach((m) => m.dispose());
-          else child.material?.dispose();
-        }
-      });
-
-      boneAttachmentsRef.current.delete(key);
-    },
-
-    clearBoneAttachments() {
-      for (const [_key, entry] of boneAttachmentsRef.current) {
         entry.object.parent?.remove(entry.object);
         entry.object.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -800,91 +790,110 @@ export const ShellPreviewViewer = forwardRef<
             else child.material?.dispose();
           }
         });
-      }
-      boneAttachmentsRef.current.clear();
-    },
 
-    // ── POC-3: Animation methods ───────────────────────────────────────
+        boneAttachmentsRef.current.delete(key);
+      },
 
-    setupAvatar: doSetupAvatar,
-
-    addArmorPiece: doAddArmorPiece,
-
-    setArmorPieceVisible(key: string, visible: boolean) {
-      const mesh = armorPiecesRef.current.get(key);
-      if (mesh) {
-        mesh.visible = visible;
-      }
-    },
-
-    clearArmorPieces() {
-      for (const [_key, mesh] of armorPiecesRef.current) {
-        if (vrmSceneRef.current) {
-          vrmSceneRef.current.remove(mesh);
+      clearBoneAttachments() {
+        for (const [_key, entry] of boneAttachmentsRef.current) {
+          entry.object.parent?.remove(entry.object);
+          entry.object.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              child.geometry?.dispose();
+              if (Array.isArray(child.material))
+                child.material.forEach((m) => m.dispose());
+              else child.material?.dispose();
+            }
+          });
         }
-        mesh.geometry?.dispose();
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach((m) => m.dispose());
-        } else {
-          mesh.material?.dispose();
+        boneAttachmentsRef.current.clear();
+      },
+
+      // ── POC-3: Animation methods ───────────────────────────────────────
+
+      setupAvatar: doSetupAvatar,
+
+      addArmorPiece: doAddArmorPiece,
+
+      setArmorPieceVisible(key: string, visible: boolean) {
+        const mesh = armorPiecesRef.current.get(key);
+        if (mesh) {
+          mesh.visible = visible;
         }
-      }
-      armorPiecesRef.current.clear();
-    },
+      },
 
-    showRiggedArmor(
-      riggedMesh: THREE.SkinnedMesh,
-      vrmScene: THREE.Object3D,
-      vrm: VRM,
-    ) {
-      doSetupAvatar(vrmScene, vrm);
-      doAddArmorPiece("default", riggedMesh);
-    },
+      clearArmorPieces() {
+        for (const [_key, mesh] of armorPiecesRef.current) {
+          if (vrmSceneRef.current) {
+            vrmSceneRef.current.remove(mesh);
+          }
+          mesh.geometry?.dispose();
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach((m) => m.dispose());
+          } else {
+            mesh.material?.dispose();
+          }
+        }
+        armorPiecesRef.current.clear();
+      },
 
-    async playAnimation(animUrl: string) {
-      const vrm = vrmRef.current;
-      const mixer = mixerRef.current;
-      if (!vrm || !mixer) {
-        console.warn(
-          "[ShellPreviewViewer] Cannot play animation — no VRM or mixer",
+      showRiggedArmor(
+        riggedMesh: THREE.SkinnedMesh,
+        vrmScene: THREE.Object3D,
+        vrm: VRM,
+      ) {
+        doSetupAvatar(vrmScene, vrm);
+        doAddArmorPiece("default", riggedMesh);
+      },
+
+      async playAnimation(animUrl: string) {
+        const vrm = vrmRef.current;
+        const mixer = mixerRef.current;
+        if (!vrm || !mixer) {
+          console.warn(
+            "[ShellPreviewViewer] Cannot play animation — no VRM or mixer",
+          );
+          return;
+        }
+
+        // Load Mixamo animation GLB
+        const gltf = await gltfLoaderRef.current.loadAsync(animUrl);
+
+        if (!gltf.animations || gltf.animations.length === 0) {
+          console.warn("[ShellPreviewViewer] No animations found in", animUrl);
+          return;
+        }
+
+        // Retarget Mixamo animation to VRM skeleton
+        const retargetedClip = retargetAnimation(
+          gltf,
+          vrm,
+          rootToHipsRef.current,
         );
-        return;
-      }
+        if (!retargetedClip) {
+          console.error(
+            "[ShellPreviewViewer] Animation retargeting failed for",
+            animUrl,
+          );
+          return;
+        }
 
-      // Load Mixamo animation GLB
-      const gltf = await gltfLoaderRef.current.loadAsync(animUrl);
+        // Stop any existing animation and play the new one
+        mixer.stopAllAction();
+        const action = mixer.clipAction(retargetedClip);
+        action.reset().fadeIn(0.2).play();
+      },
 
-      if (!gltf.animations || gltf.animations.length === 0) {
-        console.warn("[ShellPreviewViewer] No animations found in", animUrl);
-        return;
-      }
-
-      // Retarget Mixamo animation to VRM skeleton
-      const retargetedClip = retargetAnimation(
-        gltf,
-        vrm,
-        rootToHipsRef.current,
-      );
-      if (!retargetedClip) {
-        console.error(
-          "[ShellPreviewViewer] Animation retargeting failed for",
-          animUrl,
-        );
-        return;
-      }
-
-      // Stop any existing animation and play the new one
-      mixer.stopAllAction();
-      const action = mixer.clipAction(retargetedClip);
-      action.reset().fadeIn(0.2).play();
-    },
-
-    stopAnimation() {
-      if (mixerRef.current) {
-        mixerRef.current.stopAllAction();
-      }
-    },
-  }));
+      stopAnimation() {
+        if (mixerRef.current) {
+          mixerRef.current.stopAllAction();
+        }
+      },
+      // All methods reference stable refs — no reactive deps needed
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }),
+    [],
+  );
 
   return (
     <div

@@ -22,15 +22,19 @@ function isValidPublicUrl(urlStr: string): boolean {
 
     // Block private/internal IP ranges to prevent SSRF
     const host = url.hostname;
+    // Strip IPv6 mapped prefix for consistent checks (e.g. ::ffff:127.0.0.1 → 127.0.0.1)
+    const bareHost = host.replace(/^::ffff:/, "");
     if (
-      host === "localhost" ||
-      host.startsWith("127.") ||
-      host === "::1" ||
-      host.startsWith("10.") ||
-      host.startsWith("192.168.") ||
-      host.startsWith("169.254.") ||
-      host === "0.0.0.0" ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      bareHost === "localhost" ||
+      bareHost.startsWith("127.") ||
+      bareHost.startsWith("0.") ||
+      bareHost === "::1" ||
+      bareHost === "0.0.0.0" ||
+      bareHost.startsWith("10.") ||
+      bareHost.startsWith("192.168.") ||
+      bareHost.startsWith("169.254.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(bareHost) ||
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(bareHost) // CGN (100.64.0.0/10)
     ) {
       return false;
     }

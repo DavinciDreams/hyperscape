@@ -228,7 +228,7 @@ const app = new Elysia()
     cors({
       origin:
         process.env.NODE_ENV === "production"
-          ? process.env.FRONTEND_URL || "*"
+          ? process.env.FRONTEND_URL || false
           : true,
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],

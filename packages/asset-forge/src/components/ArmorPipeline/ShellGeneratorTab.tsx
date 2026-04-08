@@ -144,7 +144,11 @@ export const ShellGeneratorTab: React.FC<ShellGeneratorTabProps> = ({
   }, [avatarUrl, selectedSlots, customThicknessMm, addLog, onExtract]);
 
   const handleExportShell = useCallback(async () => {
-    if (!result || !serviceRef.current) return;
+    if (!result) return;
+    // Ensure service is available — it may be null if extraction used the shared onExtract path
+    if (!serviceRef.current) {
+      serviceRef.current = new ShellExtractionService();
+    }
 
     const bulkKey = selectedBulk;
     for (const slot of selectedSlots) {

@@ -139,6 +139,8 @@ export const ArmorPipelinePage: React.FC = () => {
   const [armorKit, setArmorKit] = useState<Map<string, ArmorKitPiece>>(
     new Map(),
   );
+  const armorKitRef = useRef(armorKit);
+  armorKitRef.current = armorKit;
 
   const handleAddToKit = useCallback(
     (shell: ShellMesh, texturedGlbUrl: string) => {
@@ -158,16 +160,15 @@ export const ArmorPipelinePage: React.FC = () => {
     [],
   );
 
-  // Cleanup blob URLs on unmount
+  // Cleanup blob URLs on unmount — use ref to avoid stale closure
   useEffect(() => {
     return () => {
-      armorKit.forEach((piece) => {
+      armorKitRef.current.forEach((piece) => {
         if (piece.texturedUrl?.startsWith("blob:")) {
           URL.revokeObjectURL(piece.texturedUrl);
         }
       });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const kitCount = armorKit.size;

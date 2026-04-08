@@ -686,9 +686,9 @@ export class TripoService {
     const hostOk =
       parsedUrl.hostname === "api.tripo3d.ai" ||
       parsedUrl.hostname.endsWith(".tripo3d.ai") ||
-      // Tripo uses region-prefixed S3 hosts (e.g., bucket.s3.us-east-1.amazonaws.com)
-      // Require the region segment to prevent matching arbitrary attacker buckets
-      /^[a-z0-9][a-z0-9.-]*\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(
+      // Tripo uses S3 buckets prefixed with "tripo" (e.g., tripo-data.s3.us-east-1.amazonaws.com)
+      // Pin to Tripo's known bucket prefix with required region segment
+      /^tripo[a-z0-9-]*\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(
         parsedUrl.hostname,
       );
     if (!hostOk) {
@@ -706,7 +706,21 @@ export class TripoService {
       );
     }
 
+    // Guard against oversized responses (max 100MB)
+    const MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024;
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_DOWNLOAD_SIZE) {
+      throw new Error(
+        `Tripo result file too large: ${contentLength} bytes (max ${MAX_DOWNLOAD_SIZE})`,
+      );
+    }
+
     const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_DOWNLOAD_SIZE) {
+      throw new Error(
+        `Tripo result file too large: ${arrayBuffer.byteLength} bytes (max ${MAX_DOWNLOAD_SIZE})`,
+      );
+    }
     return { buffer: Buffer.from(arrayBuffer), url };
   }
 

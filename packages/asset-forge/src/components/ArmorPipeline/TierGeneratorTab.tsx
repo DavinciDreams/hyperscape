@@ -84,6 +84,7 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
   const shellServiceRef = useRef<ShellExtractionService | null>(null);
   const textureServiceRef = useRef<ArmorTextureService | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const unmountedRef = useRef(false);
 
   // Settings
   const [avatarUrl, setAvatarUrl] = useState(AVATAR_OPTIONS[0].url);
@@ -130,6 +131,7 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
@@ -248,11 +250,13 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
       const taskMap = new Map(tasks.map((t) => [t.tierId, t.taskId]));
 
       const poll = async () => {
+        if (unmountedRef.current) return;
         let allDone = true;
 
         for (const [tierId, taskId] of taskMap) {
           try {
             const status: TextureTaskStatus = await service.getStatus(taskId);
+            if (unmountedRef.current) return;
 
             setTierTasks((prev) =>
               prev.map((t) => {
