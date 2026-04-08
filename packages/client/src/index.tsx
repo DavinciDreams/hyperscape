@@ -92,7 +92,6 @@ const EmbeddedAgentControlScreen = React.lazy(() =>
 import { isEmbeddedMode } from "./types/embeddedConfig";
 import { validateURLParams } from "./utils/InputValidator";
 import { GAME_API_URL, GAME_WS_URL, refreshApiConfig } from "./lib/api-config";
-import { validateURLParams } from "./utils/InputValidator";
 import {
   buildEmbeddedConfig,
   embeddedParamSchema,
