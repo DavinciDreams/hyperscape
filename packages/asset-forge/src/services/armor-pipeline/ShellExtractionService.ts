@@ -399,9 +399,6 @@ export class ShellExtractionService {
         for (const alias of aliases) {
           idx = boneNameLower.indexOf(alias);
           if (idx >= 0) break;
-          // Also try contains match for aliases
-          idx = boneNameLower.findIndex((n) => n === alias);
-          if (idx >= 0) break;
         }
       }
 
@@ -998,8 +995,9 @@ export class ShellExtractionService {
 
       // Find edges that are at the slot boundary: edges where the two adjacent
       // triangles belong to DIFFERENT slots. Build a map of edge→slot ownership.
-      const MAX_V = totalVertCount + 1;
-      const edgeSlots = new Map<number, Set<EquipmentSlotName>>();
+      const boundaryEdgeKey = (a: number, b: number) =>
+        a < b ? `${a}_${b}` : `${b}_${a}`;
+      const edgeSlots = new Map<string, Set<EquipmentSlotName>>();
       for (const slot of slots) {
         const tris = slotTriangles.get(slot)!;
         for (let t = 0; t < tris.length; t += 3) {
@@ -1007,7 +1005,7 @@ export class ShellExtractionService {
           for (let j = 0; j < 3; j++) {
             const a = tri[j],
               b = tri[(j + 1) % 3];
-            const ek = Math.min(a, b) * MAX_V + Math.max(a, b);
+            const ek = boundaryEdgeKey(a, b);
             let s = edgeSlots.get(ek);
             if (!s) {
               s = new Set();
@@ -1025,8 +1023,9 @@ export class ShellExtractionService {
       }
       for (const [ek, slotSet] of edgeSlots) {
         if (slotSet.size < 2) continue; // internal edge, not at slot boundary
-        const a = Math.floor(ek / MAX_V);
-        const b = ek % MAX_V;
+        const parts = ek.split("_");
+        const a = parseInt(parts[0], 10);
+        const b = parseInt(parts[1], 10);
         if (interSlotBoundaryVerts.has(a) && interSlotBoundaryVerts.has(b)) {
           chainAdj.get(a)!.add(b);
           chainAdj.get(b)!.add(a);
@@ -1054,7 +1053,7 @@ export class ShellExtractionService {
         }
       }
 
-      // Smooth boundary normals along the chain (6 iterations)
+      // Smooth boundary normals along the chain (8 iterations)
       const chainAdjArr = new Map<number, number[]>();
       for (const [v, s] of chainAdj) chainAdjArr.set(v, Array.from(s));
 

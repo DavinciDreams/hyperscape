@@ -165,6 +165,9 @@ function buildS3PutHeaders(params: {
 // Service
 // ---------------------------------------------------------------------------
 
+/** Tripo task IDs are alphanumeric — reject anything else to prevent path injection */
+const TASK_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
 export class TripoService {
   private apiKey: string;
   private baseUrl = "https://api.tripo3d.ai/v2/openapi";
@@ -558,6 +561,10 @@ export class TripoService {
 
   /** Get the status of a Tripo task. */
   async getTaskStatus(taskId: string): Promise<TripoTaskStatus> {
+    if (!TASK_ID_RE.test(taskId)) {
+      throw new Error(`Invalid task ID format: ${taskId}`);
+    }
+
     const response = await fetch(`${this.baseUrl}/task/${taskId}`, {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
@@ -670,12 +677,14 @@ export class TripoService {
       throw new Error("No download URL available for this task");
     }
 
-    // Validate URL domain to prevent SSRF — exact host or subdomain match only
+    // Validate URL domain to prevent SSRF
     const parsedUrl = new URL(url);
-    const ALLOWED_TRIPO_HOSTS = ["api.tripo3d.ai", "s3.amazonaws.com"];
-    const hostOk = ALLOWED_TRIPO_HOSTS.some(
-      (h) => parsedUrl.hostname === h || parsedUrl.hostname.endsWith(`.${h}`),
-    );
+    const hostOk =
+      parsedUrl.hostname === "api.tripo3d.ai" ||
+      parsedUrl.hostname.endsWith(".tripo3d.ai") ||
+      // Tripo uses region-prefixed S3 hosts (e.g., s3.us-east-1.amazonaws.com)
+      // Only allow *.s3*.amazonaws.com patterns, not bare s3.amazonaws.com
+      /^[a-z0-9-]+\.s3[a-z0-9.-]*\.amazonaws\.com$/.test(parsedUrl.hostname);
     if (!hostOk) {
       throw new Error(
         `Refusing to download from untrusted domain: ${parsedUrl.hostname}`,

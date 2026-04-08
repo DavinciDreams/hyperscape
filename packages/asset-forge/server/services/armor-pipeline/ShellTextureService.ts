@@ -55,6 +55,9 @@ interface MeshyTaskStatus {
   }>;
 }
 
+/** Meshy task IDs are UUIDs — reject anything else to prevent path injection */
+const TASK_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
 export class ShellTextureService {
   private apiKey: string;
   private baseUrl = "https://api.meshy.ai";
@@ -164,6 +167,10 @@ export class ShellTextureService {
    * Check status of a retexture task.
    */
   async getTaskStatus(taskId: string): Promise<TextureTaskStatus> {
+    if (!TASK_ID_RE.test(taskId)) {
+      throw new Error(`Invalid task ID format: ${taskId}`);
+    }
+
     const response = await fetch(
       `${this.baseUrl}/openapi/v1/retexture/${taskId}`,
       {

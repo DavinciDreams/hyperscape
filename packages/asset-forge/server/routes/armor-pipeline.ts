@@ -18,7 +18,24 @@ const SAFE_PATH_RE = /^[a-zA-Z0-9_-]+$/;
 function isValidPublicUrl(urlStr: string): boolean {
   try {
     const url = new URL(urlStr);
-    return url.protocol === "https:";
+    if (url.protocol !== "https:") return false;
+
+    // Block private/internal IP ranges to prevent SSRF
+    const host = url.hostname;
+    if (
+      host === "localhost" ||
+      host.startsWith("127.") ||
+      host === "::1" ||
+      host.startsWith("10.") ||
+      host.startsWith("192.168.") ||
+      host.startsWith("169.254.") ||
+      host === "0.0.0.0" ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) {
+      return false;
+    }
+
+    return true;
   } catch {
     return false;
   }
@@ -153,6 +170,23 @@ export const createArmorPipelineRoutes = (
                 success: false,
                 error: "tiers must be a non-empty array",
               };
+            }
+            // Validate each tier has required fields
+            for (let i = 0; i < tiers.length; i++) {
+              const tier = tiers[i];
+              if (
+                !tier ||
+                typeof tier.tierId !== "string" ||
+                !tier.tierId ||
+                typeof tier.prompt !== "string" ||
+                !tier.prompt
+              ) {
+                set.status = 400;
+                return {
+                  success: false,
+                  error: `tiers[${i}] must have non-empty "tierId" and "prompt" string fields`,
+                };
+              }
             }
             if (tiers.length > 10) {
               set.status = 400;

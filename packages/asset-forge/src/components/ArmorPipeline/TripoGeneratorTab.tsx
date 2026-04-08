@@ -215,6 +215,8 @@ export const TripoGeneratorTab: React.FC<TripoGeneratorTabProps> = ({
 
   // Attachment state
   const [attachments, setAttachments] = useState<ArmorAttachment[]>([]);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
   const [expandedAttachment, setExpandedAttachment] = useState<string | null>(
     null,
   );
@@ -590,9 +592,11 @@ export const TripoGeneratorTab: React.FC<TripoGeneratorTabProps> = ({
 
   const handleGenerateAttachment = useCallback(
     async (id: string) => {
-      const idx = attachments.findIndex((a) => a.id === id);
+      // Read from ref to avoid stale closure — attachments may change while generation is in-flight
+      const currentAttachments = attachmentsRef.current;
+      const idx = currentAttachments.findIndex((a) => a.id === id);
       if (idx < 0) return;
-      const att = attachments[idx];
+      const att = currentAttachments[idx];
 
       setAttachments((prev) =>
         prev.map((a) =>
@@ -692,7 +696,7 @@ export const TripoGeneratorTab: React.FC<TripoGeneratorTabProps> = ({
         addLog(`  ERROR generating ${att.label}: ${msg}`);
       }
     },
-    [attachments, quality, addLog, getTripoService],
+    [quality, addLog, getTripoService],
   );
 
   const handleUpdateAttachmentTransform = useCallback(

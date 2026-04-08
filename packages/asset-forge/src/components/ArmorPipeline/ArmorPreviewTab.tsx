@@ -377,7 +377,6 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
           fileUrl,
           vrmSkeleton,
         );
-        URL.revokeObjectURL(fileUrl);
 
         const key = `${result.slotName}_${result.bulkClass}`;
         viewerRef.current?.addArmorPiece(key, result.skinnedMesh);
@@ -390,6 +389,7 @@ export const ArmorPreviewTab: React.FC<ArmorPreviewTabProps> = ({
         setError(msg);
         addLog(`ERROR: ${msg}`);
       } finally {
+        URL.revokeObjectURL(fileUrl);
         setIsRigging(false);
       }
     };
