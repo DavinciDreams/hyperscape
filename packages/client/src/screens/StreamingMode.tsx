@@ -26,7 +26,12 @@ import type {
   StreamingGuardrailPhase,
 } from "@hyperscape/shared";
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
-import type { StreamingWindow } from "@/lib/streamingWindow";
+import type {
+  CaptureControlStatus,
+  StreamingWindow,
+  StreamingWindowHeartbeat,
+} from "@/lib/streamingWindow";
+import { buildCaptureControlStatus } from "@/lib/captureStatus";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
@@ -67,9 +72,6 @@ export interface AgentInfo {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
-  highestHit: number;
-  attacksLanded: number;
-  healsUsed: number;
   equipment: Record<string, string>;
   inventory: Array<{ itemId: string; quantity: number } | null>;
   rank: number;
@@ -97,6 +99,81 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
+const TARGET_AVATAR_READY_GRACE_MS = 30_000;
+
+function normalizeCaptureBridgeUrl(rawValue: string | null): string {
+  const fallbackUrl = "ws://localhost:8765";
+  const candidate = rawValue?.trim() || fallbackUrl;
+
+  try {
+    const parsed = new URL(candidate, window.location.href);
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      return fallbackUrl;
+    }
+    if (
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "0.0.0.0" ||
+      parsed.hostname === "::1"
+    ) {
+      parsed.hostname = "localhost";
+    }
+    return parsed.toString();
+  } catch {
+    return fallbackUrl;
+  }
+}
+
+function createCaptureSessionGeneration(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
+  const playerDirect = world.entities?.players?.get(targetEntityId) as
+    | {
+        avatar?: unknown;
+        _avatar?: unknown;
+        mesh?: { visible?: boolean } | null;
+        _fallbackAvatarRoot?: { visible?: boolean } | null;
+      }
+    | undefined;
+  if (
+    playerDirect?.avatar ||
+    playerDirect?._avatar ||
+    playerDirect?._fallbackAvatarRoot ||
+    playerDirect?.mesh
+  ) {
+    return true;
+  }
+
+  if (world.entities?.players) {
+    for (const [, player] of world.entities.players) {
+      const candidate = player as {
+        id?: string;
+        characterId?: string;
+        avatar?: unknown;
+        _avatar?: unknown;
+        mesh?: { visible?: boolean } | null;
+        _fallbackAvatarRoot?: { visible?: boolean } | null;
+      };
+      if (
+        (candidate.id === targetEntityId ||
+          candidate.characterId === targetEntityId) &&
+        (candidate.avatar ||
+          candidate._avatar ||
+          candidate._fallbackAvatarRoot ||
+          candidate.mesh)
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function toGuardrailAgent(
   agent: AgentInfo | null,
 ): StreamingGuardrailAgentSnapshot | null {
@@ -117,6 +194,8 @@ function deriveStreamingSurfaceBlockReason(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
 }): string | null {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
@@ -139,6 +218,9 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (params.needsCameraLock && !params.cameraLocked) {
     return "camera_target_unresolved";
   }
+  if (params.needsTargetAvatar && !params.targetAvatarReady) {
+    return "avatar_not_ready";
+  }
   return null;
 }
 
@@ -150,6 +232,8 @@ export function deriveStreamingRendererHealth(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
   loadingDismissed: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
   agent1: AgentInfo | null;
@@ -165,6 +249,8 @@ export function deriveStreamingRendererHealth(params: {
     initError: params.initError,
     needsCameraLock: params.needsCameraLock,
     cameraLocked: params.cameraLocked,
+    needsTargetAvatar: params.needsTargetAvatar,
+    targetAvatarReady: params.targetAvatarReady,
     phase: params.phase,
   });
   let degradedReason =
@@ -196,6 +282,8 @@ export function shouldDismissStreamingLoading(params: {
   initError?: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
   phase?: StreamingState["cycle"]["phase"] | null;
 }): boolean {
   return (
@@ -207,9 +295,18 @@ export function shouldDismissStreamingLoading(params: {
       initError: params.initError ?? null,
       needsCameraLock: params.needsCameraLock,
       cameraLocked: params.cameraLocked,
+      needsTargetAvatar: params.needsTargetAvatar,
+      targetAvatarReady: params.targetAvatarReady,
       phase: params.phase ?? null,
     }) === null
   );
+}
+
+export function shouldShowStreamingLoadingOverlay(params: {
+  initError?: string | null;
+  loadingDismissed: boolean;
+}): boolean {
+  return !params.initError && !params.loadingDismissed;
 }
 
 export function StreamingMode() {
@@ -220,6 +317,9 @@ export function StreamingMode() {
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
+  const [targetAvatarReady, setTargetAvatarReady] = useState(false);
+  const [targetAvatarGraceExpired, setTargetAvatarGraceExpired] =
+    useState(false);
   const [terrainStalled, setTerrainStalled] = useState(false);
   const [readyEventDelayed, setReadyEventDelayed] = useState(false);
   const [clientInitError, setClientInitError] = useState<string | null>(null);
@@ -232,18 +332,37 @@ export function StreamingMode() {
   const lastCameraTargetRef = useRef<string | null>(null);
   const terrainPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const terrainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const avatarTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const worldReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastCycleIdRef = useRef<string | null>(null);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
+  const heartbeatRafRef = useRef<number | null>(null);
+  const renderTickRef = useRef(0);
+  const duelStateTickRef = useRef(0);
+  const latestRenderTickAtRef = useRef<number | null>(null);
+  const latestDuelStateTickAtRef = useRef<number | null>(null);
   const [streamAccessToken] = useState<string | null>(() =>
     getStreamingAccessToken(),
   );
 
+  const writeHeartbeat = useCallback(() => {
+    const win = window as StreamingWindow;
+    const heartbeat: StreamingWindowHeartbeat = {
+      renderTick: renderTickRef.current,
+      latestRenderTickAt: latestRenderTickAtRef.current,
+      duelStateTick: duelStateTickRef.current,
+      latestDuelStateTickAt: latestDuelStateTickAtRef.current,
+    };
+    win.__HYPERSCAPE_STREAM_HEARTBEAT__ = heartbeat;
+  }, []);
+
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
-    const baseWsUrl = GAME_WS_URL;
+    const baseWsUrl = GAME_WS_URL || "ws://localhost:5555/ws";
     const url = new URL(baseWsUrl, window.location.href);
     url.searchParams.set("mode", "streaming");
     if (streamAccessToken) {
@@ -263,6 +382,17 @@ export function StreamingMode() {
     }
   }, []);
 
+  const clearAvatarPolling = useCallback(() => {
+    if (avatarPollRef.current) {
+      clearInterval(avatarPollRef.current);
+      avatarPollRef.current = null;
+    }
+    if (avatarTimeoutRef.current) {
+      clearTimeout(avatarTimeoutRef.current);
+      avatarTimeoutRef.current = null;
+    }
+  }, []);
+
   const clearCameraRetryTimeouts = useCallback(() => {
     for (const timeoutId of cameraRetryTimeoutsRef.current) {
       clearTimeout(timeoutId);
@@ -278,14 +408,28 @@ export function StreamingMode() {
       worldRef.current = world;
       setConnected(true);
       const win = window as StreamingWindow;
+      win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ =
+        createCaptureSessionGeneration();
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
       setWorldReady(false);
       setTerrainReady(false);
+      setTargetAvatarReady(false);
+      setTargetAvatarGraceExpired(false);
       setTerrainStalled(false);
       setReadyEventDelayed(false);
       setClientInitError(null);
+      renderTickRef.current = 0;
+      duelStateTickRef.current = 0;
+      latestRenderTickAtRef.current = null;
+      latestDuelStateTickAtRef.current = null;
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = {
+        renderTick: 0,
+        latestRenderTickAt: null,
+        duelStateTick: 0,
+        latestDuelStateTickAt: null,
+      };
 
       // Force potato-mode graphics tuned for stable 720p streaming output.
       // Keep DPR at 1 so capture canvas stays at target resolution.
@@ -503,7 +647,7 @@ export function StreamingMode() {
     let warnedOnce = false;
 
     // Try to fetch initial state via HTTP. Keep retrying until WS/state arrives.
-    const baseApiUrl = GAME_API_URL;
+    const baseApiUrl = GAME_API_URL || "http://localhost:5555";
     const stateUrl = `${baseApiUrl}/api/streaming/state`;
     const fetchState = () => {
       if (!mounted) return;
@@ -628,7 +772,9 @@ export function StreamingMode() {
       delete win.__captureControl__;
     }
 
-    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://127.0.0.1:8765";
+    const bridgeUrl = normalizeCaptureBridgeUrl(
+      searchParams.get("bridgeUrl"),
+    );
 
     if (captureVerbose) {
       console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
@@ -668,17 +814,17 @@ export function StreamingMode() {
       const perfWithMemory = performance as {
         memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number };
       };
-      return {
-        recording: recorder?.state === "recording",
-        wsConnected: ws?.readyState === WebSocket.OPEN,
+      return buildCaptureControlStatus({
+        recorderState: recorder?.state,
+        wsReadyState: ws?.readyState,
         chunkCount,
         bytesSent,
-        uptime: startedAt > 0 ? Date.now() - startedAt : 0,
-        lastChunkMs: lastChunkAt > 0 ? Date.now() - lastChunkAt : null,
-        wsBufferedAmount: ws?.bufferedAmount ?? 0,
-        heapUsedBytes: perfWithMemory.memory?.usedJSHeapSize ?? null,
-        heapLimitBytes: perfWithMemory.memory?.jsHeapSizeLimit ?? null,
-      };
+        startedAt,
+        lastChunkAt,
+        wsBufferedAmount: ws?.bufferedAmount,
+        heapUsedBytes: perfWithMemory.memory?.usedJSHeapSize,
+        heapLimitBytes: perfWithMemory.memory?.jsHeapSizeLimit,
+      });
     };
 
     const logCaptureStatus = (prefix: string) => {
@@ -910,10 +1056,38 @@ export function StreamingMode() {
   }, [worldReady, terrainReady]);
 
   useEffect(() => {
+    const tick = () => {
+      renderTickRef.current += 1;
+      latestRenderTickAtRef.current = Date.now();
+      writeHeartbeat();
+      heartbeatRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    heartbeatRafRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      if (heartbeatRafRef.current !== null) {
+        window.cancelAnimationFrame(heartbeatRafRef.current);
+        heartbeatRafRef.current = null;
+      }
+    };
+  }, [writeHeartbeat]);
+
+  useEffect(() => {
+    if (!streamingState) {
+      return;
+    }
+    duelStateTickRef.current += 1;
+    latestDuelStateTickAtRef.current = Date.now();
+    writeHeartbeat();
+  }, [streamingState, writeHeartbeat]);
+
+  useEffect(() => {
     return () => {
       const win = window as StreamingWindow;
+      win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ = null;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
       if (worldReadyTimeoutRef.current) {
         clearTimeout(worldReadyTimeoutRef.current);
@@ -924,14 +1098,97 @@ export function StreamingMode() {
       worldRef.current = null;
       worldReadyRef.current = false;
       clearTerrainPolling();
+      clearAvatarPolling();
       clearCameraRetryTimeouts();
     };
-  }, [clearTerrainPolling, clearCameraRetryTimeouts]);
+  }, [clearAvatarPolling, clearTerrainPolling, clearCameraRetryTimeouts]);
 
   // Loading screen is shown only during initial boot. Once everything is
   // ready for the first time, we fade out and never show it again — camera
   // target switches are handled seamlessly by ClientCameraSystem.
   const needsCameraLock = Boolean(streamingState?.cameraTarget);
+  const needsTargetAvatar = Boolean(
+    streamingState?.cameraTarget &&
+    streamingState?.cycle.phase &&
+    streamingState.cycle.phase !== "IDLE",
+  );
+  const effectiveTargetAvatarReady =
+    targetAvatarReady || targetAvatarGraceExpired;
+  const waitingForTargetAvatar =
+    needsTargetAvatar && !effectiveTargetAvatarReady;
+
+  useEffect(() => {
+    lastCycleIdRef.current = streamingState?.cycle.cycleId ?? null;
+  }, [streamingState?.cycle.cycleId]);
+
+  useEffect(() => {
+    clearAvatarPolling();
+
+    if (!needsTargetAvatar) {
+      setTargetAvatarReady(true);
+      setTargetAvatarGraceExpired(false);
+      return;
+    }
+
+    const world = worldRef.current;
+    const targetEntityId = streamingState?.cameraTarget;
+    if (!world || !worldReady || !targetEntityId) {
+      setTargetAvatarReady(false);
+      setTargetAvatarGraceExpired(false);
+      return;
+    }
+
+    const checkAvatarReady = () => {
+      if (isTargetAvatarReady(world, targetEntityId)) {
+        setTargetAvatarReady(true);
+        setTargetAvatarGraceExpired(false);
+        clearAvatarPolling();
+        return true;
+      }
+      return false;
+    };
+
+    setTargetAvatarReady(false);
+    setTargetAvatarGraceExpired(false);
+    if (checkAvatarReady()) {
+      return;
+    }
+
+    const handleAvatarLoadComplete = (payload: unknown) => {
+      const data = payload as { playerId?: string; success?: boolean };
+      if (data.playerId === targetEntityId || checkAvatarReady()) {
+        if (checkAvatarReady()) {
+          setTargetAvatarReady(true);
+          setTargetAvatarGraceExpired(false);
+          clearAvatarPolling();
+        }
+      }
+    };
+
+    world.on(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
+    avatarPollRef.current = setInterval(() => {
+      checkAvatarReady();
+    }, 250);
+    avatarTimeoutRef.current = setTimeout(() => {
+      clearAvatarPolling();
+      setTargetAvatarGraceExpired(true);
+      console.warn(
+        `[StreamingMode] Avatar readiness grace expired for "${targetEntityId}", continuing with spectator capture`,
+      );
+    }, TARGET_AVATAR_READY_GRACE_MS);
+
+    return () => {
+      world.off(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
+      clearAvatarPolling();
+    };
+  }, [
+    clearAvatarPolling,
+    needsTargetAvatar,
+    streamingState?.cycle.cycleId,
+    streamingState?.cameraTarget,
+    worldReady,
+  ]);
+
   const isInitiallyReady = shouldDismissStreamingLoading({
     connected,
     worldReady,
@@ -940,6 +1197,8 @@ export function StreamingMode() {
     initError: clientInitError,
     needsCameraLock,
     cameraLocked,
+    needsTargetAvatar,
+    targetAvatarReady: effectiveTargetAvatarReady,
     phase: streamingState?.cycle.phase ?? null,
   });
   const rendererHealth = useMemo(
@@ -952,6 +1211,8 @@ export function StreamingMode() {
         initError: clientInitError,
         needsCameraLock,
         cameraLocked,
+        needsTargetAvatar,
+        targetAvatarReady: effectiveTargetAvatarReady,
         loadingDismissed,
         phase: streamingState?.cycle.phase ?? null,
         agent1: streamingState?.cycle.agent1 ?? null,
@@ -964,8 +1225,10 @@ export function StreamingMode() {
       connected,
       loadingDismissed,
       needsCameraLock,
+      needsTargetAvatar,
       streamingState,
       terrainReady,
+      effectiveTargetAvatarReady,
       worldReady,
     ],
   );
@@ -974,6 +1237,49 @@ export function StreamingMode() {
     const win = window as StreamingWindow;
     win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
     win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
+  }, [rendererHealth]);
+
+  useEffect(() => {
+    if (window.parent === window) {
+      return;
+    }
+
+    let targetOrigin = window.location.origin;
+    try {
+      if (document.referrer) {
+        targetOrigin = new URL(document.referrer).origin;
+      }
+    } catch {
+      // Fall back to same-origin postMessage when referrer parsing fails.
+    }
+
+    const postStatus = () => {
+      const win = window as StreamingWindow;
+      const degradedReason = rendererHealth.degradedReason;
+      const status =
+        rendererHealth.ready
+          ? "playing"
+          : degradedReason === "initialization_failed"
+            ? "error:init_failed"
+            : degradedReason || "loading";
+
+      window.parent.postMessage(
+        {
+          type: "HYPERSCAPE_STREAM_STATUS",
+          ready: rendererHealth.ready,
+          status,
+          rendererHealth,
+          heartbeat: win.__HYPERSCAPE_STREAM_HEARTBEAT__ ?? null,
+        },
+        targetOrigin,
+      );
+    };
+
+    postStatus();
+    const interval = window.setInterval(postStatus, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
   }, [rendererHealth]);
 
   // Write boot status to a window global so the capture pipeline's renderer
@@ -997,10 +1303,19 @@ export function StreamingMode() {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
     } else if (!terrainReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
+    } else if (waitingForTargetAvatar) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_avatar";
     } else {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
     }
-  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
+  }, [
+    clientInitError,
+    connected,
+    loadingDismissed,
+    terrainReady,
+    waitingForTargetAvatar,
+    worldReady,
+  ]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -1022,8 +1337,12 @@ export function StreamingMode() {
     return () => clearTimeout(timer);
   }, [fadingOut, loadingDismissed]);
 
-  // Show loading overlay only during initial load or fade-out
-  const showLoading = !loadingDismissed && !clientInitError;
+  // Show loading overlay only during initial load or fade-out. Once dismissed,
+  // camera target switches and avatar churn should not blank the stream again.
+  const showLoading = shouldShowStreamingLoadingOverlay({
+    initError: clientInitError,
+    loadingDismissed,
+  });
 
   const loadingHeadline = !connected
     ? "Connecting to Hyperscape..."
@@ -1044,7 +1363,9 @@ export function StreamingMode() {
           : "Waiting for terrain and arena visuals"
         : needsCameraLock && !cameraLocked
           ? "Locking the initial camera target"
-          : "Finalizing spectator presentation";
+          : waitingForTargetAvatar
+            ? "Waiting for the active duel avatar to finish loading"
+            : "Finalizing spectator presentation";
 
   return (
     <div

@@ -1,3 +1,9 @@
+import type {
+  StreamDeliveryTransport,
+  StreamDestinationProvider,
+  StreamDestinationRole,
+} from "./delivery-config.js";
+
 /**
  * RTMP Streaming Types
  *
@@ -6,7 +12,13 @@
 
 /** RTMP destination configuration */
 export interface RTMPDestination {
+  id?: string;
   name: string;
+  role?: StreamDestinationRole;
+  provider?: StreamDestinationProvider;
+  transport?: StreamDeliveryTransport;
+  playbackUrl?: string | null;
+  ingestUrl?: string | null;
   url: string;
   key: string;
   enabled: boolean;
@@ -36,7 +48,13 @@ export interface StreamingConfig {
 
 /** Stream status for a single destination */
 export interface DestinationStatus {
+  id?: string;
   name: string;
+  role?: StreamDestinationRole;
+  provider?: StreamDestinationProvider;
+  transport?: StreamDeliveryTransport;
+  playbackUrl?: string | null;
+  ingestUrl?: string | null;
   connected: boolean;
   error?: string;
   bytesWritten: number;

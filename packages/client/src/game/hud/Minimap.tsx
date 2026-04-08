@@ -383,8 +383,8 @@ interface SpectatorTarget {
  * that previously appeared independently in the entity interval and the RAF loop.
  */
 function getSpectatorTarget(world: ClientWorld): SpectatorTarget | null {
-  if ((window as HyperscapeWindow).__HYPERSCAPE_CONFIG__?.mode !== "spectator")
-    return null;
+  const mode = (window as HyperscapeWindow).__HYPERSCAPE_CONFIG__?.mode;
+  if (mode !== "spectator" && mode !== "stream") return null;
   const cameraSystem = world.getSystem("client-camera-system") as {
     getCameraInfo?: () => {
       target?: {

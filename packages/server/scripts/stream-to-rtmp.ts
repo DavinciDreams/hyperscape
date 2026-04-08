@@ -15,15 +15,15 @@
  * Architecture:
  *   Chromium Compositor → CDP screencastFrame → Node.js → FFmpeg stdin (JPEG pipe) → RTMP fanout
  *
- * Falls back to the legacy MediaRecorder + WebSocket path if CDP capture fails
- * or STREAM_CAPTURE_MODE=mediarecorder is set.
+ * Falls back to WebCodecs when CDP capture fails. MediaRecorder remains an
+ * explicit operator/debug path when STREAM_CAPTURE_MODE=mediarecorder is set.
  *
  * Usage:
  *   bun run stream:rtmp
  *   bun run packages/server/scripts/stream-to-rtmp.ts
  *
  * Environment Variables:
- *   STREAM_CAPTURE_MODE      - 'cdp' (default) or 'mediarecorder' (legacy)
+ *   STREAM_CAPTURE_MODE      - 'cdp' (default), 'webcodecs', or 'mediarecorder' (debug)
  *   STREAM_CAPTURE_HEADLESS  - 'true' for headless (default: false for better GPU rendering)
  *   STREAM_CAPTURE_CHANNEL   - Browser channel ('chrome', 'msedge', etc.)
  *   STREAM_CAPTURE_ANGLE     - ANGLE backend (default: metal on macOS, vulkan elsewhere)
@@ -55,6 +55,26 @@ import {
   generateWebCodecsCaptureScript,
 } from "../src/streaming/index.js";
 import {
+  resolveStreamDeliveryInfo,
+  type StreamDeliveryInfo,
+} from "../src/streaming/delivery-config.js";
+import type {
+  BrowserCaptureStatusSnapshot,
+  StreamSourceCaptureMode,
+  StreamSourceDegradedReason,
+  StreamSourceRuntime,
+} from "../src/streaming/source-runtime.js";
+import { resolveBrowserCaptureLastFrameAt } from "../src/streaming/source-runtime.js";
+import {
+  resolveStreamIngestSettings,
+  type StreamIngestSettings,
+} from "../src/streaming/ingest-config.js";
+import {
+  readLocalHlsManifestSnapshot,
+  resolveExternalStatusFile,
+  type HlsManifestSnapshot,
+} from "../src/streaming/stream-status-artifacts.js";
+import {
   buildDefaultCaptureLaunchArgs,
   resolveAllowedCaptureOrigins,
   resolveUnexpectedCaptureOrigin,
@@ -83,6 +103,27 @@ const STREAMING_VIEWER_ACCESS_TOKEN = (
   process.env.STREAMING_VIEWER_ACCESS_TOKEN || ""
 ).trim();
 
+function normalizeCaptureGameUrl(rawUrl: string): string {
+  if ((process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") !== "cdp") {
+    return rawUrl;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    // CDP capture reads frames directly from the compositor and does not
+    // expose the legacy in-page WebSocket bridge. Leaving these params on the
+    // stream URL makes the page repeatedly dial a bridge that will never exist.
+    url.searchParams.delete("internalCapture");
+    url.searchParams.delete("bridgeUrl");
+    // Preserve an explicit source-capture hint so the stream entrypoint can
+    // purge service workers/caches on Pages without re-enabling bridge capture.
+    url.searchParams.set("streamCapture", "1");
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function withViewerAccessToken(rawUrl: string): string {
   if (!STREAMING_VIEWER_ACCESS_TOKEN) return rawUrl;
   try {
@@ -98,18 +139,26 @@ function withViewerAccessToken(rawUrl: string): string {
 }
 
 const GAME_URL_CANDIDATES = Array.from(
-  new Set([GAME_URL, ...GAME_FALLBACK_URLS].map(withViewerAccessToken)),
+  new Set(
+    [GAME_URL, ...GAME_FALLBACK_URLS]
+      .map(withViewerAccessToken)
+      .map(normalizeCaptureGameUrl),
+  ),
 );
-const ALLOWED_CAPTURE_ORIGINS =
-  resolveAllowedCaptureOrigins(GAME_URL_CANDIDATES);
+const ALLOWED_CAPTURE_ORIGINS = resolveAllowedCaptureOrigins(
+  GAME_URL_CANDIDATES,
+);
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
 const BRIDGE_URL = `ws://localhost:${BRIDGE_PORT}`;
 const SPECTATOR_PORT = parseInt(process.env.SPECTATOR_PORT || "4180", 10);
-const EXTERNAL_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
+const EXTERNAL_STATUS_FILE = resolveExternalStatusFile(process.env);
 let externalStatusWriteErrored = false;
 
-/** Capture mode: 'cdp' (fast) or 'mediarecorder' (legacy) or 'webcodecs' (holy grail) */
+/**
+ * Capture mode: 'cdp' is the production default, 'webcodecs' is the automatic
+ * fallback, and 'mediarecorder' remains an explicit operator/debug mode.
+ */
 const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") as
   | "cdp"
   | "mediarecorder"
@@ -179,6 +228,8 @@ let browser: Browser | null = null;
 let page: Page | null = null;
 let cdpSession: CDPSession | null = null;
 let selectedGameUrl: string | null = null;
+let latestSceneUrl: string | null = null;
+let latestActiveBundle: string | null = null;
 let launchTime = Date.now();
 const BROWSER_RESTART_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 Hour
 const CAPTURE_RECOVERY_TIMEOUT_MS = Math.max(
@@ -202,6 +253,22 @@ const CDP_STARTUP_TIMEOUT_MS = Math.max(
     10,
   ) || 15_000,
 );
+const SOURCE_CAPTURE_STALL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.STREAM_SOURCE_CAPTURE_STALL_MS || "10_000", 10) ||
+    10_000,
+);
+const SOURCE_DEGRADED_RESTART_POLLS = Math.max(
+  2,
+  Number.parseInt(
+    process.env.STREAM_SOURCE_DEGRADED_RESTART_POLLS || "6",
+    10,
+  ) || 6,
+);
+const FATAL_WRITE_PAGE_STALL_THRESHOLD_MS = Math.max(
+  2_000,
+  Math.min(5_000, Math.floor(SOURCE_CAPTURE_STALL_MS / 2)),
+);
 
 // ── CDP Frame Rate Tracking ────────────────────────────────────────────────
 
@@ -209,6 +276,13 @@ let cdpFrameCount = 0;
 let cdpFps = 0;
 let cdpFpsIntervalId: ReturnType<typeof setInterval> | null = null;
 let cdpDroppedFrames = 0;
+let lastCaptureFrameAt: number | null = null;
+let latestRenderTickAt: number | null = null;
+let latestDuelStateTickAt: number | null = null;
+let latestVisualChangeAt: number | null = null;
+let lastVisualSampleHash: string | null = null;
+let lastObservedRenderTick = 0;
+let lastObservedDuelStateTick = 0;
 
 function startFpsTracking() {
   if (cdpFpsIntervalId) clearInterval(cdpFpsIntervalId);
@@ -227,7 +301,90 @@ function stopFpsTracking() {
   }
 }
 
-type ActiveCaptureMode = "cdp" | "webcodecs" | "mediarecorder";
+type ActiveCaptureMode = Exclude<StreamSourceCaptureMode, "none">;
+
+type RendererHeartbeatSnapshot = {
+  renderTick: number;
+  latestRenderTickAt: number | null;
+  duelStateTick: number;
+  latestDuelStateTickAt: number | null;
+};
+
+type RendererMetricsSnapshot = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number;
+  renderTick: number;
+  duelStateTick: number;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+};
+
+type CaptureDiagnosticsFrameSnapshot = {
+  at: number;
+  size: number;
+  cdpTimestamp: number | null;
+};
+
+type CaptureDiagnosticsBackpressureSnapshot = {
+  at: number;
+  backpressured: boolean;
+};
+
+type CaptureDiagnosticsFatalWriteSnapshot = {
+  at: number;
+  message: string;
+  frameCount: number;
+  droppedFrames: number;
+  bytesReceived: number;
+  backpressured: boolean;
+  cdpDirectMode: boolean;
+  uptimeMs: number;
+};
+
+type CaptureDiagnosticsSnapshot = {
+  recentFrames: CaptureDiagnosticsFrameSnapshot[];
+  recentFrameCadenceMs: number[];
+  nonMonotonicCdpTimestampCount: number;
+  backpressureTransitions: CaptureDiagnosticsBackpressureSnapshot[];
+  firstFatalWriteError: CaptureDiagnosticsFatalWriteSnapshot | null;
+  lastFatalWriteError: CaptureDiagnosticsFatalWriteSnapshot | null;
+  pageStallBeforeLastFatalWrite: boolean | null;
+  lastFrameAgeMs: number | null;
+  captureSessionGeneration: string | null;
+  browserCapture: {
+    recording: boolean | null;
+    wsConnected: boolean | null;
+    chunkCount: number | null;
+    bytesSent: number | null;
+    lastChunkAt: number | null;
+    lastChunkAgeMs: number | null;
+    lastChunkMs: number | null;
+  };
+};
+
+type RendererSmokeSnapshot = {
+  currentSceneUrl: string | null;
+  activeBundle: string | null;
+  deliveryMode: StreamDeliveryInfo["mode"];
+  captureFpsP50: number | null;
+  captureFpsP95: number | null;
+  encodeFpsP50: number | null;
+  encodeFpsP95: number | null;
+  updatedAt: number;
+  ingest: RendererIngestSnapshot;
+};
+
+type RendererIngestSnapshot = {
+  profile: StreamIngestSettings["profile"];
+  transport: StreamIngestSettings["transport"];
+  audioSampleRate: number;
+  gopFrames: number;
+  probeOnly: boolean;
+};
 
 type RendererHealthSnapshot = CaptureRendererHealthSnapshot & {
   updatedAt: number | null;
@@ -242,17 +399,305 @@ let latestRendererHealth: RendererHealthSnapshot = {
   diagnostics: null,
 };
 let rendererHealthProbeInFlight: Promise<RendererHealthSnapshot> | null = null;
+let browserCaptureStatusProbeInFlight: Promise<BrowserCaptureStatus | null> | null =
+  null;
 let captureNavigationAbortInFlight = false;
+let latestBrowserCaptureStatus: BrowserCaptureStatus | null = null;
+let sourceRecoveryCount = 0;
+let sourceLastRecoveryAt: number | null = null;
+const FPS_SAMPLE_RETENTION_MS = 60_000;
+const captureFpsSamples: Array<{ at: number; value: number }> = [];
+const encodeFpsSamples: Array<{ at: number; value: number }> = [];
+
+function pruneFpsSamples(nowMs: number): void {
+  while (
+    captureFpsSamples.length > 0 &&
+    nowMs - captureFpsSamples[0]!.at > FPS_SAMPLE_RETENTION_MS
+  ) {
+    captureFpsSamples.shift();
+  }
+  while (
+    encodeFpsSamples.length > 0 &&
+    nowMs - encodeFpsSamples[0]!.at > FPS_SAMPLE_RETENTION_MS
+  ) {
+    encodeFpsSamples.shift();
+  }
+}
+
+function recordFpsSample(
+  samples: Array<{ at: number; value: number }>,
+  value: number | null,
+  nowMs: number,
+): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return;
+  }
+  samples.push({ at: nowMs, value });
+}
+
+function percentileFromSamples(
+  samples: ReadonlyArray<{ at: number; value: number }>,
+  percentile: number,
+): number | null {
+  if (samples.length === 0) return null;
+  const sorted = samples.map((sample) => sample.value).sort((a, b) => a - b);
+  const clampedPercentile = Math.max(0, Math.min(1, percentile));
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.round((sorted.length - 1) * clampedPercentile)),
+  );
+  const value = sorted[index];
+  return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
+}
+
+function buildRendererMetricsSnapshot(
+  bridge: ReturnType<typeof getRTMPBridge>,
+  captureMode: ActiveCaptureMode,
+): RendererMetricsSnapshot {
+  const stats = bridge.getStats();
+  const nowMs = Date.now();
+  const captureFps = captureMode === "cdp" ? cdpFps : null;
+  const encodeFps =
+    typeof stats.encoderFps === "number" && Number.isFinite(stats.encoderFps)
+      ? stats.encoderFps
+      : null;
+  recordFpsSample(captureFpsSamples, captureFps, nowMs);
+  recordFpsSample(encodeFpsSamples, encodeFps, nowMs);
+  pruneFpsSamples(nowMs);
+
+  return {
+    captureFps,
+    encodeFps,
+    droppedFrames: Math.max(stats.droppedFrames, cdpDroppedFrames),
+    renderTick: lastObservedRenderTick,
+    duelStateTick: lastObservedDuelStateTick,
+    latestFrameAt: lastCaptureFrameAt,
+    latestRenderTickAt,
+    latestDuelStateTickAt,
+    latestVisualChangeAt,
+    visualChangeAgeMs:
+      latestVisualChangeAt != null
+        ? Math.max(0, Date.now() - latestVisualChangeAt)
+        : null,
+  };
+}
+
+function buildCaptureDiagnosticsSnapshot(
+  bridge: ReturnType<typeof getRTMPBridge>,
+): CaptureDiagnosticsSnapshot {
+  const diagnostics = bridge.getCaptureDiagnostics();
+  const lastFatalWriteError = diagnostics.lastFatalWriteError
+    ? { ...diagnostics.lastFatalWriteError }
+    : null;
+  const latestFrameAt =
+    typeof lastCaptureFrameAt === "number" && Number.isFinite(lastCaptureFrameAt)
+      ? lastCaptureFrameAt
+      : null;
+
+  return {
+    recentFrames: diagnostics.recentFrames.map((sample) => ({
+      at: sample.at,
+      size: sample.size,
+      cdpTimestamp: sample.cdpTimestamp,
+    })),
+    recentFrameCadenceMs: [...diagnostics.recentFrameCadenceMs],
+    nonMonotonicCdpTimestampCount:
+      diagnostics.nonMonotonicCdpTimestampCount,
+    backpressureTransitions: diagnostics.backpressureTransitions.map(
+      (transition) => ({
+        at: transition.at,
+        backpressured: transition.backpressured,
+      }),
+    ),
+    firstFatalWriteError: diagnostics.firstFatalWriteError
+      ? { ...diagnostics.firstFatalWriteError }
+      : null,
+    lastFatalWriteError,
+    pageStallBeforeLastFatalWrite:
+      lastFatalWriteError == null
+        ? null
+        : latestFrameAt == null
+          ? true
+          : lastFatalWriteError.at - latestFrameAt >=
+              FATAL_WRITE_PAGE_STALL_THRESHOLD_MS,
+    lastFrameAgeMs:
+      latestFrameAt == null ? null : Math.max(0, Date.now() - latestFrameAt),
+    captureSessionGeneration:
+      latestBrowserCaptureStatus?.captureSessionGeneration ?? null,
+  browserCapture: {
+    recording:
+      typeof latestBrowserCaptureStatus?.recording === "boolean"
+        ? latestBrowserCaptureStatus.recording
+        : null,
+      wsConnected:
+        typeof latestBrowserCaptureStatus?.wsConnected === "boolean"
+          ? latestBrowserCaptureStatus.wsConnected
+          : null,
+      chunkCount:
+        typeof latestBrowserCaptureStatus?.chunkCount === "number" &&
+        Number.isFinite(latestBrowserCaptureStatus.chunkCount)
+          ? latestBrowserCaptureStatus.chunkCount
+          : null,
+    bytesSent:
+      typeof latestBrowserCaptureStatus?.bytesSent === "number" &&
+      Number.isFinite(latestBrowserCaptureStatus.bytesSent)
+        ? latestBrowserCaptureStatus.bytesSent
+        : null,
+    lastChunkAt:
+      typeof latestBrowserCaptureStatus?.lastChunkAt === "number" &&
+      Number.isFinite(latestBrowserCaptureStatus.lastChunkAt)
+        ? latestBrowserCaptureStatus.lastChunkAt
+        : null,
+    lastChunkAgeMs:
+      typeof latestBrowserCaptureStatus?.lastChunkAgeMs === "number" &&
+      Number.isFinite(latestBrowserCaptureStatus.lastChunkAgeMs)
+        ? latestBrowserCaptureStatus.lastChunkAgeMs
+        : null,
+    lastChunkMs:
+      typeof latestBrowserCaptureStatus?.lastChunkMs === "number" &&
+      Number.isFinite(latestBrowserCaptureStatus.lastChunkMs)
+        ? latestBrowserCaptureStatus.lastChunkMs
+        : null,
+    },
+  };
+}
+
+function buildRendererSmokeSnapshot(
+  delivery: StreamDeliveryInfo,
+): RendererSmokeSnapshot {
+  const nowMs = Date.now();
+  const ingest = resolveStreamIngestSettings(process.env);
+  pruneFpsSamples(nowMs);
+  return {
+    currentSceneUrl: latestSceneUrl ?? selectedGameUrl,
+    activeBundle: latestActiveBundle,
+    deliveryMode: delivery.mode,
+    captureFpsP50: percentileFromSamples(captureFpsSamples, 0.5),
+    captureFpsP95: percentileFromSamples(captureFpsSamples, 0.95),
+    encodeFpsP50: percentileFromSamples(encodeFpsSamples, 0.5),
+    encodeFpsP95: percentileFromSamples(encodeFpsSamples, 0.95),
+    updatedAt: nowMs,
+    ingest: {
+      profile: ingest.profile,
+      transport: ingest.transport,
+      audioSampleRate: ingest.audioSampleRate,
+      gopFrames: ingest.gopFrames,
+      probeOnly: ingest.probeOnly,
+    },
+  };
+}
+
+function recordSourceRecovery(reason: string): void {
+  sourceRecoveryCount += 1;
+  sourceLastRecoveryAt = Date.now();
+  console.log(`[Main] Source recovery recorded: ${reason}`);
+}
+
+function mapRendererReasonToSourceDegradedReason(
+  degradedReason: string | null | undefined,
+): StreamSourceDegradedReason | null {
+  const normalized = (degradedReason ?? "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (
+    normalized === "capture_page_missing" ||
+    normalized === "loading_overlay_active" ||
+    normalized === "canvas_missing" ||
+    normalized === "initialization_failed" ||
+    normalized === "asset_origin_incomplete" ||
+    normalized.startsWith("probe_failed:")
+  ) {
+    return "page_not_ready";
+  }
+  return null;
+}
+
+function resolveSourceRuntimeSnapshot(
+  bridge: ReturnType<typeof getRTMPBridge>,
+  captureMode: ActiveCaptureMode,
+): StreamSourceRuntime {
+  const nowMs = Date.now();
+  const bridgeStatus = bridge.getStatus();
+  const ingest = resolveStreamIngestSettings(process.env);
+  const hlsManifest = readLocalHlsManifestSnapshot(process.env);
+  const browserCaptureLastFrameAt = resolveBrowserCaptureLastFrameAt(
+    latestBrowserCaptureStatus as BrowserCaptureStatusSnapshot | null,
+    nowMs,
+  );
+  const lastFrameAt =
+    captureMode === "cdp" ? lastCaptureFrameAt : browserCaptureLastFrameAt;
+  const rendererReason = mapRendererReasonToSourceDegradedReason(
+    latestRendererHealth.degradedReason,
+  );
+
+  let degradedReason: StreamSourceDegradedReason | null = null;
+  if (captureNavigationAbortInFlight) {
+    degradedReason = "unexpected_navigation";
+  } else if (!browser || !page || page.isClosed()) {
+    degradedReason = "browser_missing";
+  } else if (rendererReason) {
+    degradedReason = rendererReason;
+  } else if (bridgeStatus.ffmpegRunning !== true) {
+    degradedReason = "encoder_stalled";
+  } else if (
+    captureMode === "cdp" &&
+    (lastCaptureFrameAt == null || nowMs - lastCaptureFrameAt > SOURCE_CAPTURE_STALL_MS)
+  ) {
+    degradedReason = "capture_stalled";
+  } else if (
+    captureMode !== "cdp" &&
+    !latestBrowserCaptureStatus?.captureSessionGeneration
+  ) {
+    degradedReason = "page_not_ready";
+  } else if (
+    captureMode !== "cdp" &&
+    (bridgeStatus.clientConnected !== true ||
+      latestBrowserCaptureStatus?.recording !== true ||
+      latestBrowserCaptureStatus?.wsConnected !== true ||
+      lastFrameAt == null ||
+      nowMs - lastFrameAt > SOURCE_CAPTURE_STALL_MS)
+  ) {
+    degradedReason = "capture_stalled";
+  } else if (
+    !ingest.probeOnly &&
+    typeof hlsManifest?.updatedAt === "number" &&
+    Number.isFinite(hlsManifest.updatedAt) &&
+    nowMs - hlsManifest.updatedAt > SOURCE_CAPTURE_STALL_MS
+  ) {
+    degradedReason = "manifest_stale";
+  }
+
+  return {
+    ready: degradedReason == null,
+    statusSource: "external_worker",
+    captureMode,
+    degradedReason,
+    currentSceneUrl: latestSceneUrl ?? selectedGameUrl,
+    activeBundle: latestActiveBundle,
+    lastFrameAt,
+    lastRenderTickAt: latestRenderTickAt,
+    lastVisualChangeAt: latestVisualChangeAt,
+    lastRecoveryAt: sourceLastRecoveryAt,
+    recoveryCount: sourceRecoveryCount,
+    workerHeartbeatAt: nowMs,
+  };
+}
 
 function writeExternalStatusSnapshot(
   bridge: ReturnType<typeof getRTMPBridge>,
   captureMode: ActiveCaptureMode,
-): void {
-  if (!EXTERNAL_STATUS_FILE) return;
+): StreamSourceRuntime | null {
+  const sourceRuntime = resolveSourceRuntimeSnapshot(bridge, captureMode);
+  if (!EXTERNAL_STATUS_FILE) return sourceRuntime;
 
   const bridgeStatus = bridge.getStatus();
   const stats = bridge.getStats();
   const processMemory = process.memoryUsage();
+  const delivery: StreamDeliveryInfo = resolveStreamDeliveryInfo(process.env);
+  const ingest = resolveStreamIngestSettings(process.env);
+  const hlsManifest = readLocalHlsManifestSnapshot(process.env);
+  const metrics = buildRendererMetricsSnapshot(bridge, captureMode);
+  const captureDiagnostics = buildCaptureDiagnosticsSnapshot(bridge);
+  const smoke = buildRendererSmokeSnapshot(delivery);
   const payload = {
     ...bridgeStatus,
     stats: {
@@ -262,11 +707,25 @@ function writeExternalStatusSnapshot(
       destinations: stats.destinations,
       healthy: stats.healthy,
       droppedFrames: stats.droppedFrames,
+      encoderFps: stats.encoderFps,
       backpressured: stats.backpressured,
       spectators: stats.spectators,
       processMemory: stats.processMemory,
     },
     captureMode,
+    metrics,
+    hlsManifest,
+    delivery,
+    ingest: {
+      profile: ingest.profile,
+      transport: ingest.transport,
+      audioSampleRate: ingest.audioSampleRate,
+      gopFrames: ingest.gopFrames,
+      probeOnly: ingest.probeOnly,
+    },
+    smoke,
+    sourceRuntime,
+    captureDiagnostics,
     processRssBytes: processMemory.rss,
     rendererHealth: latestRendererHealth,
     updatedAt: Date.now(),
@@ -286,6 +745,7 @@ function writeExternalStatusSnapshot(
       );
     }
   }
+  return sourceRuntime;
 }
 
 function clearExternalStatusSnapshot(): void {
@@ -365,8 +825,22 @@ async function probeRendererHealth(
         updatedAt?: number | null;
         phase?: string | null;
       } | null;
+      __HYPERSCAPE_STREAM_HEARTBEAT__?: {
+        renderTick?: number;
+        latestRenderTickAt?: number | null;
+        duelStateTick?: number;
+        latestDuelStateTickAt?: number | null;
+      } | null;
       __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
     };
+    const activeBundle =
+      Array.from(
+        document.querySelectorAll<HTMLScriptElement>("script[src]"),
+      ).find(
+        (script) =>
+          script.src.includes("StreamingMode-") ||
+          script.src.includes("framework.client-"),
+      )?.src ?? null;
     const explicitHealth =
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ &&
       typeof win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ === "object"
@@ -407,14 +881,142 @@ async function probeRendererHealth(
       !bootStatus.startsWith("error:");
     const hasCriticalErrorUi =
       !explicitHealth && bootStatus !== null && bootStatus.startsWith("error:");
+    const heartbeat =
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ &&
+      typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__ === "object"
+        ? {
+            renderTick:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__.renderTick ===
+                "number" &&
+              Number.isFinite(win.__HYPERSCAPE_STREAM_HEARTBEAT__.renderTick)
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.renderTick
+                : 0,
+            latestRenderTickAt:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestRenderTickAt ===
+                "number" &&
+              Number.isFinite(
+                win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestRenderTickAt,
+              )
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestRenderTickAt
+                : null,
+            duelStateTick:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__.duelStateTick ===
+                "number" &&
+              Number.isFinite(win.__HYPERSCAPE_STREAM_HEARTBEAT__.duelStateTick)
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.duelStateTick
+                : 0,
+            latestDuelStateTickAt:
+              typeof win.__HYPERSCAPE_STREAM_HEARTBEAT__
+                .latestDuelStateTickAt === "number" &&
+              Number.isFinite(
+                win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestDuelStateTickAt,
+              )
+                ? win.__HYPERSCAPE_STREAM_HEARTBEAT__.latestDuelStateTickAt
+                : null,
+          }
+        : null;
+    let frameHash: string | null = null;
+    const preferredCanvas =
+      document.querySelector("#hyperscape-world-canvas") ??
+      document.querySelector("#game-canvas canvas") ??
+      document.querySelector("[data-component='viewport'] canvas");
+    const canvasCandidates = Array.from(document.querySelectorAll("canvas")).filter(
+      (candidate): candidate is HTMLCanvasElement =>
+        candidate instanceof HTMLCanvasElement,
+    );
+    const largestCanvas = canvasCandidates
+      .slice()
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        const leftArea =
+          Math.max(leftRect.width, left.width) *
+          Math.max(leftRect.height, left.height);
+        const rightArea =
+          Math.max(rightRect.width, right.width) *
+          Math.max(rightRect.height, right.height);
+        return rightArea - leftArea;
+      })[0];
+    const canvas =
+      preferredCanvas instanceof HTMLCanvasElement
+        ? preferredCanvas
+        : largestCanvas ?? null;
+    if (canvas instanceof HTMLCanvasElement) {
+      const sampleCanvas = document.createElement("canvas");
+      sampleCanvas.width = 32;
+      sampleCanvas.height = 18;
+      const context = sampleCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+      if (context) {
+        try {
+          context.drawImage(
+            canvas,
+            0,
+            0,
+            sampleCanvas.width,
+            sampleCanvas.height,
+          );
+          const imageData = context.getImageData(
+            0,
+            0,
+            sampleCanvas.width,
+            sampleCanvas.height,
+          ).data;
+          let hash = 2166136261;
+          for (let i = 0; i < imageData.length; i += 16) {
+            hash ^= imageData[i] ?? 0;
+            hash = Math.imul(hash, 16777619);
+            hash ^= imageData[i + 1] ?? 0;
+            hash = Math.imul(hash, 16777619);
+            hash ^= imageData[i + 2] ?? 0;
+            hash = Math.imul(hash, 16777619);
+          }
+          frameHash = (hash >>> 0).toString(16);
+        } catch {
+          frameHash = null;
+        }
+      }
+    }
     return {
       explicitHealth,
-      hasCanvas: document.querySelector("canvas") !== null,
+      hasCanvas: canvasCandidates.length > 0,
       readyFlag: win.__HYPERSCAPE_STREAM_READY__ === true,
       hasStreamingBootUi,
       hasCriticalErrorUi,
+      heartbeat,
+      frameHash,
+      currentSceneUrl: window.location.href,
+      activeBundle,
     };
   });
+
+  const heartbeat =
+    probe.heartbeat && typeof probe.heartbeat === "object"
+      ? (probe.heartbeat as RendererHeartbeatSnapshot)
+      : null;
+  if (heartbeat) {
+    lastObservedRenderTick = heartbeat.renderTick;
+    lastObservedDuelStateTick = heartbeat.duelStateTick;
+    latestRenderTickAt = heartbeat.latestRenderTickAt;
+    latestDuelStateTickAt = heartbeat.latestDuelStateTickAt;
+  }
+  latestSceneUrl =
+    typeof probe.currentSceneUrl === "string" && probe.currentSceneUrl.length > 0
+      ? probe.currentSceneUrl
+      : selectedGameUrl;
+  latestActiveBundle =
+    typeof probe.activeBundle === "string" && probe.activeBundle.length > 0
+      ? probe.activeBundle
+      : null;
+  if (typeof probe.frameHash === "string" && probe.frameHash.length > 0) {
+    if (probe.frameHash !== lastVisualSampleHash) {
+      lastVisualSampleHash = probe.frameHash;
+      latestVisualChangeAt = probedAt;
+    } else if (latestVisualChangeAt === null) {
+      latestVisualChangeAt = probedAt;
+    }
+  }
 
   const explicitHealth =
     probe.explicitHealth && typeof probe.explicitHealth === "object"
@@ -496,9 +1098,7 @@ function assertAllowedCaptureNavigation(rawUrl: string): void {
   );
 }
 
-async function abortCaptureForUnexpectedNavigation(
-  rawUrl: string,
-): Promise<void> {
+async function abortCaptureForUnexpectedNavigation(rawUrl: string): Promise<void> {
   if (captureNavigationAbortInFlight) {
     return;
   }
@@ -646,8 +1246,11 @@ async function launchCaptureBrowser() {
   }
 }
 
-async function setupBrowser() {
+async function setupBrowser(forceReselect = false) {
   if (browser) await cleanup();
+  if (forceReselect) {
+    selectedGameUrl = null;
+  }
 
   console.log(
     `[Main] Launching browser (headless=${STREAM_CAPTURE_HEADLESS}, angle=${ANGLE_BACKEND}${STREAM_CAPTURE_CHANNEL ? `, channel=${STREAM_CAPTURE_CHANNEL}` : ""}, mode=${CAPTURE_MODE})...`,
@@ -838,7 +1441,22 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
     // Decode base64 JPEG and feed to FFmpeg
     const jpegBuffer = Buffer.from(base64Data, "base64");
-    const written = bridge.feedFrame(jpegBuffer);
+    const frameAt = Date.now();
+    const metadataRecord =
+      params.metadata && typeof params.metadata === "object"
+        ? (params.metadata as Record<string, unknown>)
+        : null;
+    const cdpTimestamp =
+      metadataRecord &&
+      typeof metadataRecord.timestamp === "number" &&
+      Number.isFinite(metadataRecord.timestamp)
+        ? metadataRecord.timestamp
+        : null;
+    lastCaptureFrameAt = frameAt;
+    const written = bridge.feedFrame(jpegBuffer, {
+      frameAt,
+      cdpTimestamp,
+    });
 
     if (written) {
       cdpFrameCount++;
@@ -1039,8 +1657,11 @@ type BrowserCaptureStatus = {
   chunkCount?: number;
   bytesSent?: number;
   uptime?: number;
-  lastChunkMs?: number;
+  lastChunkAt?: number | null;
+  lastChunkAgeMs?: number | null;
+  lastChunkMs?: number | null;
   captureFps?: number;
+  captureSessionGeneration?: string | null;
 };
 
 async function getBrowserCaptureStatus(): Promise<BrowserCaptureStatus | null> {
@@ -1048,16 +1669,47 @@ async function getBrowserCaptureStatus(): Promise<BrowserCaptureStatus | null> {
 
   try {
     return (await page.evaluate(() => {
-      return (
-        window as unknown as {
-          __captureControl__?: { getStatus: () => unknown };
-        }
-      ).__captureControl__?.getStatus?.();
+      const win = window as unknown as {
+        __captureControl__?: { getStatus: () => unknown };
+        __HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__?: string | null;
+      };
+      const captureStatus =
+        (win.__captureControl__?.getStatus?.() as Record<string, unknown>) ?? {};
+      return {
+        ...captureStatus,
+        captureSessionGeneration:
+          typeof win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ === "string"
+            ? win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__
+            : null,
+      };
     })) as BrowserCaptureStatus | null;
   } catch (err) {
     if (isTransientPageEvalError(err)) return null;
     throw err;
   }
+}
+
+async function refreshBrowserCaptureStatusSnapshot(): Promise<BrowserCaptureStatus | null> {
+  if (browserCaptureStatusProbeInFlight) {
+    return browserCaptureStatusProbeInFlight;
+  }
+
+  browserCaptureStatusProbeInFlight = getBrowserCaptureStatus()
+    .then((status) => {
+      latestBrowserCaptureStatus = status;
+      return latestBrowserCaptureStatus;
+    })
+    .catch((err) => {
+      if (!isTransientPageEvalError(err)) {
+        throw err;
+      }
+      return null;
+    })
+    .finally(() => {
+      browserCaptureStatusProbeInFlight = null;
+    });
+
+  return browserCaptureStatusProbeInFlight;
 }
 
 async function stopInPageCaptureControl(): Promise<void> {
@@ -1083,7 +1735,7 @@ async function waitForCaptureTraffic(
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const captureStatus = await getBrowserCaptureStatus();
+    const captureStatus = await refreshBrowserCaptureStatusSnapshot();
     const bridgeStats = bridge.getStats();
     const captureActive =
       captureStatus?.recording === true && captureStatus?.wsConnected === true;
@@ -1144,6 +1796,7 @@ async function main() {
   let lastCdpBytesReceived = 0;
   let cdpRecoveryInFlight = false;
   let cdpRecoveryFailures = 0;
+  let sourceDegradedPolls = 0;
 
   if (CAPTURE_MODE === "cdp") {
     // ── CDP Mode: Direct screencast frame piping ──
@@ -1155,7 +1808,7 @@ async function main() {
       );
     } catch (err) {
       console.warn(
-        `[Main] CDP startup failed; falling back to MediaRecorder injection: ${errMsg(err)}`,
+        `[Main] CDP startup failed; falling back to WebCodecs capture: ${errMsg(err)}`,
       );
       await withTimeout(
         stopCdpCapture(),
@@ -1164,23 +1817,15 @@ async function main() {
       ).catch(() => undefined);
       bridge.stop();
       bridge.startSpectatorServer(SPECTATOR_PORT);
-      captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
-      activeCaptureMode = "mediarecorder";
+      captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
+      activeCaptureMode = "webcodecs";
+      recordSourceRecovery("cdp_startup_failed_to_webcodecs");
 
       const healthy = await waitForCaptureTraffic(bridge, 20_000);
       if (!healthy) {
-        console.warn(
-          "[Main] MediaRecorder fallback produced no media within 20s; trying WebCodecs capture.",
+        throw new Error(
+          "WebCodecs fallback produced no media within 20s after CDP startup failure.",
         );
-        if (captureWatchdog) {
-          clearInterval(captureWatchdog);
-          captureWatchdog = null;
-        }
-        await stopInPageCaptureControl();
-        bridge.stop();
-        bridge.startSpectatorServer(SPECTATOR_PORT);
-        captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-        activeCaptureMode = "webcodecs";
       }
     }
   } else if (CAPTURE_MODE === "webcodecs") {
@@ -1200,6 +1845,7 @@ async function main() {
       bridge.startSpectatorServer(SPECTATOR_PORT);
       await startCdpCapture(bridge);
       activeCaptureMode = "cdp";
+      recordSourceRecovery("webcodecs_startup_failed_to_cdp");
     }
   } else {
     // ── Legacy Mode: MediaRecorder + WebSocket ──
@@ -1217,9 +1863,41 @@ async function main() {
   writeExternalStatusSnapshot(bridge, activeCaptureMode);
   const statusSnapshotInterval = setInterval(() => {
     void refreshRendererHealthSnapshot(page)
+      .then(() =>
+        activeCaptureMode === "cdp"
+          ? Promise.resolve<BrowserCaptureStatus | null>(null)
+          : refreshBrowserCaptureStatusSnapshot(),
+      )
       .catch(() => undefined)
       .finally(() => {
-        writeExternalStatusSnapshot(bridge, activeCaptureMode);
+        const sourceRuntime = writeExternalStatusSnapshot(bridge, activeCaptureMode);
+        const degradedReason = sourceRuntime?.degradedReason ?? null;
+        const withinLaunchGrace =
+          Date.now() - launchTime <
+          Math.max(CDP_STARTUP_TIMEOUT_MS, SOURCE_CAPTURE_STALL_MS);
+        const shouldRestartForDegradation =
+          !withinLaunchGrace &&
+          (degradedReason === "browser_missing" ||
+            degradedReason === "page_not_ready" ||
+            degradedReason === "unexpected_navigation" ||
+            degradedReason === "capture_stalled" ||
+            degradedReason === "encoder_stalled" ||
+            degradedReason === "manifest_stale");
+        if (shouldRestartForDegradation) {
+          sourceDegradedPolls += 1;
+        } else {
+          sourceDegradedPolls = 0;
+        }
+        if (
+          shouldRestartForDegradation &&
+          sourceDegradedPolls >= SOURCE_DEGRADED_RESTART_POLLS
+        ) {
+          console.error(
+            `[Main] Source remained degraded (${degradedReason}) for ${sourceDegradedPolls} consecutive health polls; restarting worker.`,
+          );
+          sourceDegradedPolls = 0;
+          void shutdown(1);
+        }
       });
   }, 2000);
 
@@ -1292,7 +1970,7 @@ async function main() {
           await withTimeout(
             (async () => {
               await stopCdpCapture();
-              await setupBrowser();
+              await setupBrowser(cdpRecoveryFailures > 0);
               await startCdpCapture(bridge);
             })(),
             CAPTURE_RECOVERY_TIMEOUT_MS,
@@ -1301,6 +1979,7 @@ async function main() {
           recovered = true;
           cdpRecoveryFailures = 0;
           lastCdpBytesReceived = bridge.getStats().bytesReceived;
+          recordSourceRecovery("cdp_stall_recovery");
           console.log("[Main] CDP capture restarted successfully");
         } catch (err) {
           cdpRecoveryFailures += 1;
@@ -1317,7 +1996,7 @@ async function main() {
           cdpRecoveryFailures >= CAPTURE_RECOVERY_MAX_FAILURES
         ) {
           console.warn(
-            "[Main] Falling back to MediaRecorder capture mode after CDP stall.",
+            "[Main] Falling back to WebCodecs capture mode after CDP stall.",
           );
           try {
             // Clear any existing watchdog before starting a new one.
@@ -1332,22 +2011,24 @@ async function main() {
             ).catch(() => undefined);
             bridge.stop();
             bridge.startSpectatorServer(SPECTATOR_PORT);
-            captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
-            activeCaptureMode = "mediarecorder";
+            captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
+            activeCaptureMode = "webcodecs";
             lastCdpBytesReceived = bridge.getStats().bytesReceived;
             cdpRecoveryFailures = 0;
-            console.log("[Main] Fallback to MediaRecorder mode complete");
+            recordSourceRecovery("cdp_stall_fallback_to_webcodecs");
+            console.log("[Main] Fallback to WebCodecs mode complete");
           } catch (fallbackErr) {
             console.error(
-              "[Main] MediaRecorder fallback failed:",
+              "[Main] WebCodecs fallback failed:",
               errMsg(fallbackErr),
             );
+            void shutdown(1);
           }
         }
       }
     } else {
       try {
-        const captureStatus = await getBrowserCaptureStatus();
+        const captureStatus = await refreshBrowserCaptureStatusSnapshot();
         if (captureStatus) {
           console.log("[Status] Capture:", captureStatus);
           if (typeof captureStatus.captureFps === "number") {
@@ -1393,9 +2074,12 @@ async function main() {
           await setupBrowser();
           if (activeCaptureMode === "cdp") {
             await startCdpCapture(bridge);
+          } else if (activeCaptureMode === "webcodecs") {
+            captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
           } else if (activeCaptureMode === "mediarecorder") {
             captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
           }
+          recordSourceRecovery("scheduled_browser_rotation");
         } catch (err) {
           console.error("[Main] Failed to rotate browser!", err);
         }
@@ -1404,7 +2088,7 @@ async function main() {
   }, 30000);
 
   // Handle shutdown
-  const shutdown = async () => {
+  const shutdown = async (exitCode = 0) => {
     console.log("\n[Main] Shutting down...");
     if (captureWatchdog) clearInterval(captureWatchdog);
     clearInterval(statusSnapshotInterval);
@@ -1427,7 +2111,7 @@ async function main() {
       diag.uninstall();
     }
 
-    process.exit(0);
+    process.exit(exitCode);
   };
 
   process.on("SIGINT", shutdown);
@@ -1459,6 +2143,11 @@ async function cleanup() {
     await browser.close();
     browser = null;
   }
+
+  page = null;
+  latestBrowserCaptureStatus = null;
+  latestSceneUrl = null;
+  latestActiveBundle = null;
 
   clearExternalStatusSnapshot();
   console.log("[Main] Cleanup complete");

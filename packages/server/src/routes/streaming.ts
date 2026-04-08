@@ -19,6 +19,23 @@ import {
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
 import {
+  buildStreamDestinationId,
+  normalizeStreamDestinationProvider,
+  resolveStreamDeliveryInfo,
+  type StreamManifestStatus,
+} from "../streaming/delivery-config.js";
+import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
+import { resolveStreamIngestSettings } from "../streaming/ingest-config.js";
+import {
+  acquirePlaybackProbePoller,
+  type StreamPlaybackProbeResult,
+} from "../streaming/destination-probe.js";
+import {
+  readLocalHlsManifestSnapshot,
+  resolveExternalStatusFile,
+  type HlsManifestSnapshot,
+} from "../streaming/stream-status-artifacts.js";
+import {
   STREAMING_CANONICAL_PLATFORM,
   STREAMING_PUBLIC_DELAY_DEFAULT_MS,
   STREAMING_PUBLIC_DELAY_MS,
@@ -29,8 +46,13 @@ import {
   loadExternalRtmpStatusSnapshot,
   registerStreamingBettingRoutes,
 } from "./streaming-betting-routes.js";
+import type {
+  ExternalCaptureDiagnosticsBlob,
+  ExternalRtmpDestination,
+  ExternalRtmpStatusSnapshot,
+} from "./streaming-external-status.js";
+import { deriveStreamSourceRuntime } from "./streaming-source-runtime.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
-import { getDefaultPublicWsUrl } from "../shared/public-ws-url.js";
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;
@@ -78,10 +100,7 @@ const STREAMING_SSE_MAX_PENDING_BYTES = Math.max(
   128 * 1024,
   Math.min(
     16 * 1024 * 1024,
-    Number.parseInt(
-      process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576",
-      10,
-    ),
+    Number.parseInt(process.env.STREAMING_SSE_MAX_PENDING_BYTES || "1048576", 10),
   ),
 );
 const STREAMING_SSE_REPLAY_MAX_BYTES = Math.max(
@@ -101,11 +120,14 @@ const STREAMING_SSE_MAX_CLIENTS = Math.max(
     Number.parseInt(process.env.STREAMING_SSE_MAX_CLIENTS || "64", 10),
   ),
 );
-const EXTERNAL_RTMP_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
+const EXTERNAL_RTMP_STATUS_FILE = resolveExternalStatusFile(process.env);
 const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
   5000,
   Number.parseInt(process.env.RTMP_STATUS_MAX_AGE_MS || "15000", 10),
 );
+const REQUIRE_EXTERNAL_SOURCE_RUNTIME =
+  process.env.STREAM_SOURCE_RUNTIME_REQUIRE_EXTERNAL === "true" ||
+  process.env.NODE_ENV === "production";
 const BETTING_BOOTSTRAP_RATE_LIMIT: RateLimitOptions = {
   max: 240,
   timeWindow: "1 minute",
@@ -114,6 +136,454 @@ const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
   max: 60,
   timeWindow: "1 minute",
 };
+
+type StreamingStatusMetricsSnapshot = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+};
+
+type StreamingStatusManifestSnapshot = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+type StreamingStatusSmokeSnapshot = {
+  currentSceneUrl: string | null;
+  activeBundle: string | null;
+  deliveryMode: string | null;
+  captureFpsP50: number | null;
+  captureFpsP95: number | null;
+  encodeFpsP50: number | null;
+  encodeFpsP95: number | null;
+  updatedAt: number | null;
+  ingest: StreamingStatusIngestSnapshot;
+};
+
+type StreamingStatusIngestSnapshot = {
+  profile: string | null;
+  transport: string | null;
+  audioSampleRate: number | null;
+  gopFrames: number | null;
+  probeOnly: boolean | null;
+};
+
+type StreamingCanonicalStatusSnapshot = {
+  sourceReady: boolean;
+  canonicalTransportConnected: boolean;
+  canonicalPlaybackReady: boolean;
+  manifestStatus: StreamManifestStatus;
+  lastError: string | null;
+  updatedAt: number | null;
+};
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+export function normalizeStreamingStatusMetrics(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  bridgeStats?:
+    | {
+        encoderFps?: number;
+        droppedFrames?: number;
+      }
+    | null
+    | undefined;
+}): StreamingStatusMetricsSnapshot {
+  const metrics = params.externalSnapshot?.metrics;
+  const bridgeStats = params.bridgeStats;
+
+  return {
+    captureFps: asFiniteNumber(metrics?.captureFps),
+    encodeFps:
+      asFiniteNumber(metrics?.encodeFps) ??
+      asFiniteNumber(bridgeStats?.encoderFps),
+    droppedFrames:
+      asFiniteNumber(metrics?.droppedFrames) ??
+      asFiniteNumber(bridgeStats?.droppedFrames),
+    renderTick: asFiniteNumber(metrics?.renderTick),
+    duelStateTick: asFiniteNumber(metrics?.duelStateTick),
+    latestFrameAt: asFiniteNumber(metrics?.latestFrameAt),
+    latestRenderTickAt: asFiniteNumber(metrics?.latestRenderTickAt),
+    latestDuelStateTickAt: asFiniteNumber(metrics?.latestDuelStateTickAt),
+    latestVisualChangeAt: asFiniteNumber(metrics?.latestVisualChangeAt),
+    visualChangeAgeMs: asFiniteNumber(metrics?.visualChangeAgeMs),
+  };
+}
+
+export function normalizeStreamingStatusManifest(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  localHlsManifest?: HlsManifestSnapshot | null;
+}): StreamingStatusManifestSnapshot {
+  const externalManifest = params.externalSnapshot?.hlsManifest;
+  const localManifest = params.localHlsManifest;
+  return {
+    updatedAt:
+      asFiniteNumber(externalManifest?.updatedAt) ??
+      asFiniteNumber(localManifest?.updatedAt),
+    mediaSequence:
+      asFiniteNumber(externalManifest?.mediaSequence) ??
+      asFiniteNumber(localManifest?.mediaSequence),
+  };
+}
+
+export function normalizeStreamingStatusSmoke(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  deliveryModeFallback: string | null;
+}): StreamingStatusSmokeSnapshot {
+  const smoke = params.externalSnapshot?.smoke;
+  const ingest =
+    smoke?.ingest && typeof smoke.ingest === "object"
+      ? smoke.ingest
+      : params.externalSnapshot?.ingest;
+  const fallbackIngest = resolveStreamIngestSettings(process.env);
+  return {
+    currentSceneUrl:
+      typeof smoke?.currentSceneUrl === "string" &&
+      smoke.currentSceneUrl.trim().length > 0
+        ? smoke.currentSceneUrl.trim()
+        : null,
+    activeBundle:
+      typeof smoke?.activeBundle === "string" &&
+      smoke.activeBundle.trim().length > 0
+        ? smoke.activeBundle.trim()
+        : null,
+    deliveryMode:
+      typeof smoke?.deliveryMode === "string" && smoke.deliveryMode.trim().length > 0
+        ? smoke.deliveryMode.trim()
+        : params.deliveryModeFallback,
+    captureFpsP50: asFiniteNumber(smoke?.captureFpsP50),
+    captureFpsP95: asFiniteNumber(smoke?.captureFpsP95),
+    encodeFpsP50: asFiniteNumber(smoke?.encodeFpsP50),
+    encodeFpsP95: asFiniteNumber(smoke?.encodeFpsP95),
+    updatedAt: asFiniteNumber(smoke?.updatedAt),
+    ingest: {
+      profile:
+        typeof ingest?.profile === "string" && ingest.profile.trim().length > 0
+          ? ingest.profile.trim()
+          : fallbackIngest.profile,
+      transport:
+        typeof ingest?.transport === "string" && ingest.transport.trim().length > 0
+          ? ingest.transport.trim()
+          : fallbackIngest.transport,
+      audioSampleRate:
+        asFiniteNumber(ingest?.audioSampleRate) ?? fallbackIngest.audioSampleRate,
+      gopFrames: asFiniteNumber(ingest?.gopFrames) ?? fallbackIngest.gopFrames,
+      probeOnly:
+        asBoolean(ingest?.probeOnly) ?? (fallbackIngest.probeOnly ? true : false),
+    },
+  };
+}
+
+function findCanonicalStreamingDestination(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
+}): {
+  index: number;
+  destination: ExternalRtmpDestination | null;
+} {
+  const destinations = Array.isArray(params.externalSnapshot?.destinations)
+    ? params.externalSnapshot!.destinations
+    : [];
+  const canonicalProvider = normalizeStreamDestinationProvider(
+    params.delivery.provider,
+    "Cloudflare",
+  );
+  const canonicalDestinationId = buildStreamDestinationId({
+    role: "canonical",
+    provider: canonicalProvider,
+    name: "External Delivery",
+  });
+
+  const index = destinations.findIndex((destination) => destination.role === "canonical");
+  if (index >= 0) {
+    return {
+      index,
+      destination: destinations[index] ?? null,
+    };
+  }
+
+  const idIndex = destinations.findIndex(
+    (destination) => destination.id === canonicalDestinationId,
+  );
+  if (idIndex >= 0) {
+    return {
+      index: idIndex,
+      destination: destinations[idIndex] ?? null,
+    };
+  }
+
+  const providerIndex = destinations.findIndex(
+    (destination) =>
+      normalizeStreamDestinationProvider(
+        destination.provider ?? null,
+        destination.name ?? null,
+      ) === canonicalProvider,
+  );
+  if (providerIndex >= 0) {
+    return {
+      index: providerIndex,
+      destination: destinations[providerIndex] ?? null,
+    };
+  }
+
+  return {
+    index: -1,
+    destination: null,
+  };
+}
+
+function resolveCanonicalPlaybackUrl(params: {
+  destination: ExternalRtmpDestination | null;
+  delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
+}): string | null {
+  return (
+    params.destination?.playbackUrl ??
+    params.delivery.playbackUrl ??
+    params.delivery.llhlsUrl ??
+    params.delivery.hlsUrl ??
+    null
+  );
+}
+
+function hasFreshContradictorySourceError(params: {
+  sourceRuntime: StreamSourceRuntime;
+  captureDiagnostics?: ExternalCaptureDiagnosticsBlob | null;
+  canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
+}): boolean {
+  if (params.sourceRuntime.ready === true) {
+    return false;
+  }
+
+  const probeUpdatedAt = asFiniteNumber(params.canonicalProbeSnapshot?.updatedAt);
+  const fatalWriteAt = asFiniteNumber(
+    params.captureDiagnostics?.lastFatalWriteError?.at,
+  );
+  const workerHeartbeatAt = asFiniteNumber(
+    params.sourceRuntime.workerHeartbeatAt,
+  );
+  const freshestSourceIncidentAt = Math.max(
+    fatalWriteAt ?? Number.NEGATIVE_INFINITY,
+    workerHeartbeatAt ?? Number.NEGATIVE_INFINITY,
+  );
+
+  if (!Number.isFinite(freshestSourceIncidentAt)) {
+    return true;
+  }
+  if (probeUpdatedAt == null) {
+    return true;
+  }
+
+  return freshestSourceIncidentAt >= probeUpdatedAt;
+}
+
+function normalizeCanonicalStreamingTruth(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
+  canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
+  sourceRuntime: StreamSourceRuntime;
+}): {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  canonicalStatus: StreamingCanonicalStatusSnapshot;
+} {
+  const { index, destination } = findCanonicalStreamingDestination({
+    externalSnapshot: params.externalSnapshot,
+    delivery: params.delivery,
+  });
+  const playbackUrl = resolveCanonicalPlaybackUrl({
+    destination,
+    delivery: params.delivery,
+  });
+  const probeReady = params.canonicalProbeSnapshot?.ready === true;
+  const sourceReady = params.sourceRuntime.ready === true;
+  const contradictorySourceError = hasFreshContradictorySourceError({
+    sourceRuntime: params.sourceRuntime,
+    captureDiagnostics: params.externalSnapshot?.captureDiagnostics ?? null,
+    canonicalProbeSnapshot: params.canonicalProbeSnapshot ?? null,
+  });
+  const destinationError =
+    typeof destination?.error === "string" && destination.error.trim().length > 0
+      ? destination.error.trim()
+      : null;
+  const canonicalDestinationConnected =
+    probeReady || destination?.connected === true;
+  const canonicalTransportConnected =
+    sourceReady &&
+    canonicalDestinationConnected &&
+    !contradictorySourceError;
+  const canonicalPlaybackReady = probeReady;
+  const manifestStatus =
+    params.canonicalProbeSnapshot?.manifestStatus ??
+    (playbackUrl ? "unknown" : "missing");
+  const updatedAt =
+    params.canonicalProbeSnapshot?.updatedAt ??
+    destination?.startedAt ??
+    params.externalSnapshot?.updatedAt ??
+    null;
+  const lastError =
+    probeReady && !contradictorySourceError
+      ? null
+      : params.sourceRuntime.ready
+      ? destinationError ??
+        params.canonicalProbeSnapshot?.lastError ??
+        (playbackUrl ? "delivery_disconnected" : "playback_unconfigured")
+      : params.sourceRuntime.degradedReason ?? destinationError ?? "source_unavailable";
+
+  if (!params.externalSnapshot || index < 0) {
+    return {
+      externalSnapshot: params.externalSnapshot,
+      canonicalStatus: {
+        sourceReady,
+        canonicalTransportConnected,
+        canonicalPlaybackReady,
+        manifestStatus,
+        lastError,
+        updatedAt,
+      },
+    };
+  }
+
+  const normalizedDestinations = params.externalSnapshot.destinations.map(
+    (candidate, candidateIndex) => {
+      if (candidateIndex !== index) {
+        return candidate;
+      }
+      return {
+        ...candidate,
+        connected: canonicalDestinationConnected,
+        transportHealthy:
+          sourceReady && probeReady && !contradictorySourceError,
+        playbackReady: canonicalPlaybackReady,
+        manifestStatus,
+        lastError,
+        error: lastError ?? undefined,
+        updatedAt: updatedAt ?? undefined,
+      };
+    },
+  );
+
+  return {
+    externalSnapshot: {
+      ...params.externalSnapshot,
+      destinations: normalizedDestinations,
+    },
+    canonicalStatus: {
+      sourceReady,
+      canonicalTransportConnected,
+      canonicalPlaybackReady,
+      manifestStatus,
+      lastError,
+      updatedAt,
+    },
+  };
+}
+
+export function buildStreamingStatusPayload(params: {
+  base: Record<string, unknown>;
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
+  localHlsManifest?: HlsManifestSnapshot | null;
+  bridgeStats?:
+    | {
+        encoderFps?: number;
+        droppedFrames?: number;
+      }
+    | null
+    | undefined;
+  rendererHealth: ReturnType<typeof deriveBettingRendererHealth>;
+  captureStats?:
+    | {
+        clientConnected: boolean;
+        ffmpegRunning: boolean;
+      }
+    | null
+    | undefined;
+}) {
+  const delivery =
+    params.externalSnapshot?.delivery ?? resolveStreamDeliveryInfo(process.env);
+  const sourceRuntime: StreamSourceRuntime = deriveStreamSourceRuntime({
+    externalStatusSnapshot: params.externalSnapshot,
+    externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+    rendererHealth: params.rendererHealth,
+    localHlsManifest: params.localHlsManifest,
+    captureStats: params.captureStats,
+    requireExternalWorker: REQUIRE_EXTERNAL_SOURCE_RUNTIME,
+  });
+  const normalizedCanonicalTruth = normalizeCanonicalStreamingTruth({
+    externalSnapshot: params.externalSnapshot,
+    delivery,
+    canonicalProbeSnapshot: params.canonicalProbeSnapshot ?? null,
+    sourceRuntime,
+  });
+  const effectiveExternalSnapshot = normalizedCanonicalTruth.externalSnapshot;
+  const metrics = normalizeStreamingStatusMetrics({
+    externalSnapshot: effectiveExternalSnapshot,
+    bridgeStats: params.bridgeStats,
+  });
+  const hlsManifest = normalizeStreamingStatusManifest({
+    externalSnapshot: effectiveExternalSnapshot,
+    localHlsManifest: params.localHlsManifest,
+  });
+  const smoke = normalizeStreamingStatusSmoke({
+    externalSnapshot: effectiveExternalSnapshot,
+    deliveryModeFallback: delivery.mode,
+  });
+  const externalActive = asBoolean(effectiveExternalSnapshot?.active);
+  const externalFfmpegRunning = asBoolean(effectiveExternalSnapshot?.ffmpegRunning);
+  const externalClientConnected = asBoolean(
+    effectiveExternalSnapshot?.clientConnected,
+  );
+
+  return {
+    ...params.base,
+    running: externalActive ?? params.base.running,
+    bridgeActive: externalActive ?? params.base.bridgeActive,
+    ffmpegRunning: externalFfmpegRunning ?? params.base.ffmpegRunning,
+    clientConnected: externalClientConnected ?? params.base.clientConnected,
+    destinations:
+      effectiveExternalSnapshot?.destinations ??
+      params.base.destinations ??
+      [],
+    metrics,
+    captureFps: metrics.captureFps,
+    encodeFps: metrics.encodeFps,
+    droppedFrames: metrics.droppedFrames,
+    renderTick: metrics.renderTick,
+    duelStateTick: metrics.duelStateTick,
+    latestFrameAt: metrics.latestFrameAt,
+    latestRenderTickAt: metrics.latestRenderTickAt,
+    latestDuelStateTickAt: metrics.latestDuelStateTickAt,
+    latestVisualChangeAt: metrics.latestVisualChangeAt,
+    visualChangeAgeMs: metrics.visualChangeAgeMs,
+    hlsManifest,
+    hlsManifestUpdatedAt: hlsManifest.updatedAt,
+    hlsMediaSequence: hlsManifest.mediaSequence,
+    delivery,
+    ingest: smoke.ingest,
+    smoke,
+    deliveryMode: delivery.mode,
+    deliveryProvider: delivery.provider ?? null,
+    playbackUrl: delivery.playbackUrl ?? null,
+    rendererHealth: params.rendererHealth,
+    sourceRuntime,
+    canonicalStatus: normalizedCanonicalTruth.canonicalStatus,
+    captureDiagnostics:
+      (effectiveExternalSnapshot?.captureDiagnostics as ExternalCaptureDiagnosticsBlob | null) ??
+      null,
+  };
+}
 
 function getInventorySnapshot(
   world: World,
@@ -206,6 +676,18 @@ export function registerStreamingRoutes(
   let lastBroadcastSeq = 0;
   let statePushInterval: ReturnType<typeof setInterval> | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  const configuredStreamingDelivery = resolveStreamDeliveryInfo(process.env);
+  const canonicalPlaybackProbePoller = acquirePlaybackProbePoller(
+    configuredStreamingDelivery.mode === "external_hls"
+      ? configuredStreamingDelivery.playbackUrl ??
+          configuredStreamingDelivery.llhlsUrl ??
+          configuredStreamingDelivery.hlsUrl
+      : null,
+    {
+      intervalMs: Math.max(2_000, Math.min(EXTERNAL_RTMP_STATUS_MAX_AGE_MS, 5_000)),
+      timeoutMs: Math.min(EXTERNAL_RTMP_STATUS_MAX_AGE_MS, 4_000),
+    },
+  );
   const bettingRoutes = registerStreamingBettingRoutes({
     fastify,
     world,
@@ -570,6 +1052,7 @@ export function registerStreamingRoutes(
     for (const clientId of [...sseClients.keys()]) {
       removeSseClient(clientId, "shutdown");
     }
+    canonicalPlaybackProbePoller?.release();
     bettingRoutes.close();
     done();
   });
@@ -1009,8 +1492,6 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const betUrl =
-        (process.env.STREAMING_PUBLIC_BET_URL || "").trim() || null;
       return reply.send({
         enabled: process.env.STREAMING_DUEL_ENABLED !== "false",
         cycleDuration: STREAMING_TIMING.CYCLE_DURATION,
@@ -1022,32 +1503,7 @@ export function registerStreamingRoutes(
         publicDelayMs: STREAMING_PUBLIC_DELAY_MS,
         publicDelayDefaultMs: STREAMING_PUBLIC_DELAY_DEFAULT_MS,
         publicDelayOverridden: STREAMING_PUBLIC_DELAY_OVERRIDDEN,
-        wsUrl: process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl(),
-        betUrl,
-        bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
-      });
-    },
-  );
-
-  /**
-   * Public betting CTA for stream overlays (no secrets).
-   * Set STREAMING_PUBLIC_BET_URL to your prediction-market / wallet-connect page.
-   */
-  fastify.get(
-    "/api/streaming/betting",
-    {
-      config: { rateLimit: false },
-    },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
-      const betUrl =
-        (process.env.STREAMING_PUBLIC_BET_URL || "").trim() || null;
-      return reply.send({
-        betUrl,
-        bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
-        hint:
-          betUrl != null
-            ? "Wagers typically lock when the countdown starts. Pick a side before the bell."
-            : "Set STREAMING_PUBLIC_BET_URL on the server to show a bet link on stream.",
+        wsUrl: process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws",
       });
     },
   );
@@ -1063,8 +1519,46 @@ export function registerStreamingRoutes(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
       );
+      const canonicalProbeSnapshot = canonicalPlaybackProbePoller
+        ? (await canonicalPlaybackProbePoller.refresh().then(() =>
+            canonicalPlaybackProbePoller.getSnapshot(),
+          ))
+        : null;
+      const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
       if (externalSnapshot) {
-        return reply.send(externalSnapshot);
+        const rendererHealth = deriveBettingRendererHealth(
+          getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          {
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            localHlsManifest,
+            captureStats: {
+              clientConnected: externalSnapshot.clientConnected === true,
+              ffmpegRunning: externalSnapshot.ffmpegRunning === true,
+            },
+          },
+        );
+
+        return reply.send(
+          buildStreamingStatusPayload({
+            base: {
+              running: externalSnapshot.active === true,
+              bridgeActive: externalSnapshot.active === true,
+              ffmpegRunning: externalSnapshot.ffmpegRunning === true,
+              clientConnected: externalSnapshot.clientConnected === true,
+              destinations: externalSnapshot.destinations,
+              stats: externalSnapshot.stats,
+            },
+            externalSnapshot,
+            canonicalProbeSnapshot,
+            localHlsManifest,
+            rendererHealth,
+            captureStats: {
+              clientConnected: externalSnapshot.clientConnected === true,
+              ffmpegRunning: externalSnapshot.ffmpegRunning === true,
+            },
+          }),
+        );
       }
 
       try {
@@ -1077,28 +1571,43 @@ export function registerStreamingRoutes(
         }
         const status = bridge.getStatus();
         const stats = bridge.getStats();
-
-        return reply.send({
-          ...status,
-          stats: {
-            bytesReceived: stats.bytesReceived,
-            bytesReceivedMB: (stats.bytesReceived / 1024 / 1024).toFixed(2),
-            uptimeSeconds: Math.floor(stats.uptime / 1000),
-            destinations: stats.destinations,
-            healthy: stats.healthy,
-            droppedFrames: stats.droppedFrames,
-            backpressured: stats.backpressured,
-            spectators: stats.spectators,
-            processMemory: stats.processMemory,
+        const rendererHealth = deriveBettingRendererHealth(
+          getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          {
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            localHlsManifest,
           },
-          rendererHealth: deriveBettingRendererHealth(
-            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
-            {
-              externalStatusSnapshot: externalSnapshot,
-              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+        );
+
+        return reply.send(
+          buildStreamingStatusPayload({
+            base: {
+              ...status,
+              stats: {
+                bytesReceived: stats.bytesReceived,
+                bytesReceivedMB: (stats.bytesReceived / 1024 / 1024).toFixed(2),
+                uptimeSeconds: Math.floor(stats.uptime / 1000),
+                destinations: stats.destinations,
+                healthy: stats.healthy,
+                droppedFrames: stats.droppedFrames,
+                encoderFps: stats.encoderFps,
+                backpressured: stats.backpressured,
+                spectators: stats.spectators,
+                processMemory: stats.processMemory,
+              },
             },
-          ),
-        });
+            externalSnapshot,
+            canonicalProbeSnapshot,
+            localHlsManifest,
+            bridgeStats: stats,
+            rendererHealth,
+            captureStats: {
+              clientConnected: status.clientConnected,
+              ffmpegRunning: status.ffmpegRunning,
+            },
+          }),
+        );
       } catch {
         return reply.status(503).send({
           error: "RTMP bridge not initialized",
@@ -1117,25 +1626,89 @@ export function registerStreamingRoutes(
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         const capture = getStreamCapture();
+        const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
         const externalSnapshot = await loadExternalRtmpStatusSnapshot(
           EXTERNAL_RTMP_STATUS_FILE || null,
           EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
           { allowStale: true },
         );
-        return reply.send({
-          ...capture.getStats(),
-          rendererHealth: deriveBettingRendererHealth(
-            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
-            {
-              externalStatusSnapshot: externalSnapshot,
-              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
-            },
-          ),
-        });
+        const canonicalProbeSnapshot = canonicalPlaybackProbePoller
+          ? (await canonicalPlaybackProbePoller.refresh().then(() =>
+              canonicalPlaybackProbePoller.getSnapshot(),
+            ))
+          : null;
+        const captureStats = capture.getStats();
+        const rendererHealth = deriveBettingRendererHealth(
+          getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          {
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            localHlsManifest,
+            captureStats,
+          },
+        );
+        return reply.send(
+          buildStreamingStatusPayload({
+            base: captureStats,
+            externalSnapshot,
+            canonicalProbeSnapshot,
+            localHlsManifest,
+            rendererHealth,
+            captureStats,
+          }),
+        );
       } catch {
         return reply.status(503).send({
           error: "Stream capture not initialized",
           message: "The stream capture pipeline has not been started",
+        });
+      }
+    },
+  );
+
+  fastify.get(
+    "/api/streaming/capture/smoke",
+    {
+      config: { rateLimit: false },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const externalSnapshot = await loadExternalRtmpStatusSnapshot(
+          EXTERNAL_RTMP_STATUS_FILE || null,
+          EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+          { allowStale: true },
+        );
+        const delivery =
+          externalSnapshot?.delivery ?? resolveStreamDeliveryInfo(process.env);
+        return reply.send(
+          {
+            ...normalizeStreamingStatusSmoke({
+              externalSnapshot,
+              deliveryModeFallback: delivery.mode,
+            }),
+            sourceRuntime: deriveStreamSourceRuntime({
+              externalStatusSnapshot: externalSnapshot,
+              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+              rendererHealth: deriveBettingRendererHealth(
+                getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+                {
+                  externalStatusSnapshot: externalSnapshot,
+                  externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+                  localHlsManifest: readLocalHlsManifestSnapshot(process.env),
+                  captureStats: getStreamCapture().getStats(),
+                },
+              ),
+              localHlsManifest: readLocalHlsManifestSnapshot(process.env),
+              captureStats: getStreamCapture().getStats(),
+              requireExternalWorker: REQUIRE_EXTERNAL_SOURCE_RUNTIME,
+            }),
+          },
+        );
+      } catch {
+        return reply.status(503).send({
+          error: "Stream capture smoke unavailable",
+          message:
+            "The stream capture smoke summary is not available right now",
         });
       }
     },

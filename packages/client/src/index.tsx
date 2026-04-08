@@ -197,7 +197,6 @@ try {
 // Parse URL parameters for embedded configuration
 const urlParams = new URLSearchParams(window.location.search);
 const isEmbedded = urlParams.get("embedded") === "true";
-
 if (isEmbedded) {
   window.__HYPERSCAPE_EMBEDDED__ = true;
 

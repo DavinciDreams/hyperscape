@@ -5,8 +5,31 @@ import {
 } from "@hyperscape/shared";
 import type { StreamingDuelCycle } from "../systems/StreamingDuelScheduler/types.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
+import type { HlsManifestSnapshot } from "../streaming/stream-status-artifacts.js";
 import type { BettingFeedRendererHealth } from "./streaming-betting-feed.js";
-import type { ExternalRtmpStatusSnapshot } from "./streaming-external-status.js";
+import type {
+  ExternalHlsManifestBlob,
+  ExternalRendererMetricsBlob,
+  ExternalRtmpStatusSnapshot,
+} from "./streaming-external-status.js";
+
+const RENDER_TICK_STALE_MS = 3_000;
+const VISUAL_CHANGE_STALE_MS = 1_000;
+const MIN_CAPTURE_FPS = 24;
+const MIN_ENCODE_FPS = 24;
+
+type NormalizedRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  latestRenderTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+};
+
+type NormalizedHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -28,6 +51,42 @@ function normalizeRendererHealthSnapshot(
     degradedReason: asString(candidate.degradedReason),
     updatedAt: asFiniteNumber(candidate.updatedAt),
   };
+}
+
+function normalizeRendererMetrics(
+  value: ExternalRendererMetricsBlob | undefined,
+): NormalizedRendererMetrics | null {
+  if (!value || typeof value !== "object") return null;
+  return {
+    captureFps: asFiniteNumber(value.captureFps),
+    encodeFps: asFiniteNumber(value.encodeFps),
+    latestRenderTickAt: asFiniteNumber(value.latestRenderTickAt),
+    latestVisualChangeAt: asFiniteNumber(value.latestVisualChangeAt),
+    visualChangeAgeMs: asFiniteNumber(value.visualChangeAgeMs),
+  };
+}
+
+function normalizeHlsManifest(
+  value: ExternalHlsManifestBlob | HlsManifestSnapshot | undefined | null,
+): NormalizedHlsManifest | null {
+  if (!value || typeof value !== "object") return null;
+  return {
+    updatedAt: asFiniteNumber(value.updatedAt),
+    mediaSequence: asFiniteNumber(value.mediaSequence),
+  };
+}
+
+function isFreshHlsManifest(params: {
+  hlsManifest: NormalizedHlsManifest | null;
+  nowMs: number;
+  freshnessMs: number;
+}): boolean {
+  const { hlsManifest, nowMs, freshnessMs } = params;
+  if (!hlsManifest) return false;
+  if (hlsManifest.mediaSequence == null || hlsManifest.updatedAt == null) {
+    return false;
+  }
+  return Math.max(0, nowMs - hlsManifest.updatedAt) <= freshnessMs;
 }
 
 function deriveCycleGuardrailReason(
@@ -58,12 +117,76 @@ function deriveCycleGuardrailReason(
   });
 }
 
+function phaseNeedsLiveRender(cycle: StreamingDuelCycle | null): boolean {
+  return cycle?.phase != null && cycle.phase !== "IDLE";
+}
+
+function phaseNeedsVisualChange(cycle: StreamingDuelCycle | null): boolean {
+  return cycle?.phase === "FIGHTING" || cycle?.phase === "RESOLUTION";
+}
+
+function deriveMetricsDegradedReason(params: {
+  cycle: StreamingDuelCycle | null;
+  metrics: NormalizedRendererMetrics | null;
+  hlsManifest: NormalizedHlsManifest | null;
+  nowMs: number;
+  externalStatusMaxAgeMs: number;
+}): string | null {
+  const { cycle, metrics, hlsManifest, nowMs, externalStatusMaxAgeMs } = params;
+  if (!phaseNeedsLiveRender(cycle)) {
+    return null;
+  }
+  if (!metrics && !hlsManifest) {
+    return null;
+  }
+  if (metrics != null) {
+    const renderTickAgeMs =
+      metrics.latestRenderTickAt != null
+        ? Math.max(0, nowMs - metrics.latestRenderTickAt)
+        : null;
+    if (renderTickAgeMs == null || renderTickAgeMs > RENDER_TICK_STALE_MS) {
+      return "render_tick_stale";
+    }
+
+    if (!phaseNeedsVisualChange(cycle)) {
+      return null;
+    }
+
+    if (
+      metrics.visualChangeAgeMs == null ||
+      metrics.visualChangeAgeMs > VISUAL_CHANGE_STALE_MS
+    ) {
+      return "visual_change_stale";
+    }
+    if (metrics.captureFps != null && metrics.captureFps < MIN_CAPTURE_FPS) {
+      return "capture_fps_low";
+    }
+    if (metrics.encodeFps != null && metrics.encodeFps < MIN_ENCODE_FPS) {
+      return "encoder_fps_low";
+    }
+
+    return null;
+  }
+
+  const manifestFresh = isFreshHlsManifest({
+    hlsManifest,
+    nowMs,
+    freshnessMs: externalStatusMaxAgeMs,
+  });
+  if (!manifestFresh) {
+    return "manifest_stale";
+  }
+
+  return null;
+}
+
 export function deriveBettingRendererHealth(
   cycle: StreamingDuelCycle | null,
   options?: {
     externalStatusSnapshot?: ExternalRtmpStatusSnapshot | null;
     externalStatusMaxAgeMs?: number;
     nowMs?: number;
+    localHlsManifest?: HlsManifestSnapshot | null;
     captureStats?: {
       clientConnected: boolean;
       ffmpegRunning: boolean;
@@ -71,6 +194,7 @@ export function deriveBettingRendererHealth(
   },
 ): BettingFeedRendererHealth {
   const updatedAt = options?.nowMs ?? Date.now();
+  const externalStatusMaxAgeMs = options?.externalStatusMaxAgeMs ?? 15_000;
   const guardrailReason = deriveCycleGuardrailReason(cycle);
   if (guardrailReason) {
     return {
@@ -84,15 +208,32 @@ export function deriveBettingRendererHealth(
   const externalRendererHealth = normalizeRendererHealthSnapshot(
     externalSnapshot?.rendererHealth,
   );
+  const externalRendererMetrics = normalizeRendererMetrics(
+    externalSnapshot?.metrics,
+  );
+  const externalHlsManifest = normalizeHlsManifest(
+    externalSnapshot?.hlsManifest,
+  ) ?? normalizeHlsManifest(options?.localHlsManifest);
+  const metricsReason = deriveMetricsDegradedReason({
+    cycle,
+    metrics: externalRendererMetrics,
+    hlsManifest: externalHlsManifest,
+    nowMs: updatedAt,
+    externalStatusMaxAgeMs,
+  });
+
   if (externalRendererHealth) {
+    const healthSnapshotUpdatedAt =
+      asFiniteNumber(externalSnapshot?.updatedAt) ??
+      externalRendererHealth.updatedAt;
     const ageMs =
-      externalRendererHealth.updatedAt != null
-        ? Math.max(0, updatedAt - externalRendererHealth.updatedAt)
+      healthSnapshotUpdatedAt != null
+        ? Math.max(0, updatedAt - healthSnapshotUpdatedAt)
         : null;
     if (
-      externalRendererHealth.updatedAt != null &&
+      healthSnapshotUpdatedAt != null &&
       ageMs != null &&
-      ageMs > (options?.externalStatusMaxAgeMs ?? 15_000)
+      ageMs > externalStatusMaxAgeMs
     ) {
       return {
         ready: false,
@@ -100,7 +241,78 @@ export function deriveBettingRendererHealth(
         updatedAt,
       };
     }
-    return externalRendererHealth;
+
+    // The visual-change hash is only a heuristic. When the worker has a fresh
+    // explicit ready=true snapshot, trust that over a lone visual hash stall.
+    if (
+      externalRendererHealth.ready &&
+      metricsReason === "visual_change_stale"
+    ) {
+      return {
+        ...externalRendererHealth,
+        updatedAt: healthSnapshotUpdatedAt,
+      };
+    }
+
+    if (metricsReason) {
+      return {
+        ready: false,
+        degradedReason: metricsReason,
+        updatedAt,
+      };
+    }
+
+    if (
+      !externalRendererHealth.ready &&
+      externalRendererHealth.degradedReason &&
+      externalRendererHealth.degradedReason !== "renderer_health_stale"
+    ) {
+      return {
+        ...externalRendererHealth,
+        updatedAt: healthSnapshotUpdatedAt,
+      };
+    }
+
+    if (
+      externalRendererHealth.ready ||
+      !phaseNeedsVisualChange(cycle)
+    ) {
+      return {
+        ...externalRendererHealth,
+        updatedAt: healthSnapshotUpdatedAt,
+      };
+    }
+
+    if (externalRendererMetrics || externalHlsManifest) {
+      return {
+        ready: true,
+        degradedReason: null,
+        updatedAt:
+          externalRendererHealth.updatedAt ??
+          externalHlsManifest?.updatedAt ??
+          updatedAt,
+      };
+    }
+  } else if (metricsReason) {
+    return {
+      ready: false,
+      degradedReason: metricsReason,
+      updatedAt,
+    };
+  }
+
+  if (
+    isFreshHlsManifest({
+      hlsManifest: externalHlsManifest,
+      nowMs: updatedAt,
+      freshnessMs: externalStatusMaxAgeMs,
+    })
+  ) {
+    return {
+      ready: true,
+      degradedReason: null,
+      updatedAt: externalHlsManifest?.updatedAt ?? updatedAt,
+    };
   }
 
   const captureStats = options?.captureStats ?? getStreamCapture().getStats();

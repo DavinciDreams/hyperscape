@@ -13,6 +13,7 @@ import {
   buildBettingFeedPayload,
   selectReplayDelivery,
   type BettingFeedFrame,
+  type BettingFeedRendererMetrics,
   type BettingFeedRendererHealth,
 } from "./streaming-betting-feed.js";
 import {
@@ -23,7 +24,27 @@ import {
 } from "./streaming-betting-auth.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
 import { deriveBettingRendererHealth } from "./streaming-betting-health.js";
-import { acquireExternalStatusPoller } from "./streaming-external-status.js";
+import {
+  acquireExternalStatusPoller,
+  type ExternalRtmpDestination,
+  type ExternalRtmpStatusSnapshot,
+} from "./streaming-external-status.js";
+import { deriveStreamSourceRuntime } from "./streaming-source-runtime.js";
+import { acquirePlaybackProbePoller } from "../streaming/destination-probe.js";
+import {
+  buildStreamDestinationId,
+  inferStreamDeliveryTransport,
+  normalizeStreamDestinationProvider,
+  resolveSelfHostedStreamPlaybackUrl,
+  resolveStreamDeliveryInfo,
+  resolveStreamPresentationDelayMs,
+  type StreamChannelState,
+  type StreamDestinationState,
+  type StreamManifestStatus,
+  type StreamPublicReadiness,
+} from "../streaming/delivery-config.js";
+import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
+import { readLocalHlsManifestSnapshot } from "../streaming/stream-status-artifacts.js";
 
 // Re-exports so existing consumers (streaming.ts, tests) don't need import changes.
 export { deriveBettingRendererHealth } from "./streaming-betting-health.js";
@@ -67,6 +88,10 @@ type BettingRouteMetrics = {
     lastBroadcastSeq: number;
   };
 };
+
+const REQUIRE_EXTERNAL_SOURCE_RUNTIME =
+  process.env.STREAM_SOURCE_RUNTIME_REQUIRE_EXTERNAL === "true" ||
+  process.env.NODE_ENV === "production";
 
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
 
@@ -191,6 +216,40 @@ export function registerStreamingBettingRoutes(
     externalStatusFile,
     externalStatusMaxAgeMs,
   );
+  const configuredDelivery = resolveStreamDeliveryInfo(process.env);
+  const configuredPresentationDelayMs = resolveStreamPresentationDelayMs(
+    process.env,
+    configuredDelivery.mode,
+  );
+  const configuredSelfHostedPlaybackUrl =
+    resolveSelfHostedStreamPlaybackUrl(process.env);
+  const configuredCanonicalProvider = normalizeStreamDestinationProvider(
+    configuredDelivery.provider,
+    "Cloudflare",
+  );
+  const configuredCanonicalDestinationId = buildStreamDestinationId({
+    role: "canonical",
+    provider: configuredCanonicalProvider,
+    name: "External Delivery",
+  });
+  const configuredFallbackDestinationId = buildStreamDestinationId({
+    role: "fallback",
+    provider: "self_hls",
+    name: "Self-HLS",
+  });
+  const configuredExternalPlaybackUrl =
+    configuredDelivery.mode === "external_hls"
+      ? configuredDelivery.playbackUrl ??
+        configuredDelivery.llhlsUrl ??
+        configuredDelivery.hlsUrl
+      : null;
+  const externalPlaybackProbePoller = acquirePlaybackProbePoller(
+    configuredExternalPlaybackUrl,
+    {
+      intervalMs: Math.max(2_000, Math.min(externalStatusMaxAgeMs, 5_000)),
+      timeoutMs: Math.min(externalStatusMaxAgeMs, 4_000),
+    },
+  );
   if (!tokenResolution.token && process.env.NODE_ENV === "production") {
     fastify.log.warn(
       "BETTING_FEED_ACCESS_TOKEN is unset in production; internal betting feed will fail closed",
@@ -279,6 +338,7 @@ export function registerStreamingBettingRoutes(
     }
     closed = true;
     clearBettingLoops();
+    externalPlaybackProbePoller?.release();
     externalStatusPoller?.release();
     for (const clientId of [...bettingClients.keys()]) {
       removeBettingClient(clientId);
@@ -383,13 +443,537 @@ export function registerStreamingBettingRoutes(
   const currentRendererHealthSnapshot = (
     cycle: StreamingDuelCycle | null,
     nowMs?: number,
-  ): BettingFeedRendererHealth =>
-    deriveBettingRendererHealth(cycle, {
+  ): BettingFeedRendererHealth => {
+    const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
+    return deriveBettingRendererHealth(cycle, {
       externalStatusSnapshot: externalStatusPoller?.getSnapshot() ?? null,
       externalStatusMaxAgeMs,
       nowMs,
+      localHlsManifest,
       captureStats: getStreamCaptureStats?.() ?? undefined,
     });
+  };
+
+  const currentRendererMetricsSnapshot = (): BettingFeedRendererMetrics | null => {
+    const metrics = externalStatusPoller?.getSnapshot()?.metrics;
+    const hlsManifest =
+      externalStatusPoller?.getSnapshot()?.hlsManifest ??
+      readLocalHlsManifestSnapshot(process.env);
+    const hasHlsManifest =
+      typeof hlsManifest?.updatedAt === "number" ||
+      typeof hlsManifest?.mediaSequence === "number";
+    if (!metrics && !hasHlsManifest) {
+      return null;
+    }
+    return {
+      captureFps:
+        typeof metrics?.captureFps === "number" ? metrics.captureFps : null,
+      encodeFps:
+        typeof metrics?.encodeFps === "number" ? metrics.encodeFps : null,
+      droppedFrames:
+        typeof metrics?.droppedFrames === "number" ? metrics.droppedFrames : null,
+      renderTick:
+        typeof metrics?.renderTick === "number" ? metrics.renderTick : null,
+      duelStateTick:
+        typeof metrics?.duelStateTick === "number" ? metrics.duelStateTick : null,
+      latestFrameAt:
+        typeof metrics?.latestFrameAt === "number" ? metrics.latestFrameAt : null,
+      latestRenderTickAt:
+        typeof metrics?.latestRenderTickAt === "number"
+          ? metrics.latestRenderTickAt
+          : null,
+      latestDuelStateTickAt:
+        typeof metrics?.latestDuelStateTickAt === "number"
+          ? metrics.latestDuelStateTickAt
+          : null,
+      latestVisualChangeAt:
+        typeof metrics?.latestVisualChangeAt === "number"
+          ? metrics.latestVisualChangeAt
+          : null,
+      visualChangeAgeMs:
+        typeof metrics?.visualChangeAgeMs === "number"
+          ? metrics.visualChangeAgeMs
+          : null,
+      hlsManifest: hasHlsManifest
+        ? {
+            updatedAt:
+              typeof hlsManifest.updatedAt === "number"
+                ? hlsManifest.updatedAt
+                : null,
+            mediaSequence:
+              typeof hlsManifest.mediaSequence === "number"
+                ? hlsManifest.mediaSequence
+                : null,
+          }
+        : null,
+    };
+  };
+
+  const currentSourceRuntimeSnapshot = (
+    cycle: StreamingDuelCycle | null,
+    nowMs?: number,
+    rendererHealth?: BettingFeedRendererHealth | null,
+  ): StreamSourceRuntime => {
+    const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
+    return deriveStreamSourceRuntime({
+      externalStatusSnapshot: externalStatusPoller?.getSnapshot() ?? null,
+      externalStatusMaxAgeMs,
+      rendererHealth: rendererHealth ?? currentRendererHealthSnapshot(cycle, nowMs),
+      localHlsManifest,
+      captureStats: getStreamCaptureStats?.() ?? undefined,
+      nowMs,
+      requireExternalWorker: REQUIRE_EXTERNAL_SOURCE_RUNTIME,
+    });
+  };
+
+  const resolveSnapshotUpdatedAt = (
+    value: number | null | undefined,
+    fallbackUpdatedAt: number,
+  ): number => {
+    return typeof value === "number" && Number.isFinite(value)
+      ? value
+      : fallbackUpdatedAt;
+  };
+
+  const isSnapshotFresh = (
+    updatedAt: number | null | undefined,
+    nowMs: number,
+  ): boolean => {
+    return (
+      typeof updatedAt === "number" &&
+      Number.isFinite(updatedAt) &&
+      Math.max(0, nowMs - updatedAt) <= externalStatusMaxAgeMs
+    );
+  };
+
+  const resolveManifestStatusFromUpdatedAt = (
+    updatedAt: number | null | undefined,
+    nowMs: number,
+  ): StreamManifestStatus => {
+    if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt)) {
+      return "missing";
+    }
+    return isSnapshotFresh(updatedAt, nowMs) ? "ok" : "stale";
+  };
+
+  const resolveExternalDeliveryReason = (params: {
+    nowMs: number;
+    externalSnapshot: ExternalRtmpStatusSnapshot | null;
+    destination: ExternalRtmpDestination | null;
+    playbackUrl: string | null;
+  }): string | null => {
+    const probeSnapshot = externalPlaybackProbePoller?.getSnapshot() ?? null;
+
+    if (!params.playbackUrl) {
+      return "playback_unconfigured";
+    }
+    if (!params.externalSnapshot) {
+      return "delivery_status_unavailable";
+    }
+
+    const snapshotUpdatedAt = resolveSnapshotUpdatedAt(
+      params.externalSnapshot.updatedAt,
+      params.nowMs,
+    );
+    if (!isSnapshotFresh(snapshotUpdatedAt, params.nowMs)) {
+      return "delivery_status_stale";
+    }
+    if (
+      params.externalSnapshot.active !== true ||
+      params.externalSnapshot.ffmpegRunning !== true
+    ) {
+      return "delivery_pipeline_inactive";
+    }
+    if (!params.destination) {
+      return "delivery_destination_missing";
+    }
+    if (probeSnapshot?.ready === true) {
+      return null;
+    }
+    if (params.destination.connected !== true) {
+      return "delivery_disconnected";
+    }
+    if (
+      params.externalSnapshot.stats?.healthy === false ||
+      (typeof params.destination.error === "string" &&
+        params.destination.error.trim().length > 0)
+    ) {
+      return "delivery_unhealthy";
+    }
+    if (!probeSnapshot) {
+      return "delivery_status_unavailable";
+    }
+    if (probeSnapshot.ready) {
+      return null;
+    }
+    if (probeSnapshot.manifestStatus === "missing") {
+      return "manifest_not_ready";
+    }
+    if (probeSnapshot.manifestStatus === "stale") {
+      return "manifest_stale";
+    }
+    return "delivery_unhealthy";
+  };
+
+  const findCanonicalExternalDestination = (
+    externalSnapshot: ExternalRtmpStatusSnapshot | null,
+  ): ExternalRtmpDestination | null => {
+    if (!externalSnapshot) {
+      return null;
+    }
+
+    const destinations = Array.isArray(externalSnapshot.destinations)
+      ? externalSnapshot.destinations
+      : [];
+    return (
+      destinations.find((destination) => destination.role === "canonical") ??
+      destinations.find(
+        (destination) => destination.id === configuredCanonicalDestinationId,
+      ) ??
+      destinations.find(
+        (destination) =>
+          normalizeStreamDestinationProvider(
+            destination.provider ?? null,
+            destination.name ?? null,
+          ) === configuredCanonicalProvider,
+      ) ??
+      destinations.find((destination) =>
+        (destination.name ?? "")
+          .trim()
+          .toLowerCase()
+          .includes("external delivery"),
+      ) ??
+      null
+    );
+  };
+
+  const buildSelfHostedDestination = (params: {
+    role: "canonical" | "fallback";
+    nowMs: number;
+  }): StreamDestinationState => {
+    const localManifest =
+      externalStatusPoller?.getSnapshot()?.hlsManifest ??
+      readLocalHlsManifestSnapshot(process.env);
+    const manifestUpdatedAt =
+      typeof localManifest?.updatedAt === "number" &&
+      Number.isFinite(localManifest.updatedAt)
+        ? localManifest.updatedAt
+        : null;
+    const manifestStatus = resolveManifestStatusFromUpdatedAt(
+      manifestUpdatedAt,
+      params.nowMs,
+    );
+    const playbackReady = manifestStatus === "ok";
+
+    return {
+      id:
+        params.role === "fallback"
+          ? configuredFallbackDestinationId
+          : buildStreamDestinationId({
+              role: "canonical",
+              provider: "self_hls",
+              name: "Self-HLS",
+            }),
+      name: "Self-HLS",
+      role: params.role,
+      provider: "self_hls",
+      transport: "hls",
+      playbackUrl: configuredSelfHostedPlaybackUrl,
+      ingestUrl: null,
+      connected: playbackReady,
+      transportHealthy: playbackReady,
+      playbackReady,
+      manifestStatus,
+      lastError:
+        playbackReady
+          ? null
+          : manifestStatus === "stale"
+            ? "manifest_stale"
+            : "manifest_not_ready",
+      updatedAt: manifestUpdatedAt,
+    };
+  };
+
+  const buildCanonicalExternalDestination = (params: {
+    nowMs: number;
+    sourceRuntime: StreamSourceRuntime;
+  }): {
+    destination: StreamDestinationState;
+    publicReadiness: StreamPublicReadiness;
+  } => {
+    const externalSnapshot = externalStatusPoller?.getSnapshot() ?? null;
+    const externalDestination = findCanonicalExternalDestination(externalSnapshot);
+    const probeSnapshot = externalPlaybackProbePoller?.getSnapshot() ?? null;
+    const playbackUrl =
+      externalDestination?.playbackUrl ??
+      configuredDelivery.playbackUrl ??
+      configuredDelivery.llhlsUrl ??
+      configuredDelivery.hlsUrl ??
+      null;
+    const ingestUrl =
+      externalDestination?.ingestUrl ?? configuredDelivery.ingestUrl ?? null;
+    const snapshotUpdatedAt = externalSnapshot
+      ? resolveSnapshotUpdatedAt(externalSnapshot.updatedAt, params.nowMs)
+      : params.nowMs;
+    const probeReady = probeSnapshot?.ready === true;
+    const destinationConnected =
+      externalDestination?.connected === true || probeReady;
+    const destinationError =
+      typeof externalDestination?.error === "string"
+        ? externalDestination.error.trim()
+        : null;
+    const updatedAt = resolveSnapshotUpdatedAt(
+      probeSnapshot?.updatedAt ??
+        externalDestination?.startedAt ??
+        externalSnapshot?.updatedAt,
+      params.nowMs,
+    );
+    const lastFatalWriteAt =
+      typeof externalSnapshot?.captureDiagnostics?.lastFatalWriteError?.at ===
+        "number" &&
+      Number.isFinite(externalSnapshot.captureDiagnostics.lastFatalWriteError.at)
+        ? externalSnapshot.captureDiagnostics.lastFatalWriteError.at
+        : null;
+    const freshestSourceIncidentAt = Math.max(
+      lastFatalWriteAt ?? Number.NEGATIVE_INFINITY,
+      params.sourceRuntime.workerHeartbeatAt ?? Number.NEGATIVE_INFINITY,
+    );
+    const contradictorySourceError =
+      probeReady &&
+      params.sourceRuntime.ready !== true &&
+      (!Number.isFinite(freshestSourceIncidentAt) ||
+        freshestSourceIncidentAt >= updatedAt);
+    const transportHealthy =
+      params.sourceRuntime.ready === true &&
+      externalSnapshot != null &&
+      isSnapshotFresh(snapshotUpdatedAt, params.nowMs) &&
+      externalSnapshot.active === true &&
+      externalSnapshot.ffmpegRunning === true &&
+      externalSnapshot.stats?.healthy !== false &&
+      destinationConnected &&
+      probeReady &&
+      !contradictorySourceError;
+    const reason = resolveExternalDeliveryReason({
+      nowMs: params.nowMs,
+      externalSnapshot,
+      destination: externalDestination,
+      playbackUrl,
+    });
+
+    return {
+      destination: {
+        id: externalDestination?.id ?? configuredCanonicalDestinationId,
+        name: externalDestination?.name ?? "External Delivery",
+        role: "canonical",
+        provider: normalizeStreamDestinationProvider(
+          externalDestination?.provider ?? configuredDelivery.provider,
+          externalDestination?.name ?? "External Delivery",
+        ),
+        transport:
+          externalDestination?.transport ??
+          inferStreamDeliveryTransport({
+            playbackUrl,
+            ingestUrl,
+          }),
+        playbackUrl,
+        ingestUrl,
+        connected: destinationConnected,
+        transportHealthy,
+        playbackReady: probeReady,
+        manifestStatus:
+          probeSnapshot?.manifestStatus ??
+          (playbackUrl ? "unknown" : "missing"),
+        lastError: probeReady
+          ? contradictorySourceError
+            ? params.sourceRuntime.degradedReason ??
+              destinationError ??
+              reason
+            : null
+          : destinationError ?? probeSnapshot?.lastError ?? reason,
+        updatedAt,
+      },
+      publicReadiness: {
+        ready: reason == null,
+        reason,
+        updatedAt,
+      },
+    };
+  };
+
+  const buildMirrorDestinations = (params: {
+    nowMs: number;
+    canonicalDestinationId: string | null;
+  }): StreamDestinationState[] => {
+    const externalSnapshot = externalStatusPoller?.getSnapshot() ?? null;
+    if (!externalSnapshot) {
+      return [];
+    }
+
+    const snapshotUpdatedAt = resolveSnapshotUpdatedAt(
+      externalSnapshot.updatedAt,
+      params.nowMs,
+    );
+    const snapshotFresh = isSnapshotFresh(snapshotUpdatedAt, params.nowMs);
+    const baseTransportHealthy =
+      snapshotFresh &&
+      externalSnapshot.active === true &&
+      externalSnapshot.ffmpegRunning === true &&
+      externalSnapshot.stats?.healthy !== false;
+    const seen = new Set<string>();
+
+    return externalSnapshot.destinations.flatMap((destination) => {
+      const provider = normalizeStreamDestinationProvider(
+        destination.provider ?? null,
+        destination.name ?? null,
+      );
+      if (
+        destination.id === params.canonicalDestinationId ||
+        destination.role === "canonical" ||
+        (params.canonicalDestinationId != null &&
+          provider === configuredCanonicalProvider &&
+          ((destination.name ?? "")
+            .trim()
+            .toLowerCase()
+            .includes("external delivery") ||
+            destination.id == null))
+      ) {
+        return [];
+      }
+      if (destination.role === "fallback" || provider === "self_hls") {
+        return [];
+      }
+
+      const id =
+        destination.id ??
+        buildStreamDestinationId({
+          role: "mirror",
+          provider,
+          name: destination.name ?? provider,
+        });
+      if (seen.has(id)) {
+        return [];
+      }
+      seen.add(id);
+
+      const transportHealthy =
+        baseTransportHealthy &&
+        destination.connected === true &&
+        !(
+          typeof destination.error === "string" &&
+          destination.error.trim().length > 0
+        );
+      return [
+        {
+          id,
+          name: destination.name ?? provider,
+          role: "mirror",
+          provider,
+          transport:
+            destination.transport ??
+            inferStreamDeliveryTransport({
+              playbackUrl: destination.playbackUrl ?? null,
+              ingestUrl: destination.ingestUrl ?? destination.url ?? null,
+            }),
+          playbackUrl: destination.playbackUrl ?? null,
+          ingestUrl: destination.ingestUrl ?? destination.url ?? null,
+          connected: destination.connected === true,
+          transportHealthy,
+          playbackReady: transportHealthy,
+          manifestStatus: "unknown",
+          lastError:
+            typeof destination.error === "string" &&
+            destination.error.trim().length > 0
+              ? destination.error.trim()
+              : snapshotFresh
+                ? null
+                : "delivery_status_stale",
+          updatedAt: resolveSnapshotUpdatedAt(
+            destination.startedAt ?? externalSnapshot.updatedAt,
+            params.nowMs,
+          ),
+        } satisfies StreamDestinationState,
+      ];
+    });
+  };
+
+  const currentChannelSnapshot = (
+    cycle: StreamingDuelCycle | null,
+    nowMs?: number,
+    sourceRuntime?: StreamSourceRuntime,
+  ): StreamChannelState => {
+    const updatedAt = nowMs ?? Date.now();
+    const resolvedSourceRuntime =
+      sourceRuntime ?? currentSourceRuntimeSnapshot(cycle, updatedAt);
+
+    if (configuredDelivery.mode === "external_hls") {
+      const { destination: canonicalDestination, publicReadiness } =
+        buildCanonicalExternalDestination({
+          nowMs: updatedAt,
+          sourceRuntime: resolvedSourceRuntime,
+        });
+      const mirrors = buildMirrorDestinations({
+        nowMs: updatedAt,
+        canonicalDestinationId: canonicalDestination.id,
+      });
+      const fallbackDestination = buildSelfHostedDestination({
+        role: "fallback",
+        nowMs: updatedAt,
+      });
+      return {
+        id: "hyperscapes-broadcast-channel",
+        mode: "always_on",
+        presentationDelayMs: configuredPresentationDelayMs,
+        activeDuelId: cycle?.duelId ?? null,
+        activeDuelKey: cycle?.duelKeyHex ?? null,
+        canonicalDestinationId: canonicalDestination.id,
+        fallbackDestinationId: fallbackDestination.id,
+        publicPlaybackUrl: canonicalDestination.playbackUrl,
+        publicReadiness: resolvedSourceRuntime.ready
+          ? publicReadiness
+          : {
+              ready: false,
+              reason: resolvedSourceRuntime.degradedReason,
+              updatedAt:
+                resolvedSourceRuntime.workerHeartbeatAt ??
+                publicReadiness.updatedAt,
+            },
+        destinations: [canonicalDestination, fallbackDestination, ...mirrors],
+      };
+    }
+
+    const mirrors = buildMirrorDestinations({
+      nowMs: updatedAt,
+      canonicalDestinationId: null,
+    });
+    const canonicalDestination = buildSelfHostedDestination({
+      role: "canonical",
+      nowMs: updatedAt,
+    });
+    return {
+      id: "hyperscapes-broadcast-channel",
+      mode: "always_on",
+      presentationDelayMs: configuredPresentationDelayMs,
+      activeDuelId: cycle?.duelId ?? null,
+      activeDuelKey: cycle?.duelKeyHex ?? null,
+      canonicalDestinationId: canonicalDestination.id,
+      fallbackDestinationId: null,
+      publicPlaybackUrl: canonicalDestination.playbackUrl,
+      publicReadiness: resolvedSourceRuntime.ready
+        ? {
+            ready: canonicalDestination.playbackReady,
+            reason: canonicalDestination.lastError,
+            updatedAt: canonicalDestination.updatedAt,
+          }
+        : {
+            ready: false,
+            reason: resolvedSourceRuntime.degradedReason,
+            updatedAt:
+              resolvedSourceRuntime.workerHeartbeatAt ??
+              canonicalDestination.updatedAt,
+          },
+      destinations: [canonicalDestination, ...mirrors],
+    };
+  };
 
   const captureBettingFrame = (
     forceNewFrame = false,
@@ -399,12 +983,21 @@ export function registerStreamingBettingRoutes(
     const nextSeq = bettingSequence + 1;
     const emittedAt = Date.now();
     const rendererHealth = currentRendererHealthSnapshot(cycle, emittedAt);
+    const sourceRuntime = currentSourceRuntimeSnapshot(
+      cycle,
+      emittedAt,
+      rendererHealth,
+    );
+    const channel = currentChannelSnapshot(cycle, emittedAt, sourceRuntime);
     const payload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
       seq: nextSeq,
       emittedAt,
       cycle,
       rendererHealth,
+      channel,
+      sourceRuntime,
+      rendererMetrics: currentRendererMetricsSnapshot(),
     });
     const dedupKey = buildBettingFeedDedupKey(payload);
 
@@ -512,12 +1105,24 @@ export function registerStreamingBettingRoutes(
 
   const buildBettingBootstrapResponse = (frame: BettingFeedFrame | null) => {
     const fallbackEmittedAt = Date.now();
+    const fallbackRendererHealth = currentRendererHealthSnapshot(
+      null,
+      fallbackEmittedAt,
+    );
+    const fallbackSourceRuntime = currentSourceRuntimeSnapshot(
+      null,
+      fallbackEmittedAt,
+      fallbackRendererHealth,
+    );
     const fallbackPayload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
       seq: bettingSequence,
       emittedAt: fallbackEmittedAt,
       cycle: null,
-      rendererHealth: currentRendererHealthSnapshot(null, fallbackEmittedAt),
+      rendererHealth: fallbackRendererHealth,
+      channel: currentChannelSnapshot(null, fallbackEmittedAt, fallbackSourceRuntime),
+      sourceRuntime: fallbackSourceRuntime,
+      rendererMetrics: currentRendererMetricsSnapshot(),
     });
 
     return {
@@ -541,18 +1146,18 @@ export function registerStreamingBettingRoutes(
   const bettingBootstrapAuthPreHandler = async (
     request: FastifyRequest,
     reply: FastifyReply,
-  ): Promise<void> => {
+  ): Promise<FastifyReply | void> => {
     if (!(await assertBettingAuth(request, reply))) {
-      return;
+      return reply;
     }
   };
 
   const bettingEventsAuthPreHandler = async (
     request: FastifyRequest,
     reply: FastifyReply,
-  ): Promise<void> => {
+  ): Promise<FastifyReply | void> => {
     if (!(await assertBettingAuth(request, reply))) {
-      return;
+      return reply;
     }
   };
 
@@ -560,6 +1165,10 @@ export function registerStreamingBettingRoutes(
     _request: FastifyRequest,
     reply: FastifyReply,
   ) => {
+    if (reply.sent) {
+      return reply;
+    }
+
     const scheduler = getScheduler();
     if (!scheduler) {
       return reply.status(503).send({
@@ -569,21 +1178,24 @@ export function registerStreamingBettingRoutes(
     }
 
     await ensureBettingSourceEpoch();
-    if (bettingReplayFrames.length === 0) {
+    await externalStatusPoller?.refresh();
+    await externalPlaybackProbePoller?.refresh();
+    const latestFrame =
+      captureBettingFrame(false) ??
+      bettingReplayFrames[bettingReplayFrames.length - 1] ??
       captureBettingFrame(true);
-    }
 
-    return reply.send(
-      buildBettingBootstrapResponse(
-        bettingReplayFrames[bettingReplayFrames.length - 1] ?? null,
-      ),
-    );
+    return reply.send(buildBettingBootstrapResponse(latestFrame ?? null));
   };
 
   const handleBettingEvents = async (
     request: FastifyRequest<{ Querystring: { since?: string } }>,
     reply: FastifyReply,
   ) => {
+    if (reply.sent) {
+      return reply;
+    }
+
     const scheduler = getScheduler();
     if (!scheduler) {
       return reply.status(503).send({
@@ -593,6 +1205,9 @@ export function registerStreamingBettingRoutes(
     }
 
     await ensureBettingSourceEpoch();
+    await externalStatusPoller?.refresh();
+    await externalPlaybackProbePoller?.refresh();
+    captureBettingFrame(false);
     if (bettingReplayFrames.length === 0) {
       captureBettingFrame(true);
     }

@@ -2,8 +2,14 @@ import type {
   StreamingDuelCycle,
   StreamingPhase,
 } from "../systems/StreamingDuelScheduler/types.js";
+import type {
+  StreamChannelState,
+  StreamDestinationState,
+  StreamPublicReadiness,
+} from "../streaming/delivery-config.js";
+import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
 
-export const BETTING_FEED_SCHEMA_VERSION = 1;
+export const BETTING_FEED_SCHEMA_VERSION = 2;
 export const BETTING_SOURCE_EPOCH_STORAGE_KEY =
   "streaming:betting-source-epoch";
 
@@ -29,6 +35,41 @@ export type BettingFeedRendererHealth = {
   updatedAt: number | null;
 };
 
+export type BettingFeedDeliveryHealth = BettingFeedRendererHealth;
+
+export type BettingFeedHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+export type BettingFeedRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifest: BettingFeedHlsManifest | null;
+};
+
+export type BettingFeedDelivery = {
+  mode: "self_hls" | "external_hls";
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
+export type BettingFeedDestinationState = StreamDestinationState;
+export type BettingFeedPublicReadiness = StreamPublicReadiness;
+export type BettingFeedChannel = StreamChannelState;
+export type BettingFeedSourceRuntime = StreamSourceRuntime;
+
 export type BettingFeedPayload = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -49,6 +90,29 @@ export type BettingFeedPayload = {
   agent2: BettingFeedAgent | null;
   arenaPositions: StreamingDuelCycle["arenaPositions"];
   rendererHealth: BettingFeedRendererHealth | null;
+  deliveryHealth: BettingFeedDeliveryHealth | null;
+  channel: BettingFeedChannel | null;
+  publicReadiness: BettingFeedPublicReadiness | null;
+  canonicalDestination: BettingFeedDestinationState | null;
+  fallbackDestination: BettingFeedDestinationState | null;
+  sourceRuntime: BettingFeedSourceRuntime | null;
+  rendererMetrics: BettingFeedRendererMetrics | null;
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifestUpdatedAt: number | null;
+  hlsMediaSequence: number | null;
+  delivery: BettingFeedDelivery | null;
+  deliveryMode: BettingFeedDelivery["mode"] | null;
+  deliveryProvider: string | null;
+  playbackUrl: string | null;
 };
 
 export type BettingFeedFrame = {
@@ -122,8 +186,57 @@ export function buildBettingFeedPayload(params: {
   emittedAt: number;
   cycle: StreamingDuelCycle | null;
   rendererHealth?: BettingFeedRendererHealth | null;
+  deliveryHealth?: BettingFeedDeliveryHealth | null;
+  channel?: BettingFeedChannel | null;
+  sourceRuntime?: BettingFeedSourceRuntime | null;
+  rendererMetrics?: BettingFeedRendererMetrics | null;
+  delivery?: BettingFeedDelivery | null;
 }): BettingFeedPayload {
   const cycle = params.cycle;
+  const rendererMetrics = params.rendererMetrics ?? null;
+  const hlsManifest = rendererMetrics?.hlsManifest ?? null;
+  const channel = params.channel ?? null;
+  const canonicalDestination =
+    channel?.destinations.find(
+      (destination) => destination.id === channel.canonicalDestinationId,
+    ) ?? null;
+  const fallbackDestination =
+    channel?.fallbackDestinationId != null
+      ? channel.destinations.find(
+          (destination) => destination.id === channel.fallbackDestinationId,
+        ) ?? null
+      : null;
+  const delivery =
+    params.delivery ??
+    (canonicalDestination
+      ? {
+          mode:
+            canonicalDestination.provider === "self_hls"
+              ? "self_hls"
+              : "external_hls",
+          provider: canonicalDestination.provider,
+          playbackUrl: canonicalDestination.playbackUrl,
+          hlsUrl:
+            canonicalDestination.transport === "hls" &&
+            canonicalDestination.provider !== "self_hls"
+              ? canonicalDestination.playbackUrl
+              : null,
+          llhlsUrl:
+            canonicalDestination.transport === "llhls"
+              ? canonicalDestination.playbackUrl
+              : null,
+          ingestUrl: canonicalDestination.ingestUrl,
+        }
+      : null);
+  const deliveryHealth =
+    params.deliveryHealth ??
+    (channel?.publicReadiness
+      ? {
+          ready: channel.publicReadiness.ready,
+          degradedReason: channel.publicReadiness.reason,
+          updatedAt: channel.publicReadiness.updatedAt,
+        }
+      : null);
   return {
     schemaVersion: BETTING_FEED_SCHEMA_VERSION,
     sourceEpoch: params.sourceEpoch,
@@ -144,6 +257,29 @@ export function buildBettingFeedPayload(params: {
     agent2: toAgentSnapshot(cycle?.agent2 ?? null),
     arenaPositions: cycle?.arenaPositions ?? null,
     rendererHealth: params.rendererHealth ?? null,
+    deliveryHealth,
+    channel,
+    publicReadiness: channel?.publicReadiness ?? null,
+    canonicalDestination,
+    fallbackDestination,
+    sourceRuntime: params.sourceRuntime ?? null,
+    rendererMetrics,
+    captureFps: rendererMetrics?.captureFps ?? null,
+    encodeFps: rendererMetrics?.encodeFps ?? null,
+    droppedFrames: rendererMetrics?.droppedFrames ?? null,
+    renderTick: rendererMetrics?.renderTick ?? null,
+    duelStateTick: rendererMetrics?.duelStateTick ?? null,
+    latestFrameAt: rendererMetrics?.latestFrameAt ?? null,
+    latestRenderTickAt: rendererMetrics?.latestRenderTickAt ?? null,
+    latestDuelStateTickAt: rendererMetrics?.latestDuelStateTickAt ?? null,
+    latestVisualChangeAt: rendererMetrics?.latestVisualChangeAt ?? null,
+    visualChangeAgeMs: rendererMetrics?.visualChangeAgeMs ?? null,
+    hlsManifestUpdatedAt: hlsManifest?.updatedAt ?? null,
+    hlsMediaSequence: hlsManifest?.mediaSequence ?? null,
+    delivery,
+    deliveryMode: delivery?.mode ?? null,
+    deliveryProvider: delivery?.provider ?? null,
+    playbackUrl: delivery?.playbackUrl ?? null,
   };
 }
 
@@ -151,10 +287,77 @@ export function buildBettingFeedDedupKey(payload: BettingFeedPayload): string {
   return JSON.stringify({
     ...payload,
     emittedAt: 0,
+    latestFrameAt: 0,
+    latestRenderTickAt: 0,
+    latestDuelStateTickAt: 0,
+    latestVisualChangeAt: 0,
+    hlsManifestUpdatedAt: 0,
     rendererHealth: payload.rendererHealth
       ? {
           ...payload.rendererHealth,
           updatedAt: 0,
+        }
+      : null,
+    deliveryHealth: payload.deliveryHealth
+      ? {
+          ...payload.deliveryHealth,
+          updatedAt: 0,
+        }
+      : null,
+    channel: payload.channel
+      ? {
+          ...payload.channel,
+          publicReadiness: {
+            ...payload.channel.publicReadiness,
+            updatedAt: 0,
+          },
+          destinations: payload.channel.destinations.map((destination) => ({
+            ...destination,
+            updatedAt: 0,
+          })),
+        }
+      : null,
+    publicReadiness: payload.publicReadiness
+      ? {
+          ...payload.publicReadiness,
+          updatedAt: 0,
+        }
+      : null,
+    canonicalDestination: payload.canonicalDestination
+      ? {
+          ...payload.canonicalDestination,
+          updatedAt: 0,
+        }
+      : null,
+    fallbackDestination: payload.fallbackDestination
+      ? {
+          ...payload.fallbackDestination,
+          updatedAt: 0,
+        }
+      : null,
+    sourceRuntime: payload.sourceRuntime
+      ? {
+          ...payload.sourceRuntime,
+          lastFrameAt: 0,
+          lastRenderTickAt: 0,
+          lastVisualChangeAt: 0,
+          lastRecoveryAt: 0,
+          workerHeartbeatAt: 0,
+        }
+      : null,
+    rendererMetrics: payload.rendererMetrics
+      ? {
+          ...payload.rendererMetrics,
+          latestFrameAt: 0,
+          latestRenderTickAt: 0,
+          latestDuelStateTickAt: 0,
+          latestVisualChangeAt: 0,
+          hlsManifest: payload.rendererMetrics.hlsManifest
+            ? {
+                ...payload.rendererMetrics.hlsManifest,
+                updatedAt: 0,
+              }
+            : null,
         }
       : null,
   });

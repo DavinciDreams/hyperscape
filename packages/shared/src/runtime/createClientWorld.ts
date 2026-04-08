@@ -129,7 +129,10 @@ import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
 import { ClientTeleportEffectsSystem } from "../systems/client/ClientTeleportEffectsSystem";
 import type { SystemConstructor } from "../systems/shared/infrastructure/System";
-import { isStreamingLikeViewport } from "./clientViewportMode";
+import {
+  isDedicatedStreamViewport,
+  isStreamingLikeViewport,
+} from "./clientViewportMode";
 
 /**
  * Window extension for browser testing and debugging.
@@ -189,6 +192,8 @@ function replaceSystem(
  */
 export function createClientWorld() {
   const world = new World();
+  const isStreamingViewport = isStreamingLikeViewport();
+  const isDedicatedStreamCaptureViewport = isDedicatedStreamViewport();
   // ============================================================================
   // FRAME BUDGET MANAGER
   // ============================================================================
@@ -239,7 +244,9 @@ export function createClientWorld() {
   // Lifecycle and networking
   world.register("client-runtime", ClientRuntime); // Client lifecycle, diagnostics
   replaceSystem(world, "stage", Stage); // Three.js scene graph root
-  world.register("livekit", ClientLiveKit); // Voice chat client
+  if (!isDedicatedStreamCaptureViewport) {
+    world.register("livekit", ClientLiveKit); // Voice chat client
+  }
   world.register("network", ClientNetwork); // WebSocket connection to server
   world.register("loader", ClientLoader); // Asset loading and caching
 
@@ -248,18 +255,24 @@ export function createClientWorld() {
   world.register("environment", Environment); // Lighting, shadows, CSM
 
   // Dev tools (only active in dev mode)
-  world.register("devStats", DevStats); // FPS counter and performance telemetry
-  world.register("pathfindingDebug", PathfindingDebugSystem); // Press 'P' to toggle
-  world.register("bfsPathDebug", BFSPathDebugSystem); // Press 'B' (with F5 open) to toggle
-  world.register("walkableDebug", WalkableTileDebugSystem); // Press 'W' (with F5 open) to toggle
+  if (!isDedicatedStreamCaptureViewport) {
+    world.register("devStats", DevStats); // FPS counter and performance telemetry
+    world.register("pathfindingDebug", PathfindingDebugSystem); // Press 'P' to toggle
+    world.register("bfsPathDebug", BFSPathDebugSystem); // Press 'B' (with F5 open) to toggle
+    world.register("walkableDebug", WalkableTileDebugSystem); // Press 'W' (with F5 open) to toggle
+  }
 
   // Audio systems
-  world.register("audio", ClientAudio); // 3D spatial audio
-  world.register("music", MusicSystem); // Background music player
+  world.register("audio", ClientAudio); // 3D spatial audio / combat SFX
+  if (!isDedicatedStreamCaptureViewport) {
+    world.register("music", MusicSystem); // Background music player
+  }
 
   // Input and interaction
-  world.register("controls", ClientInput); // Keyboard, mouse, touch input
-  world.register("actions", ClientActions); // Executable player actions
+  if (!isDedicatedStreamCaptureViewport) {
+    world.register("controls", ClientInput); // Keyboard, mouse, touch input
+    world.register("actions", ClientActions); // Executable player actions
+  }
 
   // UI and preferences
   world.register("prefs", ClientInterface); // User preferences and UI state
@@ -268,7 +281,7 @@ export function createClientWorld() {
   // Streaming/spectator viewports skip physics entirely — they don't need
   // collision detection and PhysX WASM can crash in the Playwright capture
   // browser. RigidBody/Collider nodes already guard against missing PHYSX.
-  if (!isStreamingLikeViewport()) {
+  if (!isStreamingViewport) {
     replaceSystem(world, "physics", Physics);
   } else {
     // The World constructor registers a default PhysicsSystem whose init()
@@ -313,8 +326,10 @@ export function createClientWorld() {
   // that VegetationSystem receives to regenerate grass at correct heights
 
   world.register("towns", TownSystem);
-  world.register("pois", POISystem);
-  // world.register("roads", RoadNetworkSystem);
+  if (!isDedicatedStreamCaptureViewport) {
+    world.register("pois", POISystem);
+  }
+  world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM
@@ -369,7 +384,10 @@ export function createClientWorld() {
   // ============================================================================
   // DOCK SYSTEM
   // ============================================================================
-  world.register("docks", ProceduralDocks);
+  // Procedural docks for ponds and lakes — collision + mesh on client
+  if (!isDedicatedStreamCaptureViewport) {
+    world.register("docks", ProceduralDocks);
+  }
 
   // ============================================================================
   // THREE.JS SETUP
@@ -450,15 +468,16 @@ export function createClientWorld() {
         console.log(
           "[createClientWorld] Skipping tree cache pre-warm and PhysX for stream/spectator viewport",
         );
-        // CRITICAL: We still need to load PhysX even if we skip tree pre-warming!
-        // In stream mode, there is no local player, so PlayerLocal won't trigger the load either.
-        // We trigger it here in the background so colliders and static actors can initialize.
-        waitForPhysX("StreamInitialization", 120000).catch((err) => {
-          console.warn(
-            "[createClientWorld] Background PhysX load failed:",
-            err,
-          );
-        });
+        if (!isDedicatedStreamCaptureViewport) {
+          // Embedded spectator views still benefit from a background PhysX load
+          // for collision-backed terrain probes without blocking first paint.
+          waitForPhysX("StreamInitialization", 120000).catch((err) => {
+            console.warn(
+              "[createClientWorld] Background PhysX load failed:",
+              err,
+            );
+          });
+        }
       }
 
       // Mob impostor pre-warming disabled — VRM mobs use on-demand baking.

@@ -233,7 +233,9 @@ export class ConnectionManager {
       ).__HYPERSCAPE_CONFIG__;
 
       if (isEmbedded && embeddedConfig) {
-        this.isEmbeddedSpectator = embeddedConfig.mode === "spectator";
+        this.isEmbeddedSpectator =
+          embeddedConfig.mode === "spectator" ||
+          embeddedConfig.mode === "stream";
         const characterId = embeddedConfig.characterId || null;
         onEmbeddedConfig(characterId);
 

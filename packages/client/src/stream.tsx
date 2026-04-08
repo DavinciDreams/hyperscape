@@ -5,9 +5,8 @@ import { installThreeJSExtensions } from "@hyperscape/shared";
 import { Buffer } from "buffer";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { resolveCaptureAssetBase } from "./lib/streamingWindow";
 import { StreamingMode } from "./screens/StreamingMode";
-import { refreshApiConfig } from "./lib/api-config";
-import { ensurePublicRuntimeEnv } from "./lib/publicEnv";
 
 type GlobalFlags = typeof globalThis & {
   Buffer?: typeof Buffer;
@@ -63,31 +62,61 @@ globalFlags.Buffer = Buffer;
 globalFlags.isBrowser = true;
 globalFlags.isServer = false;
 
-function syncRuntimeAssetBaseUrls(): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
+// Early CDN URL initialization to prevent PhysX WASM loading race condition
+if (typeof window !== "undefined") {
   const windowWithEnv = window as Window & {
-    env?: { PUBLIC_CDN_URL?: string };
+    env?: {
+      PUBLIC_CDN_URL?: string;
+      PUBLIC_ASSETS_URL?: string;
+      PUBLIC_API_URL?: string;
+    };
     __CDN_URL?: string;
     __ASSETS_URL?: string;
+    __HYPERSCAPE_CONFIG__?: {
+      mode?: string;
+      quality?: string;
+      hiddenUI?: string[];
+    };
   };
-  const envCdn = windowWithEnv.env?.PUBLIC_CDN_URL;
-  if (envCdn && typeof envCdn === "string" && envCdn !== "undefined") {
-    let resolvedCdn = envCdn;
-    if (resolvedCdn.includes("127.0.0.1") || resolvedCdn.includes("0.0.0.0")) {
-      resolvedCdn = resolvedCdn
+  const envAssets =
+    windowWithEnv.env?.PUBLIC_ASSETS_URL ?? windowWithEnv.env?.PUBLIC_CDN_URL;
+  if (envAssets && typeof envAssets === "string" && envAssets !== "undefined") {
+    const captureAssets =
+      resolveCaptureAssetBase(
+        envAssets,
+        windowWithEnv.env?.PUBLIC_API_URL,
+        window.location.href,
+      ) ?? envAssets;
+    let resolvedAssets = captureAssets;
+    if (
+      resolvedAssets.includes("127.0.0.1") ||
+      resolvedAssets.includes("0.0.0.0")
+    ) {
+      resolvedAssets = resolvedAssets
         .replace("127.0.0.1", "localhost")
         .replace("0.0.0.0", "localhost");
     }
-    windowWithEnv.__CDN_URL = resolvedCdn;
-    windowWithEnv.__ASSETS_URL = resolvedCdn;
+    windowWithEnv.__CDN_URL = resolvedAssets;
+    windowWithEnv.__ASSETS_URL = resolvedAssets;
   }
-}
 
-// Early CDN URL initialization to prevent PhysX WASM loading race condition
-syncRuntimeAssetBaseUrls();
+  const existingViewportConfig =
+    (windowWithEnv.__HYPERSCAPE_CONFIG__ as Record<string, unknown> | undefined) ||
+    {};
+  windowWithEnv.__HYPERSCAPE_CONFIG__ = {
+    ...existingViewportConfig,
+    mode: "stream",
+    quality: (existingViewportConfig["quality"] as string | undefined) ?? "low",
+    hiddenUI:
+      (existingViewportConfig["hiddenUI"] as string[] | undefined) ?? [
+        "chat",
+        "inventory",
+        "minimap",
+        "hotbar",
+        "stats",
+      ],
+  } as typeof windowWithEnv.__HYPERSCAPE_CONFIG__;
+}
 
 installThreeJSExtensions();
 
@@ -120,10 +149,11 @@ async function resetLocalStreamingCaches(): Promise<void> {
   const isInternalCapture = isTruthyUrlFlag(
     searchParams.get("internalCapture"),
   );
+  const isSourceCapture = isTruthyUrlFlag(searchParams.get("streamCapture"));
   const isLoopbackHost = ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(
     window.location.hostname,
   );
-  if (!isInternalCapture && !isLoopbackHost) {
+  if (!isInternalCapture && !isSourceCapture && !isLoopbackHost) {
     return;
   }
 
@@ -168,9 +198,6 @@ async function resetLocalStreamingCaches(): Promise<void> {
 }
 
 async function bootstrapStreamApp(): Promise<void> {
-  await ensurePublicRuntimeEnv();
-  refreshApiConfig();
-  syncRuntimeAssetBaseUrls();
   await resetLocalStreamingCaches();
   mountStreamApp();
 }

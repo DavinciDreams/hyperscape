@@ -266,6 +266,8 @@ export const WEBCODECS_CAPTURE_SCRIPT = `
       chunkCount,
       bytesSent,
       uptime: startTime > 0 ? Date.now() - startTime : 0,
+      lastChunkAt: lastFrameTime > 0 ? lastFrameTime : null,
+      lastChunkAgeMs: lastFrameTime > 0 ? Date.now() - lastFrameTime : null,
       lastChunkMs: lastFrameTime > 0 ? Date.now() - lastFrameTime : 0,
       captureFps,
       bufferedAmount: ws ? ws.bufferedAmount : 0,

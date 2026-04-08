@@ -232,7 +232,7 @@ function setupSpectatorCamera(
   // 1. There's no local player entity to control
   // 2. The client-input system may not be fully initialized
   // 3. Spectators are read-only viewers by design
-  if (config.mode === "spectator") {
+  if (isSpectatorLikeMode(config.mode)) {
     logger.log(
       "[EmbeddedGameClient] Spectator mode - player controls not applicable (no local player)",
     );
@@ -351,7 +351,7 @@ function setupSpectatorCamera(
     onCameraLocked?.();
 
     // Ensure controls are still disabled (belt and suspenders)
-    if (config.mode === "spectator") {
+    if (isSpectatorLikeMode(config.mode)) {
       disablePlayerControls(world);
     }
   };
@@ -516,6 +516,10 @@ function applyQualityPresets(world: World, _config: EmbeddedViewportConfig) {
   prefs.setWaterReflections?.(quality.shadows !== "none");
 }
 
+function isSpectatorLikeMode(mode: EmbeddedViewportConfig["mode"] | undefined) {
+  return mode === "spectator" || mode === "stream";
+}
+
 /**
  * Embedded Game Client Component
  */
@@ -570,7 +574,7 @@ export function EmbeddedGameClient() {
       return;
     }
 
-    const isSpectatorMode = embeddedConfig.mode === "spectator";
+    const isSpectatorMode = isSpectatorLikeMode(embeddedConfig.mode);
 
     // Check if auth token is already available
     if (embeddedConfig.authToken) {
@@ -758,7 +762,7 @@ export function EmbeddedGameClient() {
   }, []);
 
   useEffect(() => {
-    if (!config || config.mode !== "spectator") {
+    if (!config || !isSpectatorLikeMode(config.mode)) {
       setMinimumLoadElapsed(true);
       return;
     }
@@ -806,7 +810,7 @@ export function EmbeddedGameClient() {
           return;
         }
 
-        if (config.mode === "spectator") {
+        if (isSpectatorLikeMode(config.mode)) {
           const targetId =
             getServerAssignedSpectatorFollowEntity(world) ||
             config.followEntity ||
@@ -873,7 +877,7 @@ export function EmbeddedGameClient() {
         getServerAssignedSpectatorFollowEntity(world) ||
         config.followEntity ||
         config.characterId;
-      const needsTargetAvatar = config.mode === "spectator";
+      const needsTargetAvatar = isSpectatorLikeMode(config.mode);
       const checkAvatarReady = () => {
         const targetEntityId = resolveTargetEntityId();
         if (!targetEntityId) {
@@ -978,7 +982,7 @@ export function EmbeddedGameClient() {
   // The auth credentials are passed via window.__HYPERSCAPE_CONFIG__ which ClientNetwork reads
   const wsUrl = (() => {
     const url = new URL(config.wsUrl, window.location.href);
-    if (config.mode === "spectator") {
+    if (isSpectatorLikeMode(config.mode)) {
       url.searchParams.set("mode", "spectator");
       url.searchParams.set(
         "followEntity",
@@ -993,7 +997,8 @@ export function EmbeddedGameClient() {
     return url.toString();
   })();
 
-  const requiresCameraLock = config.mode === "spectator";
+  const spectatorLikeMode = isSpectatorLikeMode(config.mode);
+  const requiresCameraLock = spectatorLikeMode;
   const showLoading =
     !minimumLoadElapsed ||
     !worldReady ||
@@ -1033,8 +1038,8 @@ export function EmbeddedGameClient() {
       <GameClient
         wsUrl={wsUrl}
         onSetup={handleSetup}
-        hideUI={config.mode === "spectator"}
-        streamingMode={config.mode === "spectator"}
+        hideUI={spectatorLikeMode}
+        streamingMode={spectatorLikeMode}
       />
       {showLoading && worldRef.current && (
         <div style={{ zIndex: 100, position: "absolute", inset: 0 }}>

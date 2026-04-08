@@ -99,6 +99,57 @@ function createFrame(seq: number): BettingFeedFrame {
   };
 }
 
+function createChannel(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "hyperscapes-broadcast-channel",
+    mode: "always_on",
+    presentationDelayMs: 4_000,
+    activeDuelId: "duel-1",
+    activeDuelKey: "0xabcdef",
+    canonicalDestinationId: "canonical-cloudflare",
+    fallbackDestinationId: "fallback-self-hls",
+    publicPlaybackUrl: "https://video.example/live.m3u8?protocol=llhls",
+    publicReadiness: {
+      ready: false,
+      reason: "delivery_disconnected",
+      updatedAt: 123_501,
+    },
+    destinations: [
+      {
+        id: "canonical-cloudflare",
+        name: "External Delivery",
+        role: "canonical",
+        provider: "cloudflare_stream",
+        transport: "llhls",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        ingestUrl: "rtmps://live.cloudflare.example/input",
+        connected: false,
+        transportHealthy: false,
+        playbackReady: false,
+        manifestStatus: "missing",
+        lastError: "delivery_disconnected",
+        updatedAt: 123_501,
+      },
+      {
+        id: "fallback-self-hls",
+        name: "Self-HLS",
+        role: "fallback",
+        provider: "self_hls",
+        transport: "hls",
+        playbackUrl: "/live/stream.m3u8",
+        ingestUrl: null,
+        connected: true,
+        transportHealthy: true,
+        playbackReady: true,
+        manifestStatus: "ok",
+        lastError: null,
+        updatedAt: 123_500,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe("streaming-betting-feed", () => {
   it("builds betting payloads with stable schema and phase version data", () => {
     const payload = buildBettingFeedPayload({
@@ -110,6 +161,42 @@ describe("streaming-betting-feed", () => {
         degradedReason: "loading_overlay_active",
         updatedAt: 123_500,
       },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "delivery_disconnected",
+        updatedAt: 123_501,
+      },
+      rendererMetrics: {
+        captureFps: 29,
+        encodeFps: 28,
+        droppedFrames: 1,
+        renderTick: 77,
+        duelStateTick: 66,
+        latestFrameAt: 123_450,
+        latestRenderTickAt: 123_451,
+        latestDuelStateTickAt: 123_452,
+        latestVisualChangeAt: 123_453,
+        visualChangeAgeMs: 250,
+        hlsManifest: {
+          updatedAt: 123_454,
+          mediaSequence: 812,
+        },
+      },
+      channel: createChannel(),
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+        currentSceneUrl: "https://staging.example/stream",
+        activeBundle: "bundle-a",
+        lastFrameAt: 123_455,
+        lastRenderTickAt: 123_456,
+        lastVisualChangeAt: 123_457,
+        lastRecoveryAt: 123_400,
+        recoveryCount: 1,
+        workerHeartbeatAt: 123_502,
+      },
       cycle: createCycle({
         phase: "FIGHTING",
         phaseVersion: 9,
@@ -119,7 +206,7 @@ describe("streaming-betting-feed", () => {
     });
 
     expect(payload).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       sourceEpoch: 42,
       seq: 7,
       emittedAt: 123_456,
@@ -143,10 +230,65 @@ describe("streaming-betting-feed", () => {
         degradedReason: "loading_overlay_active",
         updatedAt: 123_500,
       },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "delivery_disconnected",
+        updatedAt: 123_501,
+      },
+      publicReadiness: {
+        ready: false,
+        reason: "delivery_disconnected",
+        updatedAt: 123_501,
+      },
+      canonicalDestination: {
+        id: "canonical-cloudflare",
+        role: "canonical",
+        provider: "cloudflare_stream",
+        playbackReady: false,
+      },
+      fallbackDestination: {
+        id: "fallback-self-hls",
+        role: "fallback",
+        provider: "self_hls",
+        playbackReady: true,
+      },
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+        currentSceneUrl: "https://staging.example/stream",
+        activeBundle: "bundle-a",
+        lastFrameAt: 123_455,
+        lastRenderTickAt: 123_456,
+        lastVisualChangeAt: 123_457,
+        lastRecoveryAt: 123_400,
+        recoveryCount: 1,
+        workerHeartbeatAt: 123_502,
+      },
+      captureFps: 29,
+      encodeFps: 28,
+      droppedFrames: 1,
+      renderTick: 77,
+      duelStateTick: 66,
+      latestFrameAt: 123_450,
+      latestRenderTickAt: 123_451,
+      latestDuelStateTickAt: 123_452,
+      latestVisualChangeAt: 123_453,
+      visualChangeAgeMs: 250,
+      hlsManifestUpdatedAt: 123_454,
+      hlsMediaSequence: 812,
+      deliveryMode: "external_hls",
+      deliveryProvider: "cloudflare_stream",
+      playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
     });
 
     expect(payload.agent1?.id).toBe("agent-a");
     expect(payload.agent2?.hp).toBe(20);
+    expect(payload.rendererMetrics?.hlsManifest?.mediaSequence).toBe(812);
+    expect(payload.channel?.canonicalDestinationId).toBe("canonical-cloudflare");
+    expect(payload.delivery?.llhlsUrl).toContain("protocol=llhls");
+    expect(payload.deliveryHealth?.degradedReason).toBe("delivery_disconnected");
   });
 
   it("selects replay, bootstrap, and reset delivery modes deterministically", () => {
@@ -194,10 +336,48 @@ describe("streaming-betting-feed", () => {
       seq: 7,
       emittedAt: 123_456,
       cycle: createCycle(),
+      channel: createChannel({
+        publicReadiness: {
+          ready: true,
+          reason: null,
+          updatedAt: 123_401,
+        },
+        destinations: [
+          {
+            id: "canonical-cloudflare",
+            name: "External Delivery",
+            role: "canonical",
+            provider: "cloudflare_stream",
+            transport: "llhls",
+            playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+            ingestUrl: "rtmps://live.cloudflare.example/input",
+            connected: true,
+            transportHealthy: true,
+            playbackReady: true,
+            manifestStatus: "ok",
+            lastError: null,
+            updatedAt: 123_401,
+          },
+        ],
+      }),
       rendererHealth: {
         ready: true,
         degradedReason: null,
         updatedAt: 123_400,
+      },
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+        currentSceneUrl: "https://staging.example/stream",
+        activeBundle: "bundle-a",
+        lastFrameAt: 123_390,
+        lastRenderTickAt: 123_391,
+        lastVisualChangeAt: 123_392,
+        lastRecoveryAt: 123_300,
+        recoveryCount: 1,
+        workerHeartbeatAt: 123_401,
       },
     });
     const laterPayload = {
@@ -207,6 +387,35 @@ describe("streaming-betting-feed", () => {
         ? {
             ...basePayload.rendererHealth,
             updatedAt: 555_555,
+          }
+        : null,
+      deliveryHealth: basePayload.deliveryHealth
+        ? {
+            ...basePayload.deliveryHealth,
+            updatedAt: 777_777,
+          }
+        : null,
+      channel: basePayload.channel
+        ? {
+            ...basePayload.channel,
+            publicReadiness: {
+              ...basePayload.channel.publicReadiness,
+              updatedAt: 888_888,
+            },
+            destinations: basePayload.channel.destinations.map((destination) => ({
+              ...destination,
+              updatedAt: 999_999,
+            })),
+          }
+        : null,
+      sourceRuntime: basePayload.sourceRuntime
+        ? {
+            ...basePayload.sourceRuntime,
+            lastFrameAt: 888_887,
+            lastRenderTickAt: 888_886,
+            lastVisualChangeAt: 888_885,
+            lastRecoveryAt: 888_884,
+            workerHeartbeatAt: 888_883,
           }
         : null,
     };
