@@ -583,7 +583,8 @@ export const ShellPreviewViewer = forwardRef<
         polygonOffsetUnits: -1,
       });
 
-      const mesh = new THREE.Mesh(shell.geometry, mat);
+      // Clone geometry to avoid disposing the original ShellMesh data
+      const mesh = new THREE.Mesh(shell.geometry.clone(), mat);
       mesh.name = `shell_${shell.slotName}_${shell.bulkClass}`;
       overlayGroupRef.current.add(mesh);
     },
@@ -603,7 +604,8 @@ export const ShellPreviewViewer = forwardRef<
           polygonOffsetFactor: -1,
           polygonOffsetUnits: -1,
         });
-        const mesh = new THREE.Mesh(shell.geometry, mat);
+        // Clone geometry to avoid disposing the original ShellMesh data
+        const mesh = new THREE.Mesh(shell.geometry.clone(), mat);
         mesh.name = `shell_${shell.slotName}_${shell.bulkClass}`;
         overlayGroupRef.current.add(mesh);
       }

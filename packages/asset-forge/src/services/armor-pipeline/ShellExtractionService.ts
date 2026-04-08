@@ -1466,56 +1466,6 @@ export class ShellExtractionService {
   }
 
   /**
-   * Smooth normals of boundary vertices along the boundary chain only.
-   * Uses Jacobi-style iteration: reads from snapshot, writes new.
-   * Only boundary-chain neighbors contribute — interior neighbors are excluded.
-   * This produces "consensus normals" that both adjacent shells agree on.
-   */
-  private smoothBoundaryNormals(
-    normals: Float32Array,
-    chainAdj: Map<number, number[]>,
-    boundaryVerts: Set<number>,
-    iterations: number,
-  ): void {
-    const snapshot = new Float32Array(normals.length);
-    for (let iter = 0; iter < iterations; iter++) {
-      snapshot.set(normals);
-      for (const vi of boundaryVerts) {
-        const neighbors = chainAdj.get(vi);
-        if (!neighbors || neighbors.length === 0) continue;
-
-        // Average with chain neighbors (typically 2 for a clean loop)
-        let sx = snapshot[vi * 3],
-          sy = snapshot[vi * 3 + 1],
-          sz = snapshot[vi * 3 + 2];
-        let cnt = 1;
-        for (const ni of neighbors) {
-          const nx = snapshot[ni * 3],
-            ny = snapshot[ni * 3 + 1],
-            nz = snapshot[ni * 3 + 2];
-          if (Number.isFinite(nx)) {
-            sx += nx;
-            sy += ny;
-            sz += nz;
-            cnt++;
-          }
-        }
-        sx /= cnt;
-        sy /= cnt;
-        sz /= cnt;
-
-        // Re-normalize
-        const len = Math.sqrt(sx * sx + sy * sy + sz * sz);
-        if (len > 1e-8) {
-          normals[vi * 3] = sx / len;
-          normals[vi * 3 + 1] = sy / len;
-          normals[vi * 3 + 2] = sz / len;
-        }
-      }
-    }
-  }
-
-  /**
    * Smooth positions of boundary vertices along the boundary chain.
    * Removes waviness from marching-triangles vertex placement.
    * Jacobi-style: reads from snapshot, writes new.

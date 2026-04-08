@@ -14,6 +14,16 @@ import type { ShellTextureService } from "../services/armor-pipeline/ShellTextur
 /** Only allow alphanumeric, hyphens, and underscores in path segments */
 const SAFE_PATH_RE = /^[a-zA-Z0-9_-]+$/;
 
+/** Validate that a URL uses HTTPS and is not a private/internal address */
+function isValidPublicUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    return url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function parseBonuses(raw: string | undefined): Record<string, number> | null {
   if (!raw) return {};
   try {
@@ -65,7 +75,10 @@ export const createArmorPipelineRoutes = (
                 preserveUV,
                 enablePBR,
                 aiModel: body.aiModel || "meshy-6",
-                styleImageUrl: body.styleImageUrl || undefined,
+                styleImageUrl:
+                  body.styleImageUrl && isValidPublicUrl(body.styleImageUrl)
+                    ? body.styleImageUrl
+                    : undefined,
               },
             );
 
@@ -148,7 +161,10 @@ export const createArmorPipelineRoutes = (
             const aiModel = body.aiModel || "meshy-6";
             const enablePBR = body.enablePBR === "true";
             // Global fallback style image (used when tiers don't specify their own)
-            const globalStyleImageUrl = body.styleImageUrl || undefined;
+            const globalStyleImageUrl =
+              body.styleImageUrl && isValidPublicUrl(body.styleImageUrl)
+                ? body.styleImageUrl
+                : undefined;
 
             // Start tasks sequentially with a small delay to avoid Meshy 504s
             // (each request sends the full ~6MB base64 payload)
@@ -159,7 +175,11 @@ export const createArmorPipelineRoutes = (
                 await new Promise((r) => setTimeout(r, 2000));
               }
               // Per-tier style image takes precedence over global fallback
-              const tierStyleUrl = tier.styleImageUrl || globalStyleImageUrl;
+              const rawTierStyle = tier.styleImageUrl || globalStyleImageUrl;
+              const tierStyleUrl =
+                rawTierStyle && isValidPublicUrl(rawTierStyle)
+                  ? rawTierStyle
+                  : undefined;
               const preserveUV = body.preserveUV === "true";
               const taskId = await shellTextureService.startTextureTask(
                 dataUri,
@@ -327,7 +347,14 @@ export const createArmorPipelineRoutes = (
               gloves: "gloves",
               cape: "capes",
             };
-            const slotDir = slotDirMap[slot] || slot;
+            const slotDir = slotDirMap[slot];
+            if (!slotDir) {
+              set.status = 400;
+              return {
+                success: false,
+                error: `Unknown equipment slot: ${slot}. Must be one of: ${Object.keys(slotDirMap).join(", ")}`,
+              };
+            }
 
             // Resolve paths relative to the monorepo
             const serverAssetsDir = join(

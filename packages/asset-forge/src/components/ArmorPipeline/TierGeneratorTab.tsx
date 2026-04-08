@@ -169,9 +169,6 @@ export const TierGeneratorTab: React.FC<TierGeneratorTabProps> = ({
           addLog("Extracting shell from avatar (shared)...");
           result = await onExtract(avatarUrl, (prog) => addLog(prog.message));
         } else {
-          if (!shellServiceRef.current) {
-            shellServiceRef.current = new ShellExtractionService();
-          }
           addLog("Extracting shell from avatar...");
           result = await shellServiceRef.current.extractShells(
             avatarUrl,

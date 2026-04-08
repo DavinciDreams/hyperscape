@@ -1,6 +1,5 @@
 import {
   Layers,
-  Wand2,
   Package,
   Paintbrush,
   Crown,
@@ -19,8 +18,6 @@ import type {
   ShellMesh,
   ShellExtractionResult,
   ShellExtractionProgress,
-  EquipmentSlotName,
-  BulkClass,
 } from "@/services/armor-pipeline/types";
 import { ALL_SLOTS, ALL_BULKS } from "@/services/armor-pipeline/constants";
 
