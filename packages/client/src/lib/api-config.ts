@@ -33,9 +33,9 @@ const LOCAL_DEV_ELIZAOS_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_API_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_WS_URL = "ws://localhost:5556/ws";
 const LOCAL_DEV_CDN_URL = "http://localhost:5555/game-assets";
-const PRODUCTION_ELIZAOS_URL = "https://hyperscape.gg";
-const PRODUCTION_GAME_API_URL = "https://hyperscape.gg";
-const PRODUCTION_GAME_WS_URL = "wss://hyperscape.gg/ws";
+const PRODUCTION_ELIZAOS_URL = "https://hyperscape-production.up.railway.app";
+const PRODUCTION_GAME_API_URL = "https://hyperscape-production.up.railway.app";
+const PRODUCTION_GAME_WS_URL = "wss://hyperscape-production.up.railway.app/ws";
 const PRODUCTION_CDN_URL = "https://assets.hyperscape.club";
 
 export type ApiConfigResolutionInput = {
@@ -174,22 +174,30 @@ export function resolveApiConfig({
   };
 }
 
-const resolvedApiConfig = resolveApiConfig({
-  browserHref: typeof window !== "undefined" ? window.location.href : undefined,
-  browserHostname:
-    typeof window !== "undefined" ? window.location.hostname : undefined,
-  runtimeEnv:
-    typeof window !== "undefined"
-      ? (window as WindowWithRuntimeEnv).env
-      : undefined,
-  buildEnv: {
-    PUBLIC_ELIZAOS_URL: import.meta.env.PUBLIC_ELIZAOS_URL,
-    PUBLIC_API_URL: import.meta.env.PUBLIC_API_URL,
-    PUBLIC_WS_URL: import.meta.env.PUBLIC_WS_URL,
-    PUBLIC_CDN_URL: import.meta.env.PUBLIC_CDN_URL,
-  },
-  prod: import.meta.env.PROD,
-});
+function getCurrentResolvedApiConfig(): {
+  cdnUrl: string;
+  elizaOsUrl: string;
+  gameApiUrl: string;
+  gameWsUrl: string;
+} {
+  return resolveApiConfig({
+    browserHref:
+      typeof window !== "undefined" ? window.location.href : undefined,
+    browserHostname:
+      typeof window !== "undefined" ? window.location.hostname : undefined,
+    runtimeEnv:
+      typeof window !== "undefined"
+        ? (window as WindowWithRuntimeEnv).env
+        : undefined,
+    buildEnv: {
+      PUBLIC_ELIZAOS_URL: import.meta.env.PUBLIC_ELIZAOS_URL,
+      PUBLIC_API_URL: import.meta.env.PUBLIC_API_URL,
+      PUBLIC_WS_URL: import.meta.env.PUBLIC_WS_URL,
+      PUBLIC_CDN_URL: import.meta.env.PUBLIC_CDN_URL,
+    },
+    prod: import.meta.env.PROD,
+  });
+}
 
 export function getRuntimeAssetBaseUrl(): string {
   if (typeof window !== "undefined") {
@@ -225,21 +233,38 @@ export function resolveRuntimeAssetUrl(assetPath: string): string {
 // ElizaOS agent routes are now served directly from the Hyperscape game server.
 // No separate ElizaOS process needed - routes are at /api/agents, /api/agents/:id, etc.
 
-export const ELIZAOS_URL: string = resolvedApiConfig.elizaOsUrl;
+let resolvedApiConfig = getCurrentResolvedApiConfig();
 
-export const ELIZAOS_API = `${ELIZAOS_URL}/api` as const;
+export let ELIZAOS_URL: string = resolvedApiConfig.elizaOsUrl;
+
+export let ELIZAOS_API: string = `${ELIZAOS_URL}/api`;
 
 // =============================================================================
 // Hyperscape Game Server
 // =============================================================================
 // These are replaced at build time by Vite's define feature
 
-export const GAME_API_URL: string = resolvedApiConfig.gameApiUrl;
+export let GAME_API_URL: string = resolvedApiConfig.gameApiUrl;
 
-export const GAME_WS_URL: string = resolvedApiConfig.gameWsUrl;
+export let GAME_WS_URL: string = resolvedApiConfig.gameWsUrl;
 
 // =============================================================================
 // CDN for Static Assets
 // =============================================================================
 
-export const CDN_URL: string = resolvedApiConfig.cdnUrl;
+export let CDN_URL: string = resolvedApiConfig.cdnUrl;
+
+export function refreshApiConfig(): {
+  cdnUrl: string;
+  elizaOsUrl: string;
+  gameApiUrl: string;
+  gameWsUrl: string;
+} {
+  resolvedApiConfig = getCurrentResolvedApiConfig();
+  ELIZAOS_URL = resolvedApiConfig.elizaOsUrl;
+  ELIZAOS_API = `${ELIZAOS_URL}/api`;
+  GAME_API_URL = resolvedApiConfig.gameApiUrl;
+  GAME_WS_URL = resolvedApiConfig.gameWsUrl;
+  CDN_URL = resolvedApiConfig.cdnUrl;
+  return resolvedApiConfig;
+}

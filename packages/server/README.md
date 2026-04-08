@@ -239,8 +239,8 @@ DATABASE_URL=postgresql://user:pass@host:5488/dbname
 ### Assets
 
 ```env
-PUBLIC_CDN_URL=http://localhost:8080    # CDN URL for static assets
-PUBLIC_WS_URL=ws://localhost:5555/ws # WebSocket URL
+PUBLIC_CDN_URL=http://localhost:5555/game-assets  # CDN URL for static assets
+PUBLIC_WS_URL=ws://localhost:5556/ws              # WebSocket URL
 ```
 
 ### Authentication (Optional)

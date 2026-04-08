@@ -44,13 +44,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ (github.ref_name == 'staging' || github.ref_name == 'develop' || github.ref_name == 'dev' || github.ref_name == 'hackathon' || inputs.environment == 'dev') && 'development' || 'production' }}
     env:
-      # Production environment
+      # Railway identifiers live in repo variables so they can be updated
+      # without another workflow change when the linked service drifts.
       RAILWAY_PROJECT_ID: e5f5ba11-0380-4d71-aa0b-343d89a58c0d
-      RAILWAY_PRODUCTION_SERVICE_ID: f0b42e3b-3001-4ef1-926f-af6c3c138777
-      RAILWAY_PRODUCTION_ENVIRONMENT_ID: 194f3565-ba2f-4c98-87d2-85dfc3a5110b
+      RAILWAY_PRODUCTION_SERVICE_ID: ${{ vars.RAILWAY_PRODUCTION_SERVICE_ID || '330ea18e-b215-4cf9-9fe2-4bb09fc2ec63' }}
+      RAILWAY_PRODUCTION_ENVIRONMENT_ID: ${{ vars.RAILWAY_PRODUCTION_ENVIRONMENT_ID || '194f3565-ba2f-4c98-87d2-85dfc3a5110b' }}
       # Development environment (configure these in GitHub repository variables)
-      RAILWAY_DEV_SERVICE_ID: ${{ vars.RAILWAY_DEV_SERVICE_ID }}
-      RAILWAY_DEV_ENVIRONMENT_ID: ${{ vars.RAILWAY_DEV_ENVIRONMENT_ID }}
+      RAILWAY_DEV_SERVICE_ID: ${{ vars.RAILWAY_DEV_SERVICE_ID || vars.RAILWAY_STAGING_SERVICE_ID || '330ea18e-b215-4cf9-9fe2-4bb09fc2ec63' }}
+      RAILWAY_DEV_ENVIRONMENT_ID: ${{ vars.RAILWAY_DEV_ENVIRONMENT_ID || vars.RAILWAY_STAGING_ENVIRONMENT_ID || '1caead9b-c664-4ab2-aae5-8e9e52753db1' }}
       # Backward-compatible fallback (legacy staging variable names)
       RAILWAY_STAGING_SERVICE_ID: ${{ vars.RAILWAY_STAGING_SERVICE_ID }}
       RAILWAY_STAGING_ENVIRONMENT_ID: ${{ vars.RAILWAY_STAGING_ENVIRONMENT_ID }}
@@ -116,15 +117,20 @@ jobs:
           if echo "$RESPONSE" | grep -q '"serviceInstanceRedeploy":true'; then
             echo "triggered=true" >> $GITHUB_OUTPUT
             echo "✅ Deployment triggered successfully"
-          elif [ "${{ steps.target.outputs.environment }}" != "prod" ] && echo "$RESPONSE" | grep -q '"Not Authorized"'; then
+          elif echo "$RESPONSE" | grep -q '"Not Authorized"'; then
             echo "triggered=false" >> $GITHUB_OUTPUT
-            echo "::warning::Railway token is not authorized for the non-production deployment target; Docker validation should be used as the branch gate until credentials are refreshed."
+            echo "::warning::Railway token is not authorized for the ${{ steps.target.outputs.environment }} deployment target; refresh the token or trigger the deployment manually in Railway."
             {
               echo "### Railway deployment skipped"
               echo ""
               echo "- Target: \`${{ steps.target.outputs.environment }}\`"
               echo "- Reason: Railway API returned \`Not Authorized\` for service \`${{ steps.target.outputs.service_id }}\` in environment \`${{ steps.target.outputs.environment_id }}\`."
-              echo "- Action: refresh \`RAILWAY_TOKEN\` access or configure dedicated \`RAILWAY_DEV_SERVICE_ID\` / \`RAILWAY_DEV_ENVIRONMENT_ID\` values for non-production deploys."
+              echo "- Action: refresh \`RAILWAY_TOKEN\` access for this Railway project or trigger the deployment manually in Railway."
+              if [ "${{ steps.target.outputs.environment }}" = "prod" ]; then
+                echo "- Production note: the public Railway service may remain stale or unavailable until a manual deployment succeeds."
+              else
+                echo "- Non-production note: Docker validation should be used as the branch gate until credentials are refreshed."
+              fi
             } >> $GITHUB_STEP_SUMMARY
             exit 0
           else

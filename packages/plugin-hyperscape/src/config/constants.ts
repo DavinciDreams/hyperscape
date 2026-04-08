@@ -4,9 +4,11 @@
  */
 
 export const LOCAL_DEV_HYPERSCAPE_WS_URL = "ws://localhost:5556/ws";
-export const PRODUCTION_HYPERSCAPE_WS_URL = "wss://hyperscape.gg/ws";
+export const PRODUCTION_HYPERSCAPE_WS_URL =
+  "wss://hyperscape-production.up.railway.app/ws";
 export const LOCAL_DEV_HYPERSCAPE_API_BASE_URL = "http://localhost:5555";
-export const PRODUCTION_HYPERSCAPE_API_BASE_URL = "https://hyperscape.gg";
+export const PRODUCTION_HYPERSCAPE_API_BASE_URL =
+  "https://hyperscape-production.up.railway.app";
 
 function isProductionRuntime(): boolean {
   return process.env.NODE_ENV === "production";

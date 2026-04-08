@@ -11,7 +11,7 @@ describe("public URL defaults", () => {
     vi.unstubAllEnvs();
   });
 
-  it("uses hyperscape.gg defaults in production", () => {
+  it("uses Railway API defaults in production", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("PUBLIC_WS_URL", undefined);
     vi.stubEnv("SERVER_HOST", undefined);
@@ -20,9 +20,13 @@ describe("public URL defaults", () => {
     vi.stubEnv("UWS_ENABLED", undefined);
 
     expect(isProductionRuntime()).toBe(true);
-    expect(getDefaultElizaOsApiUrl()).toBe("https://hyperscape.gg");
-    expect(getDefaultPublicAppUrl()).toBe("https://hyperscape.gg");
-    expect(getDefaultPublicWsUrl()).toBe("wss://hyperscape.gg/ws");
+    expect(getDefaultElizaOsApiUrl()).toBe(
+      "https://hyperscape-production.up.railway.app",
+    );
+    expect(getDefaultPublicAppUrl()).toBe("https://hyperscape.club");
+    expect(getDefaultPublicWsUrl()).toBe(
+      "wss://hyperscape-production.up.railway.app/ws",
+    );
   });
 
   it("uses the uWS websocket port in local development by default", () => {

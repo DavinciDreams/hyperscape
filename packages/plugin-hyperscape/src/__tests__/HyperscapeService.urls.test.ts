@@ -19,12 +19,14 @@ describe("HyperscapeService URL resolution", () => {
     expect(resolveDefaultHyperscapeServerUrl()).toBe("ws://localhost:5556/ws");
   });
 
-  it("defaults production runtime sockets to hyperscape.gg", () => {
+  it("defaults production runtime sockets to Railway", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("HYPERSCAPE_SERVER_URL", undefined);
     vi.stubEnv("PUBLIC_WS_URL", undefined);
 
-    expect(resolveDefaultHyperscapeServerUrl()).toBe("wss://hyperscape.gg/ws");
+    expect(resolveDefaultHyperscapeServerUrl()).toBe(
+      "wss://hyperscape-production.up.railway.app/ws",
+    );
   });
 
   it("falls back to the HTTP port when uWS is disabled", () => {
