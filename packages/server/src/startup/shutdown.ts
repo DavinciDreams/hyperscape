@@ -115,6 +115,29 @@ export function registerShutdownHandlers(
     process.env.DB_WRITE_ERRORS_NON_FATAL || "",
   );
 
+  /**
+   * Unhandled rejections are often recoverable (one bad request / plugin / race).
+   * In production, default is to log + alert and keep serving so a stray Promise
+   * does not take down 24/7 uptime. Set SERVER_EXIT_ON_UNHANDLED_REJECTION=true
+   * to restore process exit (e.g. strict staging). In development, default remains
+   * exit unless SERVER_SURVIVE_UNHANDLED_REJECTION=1 for local testing.
+   */
+  const forceExitOnUnhandledRejection =
+    process.env.SERVER_EXIT_ON_UNHANDLED_REJECTION === "true";
+  const surviveUnhandledRejection =
+    !forceExitOnUnhandledRejection &&
+    (process.env.NODE_ENV === "production" ||
+      /^(1|true|yes|on)$/i.test(
+        process.env.SERVER_SURVIVE_UNHANDLED_REJECTION || "",
+      ));
+
+  if (surviveUnhandledRejection) {
+    console.log(
+      "[Shutdown] Policy: unhandled promise rejections are logged; process stays up. " +
+        "Set SERVER_EXIT_ON_UNHANDLED_REJECTION=true to exit on rejection.",
+    );
+  }
+
   const context: ShutdownContext = { fastify, world, dbContext, web3Context };
 
   // Track if we're shutting down (prevent duplicate shutdowns)
@@ -169,6 +192,15 @@ export function registerShutdownHandlers(
 
     // Step 3: Shutdown embedded agents
     await shutdownAgents();
+
+    // Step 3a: Flush agent thoughts to database
+    try {
+      const { flushAgentThoughtsToDb } =
+        await import("../eliza/dashboardInterop.js");
+      await flushAgentThoughtsToDb();
+    } catch {
+      // Thoughts module may not have been loaded
+    }
 
     // Step 2b: Shutdown Web3 chain writer (flush pending writes)
     await shutdownWeb3(context);
@@ -309,12 +341,25 @@ export function registerShutdownHandlers(
       return;
     }
 
+    const reasonStack =
+      reason instanceof Error ? (reason.stack ?? reasonStr) : reasonStr;
     console.error(
       "[Shutdown] Unhandled rejection at:",
       promise,
       "reason:",
       reason,
     );
+
+    if (surviveUnhandledRejection) {
+      lastFatalDetails = {
+        reason: reasonStr,
+        stack: reasonStack.slice(0, 4000),
+      };
+      // Do not call sendAlert here: it shares alertSent with shutdown and would
+      // block the real "server shutting down" webhook. Use log aggregation instead.
+      return;
+    }
+
     lastFatalDetails = {
       reason: reasonStr,
     };

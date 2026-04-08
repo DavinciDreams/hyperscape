@@ -6,21 +6,22 @@ import { ELIZAOS_API } from "@/lib/api-config";
 interface LogEntry {
   id: string;
   timestamp: Date;
-  level: "info" | "warn" | "error" | "debug" | "success" | "warning";
+  level:
+    | "info"
+    | "action"
+    | "decision"
+    | "thinking"
+    | "situation"
+    | "evaluation";
   message: string;
   source: string;
 }
 
-interface ElizaOSLog {
+interface AgentThought {
   id: string;
-  type?: string;
-  body?: {
-    modelType?: string;
-    executionTime?: number;
-    [key: string]: unknown;
-  };
-  createdAt: string;
-  [key: string]: unknown;
+  type: "situation" | "evaluation" | "thinking" | "decision" | "action";
+  content: string;
+  timestamp: number;
 }
 
 interface AgentLogsProps {
@@ -31,7 +32,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
   const [logs, setLogs] = React.useState<LogEntry[]>([]);
   const [filter, setFilter] = React.useState<string>("all");
   const [isPaused, setIsPaused] = React.useState(false);
-  const [deletingLogId, setDeletingLogId] = React.useState<string | null>(null);
   const logsEndRef = React.useRef<HTMLDivElement>(null);
   const retryTimeoutRef = React.useRef<number | null>(null);
   const inFlightRef = React.useRef(false);
@@ -39,30 +39,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
     () => logs.filter((log) => filter === "all" || log.level === filter),
     [filter, logs],
   );
-
-  // Delete individual log entry
-  const deleteLog = async (logId: string) => {
-    setDeletingLogId(logId);
-    try {
-      const response = await fetch(
-        `${ELIZAOS_API}/agents/${agent.id}/logs/${logId}`,
-        { method: "DELETE" },
-      );
-
-      if (response.ok) {
-        // Remove log from local state immediately
-        setLogs((prev) => prev.filter((log) => log.id !== logId));
-      } else {
-        console.error(
-          `[AgentLogs] Failed to delete log: HTTP ${response.status}`,
-        );
-      }
-    } catch (error) {
-      console.error("[AgentLogs] Error deleting log:", error);
-    } finally {
-      setDeletingLogId(null);
-    }
-  };
 
   // Fetch logs from API
   React.useEffect(() => {
@@ -77,7 +53,6 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       if (isPaused || inFlightRef.current) return;
       inFlightRef.current = true;
 
-      // Only fetch logs for active agents
       if (agent.status !== "active") {
         setLogs((prev) => (prev.length > 0 ? [] : prev));
         inFlightRef.current = false;
@@ -85,66 +60,36 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       }
 
       try {
-        // Use ElizaOS REST API to fetch agent logs
-        // Use 'limit' parameter (not 'count') and 'level' filter
         const response = await fetch(
-          `${ELIZAOS_API}/agents/${agent.id}/logs?limit=200&level=info`,
+          `${ELIZAOS_API}/agents/${agent.id}/thoughts?limit=200`,
         );
         if (response.ok) {
           const result = await response.json();
 
-          // ElizaOS returns { success, data: [...] } where data is the logs array
-          if (!result.success || !result.data || !Array.isArray(result.data)) {
-            console.warn("[AgentLogs] Unexpected response format");
+          if (!result.success || !Array.isArray(result.thoughts)) {
+            inFlightRef.current = false;
             return;
           }
 
-          const logs = result.data;
+          const thoughts: AgentThought[] = result.thoughts;
 
-          // Extract log level from type (e.g., "useModel:TEXT_EMBEDDING" -> "info")
-          const extractLevel = (log: ElizaOSLog): string => {
-            const type = log.type || "";
-            if (type.includes("error") || type.includes("Error"))
-              return "error";
-            if (type.includes("warn") || type.includes("Warning"))
-              return "warn";
-            if (type.includes("debug")) return "debug";
-            return "info"; // Default to info
-          };
-
-          // Extract message from log body and type
-          const extractMessage = (log: ElizaOSLog): string => {
-            const type = log.type || "unknown";
-            const body = log.body || {};
-
-            // Format based on type
-            if (type.startsWith("useModel:")) {
-              const modelType =
-                body.modelType || type.split(":")[1] || "unknown";
-              const executionTime = body.executionTime
-                ? `${body.executionTime.toFixed(2)}ms`
-                : "";
-              return `Used ${modelType} model${executionTime ? ` (${executionTime})` : ""}`;
-            }
-
-            // Generic fallback
-            return type;
-          };
-
-          const formattedLogs = logs.map((log: ElizaOSLog) => ({
-            id: log.id,
-            timestamp: new Date(log.createdAt),
-            level: extractLevel(log),
-            message: extractMessage(log),
-            source: agent.name,
+          const formattedLogs: LogEntry[] = thoughts.map((t) => ({
+            id: t.id,
+            timestamp: new Date(t.timestamp),
+            level: t.type as LogEntry["level"],
+            message: t.content,
+            source: t.type,
           }));
 
+          // Sort oldest first for log view
+          formattedLogs.sort(
+            (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+          );
+
           setLogs(formattedLogs);
-        } else {
-          console.error(`[AgentLogs] Failed to fetch logs: ${response.status}`);
         }
-      } catch (error) {
-        console.error("[AgentLogs] Failed to fetch logs:", error);
+      } catch {
+        // Silently retry
       } finally {
         inFlightRef.current = false;
       }
@@ -179,17 +124,18 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
 
   const getLevelColor = (level: string) => {
     switch (level) {
-      case "error":
-        return "text-red-400";
-      case "warn":
-      case "warning":
+      case "action":
+        return "text-green-400";
+      case "decision":
         return "text-yellow-400";
-      case "debug":
+      case "thinking":
+        return "text-cyan-400";
+      case "situation":
         return "text-blue-400";
-      case "success":
-        return "text-green-500"; // Added success color
+      case "evaluation":
+        return "text-purple-400";
       default:
-        return "text-green-400"; // Default for info
+        return "text-green-400";
     }
   };
 
@@ -222,7 +168,7 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
       <div className="p-4 border-b border-[#8b4513]/30 bg-[#0b0a15]/80 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <Terminal className="text-[#f2d08a]" size={20} />
-          <h2 className="font-bold text-[#f2d08a]">Live Logs</h2>
+          <h2 className="font-bold text-[#f2d08a]">Agent Thoughts</h2>
           <span className="px-2 py-0.5 rounded text-[10px] bg-[#f2d08a]/10 text-[#f2d08a] border border-[#f2d08a]/20">
             {logs.length} Events
           </span>
@@ -237,10 +183,16 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
               All
             </button>
             <button
-              onClick={() => setFilter("error")}
-              className={`px-3 py-1 text-xs rounded ${filter === "error" ? "bg-red-500/20 text-red-400" : "text-[#f2d08a]/40 hover:text-red-400"}`}
+              onClick={() => setFilter("action")}
+              className={`px-3 py-1 text-xs rounded ${filter === "action" ? "bg-green-500/20 text-green-400" : "text-[#f2d08a]/40 hover:text-green-400"}`}
             >
-              Errors
+              Actions
+            </button>
+            <button
+              onClick={() => setFilter("decision")}
+              className={`px-3 py-1 text-xs rounded ${filter === "decision" ? "bg-yellow-500/20 text-yellow-400" : "text-[#f2d08a]/40 hover:text-yellow-400"}`}
+            >
+              Decisions
             </button>
           </div>
 
@@ -281,27 +233,14 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
               </span>
 
               <span
-                className={`w-16 flex-shrink-0 text-xs font-bold pt-0.5 uppercase ${getLevelColor(log.level)}`}
+                className={`w-20 flex-shrink-0 text-xs font-bold pt-0.5 uppercase ${getLevelColor(log.level)}`}
               >
                 {log.level}
-              </span>
-
-              <span className="text-[#f2d08a]/60 w-32 flex-shrink-0 text-xs pt-0.5 truncate">
-                [{log.source}]
               </span>
 
               <span className="text-[#e8ebf4]/80 flex-1 break-all">
                 {log.message}
               </span>
-
-              <button
-                onClick={() => deleteLog(log.id)}
-                disabled={deletingLogId === log.id}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/10 rounded text-red-400/60 hover:text-red-400 disabled:opacity-50"
-                title="Delete log"
-              >
-                <Trash2 size={14} />
-              </button>
             </div>
           ))}
 
@@ -317,13 +256,15 @@ export const AgentLogs: React.FC<AgentLogsProps> = ({ agent }) => {
               ) : (
                 <>
                   <div className="text-lg font-bold text-[#f2d08a]/60 mb-2">
-                    No logs yet
+                    No thoughts yet
                   </div>
                   <div className="text-sm">Waiting for agent activity...</div>
                 </>
               )}
             </div>
           )}
+
+          <div ref={logsEndRef} />
         </div>
       </div>
     </div>

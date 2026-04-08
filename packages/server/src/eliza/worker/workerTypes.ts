@@ -50,6 +50,11 @@ export interface SharedTickData {
     resourceType: string;
     depleted: boolean;
   }>;
+  stationPositions: Array<{
+    position: [number, number, number];
+    name: string;
+    stationType: string;
+  }>;
   otherAgentTargets: Array<{ agentId: string; targetId: string | null }>;
   resourceSystemAvailable: boolean;
 }
@@ -78,6 +83,10 @@ export interface AgentTickInput {
     lastCombatChatAt: number;
   };
 
+  /** When true, skip autonomous action picking (operator sent a dashboard command).
+   *  Survival tasks (eating, equipment, shopping) still run. */
+  operatorGrace?: boolean;
+
   // ── Legacy fields kept for backward compat with AgentBehaviorEngine ──
   // These are populated from SharedTickData by the worker before processing
   npcPositions: Array<{
@@ -97,6 +106,11 @@ export interface AgentTickInput {
     name: string;
     resourceType: string;
     depleted: boolean;
+  }>;
+  stationPositions: Array<{
+    position: [number, number, number];
+    name: string;
+    stationType: string;
   }>;
 }
 

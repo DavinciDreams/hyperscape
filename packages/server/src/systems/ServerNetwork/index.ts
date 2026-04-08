@@ -431,6 +431,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     }>
   > = new Map();
 
+  /** Long-term build / playstyle vision for embedded agents (dashboard + LLM refresh). */
+  static agentCharacterVision: Map<
+    string,
+    {
+      narrative: string;
+      pillars: string[];
+      updatedAt: number;
+      source: "seed" | "llm" | "operator";
+    }
+  > = new Map();
+
   /** Maximum number of thoughts to keep per agent */
   static MAX_THOUGHTS_PER_AGENT = 50;
 
@@ -455,6 +466,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private socketManager!: SocketManager;
   private broadcastManager!: BroadcastManager;
   private spatialIndex!: SpatialIndex;
+
+  /**
+   * Index of spectator sockets grouped by the player they're following.
+   * Avoids O(N) scan over all sockets when updating region subscriptions.
+   */
+  private spectatorsByPlayer = new Map<string, Set<string>>();
   private saveManager!: SaveManager;
   private positionValidator!: PositionValidator;
   private eventBridge!: EventBridge;
@@ -568,6 +585,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.capAgentDashboardMap(ServerNetwork.characterSockets);
     ServerNetwork.capAgentDashboardMap(ServerNetwork.agentPersonality);
     ServerNetwork.capAgentDashboardMap(ServerNetwork.agentDesireScores);
+    ServerNetwork.capAgentDashboardMap(ServerNetwork.agentCharacterVision);
   }
 
   /**
@@ -840,15 +858,51 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       (mobId: string) => {
         const mobEntity = this.world.entities.get(mobId) as {
           position?: { x: number; y: number; z: number };
+          getPosition?: () => { x: number; y: number; z: number };
+          data?: { position?: unknown };
         } | null;
-        return mobEntity?.position ?? null;
+        if (!mobEntity) return null;
+        const p = mobEntity.position;
+        if (
+          p &&
+          typeof p.x === "number" &&
+          typeof p.y === "number" &&
+          typeof p.z === "number"
+        ) {
+          return { x: p.x, y: p.y, z: p.z };
+        }
+        if (typeof mobEntity.getPosition === "function") {
+          return mobEntity.getPosition();
+        }
+        const raw = mobEntity.data?.position;
+        if (Array.isArray(raw) && raw.length >= 3) {
+          const [x, y, z] = raw as number[];
+          if (
+            [x, y, z].every((n) => typeof n === "number" && Number.isFinite(n))
+          ) {
+            return { x, y, z };
+          }
+        }
+        return null;
       },
-      // isMobAlive helper - get from world entity config
+      // isMobAlive helper — Entity/MobEntity use getHealth() / data.health; config.currentHealth alone was always undefined → mobs looked dead and pending attacks were cleared every tick.
       (mobId: string) => {
         const mobEntity = this.world.entities.get(mobId) as {
+          getHealth?: () => number;
+          data?: { health?: number };
           config?: { currentHealth?: number };
         } | null;
-        return mobEntity ? (mobEntity.config?.currentHealth ?? 0) > 0 : false;
+        if (!mobEntity) return false;
+        if (typeof mobEntity.getHealth === "function") {
+          return mobEntity.getHealth() > 0;
+        }
+        if (typeof mobEntity.data?.health === "number") {
+          return mobEntity.data.health > 0;
+        }
+        if (typeof mobEntity.config?.currentHealth === "number") {
+          return mobEntity.config.currentHealth > 0;
+        }
+        return false;
       },
     );
 
@@ -1750,6 +1804,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.sockets,
       this.broadcastManager,
       this.db,
+      this.spectatorsByPlayer,
     );
     this.connectionHandler.setSpatialIndex(this.spatialIndex);
 
@@ -3397,14 +3452,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     oldKey: number,
     newKey: number,
   ): void {
-    const adapter = this.getUwsAdapterForPlayer(playerId);
-    if (!adapter) return;
     const diff = this.spatialIndex.getRegionSubscriptionDiff(oldKey, newKey);
-    for (const key of diff.unsubscribe) {
-      adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
-    }
-    for (const key of diff.subscribe) {
-      adapter.subscribe(this.spatialIndex.getRegionTopic(key));
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (adapter) {
+      for (const key of diff.unsubscribe) {
+        adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
+      }
+      for (const key of diff.subscribe) {
+        adapter.subscribe(this.spatialIndex.getRegionTopic(key));
+      }
     }
 
     // Also update any spectators following this player
@@ -3421,17 +3477,37 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     worldX: number,
     worldZ: number,
   ): void {
-    const adapter = this.getUwsAdapterForPlayer(playerId);
-    if (!adapter) return;
-    // Unsub old 9 regions
+    // Unsub old 9 regions, sub new 9 regions
     const oldKeys = this.spatialIndex.getAdjacentRegionKeysFromKey(oldKey);
-    for (let i = 0; i < 9; i++) {
-      adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
-    }
-    // Sub new 9 regions
     const newKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
+
+    const adapter = this.getUwsAdapterForPlayer(playerId);
+    if (adapter) {
+      for (let i = 0; i < 9; i++) {
+        adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
+      }
+      for (let i = 0; i < 9; i++) {
+        adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
+      }
+    }
+
+    // Update spectators following this player (embedded agents have no adapter
+    // but may have spectator viewfinders that need region resubscription).
+    const oldKeySet = new Set(oldKeys);
+    const subKeys: number[] = [];
+    const unsubKeys: number[] = [];
     for (let i = 0; i < 9; i++) {
-      adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
+      if (!oldKeySet.has(newKeys[i])) subKeys.push(newKeys[i]);
+    }
+    const newKeySet = new Set(newKeys);
+    for (let i = 0; i < 9; i++) {
+      if (!newKeySet.has(oldKeys[i])) unsubKeys.push(oldKeys[i]);
+    }
+    if (subKeys.length > 0 || unsubKeys.length > 0) {
+      this.updateSpectatorRegionSubscriptions(playerId, {
+        subscribe: subKeys,
+        unsubscribe: unsubKeys,
+      });
     }
   }
 
@@ -3443,13 +3519,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     followedPlayerId: string,
     diff: { subscribe: number[]; unsubscribe: number[] },
   ): void {
-    for (const socket of this.sockets.values()) {
-      if (!socket.isSpectator) continue;
-      const spectSocket = socket as ServerSocket & {
-        spectatingCharacterId?: string;
-      };
-      if (spectSocket.spectatingCharacterId !== followedPlayerId) continue;
-      const spectAdapter = this.broadcastManager.getAdapter(socket.id);
+    const spectatorIds = this.spectatorsByPlayer.get(followedPlayerId);
+    if (!spectatorIds || spectatorIds.size === 0) return;
+
+    for (const socketId of spectatorIds) {
+      const spectAdapter = this.broadcastManager.getAdapter(socketId);
       if (!spectAdapter) continue;
       for (const key of diff.unsubscribe) {
         spectAdapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
@@ -3651,7 +3725,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    * Delegate disconnection handling to SocketManager
    */
   onDisconnect(socket: ServerSocket | Socket, code?: number | string): void {
-    this.socketManager.handleDisconnect(socket as ServerSocket, code);
+    // Clean up spectator index before socket is removed
+    const ss = socket as ServerSocket;
+    if (ss.isSpectator && ss.spectatingCharacterId) {
+      const set = this.spectatorsByPlayer.get(ss.spectatingCharacterId);
+      if (set) {
+        set.delete(ss.id);
+        if (set.size === 0)
+          this.spectatorsByPlayer.delete(ss.spectatingCharacterId);
+      }
+    }
+    this.socketManager.handleDisconnect(ss, code);
   }
 
   flush(): void {

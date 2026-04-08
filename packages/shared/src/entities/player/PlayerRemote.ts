@@ -84,6 +84,7 @@ import {
   ENTITY_FADE_CONFIGS,
   FadeState,
 } from "../../utils/rendering/DistanceFade";
+import { UIRenderer } from "../../utils/rendering/UIRenderer";
 import { MobInstancedRenderer } from "../../utils/rendering/InstancedMeshManager";
 import type {
   MobAnimationState,
@@ -299,7 +300,24 @@ export class PlayerRemote extends Entity implements HotReloadable {
 
     this.aura = createNode("group") as Group;
 
-    // Nametags disabled - OSRS pattern: names shown in right-click menu only
+    // Create nametag sprite floating above the character's head
+    {
+      const playerName = (this.data.name as string) || "Player";
+      const isAgent = !!(this.data.isAgent as boolean);
+      const nameCanvas = UIRenderer.createNameTag(playerName, {
+        width: 80,
+        height: 13,
+        fontSize: 7,
+        textColor: isAgent ? "#ffe066" : "#ffffff",
+        backgroundColor: "rgba(0, 0, 0, 0.65)",
+      });
+      this.nameSprite = UIRenderer.createSpriteFromCanvas(nameCanvas, 0.4);
+      this.nameSprite.position.set(0, 2.35, 0);
+      this.nameSprite.renderOrder = 999;
+      if (this.node) {
+        this.node.add(this.nameSprite);
+      }
+    }
 
     // Register with HealthBars system
     const healthbars = this.world.getSystem?.("healthbars") as
@@ -1334,7 +1352,18 @@ export class PlayerRemote extends Entity implements HotReloadable {
     }
     if (data.name !== undefined) {
       this.data.name = data.name as string;
-      // Name stored in data - shown in right-click menu (OSRS pattern)
+      // Update nametag sprite if it exists
+      if (this.nameSprite) {
+        const isAgent = !!(this.data.isAgent as boolean);
+        const nameCanvas = UIRenderer.createNameTag(data.name as string, {
+          width: 80,
+          height: 13,
+          fontSize: 7,
+          textColor: isAgent ? "#ffe066" : "#ffffff",
+          backgroundColor: "rgba(0, 0, 0, 0.65)",
+        });
+        UIRenderer.updateSpriteTexture(this.nameSprite, nameCanvas);
+      }
     }
     if (data.combatLevel !== undefined) {
       this.data.combatLevel = data.combatLevel as number;

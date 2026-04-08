@@ -1,33 +1,29 @@
 import React, { useState, useEffect } from "react";
-import { Clock, Activity, MessageSquare, Zap, AlertCircle } from "lucide-react";
+import {
+  Clock,
+  Activity,
+  MessageSquare,
+  Zap,
+  AlertCircle,
+  Brain,
+  Swords,
+} from "lucide-react";
 import type { Agent } from "./types";
 import { ELIZAOS_API } from "@/lib/api-config";
 
 interface TimelineEvent {
   id: string;
-  type: "message" | "action" | "error" | "system";
+  type: "thinking" | "decision" | "action" | "situation" | "evaluation";
   title: string;
   description: string;
   timestamp: number;
-  metadata?: Record<string, unknown>;
 }
 
-interface ElizaOSTimelineLog {
-  id?: string;
-  level?: string;
-  type?: string;
-  message?: string;
-  body?: string;
-  source?: string;
-  timestamp?: string;
-  createdAt?: string;
-  [key: string]: unknown;
-}
-
-interface TimelineLogsResponse {
-  success?: boolean;
-  data?: ElizaOSTimelineLog[] | { logs?: ElizaOSTimelineLog[] };
-  logs?: ElizaOSTimelineLog[];
+interface AgentThought {
+  id: string;
+  type: "situation" | "evaluation" | "thinking" | "decision" | "action";
+  content: string;
+  timestamp: number;
 }
 
 interface AgentTimelineProps {
@@ -42,14 +38,14 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
 
   useEffect(() => {
     fetchTimeline();
+    const interval = setInterval(fetchTimeline, 8000);
+    return () => clearInterval(interval);
   }, [agent.id]);
 
   const fetchTimeline = async () => {
     try {
-      // For now, we'll use logs as timeline events
-      // In a real implementation, this would fetch from a dedicated timeline API
       const response = await fetch(
-        `${ELIZAOS_API}/agents/${agent.id}/logs?count=50`,
+        `${ELIZAOS_API}/agents/${agent.id}/thoughts?limit=100`,
       );
 
       if (!response.ok) {
@@ -58,36 +54,25 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
         return;
       }
 
-      const payload = (await response.json()) as
-        | ElizaOSTimelineLog[]
-        | TimelineLogsResponse;
+      const data = await response.json();
+      if (!data.success) {
+        setEvents([]);
+        setError(data.message || "Timeline unavailable");
+        return;
+      }
 
-      const logs = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload.data)
-          ? payload.data
-          : payload.data?.logs || payload.logs || [];
+      const thoughts: AgentThought[] = data.thoughts || [];
 
-      // Transform logs to timeline events
-      const timelineEvents = logs.map(
-        (log: ElizaOSTimelineLog): TimelineEvent => ({
-          id: log.id || `${Date.now()}-${Math.random()}`,
-          type: (log.level === "error"
-            ? "error"
-            : log.type === "message" ||
-                log.type === "action" ||
-                log.type === "error" ||
-                log.type === "system"
-              ? log.type
-              : "system") as TimelineEvent["type"],
-          title: log.message || log.body || "Activity",
-          description: log.source || agent.name,
-          timestamp: new Date(
-            log.timestamp || log.createdAt || Date.now(),
-          ).getTime(),
-          metadata: log,
-        }),
-      );
+      const timelineEvents: TimelineEvent[] = thoughts.map((t) => ({
+        id: t.id,
+        type: t.type,
+        title: formatThoughtTitle(t),
+        description: t.content,
+        timestamp: t.timestamp,
+      }));
+
+      // Most recent first
+      timelineEvents.sort((a, b) => b.timestamp - a.timestamp);
 
       setEvents(timelineEvents);
       setError(null);
@@ -99,14 +84,35 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
     }
   };
 
+  const formatThoughtTitle = (t: AgentThought): string => {
+    switch (t.type) {
+      case "situation":
+        return "Situation Assessment";
+      case "evaluation":
+        return "Evaluating Options";
+      case "thinking":
+        return "Thinking";
+      case "decision":
+        return "Decision Made";
+      case "action":
+        return "Action Taken";
+      default:
+        return "Activity";
+    }
+  };
+
   const getEventIcon = (type: string) => {
     switch (type) {
-      case "message":
+      case "situation":
         return <MessageSquare size={16} className="text-blue-400" />;
-      case "action":
+      case "evaluation":
+        return <Brain size={16} className="text-purple-400" />;
+      case "thinking":
+        return <Brain size={16} className="text-cyan-400" />;
+      case "decision":
         return <Zap size={16} className="text-yellow-400" />;
-      case "error":
-        return <AlertCircle size={16} className="text-red-400" />;
+      case "action":
+        return <Swords size={16} className="text-green-400" />;
       default:
         return <Activity size={16} className="text-[#f2d08a]" />;
     }
@@ -114,12 +120,16 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
 
   const getEventColor = (type: string) => {
     switch (type) {
-      case "message":
+      case "situation":
         return "border-blue-500/30 bg-blue-900/10";
-      case "action":
+      case "evaluation":
+        return "border-purple-500/30 bg-purple-900/10";
+      case "thinking":
+        return "border-cyan-500/30 bg-cyan-900/10";
+      case "decision":
         return "border-yellow-500/30 bg-yellow-900/10";
-      case "error":
-        return "border-red-500/30 bg-red-900/10";
+      case "action":
+        return "border-green-500/30 bg-green-900/10";
       default:
         return "border-[#8b4513]/30 bg-[#1a1005]";
     }
@@ -153,31 +163,39 @@ export const AgentTimeline: React.FC<AgentTimelineProps> = ({ agent }) => {
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setFilter("all")}
-            className={`px-3 py-1 text-xs rounded ${filter === "all" ? "bg-[#f2d08a]/20 text-[#f2d08a]" : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-[#f2d08a]"}`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setFilter("message")}
-            className={`px-3 py-1 text-xs rounded ${filter === "message" ? "bg-blue-500/20 text-blue-400" : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-blue-400"}`}
-          >
-            Messages
-          </button>
-          <button
-            onClick={() => setFilter("action")}
-            className={`px-3 py-1 text-xs rounded ${filter === "action" ? "bg-yellow-500/20 text-yellow-400" : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-yellow-400"}`}
-          >
-            Actions
-          </button>
-          <button
-            onClick={() => setFilter("error")}
-            className={`px-3 py-1 text-xs rounded ${filter === "error" ? "bg-red-500/20 text-red-400" : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-red-400"}`}
-          >
-            Errors
-          </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {(
+            [
+              "all",
+              "action",
+              "decision",
+              "thinking",
+              "situation",
+              "evaluation",
+            ] as const
+          ).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1 text-xs rounded capitalize ${
+                filter === f
+                  ? f === "all"
+                    ? "bg-[#f2d08a]/20 text-[#f2d08a]"
+                    : f === "action"
+                      ? "bg-green-500/20 text-green-400"
+                      : f === "decision"
+                        ? "bg-yellow-500/20 text-yellow-400"
+                        : f === "thinking"
+                          ? "bg-cyan-500/20 text-cyan-400"
+                          : f === "situation"
+                            ? "bg-blue-500/20 text-blue-400"
+                            : "bg-purple-500/20 text-purple-400"
+                  : "bg-[#1a1005] text-[#f2d08a]/40 hover:text-[#f2d08a]"
+              }`}
+            >
+              {f}
+            </button>
+          ))}
         </div>
         {error && (
           <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">

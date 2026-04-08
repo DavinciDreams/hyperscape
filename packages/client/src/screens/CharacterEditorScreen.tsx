@@ -416,8 +416,8 @@ export const CharacterEditorScreen: React.FC = () => {
 
         const result = await createResponse.json();
 
-        // Extract agent ID from response - OpenAPI spec: data.character.id
-        const newAgentId = result.data?.character?.id;
+        // Embedded server: data.agent.id. Legacy Eliza: data.character.id
+        const newAgentId = result.data?.agent?.id ?? result.data?.character?.id;
         if (newAgentId) {
           // Save agent mapping to Hyperscape database (CRITICAL - rollback if fails)
           try {

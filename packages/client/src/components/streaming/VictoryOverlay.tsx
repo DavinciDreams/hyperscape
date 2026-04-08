@@ -11,9 +11,15 @@ import type { AgentInfo } from "../../screens/StreamingMode";
 interface VictoryOverlayProps {
   winner: AgentInfo;
   winReason: string;
+  /** Pre-formatted line for viewers (e.g. "Knockout — HP reached zero.") */
+  winReasonLine?: string | null;
 }
 
-export function VictoryOverlay({ winner, winReason }: VictoryOverlayProps) {
+export function VictoryOverlay({
+  winner,
+  winReason: _winReason,
+  winReasonLine,
+}: VictoryOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Trigger pulse animation on mount
@@ -31,6 +37,9 @@ export function VictoryOverlay({ winner, winReason }: VictoryOverlayProps) {
       <div ref={containerRef} className="victory-pulse" style={styles.content}>
         <div style={styles.winnerName}>{winner.name}</div>
         <div style={styles.winsText}>WINS!</div>
+        {winReasonLine ? (
+          <div style={styles.reasonLine}>{winReasonLine}</div>
+        ) : null}
       </div>
 
       <style>
@@ -67,7 +76,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   winnerName: {
     color: "#f2d08a",
-    fontSize: "6rem",
+    fontSize: "clamp(2.5rem, 10vw, 6rem)",
     fontWeight: "bold",
     fontFamily: "Impact, sans-serif",
     letterSpacing: "2px",
@@ -75,15 +84,30 @@ const styles: Record<string, React.CSSProperties> = {
     textShadow:
       "0 0 40px rgba(242,208,138,0.8), 0 0 80px rgba(242,208,138,0.4), 0 4px 8px rgba(0,0,0,0.8)",
     lineHeight: 1.1,
+    textAlign: "center",
+    maxWidth: "min(95vw, 1200px)",
+    padding: "0 12px",
   },
   winsText: {
     color: "#ff6b6b",
-    fontSize: "8rem",
+    fontSize: "clamp(3.2rem, 12vw, 8rem)",
     fontWeight: "bold",
     fontFamily: "Impact, sans-serif",
     letterSpacing: "-2px",
     textShadow:
       "0 0 40px rgba(255,107,107,0.8), 0 0 80px rgba(255,107,107,0.4), 0 4px 8px rgba(0,0,0,0.8)",
     lineHeight: 1,
+  },
+  reasonLine: {
+    marginTop: "0.35em",
+    maxWidth: "min(90vw, 560px)",
+    padding: "0 20px",
+    textAlign: "center",
+    fontSize: "clamp(0.85rem, 2.2vw, 1.1rem)",
+    fontWeight: 600,
+    letterSpacing: "0.06em",
+    color: "rgba(226, 232, 240, 0.95)",
+    textShadow: "0 2px 16px rgba(0,0,0,0.9), 0 0 20px rgba(96,165,250,0.12)",
+    lineHeight: 1.35,
   },
 };

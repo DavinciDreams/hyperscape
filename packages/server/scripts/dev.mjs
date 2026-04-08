@@ -385,7 +385,7 @@ async function startServer() {
   // that keeps pauses <10ms. Polyfills are bundled via import in index.ts.
   const proc = spawn(
     "node",
-    ["--import", "./scripts/register-hooks.mjs", "build/index.js"],
+    ["--max-old-space-size=2048", "--import", "./scripts/register-hooks.mjs", "build/index.js"],
     {
       stdio: "inherit",
       cwd: rootDir,
@@ -434,11 +434,12 @@ console.log(`${colors.blue}Setting up file watcher...${colors.reset}`);
 
 const { default: chokidar } = await import("chokidar");
 
+// Only watch compiled shared output — not shared/src. Watching source caused a
+// restart on every save there *and* again when build/ updated (double restarts),
+// leaving :5555 down during esbuild + Node boot (Vite then spams ECONNREFUSED on /env.js).
 const watchRoots = [
   path.join(rootDir, "src"),
   path.join(rootDir, "../shared/build"),
-  // Fallback for environments where shared build output is delayed.
-  path.join(rootDir, "../shared/src"),
 ];
 
 const watchedExtensionRegex = /\.(ts|tsx|js|mjs|sql)$/;

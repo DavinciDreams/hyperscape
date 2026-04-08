@@ -2107,6 +2107,275 @@ export function registerAdminRoutes(
   );
 
   /**
+   * POST /admin/duels/debug-matchup
+   * Queue a duel between a target agent and a fresh embedded sparbot or an existing agent.
+   * Body: { targetCharacterId, opponentCharacterId?, opponentName?, spawnOpponent?, scriptedRole?, sparbotCombatStyle? }
+   */
+  fastify.post(
+    "/admin/duels/debug-matchup",
+    { preHandler: requireAdmin },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const body = request.body as {
+          targetCharacterId?: string;
+          opponentCharacterId?: string;
+          opponentName?: string;
+          spawnOpponent?: boolean;
+          scriptedRole?: string;
+          sparbotCombatStyle?: "auto" | "melee" | "ranged" | "mage" | "prayer";
+        };
+
+        if (
+          !body.targetCharacterId ||
+          typeof body.targetCharacterId !== "string"
+        ) {
+          return reply.code(400).send({
+            error: "targetCharacterId is required",
+          });
+        }
+
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+        if (!scheduler) {
+          return reply.code(503).send({
+            error: "Streaming duel scheduler not available",
+          });
+        }
+
+        const spawnOpponent =
+          typeof body.spawnOpponent === "boolean"
+            ? body.spawnOpponent
+            : !body.opponentCharacterId;
+        const style =
+          body.sparbotCombatStyle === "melee" ||
+          body.sparbotCombatStyle === "ranged" ||
+          body.sparbotCombatStyle === "mage" ||
+          body.sparbotCombatStyle === "prayer"
+            ? body.sparbotCombatStyle
+            : "auto";
+
+        const result = await scheduler.queueDebugMatchup({
+          targetCharacterId: body.targetCharacterId,
+          opponentCharacterId: body.opponentCharacterId,
+          opponentName: body.opponentName,
+          spawnOpponent,
+          sparbotCombatStyle: style,
+        });
+
+        return reply.send({
+          success: true,
+          mode: result.mode,
+          opponent: result.opponent,
+        });
+      } catch (err) {
+        console.error("[AdminRoutes] debug-matchup error:", err);
+        return reply.code(500).send({
+          error:
+            err instanceof Error
+              ? err.message
+              : "Failed to queue debug matchup",
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /admin/duels/debug-matchup/cleanup
+   * Remove embedded spar bots spawned via debug-matchup (spawn mode).
+   */
+  fastify.post(
+    "/admin/duels/debug-matchup/cleanup",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+        if (!scheduler) {
+          return reply.code(503).send({
+            error: "Streaming duel scheduler not available",
+          });
+        }
+
+        const removed = await scheduler.cleanupDebugSpawnedSparbots();
+        return reply.send({ success: true, removed });
+      } catch (err) {
+        console.error("[AdminRoutes] debug-matchup cleanup error:", err);
+        return reply.code(500).send({
+          error:
+            err instanceof Error ? err.message : "Failed to cleanup debug bots",
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /admin/duels/debug-sparbots/seed
+   * Placeholder — debug sparbot seeding not included in this build.
+   */
+  fastify.post(
+    "/admin/duels/debug-sparbots/seed",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      return reply.code(501).send({
+        error: "Debug sparbot seeding not available in this build",
+      });
+    },
+  );
+
+  // ==========================================================================
+  // Standalone Sparbot Pool Endpoints
+  // ==========================================================================
+
+  /**
+   * GET /admin/sparbots
+   * List active standalone sparbots in the matchmaking pool.
+   */
+  fastify.get(
+    "/admin/sparbots",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+        if (!scheduler) {
+          return reply
+            .code(503)
+            .send({ error: "Streaming duel scheduler not available" });
+        }
+        return reply.send({ sparbots: scheduler.listStandaloneSparbots() });
+      } catch (err) {
+        console.error("[AdminRoutes] list sparbots error:", err);
+        return reply.code(500).send({ error: "Failed to list sparbots" });
+      }
+    },
+  );
+
+  /**
+   * POST /admin/sparbots
+   * Spawn standalone sparbots for the matchmaking pool.
+   * Body: { style: "melee"|"ranged"|"mage"|"prayer", count: number, names?: string[] }
+   */
+  fastify.post(
+    "/admin/sparbots",
+    { preHandler: requireAdmin },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const body = request.body as {
+          style?: string;
+          tier?: string;
+          count?: number;
+          names?: string[];
+        };
+
+        const validStyles = ["melee", "ranged", "mage", "prayer"] as const;
+        type SparbotStyle = (typeof validStyles)[number];
+        const style: SparbotStyle = validStyles.includes(
+          body.style as SparbotStyle,
+        )
+          ? (body.style as SparbotStyle)
+          : "melee";
+
+        const validTiers = ["novice", "adept", "expert"] as const;
+        type SparbotTier = (typeof validTiers)[number];
+        const tier: SparbotTier = validTiers.includes(body.tier as SparbotTier)
+          ? (body.tier as SparbotTier)
+          : "adept";
+
+        const count = Math.min(
+          20,
+          Math.max(
+            1,
+            typeof body.count === "number" ? Math.floor(body.count) : 1,
+          ),
+        );
+
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+        if (!scheduler) {
+          return reply
+            .code(503)
+            .send({ error: "Streaming duel scheduler not available" });
+        }
+
+        const spawned = await scheduler.spawnStandaloneSparbots(
+          count,
+          style,
+          tier,
+          Array.isArray(body.names) ? body.names : undefined,
+        );
+        return reply.send({ success: true, spawned });
+      } catch (err) {
+        console.error("[AdminRoutes] spawn sparbots error:", err);
+        return reply.code(500).send({
+          error:
+            err instanceof Error ? err.message : "Failed to spawn sparbots",
+        });
+      }
+    },
+  );
+
+  /**
+   * DELETE /admin/sparbots
+   * Remove all standalone sparbots from the pool.
+   */
+  fastify.delete(
+    "/admin/sparbots",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+        if (!scheduler) {
+          return reply
+            .code(503)
+            .send({ error: "Streaming duel scheduler not available" });
+        }
+        const removed = await scheduler.removeStandaloneSparbots();
+        return reply.send({ success: true, removed });
+      } catch (err) {
+        console.error("[AdminRoutes] remove all sparbots error:", err);
+        return reply.code(500).send({ error: "Failed to remove sparbots" });
+      }
+    },
+  );
+
+  /**
+   * DELETE /admin/sparbots/:id
+   * Remove a specific standalone sparbot from the pool.
+   */
+  fastify.delete<{ Params: { id: string } }>(
+    "/admin/sparbots/:id",
+    { preHandler: requireAdmin },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = (request as FastifyRequest & { params: { id: string } })
+        .params;
+      try {
+        const { getStreamingDuelScheduler } =
+          await import("../../systems/StreamingDuelScheduler/index.js");
+        const scheduler = getStreamingDuelScheduler();
+        if (!scheduler) {
+          return reply
+            .code(503)
+            .send({ error: "Streaming duel scheduler not available" });
+        }
+        const removed = await scheduler.removeStandaloneSparbots([id]);
+        if (removed === 0) {
+          return reply.code(404).send({ error: "Sparbot not found" });
+        }
+        return reply.send({ success: true });
+      } catch (err) {
+        console.error("[AdminRoutes] remove sparbot error:", err);
+        return reply.code(500).send({ error: "Failed to remove sparbot" });
+      }
+    },
+  );
+
+  /**
    * Helper: find agent type and stop info for a characterId.
    * Returns { agentType, modelProvider, modelModel, agentManager }.
    */
@@ -2820,6 +3089,33 @@ export function registerAdminRoutes(
       } catch (err) {
         console.error("[AdminRoutes] Failed to trigger restart:", err);
         return reply.code(500).send({ error: "Failed to trigger restart" });
+      }
+    },
+  );
+
+  // ─── Agent LLM Cost Stats ───────────────────────────────────────────
+  fastify.get(
+    "/admin/agents/llm-costs",
+    { preHandler: requireAdmin },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { getAgentCostStats } =
+          await import("../../eliza/llmBehaviorDecision.js");
+        const stats = getAgentCostStats();
+        const entries: Array<{
+          characterId: string;
+          totalCalls: number;
+          totalTokensEst: number;
+        }> = [];
+        for (const [charId, data] of stats) {
+          entries.push({ characterId: charId, ...data });
+        }
+        return reply.send({ agents: entries, count: entries.length });
+      } catch (err) {
+        console.error("[AdminRoutes] Failed to get agent cost stats:", err);
+        return reply
+          .code(500)
+          .send({ error: "Failed to get agent cost stats" });
       }
     },
   );

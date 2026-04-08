@@ -91,6 +91,9 @@ export class HealthBars extends SystemBase {
   mesh: THREE.InstancedMesh;
   coordsAttribute: THREE.InstancedBufferAttribute;
   private uOrientation: { value: THREE.Quaternion };
+  /** Throttle stale-entry sweep to every ~500ms instead of every frame */
+  private _lastStaleSweepTime = 0;
+  private static readonly STALE_SWEEP_INTERVAL_MS = 500;
 
   constructor(world: World) {
     super(world, {
@@ -214,12 +217,18 @@ export class HealthBars extends SystemBase {
    */
   update() {
     // Sweep for stale entries whose entities have been removed from the world.
-    // Iterating in reverse is required because remove() uses swap-with-last,
-    // which modifies the array length — forward iteration would skip entries.
-    for (let i = this.healthBars.length - 1; i >= 0; i--) {
-      const entry = this.healthBars[i];
-      if (!this.world.entities.get(entry.entityId)) {
-        this.remove(entry);
+    // Throttled to every ~500ms — stale bars are invisible (hidden after HP
+    // reaches 0), so a brief delay before cleanup is imperceptible.
+    const now = performance.now();
+    if (now - this._lastStaleSweepTime >= HealthBars.STALE_SWEEP_INTERVAL_MS) {
+      this._lastStaleSweepTime = now;
+      // Iterating in reverse is required because remove() uses swap-with-last,
+      // which modifies the array length — forward iteration would skip entries.
+      for (let i = this.healthBars.length - 1; i >= 0; i--) {
+        const entry = this.healthBars[i];
+        if (!this.world.entities.get(entry.entityId)) {
+          this.remove(entry);
+        }
       }
     }
 

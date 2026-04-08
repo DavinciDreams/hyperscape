@@ -521,6 +521,8 @@ export interface WorldArea {
       arenaLayout?: string;
       arenaSize?: { width: number; length: number };
       arenaGap?: number;
+      /** `alongLength` (default): spawns ±Z. `alongWidth`: spawns ±X (east/west). */
+      spawnLayout?: "alongLength" | "alongWidth";
     }
   >;
 }
