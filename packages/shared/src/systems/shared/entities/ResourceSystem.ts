@@ -1009,6 +1009,11 @@ export class ResourceSystem extends SystemBase {
             spawnPoint.subType,
           ),
           lod1ModelScale: finalScale, // Same scale variation as main model
+          lod2Model: this.getLod2ModelPathForResource(
+            resource.type,
+            spawnPoint.subType,
+          ),
+          lod2ModelScale: finalScale, // Same scale variation as main model
           // Procgen preset for runtime procedural tree generation
           procgenPreset: this.getProcgenPresetForResource(
             resource.type,
@@ -1149,6 +1154,27 @@ export class ResourceSystem extends SystemBase {
     }
 
     return manifestData.lod1ModelPath ?? null;
+  }
+
+  /**
+   * Get LOD2 model path for resource type from manifest
+   * Returns null if not specified (LOD1/full model used until imposter)
+   */
+  private getLod2ModelPathForResource(
+    type: string,
+    subType?: string,
+  ): string | null {
+    const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
+    const manifestData = getExternalResource(variantKey);
+
+    if (!manifestData) {
+      throw new Error(
+        `[ResourceSystem] Resource manifest not found for '${variantKey}'. ` +
+          `Ensure resources.json is loaded and contains this resource type.`,
+      );
+    }
+
+    return manifestData.lod2ModelPath ?? null;
   }
 
   /**
