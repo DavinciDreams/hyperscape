@@ -255,6 +255,8 @@ export interface ExternalResourceData {
   modelPath: string | null;
   /** LOD1 model path for medium distance rendering */
   lod1ModelPath?: string | null;
+  /** LOD2 model path for far distance rendering */
+  lod2ModelPath?: string | null;
   depletedModelPath: string | null;
   /**
    * Procgen preset name for procedural tree generation.

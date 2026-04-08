@@ -419,3 +419,54 @@ export function inferLOD1Path(lod0Path: string): string {
 export function inferLOD2Path(lod0Path: string): string {
   return lod0Path.replace(/\.glb$/i, "_lod2.glb");
 }
+
+function normalizeExplicitLODPath(
+  explicitPath?: string | null,
+): string | null | undefined {
+  if (explicitPath === undefined) {
+    return undefined;
+  }
+
+  if (explicitPath === null) {
+    return null;
+  }
+
+  const trimmed = explicitPath.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Resolve the effective LOD1 model path.
+ * - `undefined`: infer by convention from the lod0 path
+ * - `null` or empty string: disable LOD1 path resolution
+ * - non-empty string: use the explicit path
+ */
+export function resolveLOD1ModelPath(
+  lod0Path: string,
+  explicitPath?: string | null,
+): string | null {
+  const normalized = normalizeExplicitLODPath(explicitPath);
+  if (normalized === null) {
+    return null;
+  }
+
+  return normalized ?? inferLOD1Path(lod0Path);
+}
+
+/**
+ * Resolve the effective LOD2 model path.
+ * - `undefined`: infer by convention from the lod0 path
+ * - `null` or empty string: disable LOD2 path resolution
+ * - non-empty string: use the explicit path
+ */
+export function resolveLOD2ModelPath(
+  lod0Path: string,
+  explicitPath?: string | null,
+): string | null {
+  const normalized = normalizeExplicitLODPath(explicitPath);
+  if (normalized === null) {
+    return null;
+  }
+
+  return normalized ?? inferLOD2Path(lod0Path);
+}
