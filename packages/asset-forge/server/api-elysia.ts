@@ -297,7 +297,8 @@ const app = new Elysia()
 
   // Static file serving - temp shell GLBs (for Meshy AI texturing)
   .get("/temp-shells/:filename", async ({ params, set }) => {
-    const filePath = path.join(ROOT_DIR, "temp-shells", params.filename);
+    const safeName = path.basename(params.filename);
+    const filePath = path.join(ROOT_DIR, "temp-shells", safeName);
     try {
       const file = Bun.file(filePath);
       if (!(await file.exists())) {

@@ -11,6 +11,15 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { ShellTextureService } from "../services/armor-pipeline/ShellTextureService";
 
+function parseBonuses(raw: string | undefined): Record<string, number> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 export const createArmorPipelineRoutes = (
   shellTextureService: ShellTextureService,
 ) => {
@@ -102,9 +111,7 @@ export const createArmorPipelineRoutes = (
             const arrayBuffer = await file.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
 
-            const filename =
-              (body as Record<string, unknown>).name?.toString() ||
-              `shell_batch_${Date.now()}.glb`;
+            const filename = body.name || `shell_batch_${Date.now()}.glb`;
 
             // Save locally + get base64 data URI (once)
             const { dataUri } = await shellTextureService.saveShellGLB(
@@ -112,26 +119,22 @@ export const createArmorPipelineRoutes = (
               filename,
             );
 
-            const tiers = (
-              typeof body.tiers === "string"
-                ? JSON.parse(body.tiers)
-                : body.tiers
-            ) as {
+            let tiers: {
               tierId: string;
               prompt: string;
               /** Per-tier style reference image URL for color consistency */
               styleImageUrl?: string;
             }[];
-            const aiModel =
-              (body as Record<string, unknown>).aiModel?.toString() ||
-              "meshy-6";
-            const enablePBR =
-              (body as Record<string, unknown>).enablePBR?.toString() ===
-              "true";
+            try {
+              tiers = JSON.parse(body.tiers);
+            } catch {
+              set.status = 400;
+              return { success: false, error: "Invalid tiers JSON" };
+            }
+            const aiModel = body.aiModel || "meshy-6";
+            const enablePBR = body.enablePBR === "true";
             // Global fallback style image (used when tiers don't specify their own)
-            const globalStyleImageUrl =
-              (body as Record<string, unknown>).styleImageUrl?.toString() ||
-              undefined;
+            const globalStyleImageUrl = body.styleImageUrl || undefined;
 
             // Start tasks sequentially with a small delay to avoid Meshy 504s
             // (each request sends the full ~6MB base64 payload)
@@ -143,9 +146,7 @@ export const createArmorPipelineRoutes = (
               }
               // Per-tier style image takes precedence over global fallback
               const tierStyleUrl = tier.styleImageUrl || globalStyleImageUrl;
-              const preserveUV =
-                (body as Record<string, unknown>).preserveUV?.toString() ===
-                "true";
+              const preserveUV = body.preserveUV === "true";
               const taskId = await shellTextureService.startTextureTask(
                 dataUri,
                 tier.prompt,
@@ -169,7 +170,7 @@ export const createArmorPipelineRoutes = (
         {
           body: t.Object({
             file: t.File(),
-            tiers: t.Any(), // JSON string or parsed array of {tierId, prompt, styleImageUrl?}[]
+            tiers: t.String(), // JSON-encoded array of {tierId, prompt, styleImageUrl?}[]
             name: t.Optional(t.String()),
             aiModel: t.Optional(t.String()),
             enablePBR: t.Optional(t.String()),
@@ -263,9 +264,20 @@ export const createArmorPipelineRoutes = (
       )
 
       // Publish rigged armor GLB to the game's model directory + update manifest
+      // Security: restricted to localhost requests only (writes to game server filesystem)
       .post(
         "/publish-to-game",
-        async ({ body, set }) => {
+        async ({ body, set, request }) => {
+          // Only allow requests from localhost
+          const url = new URL(request.url);
+          const host = url.hostname;
+          if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
+            set.status = 403;
+            return {
+              success: false,
+              error: "Publish is only allowed from localhost",
+            };
+          }
           try {
             const file = body.file;
             const arrayBuffer = await file.arrayBuffer();
@@ -352,7 +364,7 @@ export const createArmorPipelineRoutes = (
               examine: `A piece of ${tier} armor.`,
               tradeable: true,
               rarity: "common",
-              bonuses: body.bonuses ? JSON.parse(body.bonuses) : {},
+              bonuses: parseBonuses(body.bonuses),
             };
 
             if (existingIndex >= 0) {

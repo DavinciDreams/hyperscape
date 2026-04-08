@@ -449,7 +449,7 @@ export class TripoService {
     const { buffer } = await this.downloadResult(segmentationTaskId);
 
     // Parse GLB to extract mesh names using @gltf-transform/core
-    const { Document, NodeIO } = await import("@gltf-transform/core");
+    const { NodeIO } = await import("@gltf-transform/core");
     const io = new NodeIO();
     const doc = await io.readBinary(new Uint8Array(buffer));
 
