@@ -101,8 +101,7 @@ RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
     cd /app/packages/web3 && bun run build && \
     cd /app/packages/server && bun run build && \
-    cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' \
-    node ../../node_modules/vite/bin/vite.js build
+    cd /app/packages/client && bun run build:cf
 
 # ─── Runtime ────────────────────────────────────────────────────────────────
 #
