@@ -217,19 +217,10 @@ function resolveBroadcastTimelinePhase(params: {
   if (cycle.phase === "IDLE") {
     return "IDLE";
   }
-
-  if (cycle.phase === "RESOLUTION") {
-    if (duelEndTime == null || emittedAt >= duelEndTime) {
-      return "RESOLUTION";
-    }
-  }
-
-  if (cycle.phase === "FIGHTING") {
-    if (fightStartTime == null || emittedAt >= fightStartTime) {
-      return duelEndTime != null && emittedAt >= duelEndTime
-        ? "RESOLUTION"
-        : "FIGHTING";
-    }
+  const projectedCycleStart =
+    betOpenTime ?? betCloseTime ?? fightStartTime ?? duelEndTime;
+  if (projectedCycleStart != null && emittedAt < projectedCycleStart) {
+    return "IDLE";
   }
 
   if (duelEndTime != null && emittedAt >= duelEndTime) {

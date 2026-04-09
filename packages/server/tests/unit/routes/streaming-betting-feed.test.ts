@@ -200,6 +200,7 @@ describe("streaming-betting-feed", () => {
       cycle: createCycle({
         phase: "FIGHTING",
         phaseVersion: 9,
+        fightStartTime: 3_000,
         winnerId: "agent-b",
         winReason: "damage_advantage",
       }),
@@ -218,14 +219,14 @@ describe("streaming-betting-feed", () => {
         phase: "FIGHTING",
         betOpenTime: 5_000,
         betCloseTime: 6_000,
-        fightStartTime: null,
+        fightStartTime: 7_000,
         duelEndTime: null,
         presentationDelayMs: 4_000,
         updatedAt: 123_456,
       },
       betOpenTime: 1_000,
       betCloseTime: 2_000,
-      fightStartTime: null,
+      fightStartTime: 3_000,
       duelEndTime: null,
       winnerId: "agent-b",
       winnerName: "Agent B",
@@ -326,6 +327,35 @@ describe("streaming-betting-feed", () => {
       duelEndTime: 13_000,
       presentationDelayMs: 4_000,
       updatedAt: 6_500,
+    });
+  });
+
+  it("holds the projected phase at idle until the delayed cycle start arrives", () => {
+    const payload = buildBettingFeedPayload({
+      sourceEpoch: 8,
+      seq: 12,
+      emittedAt: 4_500,
+      channel: createChannel({
+        presentationDelayMs: 4_000,
+      }),
+      cycle: createCycle({
+        phase: "ANNOUNCEMENT",
+        betOpenTime: 1_000,
+        betCloseTime: 2_000,
+        fightStartTime: 3_000,
+        duelEndTime: 9_000,
+      }),
+    });
+
+    expect(payload.phase).toBe("ANNOUNCEMENT");
+    expect(payload.broadcastTimeline).toEqual({
+      phase: "IDLE",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 4_500,
     });
   });
 
