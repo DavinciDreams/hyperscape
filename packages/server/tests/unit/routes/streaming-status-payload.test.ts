@@ -622,12 +622,7 @@ describe("buildStreamingStatusPayload", () => {
         occurredAt: 4_000,
         receivedAt: 4_100,
       },
-      lastPlaybackProbe: {
-        ready: false,
-        manifestStatus: "missing",
-        lastError: "playback_unconfigured",
-        updatedAt: 4_200,
-      },
+      lastPlaybackProbe: null,
       lastExternalTransportError: null,
     });
   });

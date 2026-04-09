@@ -483,7 +483,7 @@ describe("streaming-betting-routes", () => {
         alert_type: "stream_live_input.connected",
         name: "Stream Live Input Connected",
         event: {
-          input_id: "live-input-123",
+          input_id: "live-input-env",
           video_id: "video-456",
           timestamp: "2026-04-09T02:15:00.000Z",
         },
@@ -494,7 +494,7 @@ describe("streaming-betting-routes", () => {
     expect(response.json()).toMatchObject({
       ok: true,
       eventType: "stream_live_input.connected",
-      liveInputId: "live-input-123",
+      liveInputId: "live-input-env",
     });
     expect(
       JSON.parse(
@@ -503,7 +503,7 @@ describe("streaming-betting-routes", () => {
       ),
     ).toMatchObject({
       eventType: "stream_live_input.connected",
-      liveInputId: "live-input-123",
+      liveInputId: "live-input-env",
       videoId: "video-456",
     });
     expect(
@@ -513,9 +513,79 @@ describe("streaming-betting-routes", () => {
       ),
     ).toMatchObject({
       eventType: "stream_live_input.connected",
-      liveInputId: "live-input-123",
+      liveInputId: "live-input-env",
       status: "connected",
     });
+
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("rejects authenticated Cloudflare webhooks that omit a live input id", async () => {
+    stubEnv("STREAM_CLOUDFLARE_WEBHOOK_SECRET", "cf-secret");
+    stubEnv("STREAM_CLOUDFLARE_LIVE_INPUT_ID", "live-input-env");
+
+    const storageBackedWorld = createStorageBackedWorld();
+    const options = createRouteOptions({
+      world: storageBackedWorld.world,
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "POST",
+      url: "/api/streaming/cloudflare/webhook",
+      headers: {
+        "cf-webhook-auth": "cf-secret",
+      },
+      payload: {
+        alert_type: "stream_live_input.connected",
+        name: "Stream Live Input Connected",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")).toBeUndefined();
+    expect(storageBackedWorld.rows.get("streaming:cloudflare:lifecycle")).toBeUndefined();
+
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("ignores authenticated Cloudflare webhooks for a different live input", async () => {
+    stubEnv("STREAM_CLOUDFLARE_WEBHOOK_SECRET", "cf-secret");
+    stubEnv("STREAM_CLOUDFLARE_LIVE_INPUT_ID", "live-input-env");
+
+    const storageBackedWorld = createStorageBackedWorld();
+    const options = createRouteOptions({
+      world: storageBackedWorld.world,
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "POST",
+      url: "/api/streaming/cloudflare/webhook",
+      headers: {
+        "cf-webhook-auth": "cf-secret",
+      },
+      payload: {
+        alert_type: "stream_live_input.connected",
+        name: "Stream Live Input Connected",
+        event: {
+          input_id: "other-live-input",
+          video_id: "video-456",
+          timestamp: "2026-04-09T02:15:00.000Z",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      ignored: true,
+      liveInputId: "other-live-input",
+    });
+    expect(storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")).toBeUndefined();
+    expect(storageBackedWorld.rows.get("streaming:cloudflare:lifecycle")).toBeUndefined();
 
     routes.close();
     await options.fastify.close();

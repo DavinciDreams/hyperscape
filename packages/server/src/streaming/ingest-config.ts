@@ -45,6 +45,13 @@ function asNonEmptyString(value: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function resolveConfiguredRtmpsIngestUrl(env: NodeJS.ProcessEnv): string | null {
+  return (
+    asNonEmptyString(env.STREAM_EXTERNAL_INGEST_RTMPS_URL) ??
+    asNonEmptyString(env.STREAM_INGEST_RTMPS_URL)
+  );
+}
+
 export function resolveStreamIngestSettings(
   env: NodeJS.ProcessEnv,
 ): StreamIngestSettings {
@@ -117,11 +124,15 @@ export function validateStreamIngestSettings(
     return issues;
   }
 
-  const rtmpsUrl = asNonEmptyString(env.STREAM_INGEST_RTMPS_URL);
+  const rtmpsUrl = resolveConfiguredRtmpsIngestUrl(env);
   if (!rtmpsUrl) {
-    issues.push("STREAM_INGEST_RTMPS_URL is required when STREAM_INGEST_TRANSPORT=rtmps");
+    issues.push(
+      "STREAM_INGEST_RTMPS_URL or STREAM_EXTERNAL_INGEST_RTMPS_URL is required when STREAM_INGEST_TRANSPORT=rtmps",
+    );
   } else if (!isValidUrl(rtmpsUrl, ["rtmp:", "rtmps:"])) {
-    issues.push("STREAM_INGEST_RTMPS_URL must be a valid rtmp:// or rtmps:// URL");
+    issues.push(
+      "STREAM_INGEST_RTMPS_URL or STREAM_EXTERNAL_INGEST_RTMPS_URL must be a valid rtmp:// or rtmps:// URL",
+    );
   }
 
   const streamKey = asNonEmptyString(env.STREAM_INGEST_STREAM_KEY);

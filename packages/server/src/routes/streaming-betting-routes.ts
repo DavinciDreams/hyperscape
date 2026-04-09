@@ -1518,9 +1518,26 @@ export function registerStreamingBettingRoutes(
     const receivedAt = Date.now();
     const summary = summarizeCloudflareLiveWebhook({
       payload: request.body,
-      fallbackLiveInputId: cloudflareLiveInputId,
       receivedAt,
     });
+    if (!summary.webhook.liveInputId) {
+      return reply.status(400).send({
+        error: "Bad Request",
+        message: "Cloudflare webhook payload is missing a live input id",
+      });
+    }
+    if (
+      cloudflareLiveInputId &&
+      summary.webhook.liveInputId !== cloudflareLiveInputId
+    ) {
+      return reply.status(202).send({
+        ok: true,
+        ignored: true,
+        eventType: summary.webhook.eventType,
+        liveInputId: summary.webhook.liveInputId,
+        receivedAt,
+      });
+    }
 
     try {
       await Promise.all([

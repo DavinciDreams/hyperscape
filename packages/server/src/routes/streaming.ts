@@ -686,6 +686,16 @@ export function buildStreamingStatusPayload(params: {
     (delivery.mode === "self_hls"
       ? "self_hls"
       : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare"));
+  const cloudflarePlaybackProbe =
+    activeCanonicalProvider === "cloudflare_stream" &&
+    params.canonicalProbeSnapshot
+      ? {
+          ready: params.canonicalProbeSnapshot.ready,
+          manifestStatus: params.canonicalProbeSnapshot.manifestStatus,
+          lastError: params.canonicalProbeSnapshot.lastError,
+          updatedAt: params.canonicalProbeSnapshot.updatedAt,
+        }
+      : null;
   const lastExternalTransportError =
     typeof effectiveExternalSnapshot?.captureDiagnostics?.lastFatalWriteError
       ?.message === "string" &&
@@ -741,14 +751,7 @@ export function buildStreamingStatusPayload(params: {
         null,
       lifecycle: persistedAuthority?.cloudflareLifecycle ?? null,
       lastWebhook: persistedAuthority?.cloudflareLastWebhook ?? null,
-      lastPlaybackProbe: params.canonicalProbeSnapshot
-        ? {
-            ready: params.canonicalProbeSnapshot.ready,
-            manifestStatus: params.canonicalProbeSnapshot.manifestStatus,
-            lastError: params.canonicalProbeSnapshot.lastError,
-            updatedAt: params.canonicalProbeSnapshot.updatedAt,
-          }
-        : null,
+      lastPlaybackProbe: cloudflarePlaybackProbe,
       lastExternalTransportError,
     },
     captureDiagnostics:
@@ -895,6 +898,13 @@ export function registerStreamingRoutes(
     )?.getDb?.() ?? null;
   const loadPersistedAuthorityState = () =>
     loadPersistedStreamingAuthorityState(getStorageDb());
+  const loadPersistedAuthorityStateSafely = async () => {
+    try {
+      return await loadPersistedAuthorityState();
+    } catch {
+      return null;
+    }
+  };
 
   const formatSseEvent = (event: string, data: string, id?: number): string => {
     const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -1700,7 +1710,7 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const persistedAuthorityState = await loadPersistedAuthorityState();
+      const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
@@ -1815,7 +1825,7 @@ export function registerStreamingRoutes(
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const persistedAuthorityState = await loadPersistedAuthorityState();
+        const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
         const capture = getStreamCapture();
         const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
         const externalSnapshot = await loadExternalRtmpStatusSnapshot(

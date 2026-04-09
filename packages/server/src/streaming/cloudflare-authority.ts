@@ -47,6 +47,11 @@ export type PersistedStreamingAuthorityState = {
   cloudflareLastWebhook: PersistedCloudflareWebhookState | null;
 };
 
+export type SummarizedCloudflareLiveWebhook = {
+  webhook: PersistedCloudflareWebhookState;
+  lifecycle: PersistedCloudflareLifecycleState;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -191,12 +196,8 @@ export function verifyCloudflareWebhookSecret(
 
 export function summarizeCloudflareLiveWebhook(params: {
   payload: unknown;
-  fallbackLiveInputId?: string | null;
   receivedAt?: number;
-}): {
-  webhook: PersistedCloudflareWebhookState;
-  lifecycle: PersistedCloudflareLifecycleState;
-} {
+}): SummarizedCloudflareLiveWebhook {
   const payload = asRecord(params.payload);
   const event = asRecord(payload?.event);
   const receivedAt = params.receivedAt ?? Date.now();
@@ -219,9 +220,7 @@ export function summarizeCloudflareLiveWebhook(params: {
       ["input_uid"],
       ["live_input_id"],
       ["live_input_uid"],
-    ]) ??
-    params.fallbackLiveInputId ??
-    null;
+    ]) ?? null;
   const videoId = readNestedString(payload, [
     ["event", "video_id"],
     ["event", "video_uid"],

@@ -53,9 +53,20 @@ describe("resolveStreamIngestSettings", () => {
     });
 
     expect(issues).toEqual([
-      "STREAM_INGEST_RTMPS_URL must be a valid rtmp:// or rtmps:// URL",
+      "STREAM_INGEST_RTMPS_URL or STREAM_EXTERNAL_INGEST_RTMPS_URL must be a valid rtmp:// or rtmps:// URL",
       "STREAM_INGEST_STREAM_KEY is required when STREAM_INGEST_TRANSPORT=rtmps",
     ]);
+  });
+
+  it("accepts the legacy external-prefixed RTMPS ingest URL", () => {
+    const issues = validateStreamIngestSettings({
+      STREAM_DELIVERY_MODE: "external_hls",
+      STREAM_INGEST_TRANSPORT: "rtmps",
+      STREAM_EXTERNAL_INGEST_RTMPS_URL: "rtmps://live.cloudflare.com:443/live",
+      STREAM_INGEST_STREAM_KEY: "stream-key",
+    });
+
+    expect(issues).toEqual([]);
   });
 
   it("throws when SRT external ingest settings are malformed", () => {
