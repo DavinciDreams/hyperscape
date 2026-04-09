@@ -18,28 +18,19 @@ import {
   type TerrainWorkerOutput,
 } from "../../../utils/workers";
 import {
-  LANDSCAPE_FEATURES,
   ISLAND_RADIUS,
   computeBaseHeight,
   adjustShorelineHeight,
   buildComputeBiomeWeightsJS,
-  buildApplyLandscapeFeaturesJS,
   MAX_HEIGHT,
   WATER_LEVEL_NORMALIZED,
   SHORELINE_CONFIG,
   BIOME_CONFIG,
+  BIOME_CONFIGS,
 } from "./TerrainHeightParams";
-import type {
-  LandscapeFeatureDef,
-  ShorelineConfig,
-} from "./TerrainHeightParams";
+import type { ShorelineConfig, BiomeNoiseSet } from "./TerrainHeightParams";
 import { BiomeType, DEFAULT_BIOME, BIOME_LIST } from "./TerrainBiomeTypes";
-import { LandscapeType } from "./TerrainHeightParams";
 import { WaterBodyRegistry } from "./WaterBodyRegistry";
-import { getGrassExclusionManager } from "./GrassExclusionManager";
-import { ISLAND_RIVER, MAX_RIVER_ELEVATION } from "./RiverDefinition";
-import { computeRiverSegmentAABBs, projectOntoRiver } from "./RiverUtils";
-import type { RiverSegmentAABB } from "./RiverUtils";
 import type { BridgeSystem } from "./BridgeSystem";
 
 // Import terrain generator from procgen package
@@ -198,8 +189,7 @@ export class TerrainSystem extends System {
   private updateTimer = 0;
   private terrainTime = 0; // For animated caustics
   private noise!: NoiseGenerator;
-  private landscapeFeatures: LandscapeFeatureDef[] = [];
-  private riverAABBs: RiverSegmentAABB[] = [];
+  private biomeNoiseSets: Record<string, BiomeNoiseSet> = {};
   private _loggedWorkerTileBiome = 0;
   private _loggedSyncTileBiome = 0;
   private databaseSystem!: {
@@ -835,41 +825,7 @@ export class TerrainSystem extends System {
         SHORELINE_UNDERWATER_BAND: SHORELINE_CONFIG.UNDERWATER_BAND,
         UNDERWATER_DEPTH_MULTIPLIER:
           SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
-        landscapeFeatures: this.landscapeFeatures.map((f) => ({
-          type: f.type,
-          x: f.x,
-          z: f.z,
-          radius: f.radius,
-          strength: f.strength,
-          layers: f.layers,
-          shapePower: f.shapePower,
-          edgeSharpness: f.edgeSharpness,
-          layerSlope: f.layerSlope,
-          noiseScale: f.noiseScale,
-          noiseAmount: f.noiseAmount,
-        })),
-        riverFeatures: ISLAND_RIVER.waypoints.map((wp) => ({
-          x: wp.x,
-          z: wp.z,
-          halfWidth: wp.halfWidth,
-          depth: wp.depth,
-          surfaceY: wp.surfaceY,
-        })),
-        riverAABBs: this.riverAABBs.map((bb) => ({
-          minX: bb.minX,
-          maxX: bb.maxX,
-          minZ: bb.minZ,
-          maxZ: bb.maxZ,
-        })),
       };
-
-      if (shouldEmitVerboseTerrainBootLogs()) {
-        console.log(
-          `[TerrainSystem] Worker config: ${workerConfig.riverFeatures?.length ?? 0} river waypoints, ` +
-            `${workerConfig.riverAABBs?.length ?? 0} AABBs, ` +
-            `surfaceY[0]=${workerConfig.riverFeatures?.[0]?.surfaceY?.toFixed(2) ?? "N/A"}`,
-        );
-      }
 
       // Build simplified biome data for worker
       const biomeData: Record<
@@ -1021,10 +977,7 @@ export class TerrainSystem extends System {
     );
 
     // DEBUG: log biome weights for first 5 tiles
-    if (
-      shouldEmitVerboseTerrainBootLogs() &&
-      this._loggedWorkerTileBiome < 5
-    ) {
+    if (shouldEmitVerboseTerrainBootLogs() && this._loggedWorkerTileBiome < 5) {
       // Also log river proximity stats
       let rpNonZero = 0,
         rpMax = 0;
@@ -1330,25 +1283,6 @@ export class TerrainSystem extends System {
     return tile;
   }
 
-  private initializeLandscapeFeatures(): void {
-    this.landscapeFeatures = [...LANDSCAPE_FEATURES];
-    console.log(
-      "[TerrainSystem] Landscape features:",
-      this.landscapeFeatures.length,
-      JSON.stringify(this.landscapeFeatures),
-    );
-    // Spot-check: test height at feature locations after terrain is ready
-    setTimeout(() => {
-      for (const f of this.landscapeFeatures) {
-        const h = this.getHeightAt(f.x, f.z);
-        const hNearby = this.getHeightAt(f.x + 200, f.z + 200);
-        console.log(
-          `[LandscapeDebug] ${f.type} at (${f.x}, ${f.z}): height=${h.toFixed(2)}, nearby height=${hNearby.toFixed(2)}, diff=${(h - hNearby).toFixed(2)}`,
-        );
-      }
-    }, 5000);
-  }
-
   /**
    * Initialize the unified TerrainGenerator from @hyperscape/procgen
    * This creates a standalone generator that matches this system's configuration
@@ -1558,178 +1492,15 @@ export class TerrainSystem extends System {
     this.runtimeIsServer = runtimeRole.isServer;
     this.runtimeIsClient = runtimeRole.isClient;
 
-    // Initialize deterministic noise from world id
-    this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-
-    this.initializeLandscapeFeatures();
+    // Initialize deterministic noise from world id + per-biome noise sets
+    this.ensureNoiseInitialized();
 
     // Initialize the unified terrain generator from @hyperscape/procgen
     // This provides a standalone, testable height generation system
     this.initializeTerrainGenerator();
 
-    // Build water body registry — register elevated ponds whose rim is above ocean level
+    // Water body registry — ocean level only (no manual rivers/ponds)
     this.waterBodyRegistry = new WaterBodyRegistry(this.CONFIG.WATER_THRESHOLD);
-    for (const feat of this.landscapeFeatures) {
-      if (feat.type === LandscapeType.Pond) {
-        const rimHeight = WaterBodyRegistry.computeRimHeight(feat, (x, z) =>
-          this.getHeightAt(x, z),
-        );
-        if (rimHeight > this.CONFIG.WATER_THRESHOLD) {
-          this.waterBodyRegistry.register({
-            id: `pond_${feat.x}_${feat.z}`,
-            centerX: feat.x,
-            centerZ: feat.z,
-            radius: feat.radius,
-            radiusSq: feat.radius * feat.radius,
-            surfaceY: rimHeight,
-            sourceType: "landscape_pond",
-          });
-        }
-      }
-    }
-
-    // Register river — subdivide, follow terrain, smooth surfaceY, narrow on slopes.
-    const oceanLevel = this.CONFIG.WATER_THRESHOLD;
-    const bankMargin = 0.5; // water surface 0.5m below natural terrain
-
-    // Step 1: Subdivide waypoints every ~15m for smooth terrain following.
-    const origWps = ISLAND_RIVER.waypoints;
-    const subdivided: typeof origWps = [];
-
-    for (let i = 0; i < origWps.length - 1; i++) {
-      const a = origWps[i];
-      const b = origWps[i + 1];
-      const segDx = b.x - a.x;
-      const segDz = b.z - a.z;
-      const segLen = Math.sqrt(segDx * segDx + segDz * segDz);
-      const numSteps = Math.max(1, Math.ceil(segLen / 15));
-      // Perpendicular unit vector (rotate segment direction 90°)
-      const px = segLen > 0.1 ? -segDz / segLen : 0;
-      const pz = segLen > 0.1 ? segDx / segLen : 0;
-
-      for (let s = 0; s < numSteps; s++) {
-        const t = s / numSteps;
-        const wx = a.x + segDx * t;
-        const wz = a.z + segDz * t;
-        let hw = a.halfWidth + (b.halfWidth - a.halfWidth) * t;
-        let dp = a.depth + (b.depth - a.depth) * t;
-        const centerH = this.getHeightAt(wx, wz);
-
-        // Step 2: Narrow the river on steep/high terrain (Minecraft-style max height).
-        // Uses centerline height — bank terrain doesn't affect whether the river narrows.
-        if (centerH > MAX_RIVER_ELEVATION) {
-          const excess = (centerH - MAX_RIVER_ELEVATION) / 8; // 0→1 over 8m
-          const fade = Math.max(0, 1 - excess);
-          hw = Math.max(4, hw * fade); // min 4m half-width (8m total)
-          dp = Math.max(0.5, dp * fade); // min 0.5m depth
-        }
-
-        // Step 2b: Sample bank terrain at both edges (perpendicular to flow).
-        // surfaceY must account for the lowest terrain across the cross-section,
-        // not just centerline — otherwise water floats above bank depressions.
-        const bankH1 = this.getHeightAt(wx + px * hw, wz + pz * hw);
-        const bankH2 = this.getHeightAt(wx - px * hw, wz - pz * hw);
-        const crossSectionMinH = Math.min(centerH, bankH1, bankH2);
-
-        subdivided.push({
-          x: wx,
-          z: wz,
-          halfWidth: hw,
-          depth: dp,
-          surfaceY: Math.max(crossSectionMinH - bankMargin, oceanLevel),
-        });
-      }
-    }
-    // Add final waypoint
-    const lastWp = origWps[origWps.length - 1];
-    const lastCenterH = this.getHeightAt(lastWp.x, lastWp.z);
-    subdivided.push({
-      ...lastWp,
-      surfaceY: Math.max(lastCenterH - bankMargin, oceanLevel),
-    });
-
-    // Step 3: Smooth surfaceY — 3 passes of Gaussian-like smoothing.
-    // Eliminates abrupt water surface changes from terrain noise bumps
-    // while preserving the overall downhill trend.
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 1; i < subdivided.length - 1; i++) {
-        const prev = subdivided[i - 1].surfaceY!;
-        const curr = subdivided[i].surfaceY!;
-        const next = subdivided[i + 1].surfaceY!;
-        subdivided[i].surfaceY = curr * 0.5 + (prev + next) * 0.25;
-      }
-    }
-
-    // Step 4: Ensure surfaceY never exceeds terrain height (water can't float)
-    // and never drops below ocean level. Also samples bank terrain via
-    // perpendicular direction from adjacent waypoints.
-    for (let i = 0; i < subdivided.length; i++) {
-      const wp = subdivided[i];
-      const centerH = this.getHeightAt(wp.x, wp.z);
-
-      // Compute perpendicular from adjacent waypoints for bank sampling
-      const prev = subdivided[Math.max(0, i - 1)];
-      const next = subdivided[Math.min(subdivided.length - 1, i + 1)];
-      const dx = next.x - prev.x;
-      const dz = next.z - prev.z;
-      const len = Math.sqrt(dx * dx + dz * dz);
-      let minH = centerH;
-      if (len > 0.1) {
-        const ppx = -dz / len;
-        const ppz = dx / len;
-        const bH1 = this.getHeightAt(
-          wp.x + ppx * wp.halfWidth,
-          wp.z + ppz * wp.halfWidth,
-        );
-        const bH2 = this.getHeightAt(
-          wp.x - ppx * wp.halfWidth,
-          wp.z - ppz * wp.halfWidth,
-        );
-        minH = Math.min(centerH, bH1, bH2);
-      }
-
-      wp.surfaceY = Math.max(Math.min(wp.surfaceY!, minH - 0.1), oceanLevel);
-    }
-
-    // Create local river definition with dense terrain-following waypoints
-    // (do NOT mutate the shared ISLAND_RIVER constant)
-    const subdividedRiver = { ...ISLAND_RIVER, waypoints: subdivided };
-
-    // Compute AABBs from the dense waypoints
-    this.riverAABBs = computeRiverSegmentAABBs(subdividedRiver);
-    console.log(
-      `[TerrainSystem] River: ${subdivided.length} waypoints (subdivided from ${origWps.length}), ` +
-        `${this.riverAABBs.length} segments`,
-    );
-
-    this.waterBodyRegistry.registerRiver(subdividedRiver);
-
-    // Register elevated water bodies as grass exclusion zones so the GPU grass
-    // shader doesn't render blades inside mountain ponds / highland lakes.
-    if (this.runtimeIsClient) {
-      const grassExclusion = getGrassExclusionManager();
-      for (const body of this.waterBodyRegistry.getAllBodies()) {
-        grassExclusion.addCircularBlocker(
-          `water_body_${body.id}`,
-          body.centerX,
-          body.centerZ,
-          body.radius,
-          2.0, // 2m fade at edge
-        );
-      }
-      // River grass exclusion — use subdivided waypoints (already dense, ~20m apart)
-      const riverSubWps = subdividedRiver.waypoints;
-      for (let i = 0; i < riverSubWps.length; i++) {
-        const wp = riverSubWps[i];
-        grassExclusion.addCircularBlocker(
-          `river_${i}`,
-          wp.x,
-          wp.z,
-          wp.halfWidth * subdividedRiver.valleyMultiplier + 2,
-          3.0,
-        );
-      }
-    }
 
     // Cache optional TownSystem for difficulty falloff and boss placement
     this.townSystem = this.world.getSystem<TownSystem>("towns") ?? null;
@@ -1832,11 +1603,7 @@ export class TerrainSystem extends System {
   }
 
   async start(): Promise<void> {
-    // Initialize noise generator if not already initialized (failsafe)
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-      this.initializeLandscapeFeatures();
-    }
+    this.ensureNoiseInitialized();
 
     // CRITICAL: Wait for DataManager to initialize BIOMES data before generating terrain
     // DataManager is initialized in registerSystems() which happens asynchronously
@@ -2076,20 +1843,6 @@ export class TerrainSystem extends System {
       SHORELINE_LAND_MAX_MULTIPLIER: SHORELINE_CONFIG.LAND_MAX_MULTIPLIER,
       SHORELINE_UNDERWATER_BAND: SHORELINE_CONFIG.UNDERWATER_BAND,
       UNDERWATER_DEPTH_MULTIPLIER: SHORELINE_CONFIG.UNDERWATER_DEPTH_MULTIPLIER,
-      landscapeFeatures: this.landscapeFeatures,
-      riverFeatures: ISLAND_RIVER.waypoints.map((wp) => ({
-        x: wp.x,
-        z: wp.z,
-        halfWidth: wp.halfWidth,
-        depth: wp.depth,
-        surfaceY: wp.surfaceY,
-      })),
-      riverAABBs: this.riverAABBs.map((bb) => ({
-        minX: bb.minX,
-        maxX: bb.maxX,
-        minZ: bb.minZ,
-        maxZ: bb.maxZ,
-      })),
     };
 
     const biomeCenters = [
@@ -2949,10 +2702,7 @@ export class TerrainSystem extends System {
     );
 
     // DEBUG: log biome weights for first 5 sync tiles
-    if (
-      shouldEmitVerboseTerrainBootLogs() &&
-      this._loggedSyncTileBiome < 5
-    ) {
+    if (shouldEmitVerboseTerrainBootLogs() && this._loggedSyncTileBiome < 5) {
       this._loggedSyncTileBiome++;
       let sumF = 0,
         sumD = 0;
@@ -3528,14 +3278,27 @@ export class TerrainSystem extends System {
    * Get base terrain height WITHOUT mountain biome boost.
    * Delegates to the single source of truth in TerrainHeightParams.
    */
+  private ensureNoiseInitialized(): void {
+    if (!this.noise) {
+      const seed = this.computeSeedFromWorldId();
+      this.noise = new NoiseGenerator(seed);
+      for (const [key, cfg] of Object.entries(BIOME_CONFIGS)) {
+        const base = seed + cfg.seedOffset;
+        this.biomeNoiseSets[key] = {
+          main: new NoiseGenerator(base),
+          variation: new NoiseGenerator(base + 4),
+          erosion: new NoiseGenerator(base + 1),
+        };
+      }
+    }
+  }
+
   private getBaseHeightAt(
     worldX: number,
     worldZ: number,
     biomeWeights?: Record<string, number>,
   ): number {
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-    }
+    this.ensureNoiseInitialized();
 
     const weights =
       biomeWeights ?? this.computeBiomeWeightsByPosition(worldX, worldZ);
@@ -3543,18 +3306,13 @@ export class TerrainSystem extends System {
       worldX,
       worldZ,
       this.noise,
+      this.biomeNoiseSets,
       weights,
-      this.landscapeFeatures,
-      MAX_HEIGHT,
-      this.waterBodyRegistry?.getRiverDef() ?? undefined,
-      this.riverAABBs.length > 0 ? this.riverAABBs : undefined,
     );
   }
 
   private getHeightAtWithoutShore(worldX: number, worldZ: number): number {
-    if (!this.noise) {
-      this.noise = new NoiseGenerator(this.computeSeedFromWorldId());
-    }
+    this.ensureNoiseInitialized();
 
     const flatHeight = this.getFlatZoneHeight(worldX, worldZ);
     if (flatHeight !== null) {
@@ -5374,18 +5132,6 @@ export class TerrainSystem extends System {
             .copy(env.lightDirection)
             .negate();
         }
-        if (env?.hemisphereLight) {
-          const c = env.hemisphereLight.color;
-          const avg = (c.r + c.g + c.b) / 3;
-          if (avg > 0.01) {
-            (materialWithUniforms.terrainUniforms.shadeColor.value as any).set(
-              c.r / avg,
-              c.g / avg,
-              c.b / avg,
-            );
-          }
-        }
-
         // Fog texture is the shared fogRenderTarget from FogConfig — no sync needed
 
         // Update lamppost vertex lights (night-only)
@@ -6044,35 +5790,6 @@ export class TerrainSystem extends System {
       }
     }
 
-    // ---- PASS 1c: River water flags ----
-    // For each movement tile, check if its center is inside the river channel
-    // and terrain is below river surfaceY. Uses the same waterTileFlags array
-    // so river tiles are treated as water for slope/biome checks.
-    const riverDef = this.waterBodyRegistry.getRiverDef();
-    if (riverDef) {
-      const rAABBs = this.waterBodyRegistry.getRiverAABBs();
-      for (let lx = 0; lx < tilesPerSide; lx++) {
-        const flagRow = lx * tilesPerSide;
-        const wx = originX + lx + 0.5;
-        for (let lz = 0; lz < tilesPerSide; lz++) {
-          if (waterTileFlags[flagRow + lz]) continue; // Already flagged
-          const wz = originZ + lz + 0.5;
-          const proj = projectOntoRiver(wx, wz, riverDef, rAABBs);
-          if (!proj || proj.dist >= proj.halfWidth) continue;
-          // Check terrain height at tile center vs river surfaceY
-          const terrainH = this.getHeightAt(wx, wz);
-          if (!isNaN(proj.surfaceY) && terrainH < proj.surfaceY) {
-            waterTileFlags[flagRow + lz] = 1;
-            collision.addFlags(
-              originXInt + lx,
-              originZInt + lz,
-              CollisionFlag.WATER,
-            );
-          }
-        }
-      }
-    }
-
     // ---- PASS 2: Biome + slope flags (non-water tiles only) ----
     for (let lx = 0; lx < tilesPerSide; lx++) {
       const worldX = originX + lx + 0.5;
@@ -6323,53 +6040,6 @@ export class TerrainSystem extends System {
           tile.mesh.add(bodyMesh);
         }
         tile.waterMeshes.push(bodyMesh);
-      }
-    }
-
-    // River water meshes — per-vertex Y follows interpolated surfaceY for
-    // natural slope from highland source to ocean mouth (no flat-plane jumps).
-    const riverDefLocal = this.waterBodyRegistry.getRiverDef();
-    if (riverDefLocal && this.waterSystem) {
-      const rAABBs = this.waterBodyRegistry.getRiverAABBs();
-      // Tile geometry is centered at (tile.x * tileSize, tile.z * tileSize)
-      const tileCX = tile.x * tileSize;
-      const tileCZ = tile.z * tileSize;
-      const tMinX = tileCX - tileSize * 0.5;
-      const tMaxX = tileCX + tileSize * 0.5;
-      const tMinZ = tileCZ - tileSize * 0.5;
-      const tMaxZ = tileCZ + tileSize * 0.5;
-
-      // Check if any river segment AABB overlaps this tile
-      let riverOverlapsTile = false;
-      for (const bb of rAABBs) {
-        if (
-          bb.maxX >= tMinX &&
-          bb.minX <= tMaxX &&
-          bb.maxZ >= tMinZ &&
-          bb.minZ <= tMaxZ
-        ) {
-          riverOverlapsTile = true;
-          break;
-        }
-      }
-
-      if (riverOverlapsTile) {
-        const riverMesh = this.waterSystem.generateRiverWaterMesh(
-          tile,
-          tileSize,
-          riverDefLocal,
-          rAABBs,
-        );
-        if (riverMesh && tile.mesh) {
-          if (this.CONFIG.USE_QUADTREE_LOD && this.terrainContainer) {
-            riverMesh.position.x = tile.x * tileSize;
-            riverMesh.position.z = tile.z * tileSize;
-            this.terrainContainer.add(riverMesh);
-          } else {
-            tile.mesh.add(riverMesh);
-          }
-          tile.waterMeshes.push(riverMesh);
-        }
       }
     }
   }

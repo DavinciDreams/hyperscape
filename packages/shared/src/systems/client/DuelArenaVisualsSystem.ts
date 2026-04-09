@@ -56,14 +56,14 @@ import {
   type DuelArenaConfig,
 } from "../../data/duel-manifest";
 import {
-  LOBBY_CENTER_X,
-  LOBBY_CENTER_Z,
-  LOBBY_WIDTH,
-  LOBBY_LENGTH,
   HOSPITAL_CENTER_X,
   HOSPITAL_CENTER_Z,
-  HOSPITAL_WIDTH,
   HOSPITAL_LENGTH,
+  HOSPITAL_WIDTH,
+  LOBBY_CENTER_X,
+  LOBBY_CENTER_Z,
+  LOBBY_LENGTH,
+  LOBBY_WIDTH,
 } from "../../data/arena-layout";
 
 // Arena grid size/position: getDuelArenaConfig() at runtime (see duel-manifest / ArenaPoolManager).
