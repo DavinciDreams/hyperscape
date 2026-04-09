@@ -550,4 +550,85 @@ describe("buildStreamingStatusPayload", () => {
       }),
     );
   });
+
+  it("includes persisted authority and Cloudflare diagnostics when available", () => {
+    const payload = buildStreamingStatusPayload({
+      base: { running: true },
+      externalSnapshot: null,
+      canonicalProbeSnapshot: {
+        ready: false,
+        manifestStatus: "missing",
+        lastError: "playback_unconfigured",
+        updatedAt: 4_200,
+      },
+      bridgeStats: null,
+      rendererHealth: {
+        ready: false,
+        degradedReason: "encoder_stalled",
+        updatedAt: 123,
+      },
+      persistedAuthorityState: {
+        canonicalProviderState: {
+          activeProvider: "self_hls",
+          primaryHealthySince: 3_000,
+          updatedAt: 3_500,
+        },
+        cloudflareLifecycle: {
+          eventType: "stream_live_input.disconnected",
+          eventName: "Stream Live Input Disconnected",
+          liveInputId: "live-input-123",
+          videoId: "video-456",
+          status: "disconnected",
+          errorCode: "publish_disconnected",
+          errorMessage: "Publisher disconnected unexpectedly",
+          occurredAt: 4_000,
+          receivedAt: 4_100,
+        },
+        cloudflareLastWebhook: {
+          eventType: "stream_live_input.disconnected",
+          eventName: "Stream Live Input Disconnected",
+          liveInputId: "live-input-123",
+          videoId: "video-456",
+          occurredAt: 4_000,
+          receivedAt: 4_100,
+        },
+      },
+      cloudflareLiveInputId: "live-input-123",
+    });
+
+    expect(payload.authority).toEqual({
+      activeCanonicalProvider: "self_hls",
+      primaryHealthySince: 3_000,
+      updatedAt: 3_500,
+    });
+    expect(payload.cloudflare).toEqual({
+      liveInputId: "live-input-123",
+      lifecycle: {
+        eventType: "stream_live_input.disconnected",
+        eventName: "Stream Live Input Disconnected",
+        liveInputId: "live-input-123",
+        videoId: "video-456",
+        status: "disconnected",
+        errorCode: "publish_disconnected",
+        errorMessage: "Publisher disconnected unexpectedly",
+        occurredAt: 4_000,
+        receivedAt: 4_100,
+      },
+      lastWebhook: {
+        eventType: "stream_live_input.disconnected",
+        eventName: "Stream Live Input Disconnected",
+        liveInputId: "live-input-123",
+        videoId: "video-456",
+        occurredAt: 4_000,
+        receivedAt: 4_100,
+      },
+      lastPlaybackProbe: {
+        ready: false,
+        manifestStatus: "missing",
+        lastError: "playback_unconfigured",
+        updatedAt: 4_200,
+      },
+      lastExternalTransportError: null,
+    });
+  });
 });

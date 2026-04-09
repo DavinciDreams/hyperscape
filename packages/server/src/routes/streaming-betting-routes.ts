@@ -49,6 +49,15 @@ import {
 } from "../streaming/delivery-config.js";
 import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
 import { readLocalHlsManifestSnapshot } from "../streaming/stream-status-artifacts.js";
+import {
+  loadPersistedStreamingAuthorityState,
+  persistCanonicalProviderState,
+  persistCloudflareLifecycleState,
+  persistCloudflareWebhookState,
+  summarizeCloudflareLiveWebhook,
+  verifyCloudflareWebhookSecret,
+  type PersistedCanonicalProviderState,
+} from "../streaming/cloudflare-authority.js";
 
 // Re-exports so existing consumers (streaming.ts, tests) don't need import changes.
 export { deriveBettingRendererHealth } from "./streaming-betting-health.js";
@@ -226,6 +235,8 @@ export function registerStreamingBettingRoutes(
   const viewerTokenConfigured = Boolean(
     process.env.STREAMING_VIEWER_ACCESS_TOKEN?.trim(),
   );
+  const cloudflareLiveInputId =
+    process.env.STREAM_CLOUDFLARE_LIVE_INPUT_ID?.trim() || null;
   const getScheduler =
     getStreamingDuelSchedulerOverride ?? getStreamingDuelScheduler;
   const externalStatusPoller = acquireExternalStatusPoller(
@@ -285,6 +296,9 @@ export function registerStreamingBettingRoutes(
     activeProvider: null,
     primaryHealthySince: null,
   };
+  let canonicalProviderSelectionHydrated = false;
+  let canonicalProviderSelectionHydration: Promise<void> | null = null;
+  let lastPersistedCanonicalProviderStateJson: string | null = null;
   if (internalAllowedOrigin && !allowedOrigin) {
     fastify.log.warn(
       {
@@ -379,6 +393,78 @@ export function registerStreamingBettingRoutes(
 
   const getDatabaseSystem = (): DatabaseSystemLike | null =>
     (world.getSystem("database") ?? null) as DatabaseSystemLike | null;
+
+  const getStorageDb = () => getDatabaseSystem()?.getDb?.();
+
+  const persistCanonicalProviderSelection = (): void => {
+    if (!canonicalProviderSelectionHydrated) {
+      return;
+    }
+    const activeProvider =
+      canonicalProviderSelectionState.activeProvider === "cloudflare_stream" ||
+      canonicalProviderSelectionState.activeProvider === "self_hls"
+        ? canonicalProviderSelectionState.activeProvider
+        : null;
+    const comparisonPayload = JSON.stringify({
+      activeProvider,
+      primaryHealthySince: canonicalProviderSelectionState.primaryHealthySince,
+    });
+    if (comparisonPayload === lastPersistedCanonicalProviderStateJson) {
+      return;
+    }
+    lastPersistedCanonicalProviderStateJson = comparisonPayload;
+    const state: PersistedCanonicalProviderState = {
+      activeProvider,
+      primaryHealthySince: canonicalProviderSelectionState.primaryHealthySince,
+      updatedAt: Date.now(),
+    };
+    void persistCanonicalProviderState(getStorageDb(), state).catch(() => {
+      lastPersistedCanonicalProviderStateJson = null;
+    });
+  };
+
+  const ensureCanonicalProviderSelectionHydrated = async (): Promise<void> => {
+    if (canonicalProviderSelectionHydrated) {
+      return;
+    }
+    if (canonicalProviderSelectionHydration) {
+      return canonicalProviderSelectionHydration;
+    }
+
+    canonicalProviderSelectionHydration = (async () => {
+      try {
+        const persisted = await loadPersistedStreamingAuthorityState(
+          getStorageDb(),
+        );
+        const state = persisted.canonicalProviderState;
+        if (state) {
+          canonicalProviderSelectionState.activeProvider =
+            state.activeProvider === "cloudflare_stream" ||
+            state.activeProvider === "self_hls"
+              ? state.activeProvider
+              : null;
+          canonicalProviderSelectionState.primaryHealthySince =
+            typeof state.primaryHealthySince === "number" &&
+            Number.isFinite(state.primaryHealthySince)
+              ? state.primaryHealthySince
+              : null;
+          lastPersistedCanonicalProviderStateJson = JSON.stringify({
+            activeProvider: canonicalProviderSelectionState.activeProvider,
+            primaryHealthySince:
+              canonicalProviderSelectionState.primaryHealthySince,
+          });
+        }
+      } catch {
+        // Best-effort durability only.
+      } finally {
+        canonicalProviderSelectionHydrated = true;
+      }
+    })();
+
+    return canonicalProviderSelectionHydration;
+  };
+
+  void ensureCanonicalProviderSelectionHydrated();
 
   const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
     const db = getDatabaseSystem()?.getDb?.();
@@ -909,6 +995,7 @@ export function registerStreamingBettingRoutes(
     }
 
     canonicalProviderSelectionState.activeProvider = nextCanonical.provider;
+    persistCanonicalProviderSelection();
 
     const fallback =
       priority
@@ -1261,18 +1348,18 @@ export function registerStreamingBettingRoutes(
   const bettingBootstrapAuthPreHandler = async (
     request: FastifyRequest,
     reply: FastifyReply,
-  ): Promise<FastifyReply | void> => {
+  ): Promise<void> => {
     if (!(await assertBettingAuth(request, reply))) {
-      return reply;
+      return;
     }
   };
 
   const bettingEventsAuthPreHandler = async (
     request: FastifyRequest,
     reply: FastifyReply,
-  ): Promise<FastifyReply | void> => {
+  ): Promise<void> => {
     if (!(await assertBettingAuth(request, reply))) {
-      return reply;
+      return;
     }
   };
 
@@ -1280,8 +1367,8 @@ export function registerStreamingBettingRoutes(
     _request: FastifyRequest,
     reply: FastifyReply,
   ) => {
-    if (reply.sent) {
-      return reply;
+    if (reply.sent || reply.raw.writableEnded || reply.raw.destroyed) {
+      return;
     }
 
     const scheduler = getScheduler();
@@ -1292,6 +1379,7 @@ export function registerStreamingBettingRoutes(
       });
     }
 
+    await ensureCanonicalProviderSelectionHydrated();
     await ensureBettingSourceEpoch();
     await externalStatusPoller?.refresh();
     await externalPlaybackProbePoller?.refresh();
@@ -1307,8 +1395,8 @@ export function registerStreamingBettingRoutes(
     request: FastifyRequest<{ Querystring: { since?: string } }>,
     reply: FastifyReply,
   ) => {
-    if (reply.sent) {
-      return reply;
+    if (reply.sent || reply.raw.writableEnded || reply.raw.destroyed) {
+      return;
     }
 
     const scheduler = getScheduler();
@@ -1319,6 +1407,7 @@ export function registerStreamingBettingRoutes(
       });
     }
 
+    await ensureCanonicalProviderSelectionHydrated();
     await ensureBettingSourceEpoch();
     await externalStatusPoller?.refresh();
     await externalPlaybackProbePoller?.refresh();
@@ -1405,6 +1494,51 @@ export function registerStreamingBettingRoutes(
     startBettingLoopsIfNeeded();
   };
 
+  const handleCloudflareWebhook = async (
+    request: FastifyRequest<{ Body: unknown }>,
+    reply: FastifyReply,
+  ) => {
+    const webhookSecret =
+      process.env.STREAM_CLOUDFLARE_WEBHOOK_SECRET?.trim() || null;
+    if (!webhookSecret) {
+      return reply.status(503).send({
+        error: "Cloudflare webhook secret not configured",
+        message:
+          "Set STREAM_CLOUDFLARE_WEBHOOK_SECRET before enabling the webhook route",
+      });
+    }
+
+    if (!verifyCloudflareWebhookSecret(request.headers, webhookSecret)) {
+      return reply.status(401).send({
+        error: "Unauthorized",
+        message: "Missing or invalid Cloudflare webhook secret",
+      });
+    }
+
+    const receivedAt = Date.now();
+    const summary = summarizeCloudflareLiveWebhook({
+      payload: request.body,
+      fallbackLiveInputId: cloudflareLiveInputId,
+      receivedAt,
+    });
+
+    try {
+      await Promise.all([
+        persistCloudflareWebhookState(getStorageDb(), summary.webhook),
+        persistCloudflareLifecycleState(getStorageDb(), summary.lifecycle),
+      ]);
+    } catch {
+      // Best-effort durability only.
+    }
+
+    return reply.status(202).send({
+      ok: true,
+      eventType: summary.webhook.eventType,
+      liveInputId: summary.webhook.liveInputId,
+      receivedAt,
+    });
+  };
+
   // Legacy compatibility alias. Canonical internal betting bootstrap route:
   // /api/internal/bet-sync/state
   fastify.get(
@@ -1449,6 +1583,16 @@ export function registerStreamingBettingRoutes(
       preHandler: bettingEventsAuthPreHandler,
     },
     handleBettingEvents,
+  );
+
+  fastify.post<{
+    Body: unknown;
+  }>(
+    "/api/streaming/cloudflare/webhook",
+    {
+      config: { rateLimit: false },
+    },
+    handleCloudflareWebhook,
   );
 
   fastify.addHook("onClose", async () => {

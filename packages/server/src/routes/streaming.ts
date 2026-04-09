@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
+import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
   STREAMING_TIMING,
@@ -30,6 +31,10 @@ import {
   acquirePlaybackProbePoller,
   type StreamPlaybackProbeResult,
 } from "../streaming/destination-probe.js";
+import {
+  loadPersistedStreamingAuthorityState,
+  type PersistedStreamingAuthorityState,
+} from "../streaming/cloudflare-authority.js";
 import {
   readLocalHlsManifestSnapshot,
   resolveExternalStatusFile,
@@ -637,6 +642,8 @@ export function buildStreamingStatusPayload(params: {
       }
     | null
     | undefined;
+  persistedAuthorityState?: PersistedStreamingAuthorityState | null;
+  cloudflareLiveInputId?: string | null;
 }) {
   const delivery =
     params.externalSnapshot?.delivery ?? resolveStreamDeliveryInfo(process.env);
@@ -656,6 +663,7 @@ export function buildStreamingStatusPayload(params: {
     localHlsManifest: params.localHlsManifest,
   });
   const effectiveExternalSnapshot = normalizedCanonicalTruth.externalSnapshot;
+  const persistedAuthority = params.persistedAuthorityState ?? null;
   const metrics = normalizeStreamingStatusMetrics({
     externalSnapshot: effectiveExternalSnapshot,
     bridgeStats: params.bridgeStats,
@@ -673,6 +681,19 @@ export function buildStreamingStatusPayload(params: {
   const externalClientConnected = asBoolean(
     effectiveExternalSnapshot?.clientConnected,
   );
+  const activeCanonicalProvider =
+    persistedAuthority?.canonicalProviderState?.activeProvider ??
+    (delivery.mode === "self_hls"
+      ? "self_hls"
+      : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare"));
+  const lastExternalTransportError =
+    typeof effectiveExternalSnapshot?.captureDiagnostics?.lastFatalWriteError
+      ?.message === "string" &&
+    effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message
+      .trim()
+      .length > 0
+      ? effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
+      : null;
 
   return {
     ...params.base,
@@ -707,6 +728,29 @@ export function buildStreamingStatusPayload(params: {
     rendererHealth: params.rendererHealth,
     sourceRuntime,
     canonicalStatus: normalizedCanonicalTruth.canonicalStatus,
+    authority: {
+      activeCanonicalProvider,
+      primaryHealthySince:
+        persistedAuthority?.canonicalProviderState?.primaryHealthySince ?? null,
+      updatedAt: persistedAuthority?.canonicalProviderState?.updatedAt ?? null,
+    },
+    cloudflare: {
+      liveInputId:
+        params.cloudflareLiveInputId ??
+        persistedAuthority?.cloudflareLifecycle?.liveInputId ??
+        null,
+      lifecycle: persistedAuthority?.cloudflareLifecycle ?? null,
+      lastWebhook: persistedAuthority?.cloudflareLastWebhook ?? null,
+      lastPlaybackProbe: params.canonicalProbeSnapshot
+        ? {
+            ready: params.canonicalProbeSnapshot.ready,
+            manifestStatus: params.canonicalProbeSnapshot.manifestStatus,
+            lastError: params.canonicalProbeSnapshot.lastError,
+            updatedAt: params.canonicalProbeSnapshot.updatedAt,
+          }
+        : null,
+      lastExternalTransportError,
+    },
     captureDiagnostics:
       (effectiveExternalSnapshot?.captureDiagnostics as ExternalCaptureDiagnosticsBlob | null) ??
       null,
@@ -838,6 +882,19 @@ export function registerStreamingRoutes(
     externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
     externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
   });
+  const cloudflareLiveInputId =
+    process.env.STREAM_CLOUDFLARE_LIVE_INPUT_ID?.trim() || null;
+  const getStorageDb = () =>
+    (
+      world.getSystem("database") as
+        | {
+            getDb?: () => ReturnType<DatabaseSystem["getDb"]>;
+          }
+        | null
+        | undefined
+    )?.getDb?.() ?? null;
+  const loadPersistedAuthorityState = () =>
+    loadPersistedStreamingAuthorityState(getStorageDb());
 
   const formatSseEvent = (event: string, data: string, id?: number): string => {
     const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -1643,6 +1700,7 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      const persistedAuthorityState = await loadPersistedAuthorityState();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
@@ -1681,6 +1739,8 @@ export function registerStreamingRoutes(
             canonicalProbeSnapshot,
             localHlsManifest,
             rendererHealth,
+            persistedAuthorityState,
+            cloudflareLiveInputId,
             captureStats: {
               clientConnected: externalSnapshot.clientConnected === true,
               ffmpegRunning: externalSnapshot.ffmpegRunning === true,
@@ -1730,6 +1790,8 @@ export function registerStreamingRoutes(
             localHlsManifest,
             bridgeStats: stats,
             rendererHealth,
+            persistedAuthorityState,
+            cloudflareLiveInputId,
             captureStats: {
               clientConnected: status.clientConnected,
               ffmpegRunning: status.ffmpegRunning,
@@ -1753,6 +1815,7 @@ export function registerStreamingRoutes(
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const persistedAuthorityState = await loadPersistedAuthorityState();
         const capture = getStreamCapture();
         const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
         const externalSnapshot = await loadExternalRtmpStatusSnapshot(
@@ -1782,6 +1845,8 @@ export function registerStreamingRoutes(
             canonicalProbeSnapshot,
             localHlsManifest,
             rendererHealth,
+            persistedAuthorityState,
+            cloudflareLiveInputId,
             captureStats,
           }),
         );

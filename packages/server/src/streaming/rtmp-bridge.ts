@@ -29,7 +29,10 @@ import {
   resolveExternalStreamDeliveryInfo,
   resolveStreamCanonicalProviderPriority,
 } from "./delivery-config.js";
-import { resolveStreamIngestSettings } from "./ingest-config.js";
+import {
+  assertValidStreamIngestSettings,
+  resolveStreamIngestSettings,
+} from "./ingest-config.js";
 import {
   isStreamDestinationEnabled,
   resolveEnabledStreamDestinations,
@@ -426,7 +429,10 @@ export class RTMPBridge {
   }
 
   private resolveIngestSettings() {
-    return resolveStreamIngestSettings(process.env);
+    return assertValidStreamIngestSettings(
+      process.env,
+      resolveStreamIngestSettings(process.env),
+    );
   }
 
   private buildExternalDeliveryDestination(

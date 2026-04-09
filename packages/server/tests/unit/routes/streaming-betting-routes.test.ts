@@ -66,6 +66,38 @@ function createRouteOptions(
   };
 }
 
+function createStorageBackedWorld() {
+  const rows = new Map<string, { key: string; value: string; updatedAt: number }>();
+  return {
+    rows,
+    world: {
+      getSystem: (name: string) => {
+        if (name !== "database") {
+          return null;
+        }
+        return {
+          getDb: () => ({
+            select: () => ({
+              from: () => ({
+                where: () => ({
+                  limit: async () => [],
+                }),
+              }),
+            }),
+            insert: () => ({
+              values: (row: { key: string; value: string; updatedAt: number }) => ({
+                onConflictDoUpdate: async () => {
+                  rows.set(row.key, row);
+                },
+              }),
+            }),
+          }),
+        };
+      },
+    } as never,
+  };
+}
+
 describe("streaming-betting-routes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -427,6 +459,64 @@ describe("streaming-betting-routes", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("persists Cloudflare webhook lifecycle metadata when the shared secret matches", async () => {
+    stubEnv("STREAM_CLOUDFLARE_WEBHOOK_SECRET", "cf-secret");
+    stubEnv("STREAM_CLOUDFLARE_LIVE_INPUT_ID", "live-input-env");
+
+    const storageBackedWorld = createStorageBackedWorld();
+    const options = createRouteOptions({
+      world: storageBackedWorld.world,
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "POST",
+      url: "/api/streaming/cloudflare/webhook",
+      headers: {
+        "cf-webhook-auth": "cf-secret",
+      },
+      payload: {
+        alert_type: "stream_live_input.connected",
+        name: "Stream Live Input Connected",
+        event: {
+          input_id: "live-input-123",
+          video_id: "video-456",
+          timestamp: "2026-04-09T02:15:00.000Z",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      eventType: "stream_live_input.connected",
+      liveInputId: "live-input-123",
+    });
+    expect(
+      JSON.parse(
+        storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")?.value ??
+          "null",
+      ),
+    ).toMatchObject({
+      eventType: "stream_live_input.connected",
+      liveInputId: "live-input-123",
+      videoId: "video-456",
+    });
+    expect(
+      JSON.parse(
+        storageBackedWorld.rows.get("streaming:cloudflare:lifecycle")?.value ??
+          "null",
+      ),
+    ).toMatchObject({
+      eventType: "stream_live_input.connected",
+      liveInputId: "live-input-123",
+      status: "connected",
+    });
+
     routes.close();
     await options.fastify.close();
   });

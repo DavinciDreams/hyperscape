@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveStreamIngestSettings } from "../../../src/streaming/ingest-config.js";
+import {
+  assertValidStreamIngestSettings,
+  resolveStreamIngestSettings,
+  validateStreamIngestSettings,
+} from "../../../src/streaming/ingest-config.js";
 
 describe("resolveStreamIngestSettings", () => {
   it("defaults cloudflare_live to 2-second GOP and 48k audio", () => {
@@ -40,5 +44,31 @@ describe("resolveStreamIngestSettings", () => {
       srtPassphrase: "secret",
     });
   });
-});
 
+  it("reports invalid external RTMPS ingest configuration", () => {
+    const issues = validateStreamIngestSettings({
+      STREAM_DELIVERY_MODE: "external_hls",
+      STREAM_INGEST_TRANSPORT: "rtmps",
+      STREAM_INGEST_RTMPS_URL: "not-a-url",
+    });
+
+    expect(issues).toEqual([
+      "STREAM_INGEST_RTMPS_URL must be a valid rtmp:// or rtmps:// URL",
+      "STREAM_INGEST_STREAM_KEY is required when STREAM_INGEST_TRANSPORT=rtmps",
+    ]);
+  });
+
+  it("throws when SRT external ingest settings are malformed", () => {
+    expect(() =>
+      assertValidStreamIngestSettings({
+        STREAM_DELIVERY_MODE: "external_hls",
+        STREAM_INGEST_TRANSPORT: "srt",
+        STREAM_INGEST_SRT_URL: "https://example.com/not-srt",
+        STREAM_INGEST_SRT_STREAM_ID: "",
+        STREAM_INGEST_SRT_PASSPHRASE: "short",
+      }),
+    ).toThrowError(
+      /Invalid stream ingest configuration: STREAM_INGEST_SRT_URL must be a valid srt:\/\/ URL; STREAM_INGEST_SRT_STREAM_ID is required when STREAM_INGEST_TRANSPORT=srt; STREAM_INGEST_SRT_PASSPHRASE must be at least 10 characters/,
+    );
+  });
+});
