@@ -21,7 +21,9 @@
 
 // ── Load deploy-time secrets into process.env ─────────────────────────────
 // bunx pm2 may not inherit the deploy shell's exported env vars, so we
-// read the secrets file directly to ensure DATABASE_URL et al. are present.
+// read the local runtime secret files directly. These files are intended to
+// stay personal and untracked for enoomian staging; shared project secrets
+// are intentionally not consulted here.
 const fs = require("fs");
 const SECRETS_FILES = [
   "/tmp/hyperscape-secrets.env",

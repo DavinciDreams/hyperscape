@@ -8,14 +8,16 @@ cd /root/hyperscape
 
 SECRETS_FILE="/tmp/hyperscape-secrets.env"
 if [ -f "$SECRETS_FILE" ]; then
-    echo "[deploy] Loading runtime secrets from $SECRETS_FILE"
+    echo "[deploy] Loading local runtime secrets from $SECRETS_FILE"
     set -a
     # shellcheck disable=SC1090
     . "$SECRETS_FILE"
     set +a
 else
-    echo "[deploy] Warning: $SECRETS_FILE not found; relying on existing environment"
+    echo "[deploy] Warning: $SECRETS_FILE not found; relying on the existing local shell environment only"
 fi
+
+echo "[deploy] Shared project secrets are intentionally not read in this enoomian staging path"
 
 # Auto-detect database mode: if DATABASE_URL is set to a remote host, use remote mode
 if [ -z "${DUEL_DATABASE_MODE:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
