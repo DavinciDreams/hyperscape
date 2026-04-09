@@ -9,7 +9,7 @@ import type {
 } from "../streaming/delivery-config.js";
 import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
 
-export const BETTING_FEED_SCHEMA_VERSION = 2;
+export const BETTING_FEED_SCHEMA_VERSION = 3;
 export const BETTING_SOURCE_EPOCH_STORAGE_KEY =
   "streaming:betting-source-epoch";
 
@@ -70,6 +70,16 @@ export type BettingFeedPublicReadiness = StreamPublicReadiness;
 export type BettingFeedChannel = StreamChannelState;
 export type BettingFeedSourceRuntime = StreamSourceRuntime;
 
+export type BettingFeedBroadcastTimeline = {
+  phase: StreamingPhase | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  presentationDelayMs: number;
+  updatedAt: number;
+};
+
 export type BettingFeedPayload = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -79,6 +89,7 @@ export type BettingFeedPayload = {
   duelKey: string | null;
   phase: StreamingPhase | null;
   phaseVersion: number;
+  broadcastTimeline: BettingFeedBroadcastTimeline;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -180,6 +191,106 @@ function toAgentSnapshot(
   };
 }
 
+function projectBroadcastTimestamp(
+  timestamp: number | null | undefined,
+  presentationDelayMs: number,
+): number | null {
+  return typeof timestamp === "number" && Number.isFinite(timestamp)
+    ? Math.max(0, timestamp + presentationDelayMs)
+    : null;
+}
+
+function resolveBroadcastTimelinePhase(params: {
+  cycle: StreamingDuelCycle | null;
+  emittedAt: number;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+}): StreamingPhase | null {
+  const { cycle, emittedAt, betOpenTime, betCloseTime, fightStartTime, duelEndTime } =
+    params;
+  if (!cycle) {
+    return null;
+  }
+
+  if (cycle.phase === "IDLE") {
+    return "IDLE";
+  }
+
+  if (cycle.phase === "RESOLUTION") {
+    if (duelEndTime == null || emittedAt >= duelEndTime) {
+      return "RESOLUTION";
+    }
+  }
+
+  if (cycle.phase === "FIGHTING") {
+    if (fightStartTime == null || emittedAt >= fightStartTime) {
+      return duelEndTime != null && emittedAt >= duelEndTime
+        ? "RESOLUTION"
+        : "FIGHTING";
+    }
+  }
+
+  if (duelEndTime != null && emittedAt >= duelEndTime) {
+    return "RESOLUTION";
+  }
+
+  if (fightStartTime != null && emittedAt >= fightStartTime) {
+    return "FIGHTING";
+  }
+
+  if (betCloseTime != null && emittedAt >= betCloseTime) {
+    return "COUNTDOWN";
+  }
+
+  if (betOpenTime != null && emittedAt >= betOpenTime) {
+    return "ANNOUNCEMENT";
+  }
+
+  return cycle.phase;
+}
+
+function buildBroadcastTimeline(params: {
+  cycle: StreamingDuelCycle | null;
+  emittedAt: number;
+  presentationDelayMs: number;
+}): BettingFeedBroadcastTimeline {
+  const betOpenTime = projectBroadcastTimestamp(
+    params.cycle?.betOpenTime ?? null,
+    params.presentationDelayMs,
+  );
+  const betCloseTime = projectBroadcastTimestamp(
+    params.cycle?.betCloseTime ?? null,
+    params.presentationDelayMs,
+  );
+  const fightStartTime = projectBroadcastTimestamp(
+    params.cycle?.fightStartTime ?? null,
+    params.presentationDelayMs,
+  );
+  const duelEndTime = projectBroadcastTimestamp(
+    params.cycle?.duelEndTime ?? null,
+    params.presentationDelayMs,
+  );
+
+  return {
+    phase: resolveBroadcastTimelinePhase({
+      cycle: params.cycle,
+      emittedAt: params.emittedAt,
+      betOpenTime,
+      betCloseTime,
+      fightStartTime,
+      duelEndTime,
+    }),
+    betOpenTime,
+    betCloseTime,
+    fightStartTime,
+    duelEndTime,
+    presentationDelayMs: params.presentationDelayMs,
+    updatedAt: params.emittedAt,
+  };
+}
+
 export function buildBettingFeedPayload(params: {
   sourceEpoch: number;
   seq: number;
@@ -196,6 +307,7 @@ export function buildBettingFeedPayload(params: {
   const rendererMetrics = params.rendererMetrics ?? null;
   const hlsManifest = rendererMetrics?.hlsManifest ?? null;
   const channel = params.channel ?? null;
+  const presentationDelayMs = Math.max(0, channel?.presentationDelayMs ?? 0);
   const canonicalDestination =
     channel?.destinations.find(
       (destination) => destination.id === channel.canonicalDestinationId,
@@ -237,6 +349,11 @@ export function buildBettingFeedPayload(params: {
           updatedAt: channel.publicReadiness.updatedAt,
         }
       : null);
+  const broadcastTimeline = buildBroadcastTimeline({
+    cycle,
+    emittedAt: params.emittedAt,
+    presentationDelayMs,
+  });
   return {
     schemaVersion: BETTING_FEED_SCHEMA_VERSION,
     sourceEpoch: params.sourceEpoch,
@@ -246,6 +363,7 @@ export function buildBettingFeedPayload(params: {
     duelKey: cycle?.duelKeyHex ?? null,
     phase: cycle?.phase ?? null,
     phaseVersion: cycle?.phaseVersion ?? 0,
+    broadcastTimeline,
     betOpenTime: cycle?.betOpenTime ?? null,
     betCloseTime: cycle?.betCloseTime ?? null,
     fightStartTime: cycle?.fightStartTime ?? null,
@@ -287,6 +405,10 @@ export function buildBettingFeedDedupKey(payload: BettingFeedPayload): string {
   return JSON.stringify({
     ...payload,
     emittedAt: 0,
+    broadcastTimeline: {
+      ...payload.broadcastTimeline,
+      updatedAt: 0,
+    },
     latestFrameAt: 0,
     latestRenderTickAt: 0,
     latestDuelStateTickAt: 0,

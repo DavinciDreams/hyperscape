@@ -206,7 +206,7 @@ describe("streaming-betting-feed", () => {
     });
 
     expect(payload).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceEpoch: 42,
       seq: 7,
       emittedAt: 123_456,
@@ -214,6 +214,15 @@ describe("streaming-betting-feed", () => {
       duelKey: "0xabcdef",
       phase: "FIGHTING",
       phaseVersion: 9,
+      broadcastTimeline: {
+        phase: "FIGHTING",
+        betOpenTime: 5_000,
+        betCloseTime: 6_000,
+        fightStartTime: null,
+        duelEndTime: null,
+        presentationDelayMs: 4_000,
+        updatedAt: 123_456,
+      },
       betOpenTime: 1_000,
       betCloseTime: 2_000,
       fightStartTime: null,
@@ -289,6 +298,35 @@ describe("streaming-betting-feed", () => {
     expect(payload.channel?.canonicalDestinationId).toBe("canonical-cloudflare");
     expect(payload.delivery?.llhlsUrl).toContain("protocol=llhls");
     expect(payload.deliveryHealth?.degradedReason).toBe("delivery_disconnected");
+  });
+
+  it("projects a bettor-facing timeline against the active canonical delay", () => {
+    const payload = buildBettingFeedPayload({
+      sourceEpoch: 7,
+      seq: 11,
+      emittedAt: 6_500,
+      channel: createChannel({
+        presentationDelayMs: 4_000,
+      }),
+      cycle: createCycle({
+        phase: "FIGHTING",
+        betOpenTime: 1_000,
+        betCloseTime: 2_000,
+        fightStartTime: 3_000,
+        duelEndTime: 9_000,
+      }),
+    });
+
+    expect(payload.phase).toBe("FIGHTING");
+    expect(payload.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 6_500,
+    });
   });
 
   it("selects replay, bootstrap, and reset delivery modes deterministically", () => {
@@ -383,6 +421,10 @@ describe("streaming-betting-feed", () => {
     const laterPayload = {
       ...basePayload,
       emittedAt: 999_999,
+      broadcastTimeline: {
+        ...basePayload.broadcastTimeline,
+        updatedAt: 555_554,
+      },
       rendererHealth: basePayload.rendererHealth
         ? {
             ...basePayload.rendererHealth,

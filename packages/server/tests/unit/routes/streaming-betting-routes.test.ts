@@ -120,8 +120,17 @@ describe("streaming-betting-routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceEpoch: expect.any(Number),
+      broadcastTimeline: {
+        phase: null,
+        betOpenTime: null,
+        betCloseTime: null,
+        fightStartTime: null,
+        duelEndTime: null,
+        presentationDelayMs: expect.any(Number),
+        updatedAt: expect.any(Number),
+      },
       channel: expect.objectContaining({
         canonicalDestinationId: expect.any(String),
         publicReadiness: expect.objectContaining({
