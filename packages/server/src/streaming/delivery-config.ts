@@ -7,6 +7,7 @@ export type StreamDestinationProvider =
   | "kick"
   | "youtube"
   | "custom";
+export type StreamCanonicalProvider = "cloudflare_stream" | "self_hls";
 export type StreamDeliveryTransport =
   | "llhls"
   | "hls"
@@ -56,6 +57,20 @@ export type StreamDeliveryInfo = {
   ingestUrl: string | null;
 };
 
+export type StreamExternalDeliveryInfo = {
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
+function isCanonicalProvider(
+  value: StreamDestinationProvider,
+): value is StreamCanonicalProvider {
+  return value === "cloudflare_stream" || value === "self_hls";
+}
+
 function asNonEmptyString(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -90,27 +105,48 @@ export function resolveStreamDeliveryInfo(
   env: NodeJS.ProcessEnv = process.env,
 ): StreamDeliveryInfo {
   const playbackUrl = asNonEmptyString(env.STREAM_PLAYBACK_URL);
-  const hlsUrl = asNonEmptyString(env.STREAM_PLAYBACK_HLS_URL);
-  const llhlsUrl = asNonEmptyString(env.STREAM_PLAYBACK_LLHLS_URL);
-  const ingestUrl = asNonEmptyString(env.STREAM_INGEST_RTMPS_URL);
-  const hasExternalPlayback = Boolean(hlsUrl || llhlsUrl);
+  const external = resolveExternalStreamDeliveryInfo(env);
+  const hasExternalPlayback = Boolean(external.hlsUrl || external.llhlsUrl);
   const mode = normalizeDeliveryMode(env.STREAM_DELIVERY_MODE, {
     hasExternalPlayback,
   });
 
   return {
     mode,
-    provider:
-      mode === "external_hls"
-        ? asNonEmptyString(env.STREAM_DELIVERY_PROVIDER)
-        : null,
+    provider: mode === "external_hls" ? external.provider : null,
     playbackUrl:
       mode === "external_hls"
-        ? llhlsUrl ?? hlsUrl
-        : playbackUrl ?? (hasExternalPlayback ? null : hlsUrl ?? llhlsUrl),
-    hlsUrl: mode === "external_hls" ? hlsUrl : null,
-    llhlsUrl: mode === "external_hls" ? llhlsUrl : null,
-    ingestUrl: mode === "external_hls" ? ingestUrl : null,
+        ? external.playbackUrl
+        : playbackUrl ??
+          (hasExternalPlayback ? null : external.hlsUrl ?? external.llhlsUrl),
+    hlsUrl: mode === "external_hls" ? external.hlsUrl : null,
+    llhlsUrl: mode === "external_hls" ? external.llhlsUrl : null,
+    ingestUrl: mode === "external_hls" ? external.ingestUrl : null,
+  };
+}
+
+export function resolveExternalStreamDeliveryInfo(
+  env: NodeJS.ProcessEnv = process.env,
+): StreamExternalDeliveryInfo {
+  const provider =
+    asNonEmptyString(env.STREAM_EXTERNAL_DELIVERY_PROVIDER) ??
+    asNonEmptyString(env.STREAM_DELIVERY_PROVIDER);
+  const hlsUrl =
+    asNonEmptyString(env.STREAM_EXTERNAL_PLAYBACK_HLS_URL) ??
+    asNonEmptyString(env.STREAM_PLAYBACK_HLS_URL);
+  const llhlsUrl =
+    asNonEmptyString(env.STREAM_EXTERNAL_PLAYBACK_LLHLS_URL) ??
+    asNonEmptyString(env.STREAM_PLAYBACK_LLHLS_URL);
+  const ingestUrl =
+    asNonEmptyString(env.STREAM_EXTERNAL_INGEST_RTMPS_URL) ??
+    asNonEmptyString(env.STREAM_INGEST_RTMPS_URL);
+
+  return {
+    provider,
+    playbackUrl: llhlsUrl ?? hlsUrl,
+    hlsUrl,
+    llhlsUrl,
+    ingestUrl,
   };
 }
 
@@ -221,4 +257,36 @@ export function resolveStreamPresentationDelayMs(
     return Math.max(0, parsed);
   }
   return mode === "external_hls" ? 4_000 : 0;
+}
+
+export function resolveStreamCanonicalProviderPriority(
+  env: NodeJS.ProcessEnv = process.env,
+): StreamCanonicalProvider[] {
+  const explicit = asNonEmptyString(env.STREAM_CANONICAL_PROVIDER_PRIORITY);
+  if (explicit) {
+    const parsed = explicit
+      .split(",")
+      .map((value) =>
+        normalizeStreamDestinationProvider(value, value),
+      )
+      .filter(isCanonicalProvider);
+    if (parsed.length > 0) {
+      return [...new Set(parsed)];
+    }
+  }
+
+  const mode = resolveStreamDeliveryInfo(env).mode;
+  return mode === "external_hls"
+    ? ["cloudflare_stream", "self_hls"]
+    : ["self_hls", "cloudflare_stream"];
+}
+
+export function resolveStreamFailbackSoakMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const parsed = Number(env.STREAM_FAILBACK_SOAK_MS);
+  if (!Number.isFinite(parsed)) {
+    return 30_000;
+  }
+  return Math.max(0, parsed);
 }

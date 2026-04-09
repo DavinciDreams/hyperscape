@@ -42,7 +42,9 @@ session/feed contract that Hyperscapes publishes.
   destinations using the existing FFmpeg tee architecture.
 - Self-hosted HLS remains available on the GPU host for smoke, fallback, and
   diagnostics.
-- Cloudflare Stream is the canonical betting distribution destination.
+- Provider selection is environment-driven rather than hard-wired:
+  `self_hls` can be canonical while Cloudflare remains a warm fallback or
+  research rail.
 - Twitch, Kick, YouTube, and custom restream outputs are mirrors.
 
 Railway is not the renderer of record for personal staging. The channel is
@@ -87,10 +89,10 @@ it; they do not reconstruct equivalent state from local env vars.
 
 - `canonical`
   - the only destination that controls betting-page public readiness
-  - currently Cloudflare Stream
+  - selected from provider priority and current health
 - `fallback`
-  - emergency recovery rail
-  - currently self-hosted HLS on the GPU host
+  - warm standby rail tracked independently from canonical truth
+  - promoted only by authority-layer provider selection, not by the browser
 - `mirror`
   - downstream promotional outputs
   - Twitch, Kick, YouTube, custom
@@ -107,8 +109,15 @@ Relevant bootstrap envs include:
 
 - `STREAM_DELIVERY_MODE`
 - `STREAM_DELIVERY_PROVIDER`
+- `STREAM_CANONICAL_PROVIDER_PRIORITY`
+- `STREAM_FAILBACK_SOAK_MS`
 - `STREAM_INGEST_*`
 - `STREAM_PLAYBACK_*`
+- `STREAM_EXTERNAL_DELIVERY_PROVIDER`
+- `STREAM_EXTERNAL_PLAYBACK_HLS_URL`
+- `STREAM_EXTERNAL_PLAYBACK_LLHLS_URL`
+- `STREAM_EXTERNAL_INGEST_RTMPS_URL`
+- `STREAM_CLOUDFLARE_PROBE_ONLY`
 - `DUEL_OWNS_STREAM_CAPTURE=true` for explicit local integrated-mode capture
   ownership only
 
@@ -144,13 +153,15 @@ incident, not a simulation or renderer incident.
 
 Canonical betting readiness is derived only from the canonical destination.
 
-For Cloudflare canonical delivery, readiness requires both:
+For external-delivery canonical providers such as Cloudflare, readiness
+requires both:
 
 - healthy bridge transport to the canonical destination
 - a positive public playback probe against the canonical playback manifest
 
-For self-hosted fallback delivery, readiness depends on local manifest
-freshness. Mirrors do not participate in canonical readiness.
+For self-hosted HLS canonical delivery, readiness depends on local manifest
+freshness plus local transport health. Mirrors do not participate in canonical
+readiness.
 
 Missing canonical readiness must be treated as not ready.
 
@@ -192,8 +203,12 @@ On `enoomian` personal staging:
 - Pages hosts the public client
 - the GPU box runs the source worker service that renders and encodes
 - Railway serves the API and control plane
-- Cloudflare Stream is the canonical betting viewer path
-- self-hosted HLS remains reachable for smoke and emergency fallback
+- self-hosted HLS is the current canonical betting viewer path
+- Cloudflare Stream is configured as a warm fallback and investigation rail
+- canonical selection is driven by
+  `STREAM_CANONICAL_PROVIDER_PRIORITY=self_hls,cloudflare_stream`
+- `STREAM_CLOUDFLARE_PROBE_ONLY=false` keeps Cloudflare exercised in parallel
+  without letting it poison canonical readiness while it is unhealthy
 - mirrors are optional and independent
 - health-driven source-worker restarts are handled by the source worker
   process supervisor, not the API control plane

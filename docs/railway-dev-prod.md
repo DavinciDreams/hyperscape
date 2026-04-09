@@ -41,8 +41,10 @@ For `enoomian` personal staging:
 - the GPU host runs the dedicated source worker service (`hyperscape-stream-source`)
 - the API/game-control service is separate (`hyperscape-duel-api`)
 - Railway points at the integrated branch and serves API/control-plane state
-- viewer delivery prefers Cloudflare Stream LL-HLS when configured
-- self-hosted HLS remains available for fallback and diagnostics
+- viewer delivery uses authority-layer provider selection rather than assuming
+  Cloudflare is always canonical
+- self-hosted HLS is the current personal-staging canonical rail
+- Cloudflare remains configured as a warm fallback and investigation rail
 - `DUEL_OWNS_STREAM_CAPTURE=true` is reserved for explicit local integrated
   mode only; split topology is the default for staging/prod
 
@@ -54,10 +56,17 @@ Streaming delivery selection:
 
 - `STREAM_DELIVERY_MODE=self_hls|external_hls`
 - `STREAM_DELIVERY_PROVIDER`
+- `STREAM_CANONICAL_PROVIDER_PRIORITY`
+- `STREAM_FAILBACK_SOAK_MS`
 - `STREAM_INGEST_RTMPS_URL`
 - `STREAM_INGEST_STREAM_KEY`
 - `STREAM_PLAYBACK_HLS_URL`
 - `STREAM_PLAYBACK_LLHLS_URL`
+- `STREAM_EXTERNAL_DELIVERY_PROVIDER`
+- `STREAM_EXTERNAL_PLAYBACK_HLS_URL`
+- `STREAM_EXTERNAL_PLAYBACK_LLHLS_URL`
+- `STREAM_EXTERNAL_INGEST_RTMPS_URL`
+- `STREAM_CLOUDFLARE_PROBE_ONLY`
 
 Renderer health polling:
 
@@ -97,3 +106,5 @@ After every Railway deploy verify:
 6. `rendererHealth.ready=true` only when render, encode, and delivery are fresh
 7. source-worker restarts should be health-driven rather than hidden behind
    the API/control-plane process
+8. `channel.canonicalDestinationId` and `channel.fallbackDestinationId`
+   represent the intended provider ordering for the environment

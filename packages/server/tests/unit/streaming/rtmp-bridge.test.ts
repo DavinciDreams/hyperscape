@@ -11,6 +11,11 @@ const ENV_KEYS = [
   "STREAM_FPS",
   "STREAM_DELIVERY_MODE",
   "STREAM_DELIVERY_PROVIDER",
+  "STREAM_CANONICAL_PROVIDER_PRIORITY",
+  "STREAM_EXTERNAL_DELIVERY_PROVIDER",
+  "STREAM_EXTERNAL_PLAYBACK_HLS_URL",
+  "STREAM_EXTERNAL_PLAYBACK_LLHLS_URL",
+  "STREAM_EXTERNAL_INGEST_RTMPS_URL",
   "STREAM_PLAYBACK_URL",
   "STREAM_PLAYBACK_HLS_URL",
   "STREAM_PLAYBACK_LLHLS_URL",
@@ -226,5 +231,48 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
       expect.arrayContaining(["-c:a", "aac", "-ar", "48000"]),
     );
     expect(audioArgs).not.toContain("+global_header");
+  });
+
+  it("warms external delivery while self-hls remains canonical", () => {
+    process.env.STREAM_INGEST_PROFILE = "cloudflare_live";
+    process.env.STREAM_INGEST_TRANSPORT = "srt";
+    process.env.STREAM_CLOUDFLARE_PROBE_ONLY = "false";
+    process.env.STREAM_DELIVERY_MODE = "self_hls";
+    process.env.STREAM_PLAYBACK_URL =
+      "https://self.example/live/stream.m3u8";
+    process.env.STREAM_PLAYBACK_HLS_URL =
+      "https://video.example/live.m3u8";
+    process.env.STREAM_PLAYBACK_LLHLS_URL =
+      "https://video.example/live.m3u8?protocol=llhls";
+    process.env.STREAM_DELIVERY_PROVIDER = "cloudflare_stream";
+    process.env.STREAM_CANONICAL_PROVIDER_PRIORITY =
+      "self_hls,cloudflare_stream";
+    process.env.STREAM_INGEST_SRT_URL = "srt://live.cloudflare.com:778";
+    process.env.STREAM_INGEST_SRT_STREAM_ID = "stream-id";
+    process.env.STREAM_INGEST_SRT_PASSPHRASE = "stream-passphrase";
+    process.env.HLS_OUTPUT_PATH = "/tmp/hyperscape/live/stream.m3u8";
+
+    const bridge = new RTMPBridge();
+    (bridge as any).initOutputs();
+    const outputString = (bridge as any).buildOutputString() as string;
+    const destinations = (bridge as any).destinations as Array<{
+      id?: string;
+      role?: string;
+      provider?: string;
+    }>;
+
+    expect(outputString).toContain("streamid=stream-id");
+    expect(outputString).toContain("pkt_size=1316");
+    expect(outputString).toContain("f=hls");
+    expect(destinations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "fallback-external-delivery",
+          role: "fallback",
+          provider: "cloudflare_stream",
+          transport: "srt",
+        }),
+      ]),
+    );
   });
 });

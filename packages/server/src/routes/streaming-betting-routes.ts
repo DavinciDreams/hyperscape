@@ -35,9 +35,13 @@ import {
   buildStreamDestinationId,
   inferStreamDeliveryTransport,
   normalizeStreamDestinationProvider,
+  resolveExternalStreamDeliveryInfo,
   resolveSelfHostedStreamPlaybackUrl,
+  resolveStreamCanonicalProviderPriority,
   resolveStreamDeliveryInfo,
+  resolveStreamFailbackSoakMs,
   resolveStreamPresentationDelayMs,
+  type StreamCanonicalProvider,
   type StreamChannelState,
   type StreamDestinationState,
   type StreamManifestStatus,
@@ -87,6 +91,18 @@ type BettingRouteMetrics = {
     latestSeq: number | null;
     lastBroadcastSeq: number;
   };
+};
+
+type CanonicalCandidateState = {
+  provider: StreamCanonicalProvider;
+  destination: StreamDestinationState;
+  publicReadiness: StreamPublicReadiness;
+  ready: boolean;
+};
+
+type CanonicalProviderSelectionState = {
+  activeProvider: StreamCanonicalProvider | null;
+  primaryHealthySince: number | null;
 };
 
 const REQUIRE_EXTERNAL_SOURCE_RUNTIME =
@@ -217,6 +233,9 @@ export function registerStreamingBettingRoutes(
     externalStatusMaxAgeMs,
   );
   const configuredDelivery = resolveStreamDeliveryInfo(process.env);
+  const configuredProviderPriority =
+    resolveStreamCanonicalProviderPriority(process.env);
+  const configuredFailbackSoakMs = resolveStreamFailbackSoakMs(process.env);
   const configuredPresentationDelayMs = resolveStreamPresentationDelayMs(
     process.env,
     configuredDelivery.mode,
@@ -232,17 +251,8 @@ export function registerStreamingBettingRoutes(
     provider: configuredCanonicalProvider,
     name: "External Delivery",
   });
-  const configuredFallbackDestinationId = buildStreamDestinationId({
-    role: "fallback",
-    provider: "self_hls",
-    name: "Self-HLS",
-  });
   const configuredExternalPlaybackUrl =
-    configuredDelivery.mode === "external_hls"
-      ? configuredDelivery.playbackUrl ??
-        configuredDelivery.llhlsUrl ??
-        configuredDelivery.hlsUrl
-      : null;
+    resolveExternalStreamDeliveryInfo(process.env).playbackUrl;
   const externalPlaybackProbePoller = acquirePlaybackProbePoller(
     configuredExternalPlaybackUrl,
     {
@@ -271,6 +281,10 @@ export function registerStreamingBettingRoutes(
       "STREAMING_VIEWER_ACCESS_TOKEN remains separate from internal betting feed auth; BETTING_FEED_ACCESS_TOKEN is the canonical betting secret",
     );
   }
+  const canonicalProviderSelectionState: CanonicalProviderSelectionState = {
+    activeProvider: null,
+    primaryHealthySince: null,
+  };
   if (internalAllowedOrigin && !allowedOrigin) {
     fastify.log.warn(
       {
@@ -666,14 +680,11 @@ export function registerStreamingBettingRoutes(
     const playbackReady = manifestStatus === "ok";
 
     return {
-      id:
-        params.role === "fallback"
-          ? configuredFallbackDestinationId
-          : buildStreamDestinationId({
-              role: "canonical",
-              provider: "self_hls",
-              name: "Self-HLS",
-            }),
+      id: buildStreamDestinationId({
+        role: params.role,
+        provider: "self_hls",
+        name: "Self-HLS",
+      }),
       name: "Self-HLS",
       role: params.role,
       provider: "self_hls",
@@ -694,13 +705,14 @@ export function registerStreamingBettingRoutes(
     };
   };
 
-  const buildCanonicalExternalDestination = (params: {
+  const buildExternalDeliveryCandidate = (params: {
+    role: "canonical" | "fallback";
     nowMs: number;
     sourceRuntime: StreamSourceRuntime;
-  }): {
-    destination: StreamDestinationState;
-    publicReadiness: StreamPublicReadiness;
-  } => {
+  }): CanonicalCandidateState | null => {
+    if (!configuredExternalPlaybackUrl) {
+      return null;
+    }
     const externalSnapshot = externalStatusPoller?.getSnapshot() ?? null;
     const externalDestination = findCanonicalExternalDestination(externalSnapshot);
     const probeSnapshot = externalPlaybackProbePoller?.getSnapshot() ?? null;
@@ -760,11 +772,22 @@ export function registerStreamingBettingRoutes(
       playbackUrl,
     });
 
+    const publicReadiness: StreamPublicReadiness = {
+      ready: reason == null,
+      reason,
+      updatedAt,
+    };
+
     return {
+      provider: "cloudflare_stream",
       destination: {
-        id: externalDestination?.id ?? configuredCanonicalDestinationId,
-        name: externalDestination?.name ?? "External Delivery",
-        role: "canonical",
+        id: buildStreamDestinationId({
+          role: params.role,
+          provider: "cloudflare_stream",
+          name: externalDestination?.name ?? "Cloudflare Stream",
+        }),
+        name: externalDestination?.name ?? "Cloudflare Stream",
+        role: params.role,
         provider: normalizeStreamDestinationProvider(
           externalDestination?.provider ?? configuredDelivery.provider,
           externalDestination?.name ?? "External Delivery",
@@ -792,11 +815,111 @@ export function registerStreamingBettingRoutes(
           : destinationError ?? probeSnapshot?.lastError ?? reason,
         updatedAt,
       },
-      publicReadiness: {
-        ready: reason == null,
-        reason,
-        updatedAt,
-      },
+      publicReadiness,
+      ready: publicReadiness.ready === true,
+    };
+  };
+
+  const buildSelfHostedCandidate = (params: {
+    role: "canonical" | "fallback";
+    nowMs: number;
+    sourceRuntime: StreamSourceRuntime;
+  }): CanonicalCandidateState => {
+    const destination = buildSelfHostedDestination({
+      role: params.role,
+      nowMs: params.nowMs,
+    });
+    const publicReadiness =
+      params.sourceRuntime.ready === true
+        ? {
+            ready: destination.playbackReady,
+            reason: destination.lastError,
+            updatedAt: destination.updatedAt,
+          }
+        : {
+            ready: false,
+            reason: params.sourceRuntime.degradedReason,
+            updatedAt:
+              params.sourceRuntime.workerHeartbeatAt ?? destination.updatedAt,
+          };
+
+    return {
+      provider: "self_hls",
+      destination,
+      publicReadiness,
+      ready: publicReadiness.ready === true,
+    };
+  };
+
+  const selectCanonicalCandidate = (params: {
+    nowMs: number;
+    candidates: CanonicalCandidateState[];
+  }): {
+    canonical: CanonicalCandidateState;
+    fallback: CanonicalCandidateState | null;
+  } => {
+    const candidatesByProvider = new Map(
+      params.candidates.map((candidate) => [candidate.provider, candidate]),
+    );
+    const priority = configuredProviderPriority.filter((provider) =>
+      candidatesByProvider.has(provider),
+    );
+    const primaryProvider = priority[0] ?? null;
+    const primaryCandidate =
+      primaryProvider != null ? candidatesByProvider.get(primaryProvider) ?? null : null;
+    const activeCandidate =
+      canonicalProviderSelectionState.activeProvider != null
+        ? candidatesByProvider.get(canonicalProviderSelectionState.activeProvider) ??
+          null
+        : null;
+    const firstReadyCandidate =
+      priority
+        .map((provider) => candidatesByProvider.get(provider) ?? null)
+        .find((candidate) => candidate?.ready === true) ?? null;
+
+    let nextCanonical =
+      activeCandidate ??
+      firstReadyCandidate ??
+      primaryCandidate ??
+      params.candidates[0];
+
+    if (primaryCandidate?.ready === true) {
+      canonicalProviderSelectionState.primaryHealthySince ??= params.nowMs;
+    } else {
+      canonicalProviderSelectionState.primaryHealthySince = null;
+    }
+
+    if (nextCanonical.provider === primaryProvider) {
+      if (nextCanonical.ready !== true && firstReadyCandidate) {
+        nextCanonical = firstReadyCandidate;
+      }
+    } else {
+      const primaryHealthyForMs =
+        canonicalProviderSelectionState.primaryHealthySince == null
+          ? 0
+          : Math.max(0, params.nowMs - canonicalProviderSelectionState.primaryHealthySince);
+      if (
+        primaryCandidate?.ready === true &&
+        primaryHealthyForMs >= configuredFailbackSoakMs
+      ) {
+        nextCanonical = primaryCandidate;
+      } else if (nextCanonical.ready !== true && firstReadyCandidate) {
+        nextCanonical = firstReadyCandidate;
+      }
+    }
+
+    canonicalProviderSelectionState.activeProvider = nextCanonical.provider;
+
+    const fallback =
+      priority
+        .map((provider) => candidatesByProvider.get(provider) ?? null)
+        .find(
+          (candidate) => candidate && candidate.provider !== nextCanonical.provider,
+        ) ?? null;
+
+    return {
+      canonical: nextCanonical,
+      fallback,
     };
   };
 
@@ -904,50 +1027,50 @@ export function registerStreamingBettingRoutes(
     const updatedAt = nowMs ?? Date.now();
     const resolvedSourceRuntime =
       sourceRuntime ?? currentSourceRuntimeSnapshot(cycle, updatedAt);
-
-    if (configuredDelivery.mode === "external_hls") {
-      const { destination: canonicalDestination, publicReadiness } =
-        buildCanonicalExternalDestination({
-          nowMs: updatedAt,
-          sourceRuntime: resolvedSourceRuntime,
-        });
-      const mirrors = buildMirrorDestinations({
+    const candidatePool: CanonicalCandidateState[] = [
+      buildSelfHostedCandidate({
+        role: "canonical",
         nowMs: updatedAt,
-        canonicalDestinationId: canonicalDestination.id,
-      });
-      const fallbackDestination = buildSelfHostedDestination({
-        role: "fallback",
-        nowMs: updatedAt,
-      });
-      return {
-        id: "hyperscapes-broadcast-channel",
-        mode: "always_on",
-        presentationDelayMs: configuredPresentationDelayMs,
-        activeDuelId: cycle?.duelId ?? null,
-        activeDuelKey: cycle?.duelKeyHex ?? null,
-        canonicalDestinationId: canonicalDestination.id,
-        fallbackDestinationId: fallbackDestination.id,
-        publicPlaybackUrl: canonicalDestination.playbackUrl,
-        publicReadiness: resolvedSourceRuntime.ready
-          ? publicReadiness
-          : {
-              ready: false,
-              reason: resolvedSourceRuntime.degradedReason,
-              updatedAt:
-                resolvedSourceRuntime.workerHeartbeatAt ??
-                publicReadiness.updatedAt,
-            },
-        destinations: [canonicalDestination, fallbackDestination, ...mirrors],
-      };
-    }
-
-    const mirrors = buildMirrorDestinations({
-      nowMs: updatedAt,
-      canonicalDestinationId: null,
-    });
-    const canonicalDestination = buildSelfHostedDestination({
+        sourceRuntime: resolvedSourceRuntime,
+      }),
+    ];
+    const externalCandidate = buildExternalDeliveryCandidate({
       role: "canonical",
       nowMs: updatedAt,
+      sourceRuntime: resolvedSourceRuntime,
+    });
+    if (externalCandidate) {
+      candidatePool.push(externalCandidate);
+    }
+    const { canonical, fallback } = selectCanonicalCandidate({
+      nowMs: updatedAt,
+      candidates: candidatePool,
+    });
+    const canonicalDestination = canonical.destination;
+    const fallbackDestination =
+      fallback == null
+        ? null
+        : fallback.provider === "self_hls"
+          ? buildSelfHostedDestination({
+              role: "fallback",
+              nowMs: updatedAt,
+            })
+          : buildExternalDeliveryCandidate({
+              role: "fallback",
+              nowMs: updatedAt,
+              sourceRuntime: resolvedSourceRuntime,
+            })?.destination ?? {
+              ...fallback.destination,
+              id: buildStreamDestinationId({
+                role: "fallback",
+                provider: "cloudflare_stream",
+                name: "Cloudflare Stream",
+              }),
+              role: "fallback",
+            };
+    const mirrors = buildMirrorDestinations({
+      nowMs: updatedAt,
+      canonicalDestinationId: canonicalDestination.id,
     });
     return {
       id: "hyperscapes-broadcast-channel",
@@ -956,22 +1079,14 @@ export function registerStreamingBettingRoutes(
       activeDuelId: cycle?.duelId ?? null,
       activeDuelKey: cycle?.duelKeyHex ?? null,
       canonicalDestinationId: canonicalDestination.id,
-      fallbackDestinationId: null,
+      fallbackDestinationId: fallbackDestination?.id ?? null,
       publicPlaybackUrl: canonicalDestination.playbackUrl,
-      publicReadiness: resolvedSourceRuntime.ready
-        ? {
-            ready: canonicalDestination.playbackReady,
-            reason: canonicalDestination.lastError,
-            updatedAt: canonicalDestination.updatedAt,
-          }
-        : {
-            ready: false,
-            reason: resolvedSourceRuntime.degradedReason,
-            updatedAt:
-              resolvedSourceRuntime.workerHeartbeatAt ??
-              canonicalDestination.updatedAt,
-          },
-      destinations: [canonicalDestination, ...mirrors],
+      publicReadiness: canonical.publicReadiness,
+      destinations: [
+        canonicalDestination,
+        ...(fallbackDestination ? [fallbackDestination] : []),
+        ...mirrors,
+      ],
     };
   };
 

@@ -345,6 +345,27 @@ function findCanonicalStreamingDestination(params: {
   };
 }
 
+function isFreshStreamingSnapshot(
+  updatedAt: number | null | undefined,
+  nowMs: number,
+): boolean {
+  return (
+    typeof updatedAt === "number" &&
+    Number.isFinite(updatedAt) &&
+    Math.max(0, nowMs - updatedAt) <= EXTERNAL_RTMP_STATUS_MAX_AGE_MS
+  );
+}
+
+function resolveStreamingManifestStatusFromUpdatedAt(
+  updatedAt: number | null | undefined,
+  nowMs: number,
+): StreamManifestStatus {
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt)) {
+    return "missing";
+  }
+  return isFreshStreamingSnapshot(updatedAt, nowMs) ? "ok" : "stale";
+}
+
 function resolveCanonicalPlaybackUrl(params: {
   destination: ExternalRtmpDestination | null;
   delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
@@ -394,10 +415,116 @@ function normalizeCanonicalStreamingTruth(params: {
   delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
   canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
   sourceRuntime: StreamSourceRuntime;
+  localHlsManifest?: HlsManifestSnapshot | null;
 }): {
   externalSnapshot: ExternalRtmpStatusSnapshot | null;
   canonicalStatus: StreamingCanonicalStatusSnapshot;
 } {
+  if (params.delivery.mode === "self_hls") {
+    const playbackUrl = params.delivery.playbackUrl ?? null;
+    const externalManifestUpdatedAt = asFiniteNumber(
+      params.externalSnapshot?.hlsManifest?.updatedAt,
+    );
+    const localManifestUpdatedAt = asFiniteNumber(
+      params.localHlsManifest?.updatedAt,
+    );
+    const manifestUpdatedAt =
+      externalManifestUpdatedAt != null && localManifestUpdatedAt != null
+        ? Math.max(externalManifestUpdatedAt, localManifestUpdatedAt)
+        : externalManifestUpdatedAt ?? localManifestUpdatedAt ?? null;
+    const nowMs = Date.now();
+    const manifestStatus = resolveStreamingManifestStatusFromUpdatedAt(
+      manifestUpdatedAt,
+      nowMs,
+    );
+    const sourceReady = params.sourceRuntime.ready === true;
+    const canonicalPlaybackReady = manifestStatus === "ok";
+    const canonicalTransportConnected = sourceReady && canonicalPlaybackReady;
+    const lastError = sourceReady
+      ? canonicalPlaybackReady
+        ? null
+        : manifestStatus === "stale"
+          ? "manifest_stale"
+          : playbackUrl
+            ? "manifest_not_ready"
+            : "playback_unconfigured"
+      : params.sourceRuntime.degradedReason ?? "source_unavailable";
+
+    const selfHostedDestination = {
+      id: buildStreamDestinationId({
+        role: "canonical",
+        provider: "self_hls",
+        name: "Self-HLS",
+      }),
+      name: "Self-HLS",
+      role: "canonical" as const,
+      provider: "self_hls" as const,
+      transport: "hls" as const,
+      playbackUrl,
+      ingestUrl: null,
+      connected: canonicalPlaybackReady,
+      transportHealthy: canonicalTransportConnected,
+      playbackReady: canonicalPlaybackReady,
+      manifestStatus,
+      lastError,
+      error: lastError ?? undefined,
+      updatedAt: manifestUpdatedAt ?? undefined,
+    };
+
+    const destinations = Array.isArray(params.externalSnapshot?.destinations)
+      ? params.externalSnapshot!.destinations
+      : [];
+    const normalizedIndex = destinations.findIndex((candidate) => {
+      if (candidate.role === "canonical") return true;
+      if (candidate.id === selfHostedDestination.id) return true;
+      return (
+        normalizeStreamDestinationProvider(
+          candidate.provider ?? null,
+          candidate.name ?? null,
+        ) === "self_hls"
+      );
+    });
+
+    const normalizedSnapshot = params.externalSnapshot
+      ? {
+          ...params.externalSnapshot,
+          destinations:
+            normalizedIndex >= 0
+              ? params.externalSnapshot.destinations.map((candidate, index) =>
+                  index === normalizedIndex
+                    ? { ...candidate, ...selfHostedDestination }
+                    : candidate,
+                )
+              : [...params.externalSnapshot.destinations, selfHostedDestination],
+        }
+      : {
+          active: canonicalTransportConnected,
+          ffmpegRunning: sourceReady,
+          clientConnected: sourceReady,
+          destinations: [selfHostedDestination],
+          stats: {},
+          updatedAt: manifestUpdatedAt ?? nowMs,
+          hlsManifest: {
+            updatedAt: manifestUpdatedAt,
+            mediaSequence:
+              asFiniteNumber(params.localHlsManifest?.mediaSequence) ?? null,
+          },
+          delivery: params.delivery,
+        };
+
+    return {
+      externalSnapshot: normalizedSnapshot,
+      canonicalStatus: {
+        sourceReady,
+        canonicalTransportConnected,
+        canonicalPlaybackReady,
+        manifestStatus,
+        lastError,
+        updatedAt: manifestUpdatedAt,
+      },
+    };
+  }
+
   const { index, destination } = findCanonicalStreamingDestination({
     externalSnapshot: params.externalSnapshot,
     delivery: params.delivery,
@@ -526,6 +653,7 @@ export function buildStreamingStatusPayload(params: {
     delivery,
     canonicalProbeSnapshot: params.canonicalProbeSnapshot ?? null,
     sourceRuntime,
+    localHlsManifest: params.localHlsManifest,
   });
   const effectiveExternalSnapshot = normalizedCanonicalTruth.externalSnapshot;
   const metrics = normalizeStreamingStatusMetrics({

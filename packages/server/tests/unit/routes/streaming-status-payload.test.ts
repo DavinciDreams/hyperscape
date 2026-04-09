@@ -477,4 +477,77 @@ describe("buildStreamingStatusPayload", () => {
       lastError: "encoder_stalled",
     });
   });
+
+  it("synthesizes canonical self-hls status from a fresh local manifest", () => {
+    process.env.STREAM_DELIVERY_MODE = "self_hls";
+    process.env.STREAM_PLAYBACK_URL = "https://stream.example/live/stream.m3u8";
+
+    const payload = buildStreamingStatusPayload({
+      base: { running: true, bridgeActive: true },
+      externalSnapshot: {
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        destinations: [],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: 10_000,
+        delivery: {
+          mode: "self_hls",
+          provider: null,
+          playbackUrl: "https://stream.example/live/stream.m3u8",
+          hlsUrl: null,
+          llhlsUrl: null,
+          ingestUrl: null,
+        },
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "cdp",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle: null,
+          lastFrameAt: 9_980,
+          lastRenderTickAt: 9_970,
+          lastVisualChangeAt: 9_960,
+          lastRecoveryAt: null,
+          recoveryCount: 0,
+          workerHeartbeatAt: 10_000,
+        },
+      },
+      localHlsManifest: {
+        updatedAt: Date.now(),
+        mediaSequence: 321,
+      },
+      bridgeStats: null,
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 10_000,
+      },
+    });
+
+    expect(payload.canonicalStatus).toMatchObject({
+      sourceReady: true,
+      canonicalTransportConnected: true,
+      canonicalPlaybackReady: true,
+      manifestStatus: "ok",
+      lastError: null,
+    });
+    expect(payload.destinations).toContainEqual(
+      expect.objectContaining({
+        id: "canonical-self-hls",
+        provider: "self_hls",
+        role: "canonical",
+        transport: "hls",
+        playbackUrl: "https://stream.example/live/stream.m3u8",
+        connected: true,
+        transportHealthy: true,
+        playbackReady: true,
+        manifestStatus: "ok",
+        lastError: null,
+      }),
+    );
+  });
 });

@@ -12,9 +12,10 @@ integrated ownership.
 - The GPU host runs the dedicated source worker service for browser capture
   and FFmpeg encode.
 - Railway runs this server package and publishes the canonical stream session.
-- Viewer delivery prefers Cloudflare Stream LL-HLS when configured.
-- Self-hosted HLS remains available for operator smoke, fallback, and
-  diagnostics.
+- Viewer delivery is selected by authority-layer provider priority.
+- Self-hosted HLS is the current canonical rail for personal staging.
+- Cloudflare Stream remains configured as a warm fallback and investigation
+  provider.
 
 This server is not the renderer of record.
 The split topology is the default operating model.
@@ -32,16 +33,23 @@ Provider-neutral delivery envs:
 
 - `STREAM_DELIVERY_MODE=self_hls|external_hls`
 - `STREAM_DELIVERY_PROVIDER`
+- `STREAM_CANONICAL_PROVIDER_PRIORITY`
+- `STREAM_FAILBACK_SOAK_MS`
 - `STREAM_INGEST_RTMPS_URL`
 - `STREAM_INGEST_STREAM_KEY`
 - `STREAM_PLAYBACK_HLS_URL`
 - `STREAM_PLAYBACK_LLHLS_URL`
+- `STREAM_EXTERNAL_DELIVERY_PROVIDER`
+- `STREAM_EXTERNAL_PLAYBACK_HLS_URL`
+- `STREAM_EXTERNAL_PLAYBACK_LLHLS_URL`
+- `STREAM_EXTERNAL_INGEST_RTMPS_URL`
+- `STREAM_CLOUDFLARE_PROBE_ONLY`
 
 Selection order for playback:
 
-1. `STREAM_PLAYBACK_LLHLS_URL`
-2. `STREAM_PLAYBACK_HLS_URL`
-3. local `/live/stream.m3u8`
+1. the active canonical destination selected from provider priority and health
+2. `STREAM_PLAYBACK_LLHLS_URL` or `STREAM_PLAYBACK_HLS_URL` for that provider
+3. local `/live/stream.m3u8` when self-hosted HLS is canonical
 
 `hls-cdn-sync.ts` is fallback/object-store sync only.
 
@@ -77,6 +85,8 @@ operator surfaces consume:
   - `mode`
   - `provider`
   - `playbackUrl`
+  - `canonicalDestination`
+  - `fallbackDestination`
 
 Phase-aware degradation can emit:
 

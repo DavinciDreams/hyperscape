@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveStreamDeliveryInfo } from "../../../src/streaming/delivery-config.js";
+import {
+  resolveExternalStreamDeliveryInfo,
+  resolveStreamDeliveryInfo,
+} from "../../../src/streaming/delivery-config.js";
 
 describe("resolveStreamDeliveryInfo", () => {
   it("does not infer external playback from ingest alone", () => {
@@ -56,6 +59,26 @@ describe("resolveStreamDeliveryInfo", () => {
       hlsUrl: null,
       llhlsUrl: null,
       ingestUrl: null,
+    });
+  });
+
+  it("preserves external playback config even when self-hls is canonical", () => {
+    const delivery = resolveExternalStreamDeliveryInfo({
+      STREAM_DELIVERY_MODE: "self_hls",
+      STREAM_PLAYBACK_URL: "https://self.example/live/stream.m3u8",
+      STREAM_PLAYBACK_HLS_URL: "https://video.example/live.m3u8",
+      STREAM_PLAYBACK_LLHLS_URL:
+        "https://video.example/live.m3u8?protocol=llhls",
+      STREAM_INGEST_RTMPS_URL: "rtmps://live.cloudflare.com:443/live",
+      STREAM_DELIVERY_PROVIDER: "cloudflare_stream",
+    });
+
+    expect(delivery).toEqual({
+      provider: "cloudflare_stream",
+      playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      hlsUrl: "https://video.example/live.m3u8",
+      llhlsUrl: "https://video.example/live.m3u8?protocol=llhls",
+      ingestUrl: "rtmps://live.cloudflare.com:443/live",
     });
   });
 });

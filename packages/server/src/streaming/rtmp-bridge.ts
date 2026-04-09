@@ -26,7 +26,8 @@ import {
   buildStreamDestinationId,
   inferStreamDeliveryTransport,
   normalizeStreamDestinationProvider,
-  resolveStreamDeliveryInfo,
+  resolveExternalStreamDeliveryInfo,
+  resolveStreamCanonicalProviderPriority,
 } from "./delivery-config.js";
 import { resolveStreamIngestSettings } from "./ingest-config.js";
 import {
@@ -431,9 +432,10 @@ export class RTMPBridge {
   private buildExternalDeliveryDestination(
     ingestUrl: string,
     streamKey: string,
+    role: "canonical" | "fallback",
   ): RTMPDestination | null {
     const ingestSettings = this.resolveIngestSettings();
-    const deliveryInfo = resolveStreamDeliveryInfo(process.env);
+    const deliveryInfo = resolveExternalStreamDeliveryInfo(process.env);
     const provider = normalizeStreamDestinationProvider(
       deliveryInfo.provider,
       "External Delivery",
@@ -441,7 +443,7 @@ export class RTMPBridge {
     const playbackUrl =
       deliveryInfo.playbackUrl ?? deliveryInfo.llhlsUrl ?? deliveryInfo.hlsUrl;
     const destinationId = buildStreamDestinationId({
-      role: "canonical",
+      role,
       provider,
       name: "External Delivery",
     });
@@ -459,7 +461,7 @@ export class RTMPBridge {
       return {
         id: destinationId,
         name: "External Delivery",
-        role: "canonical",
+        role,
         provider,
         transport: "srt",
         playbackUrl,
@@ -477,7 +479,7 @@ export class RTMPBridge {
     return {
       id: destinationId,
       name: "External Delivery",
-      role: "canonical",
+      role,
       provider,
       transport: inferStreamDeliveryTransport({
         playbackUrl,
@@ -694,6 +696,7 @@ export class RTMPBridge {
   loadDestinationsFromEnv(): void {
     // Keep any manually added destinations, just add from env
     const existingNames = new Set(this.destinations.map((d) => d.name));
+    const ingestSettings = this.resolveIngestSettings();
     const enabledDestinations = resolveEnabledStreamDestinations(
       process.env.STREAM_ENABLED_DESTINATIONS ||
         process.env.DUEL_STREAM_DESTINATIONS,
@@ -708,7 +711,16 @@ export class RTMPBridge {
       process.env.YOUTUBE_RTMP_STREAM_KEY ||
       ""
     ).trim();
-    const deliveryInfo = resolveStreamDeliveryInfo(process.env);
+    const externalDeliveryInfo = resolveExternalStreamDeliveryInfo(process.env);
+    const providerPriority = resolveStreamCanonicalProviderPriority(process.env);
+    const hasExternalDeliveryIngest =
+      ingestSettings.transport === "srt"
+        ? Boolean(
+            ingestSettings.srtUrl &&
+              ingestSettings.srtStreamId &&
+              ingestSettings.srtPassphrase,
+          )
+        : Boolean(externalDeliveryInfo.ingestUrl);
     const addDestination = (
       destination: RTMPDestination,
     ) => {
@@ -799,14 +811,13 @@ export class RTMPBridge {
       });
     }
 
-    if (
-      deliveryInfo.mode === "external_hls" &&
-      deliveryInfo.ingestUrl &&
-      !existingNames.has("External Delivery")
-    ) {
+    if (hasExternalDeliveryIngest && !existingNames.has("External Delivery")) {
+      const role =
+        providerPriority[0] === "cloudflare_stream" ? "canonical" : "fallback";
       const destination = this.buildExternalDeliveryDestination(
-        deliveryInfo.ingestUrl,
+        externalDeliveryInfo.ingestUrl ?? "",
         process.env.STREAM_INGEST_STREAM_KEY?.trim() || "",
+        role,
       );
       if (destination) {
         addDestination(destination);
