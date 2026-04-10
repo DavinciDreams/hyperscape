@@ -1639,7 +1639,7 @@ export function registerStreamingBettingRoutes(
   };
 
   const handleBettingBootstrap = async (
-    _request: FastifyRequest,
+    request: FastifyRequest,
     reply: FastifyReply,
   ) => {
     if (reply.sent || reply.raw.writableEnded || reply.raw.destroyed) {
@@ -1662,6 +1662,17 @@ export function registerStreamingBettingRoutes(
       captureBettingFrame(false) ??
       bettingReplayFrames[bettingReplayFrames.length - 1] ??
       captureBettingFrame(true);
+
+    if (!latestFrame) {
+      request.log.warn(
+        {
+          bettingSourceEpoch,
+          replayFrames: bettingReplayFrames.length,
+          bettingSequence,
+        },
+        "null_bootstrap_frame",
+      );
+    }
 
     return reply.send(buildBettingBootstrapResponse(latestFrame ?? null));
   };

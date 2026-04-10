@@ -14,7 +14,8 @@ import type {
 } from "./streaming-external-status.js";
 
 const RENDER_TICK_STALE_MS = 3_000;
-const VISUAL_CHANGE_STALE_MS = 1_000;
+const VISUAL_CHANGE_STALE_MS = 5_000;
+const VISUAL_CHANGE_GRACE_MS = 8_000;
 const MIN_CAPTURE_FPS = 24;
 const MIN_ENCODE_FPS = 24;
 
@@ -122,7 +123,22 @@ function phaseNeedsLiveRender(cycle: StreamingDuelCycle | null): boolean {
 }
 
 function phaseNeedsVisualChange(cycle: StreamingDuelCycle | null): boolean {
-  return cycle?.phase === "FIGHTING" || cycle?.phase === "RESOLUTION";
+  return (
+    cycle?.phase === "COUNTDOWN" ||
+    cycle?.phase === "FIGHTING" ||
+    cycle?.phase === "RESOLUTION"
+  );
+}
+
+function isWithinVisualChangeGraceWindow(
+  cycle: StreamingDuelCycle | null,
+  nowMs: number,
+): boolean {
+  if (!cycle || !phaseNeedsVisualChange(cycle)) {
+    return false;
+  }
+
+  return Math.max(0, nowMs - cycle.phaseStartTime) < VISUAL_CHANGE_GRACE_MS;
 }
 
 function deriveMetricsDegradedReason(params: {
@@ -152,9 +168,14 @@ function deriveMetricsDegradedReason(params: {
       return null;
     }
 
+    const withinVisualChangeGraceWindow = isWithinVisualChangeGraceWindow(
+      cycle,
+      nowMs,
+    );
     if (
-      metrics.visualChangeAgeMs == null ||
-      metrics.visualChangeAgeMs > VISUAL_CHANGE_STALE_MS
+      !withinVisualChangeGraceWindow &&
+      (metrics.visualChangeAgeMs == null ||
+        metrics.visualChangeAgeMs >= VISUAL_CHANGE_STALE_MS)
     ) {
       return "visual_change_stale";
     }
@@ -239,18 +260,6 @@ export function deriveBettingRendererHealth(
         ready: false,
         degradedReason: "renderer_health_stale",
         updatedAt,
-      };
-    }
-
-    // The visual-change hash is only a heuristic. When the worker has a fresh
-    // explicit ready=true snapshot, trust that over a lone visual hash stall.
-    if (
-      externalRendererHealth.ready &&
-      metricsReason === "visual_change_stale"
-    ) {
-      return {
-        ...externalRendererHealth,
-        updatedAt: healthSnapshotUpdatedAt,
       };
     }
 

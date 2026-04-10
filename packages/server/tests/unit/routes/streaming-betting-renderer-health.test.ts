@@ -190,9 +190,14 @@ describe("deriveBettingRendererHealth", () => {
     });
   });
 
-  it("trusts a fresh explicit ready snapshot over the visual-change heuristic alone", () => {
+  it("keeps a short grace window before treating missing visual change as stale", () => {
     const now = Date.now();
-    const health = deriveBettingRendererHealth(createCycle(), {
+    const health = deriveBettingRendererHealth(
+      createCycle({
+        phase: "COUNTDOWN",
+        phaseStartTime: now - 2_000,
+      }),
+      {
       externalStatusSnapshot: {
         destinations: [],
         stats: {},
@@ -219,7 +224,8 @@ describe("deriveBettingRendererHealth", () => {
         clientConnected: true,
         ffmpegRunning: true,
       },
-    });
+      },
+    );
 
     expect(health).toMatchObject({
       ready: true,
@@ -268,8 +274,8 @@ describe("deriveBettingRendererHealth", () => {
           captureFps: 60,
           encodeFps: 45,
           latestRenderTickAt: now,
-          latestVisualChangeAt: now - 5_000,
-          visualChangeAgeMs: 5_000,
+          latestVisualChangeAt: now - 4_900,
+          visualChangeAgeMs: 4_900,
         },
         hlsManifest: {
           updatedAt: now,
@@ -377,7 +383,9 @@ describe("deriveBettingRendererHealth", () => {
 
   it("reports stale visual output during fighting phases", () => {
     const now = Date.now();
-    const health = deriveBettingRendererHealth(createCycle(), {
+    const health = deriveBettingRendererHealth(createCycle({
+      phaseStartTime: now - 12_000,
+    }), {
       externalStatusSnapshot: {
         destinations: [],
         stats: {},

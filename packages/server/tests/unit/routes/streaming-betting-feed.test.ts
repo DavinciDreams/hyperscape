@@ -336,6 +336,26 @@ describe("streaming-betting-feed", () => {
     });
   });
 
+  it("promotes broadcast timeline phase to the top-level payload phase", () => {
+    const payload = buildBettingFeedPayload({
+      sourceEpoch: 7,
+      seq: 3,
+      emittedAt: 9_000,
+      channel: createChannel(),
+      cycle: createCycle({
+        phase: "FIGHTING",
+        phaseVersion: 5,
+        betOpenTime: 1_000,
+        betCloseTime: 2_000,
+        fightStartTime: 10_000,
+      }),
+    });
+
+    expect(payload.phase).toBe("COUNTDOWN");
+    expect(payload.broadcastTimeline.phase).toBe("COUNTDOWN");
+    expect(payload.phaseVersion).toBe(5);
+  });
+
   it("projects a bettor-facing timeline against the active canonical delay", () => {
     const payload = buildBettingFeedPayload({
       sourceEpoch: 7,
@@ -353,7 +373,7 @@ describe("streaming-betting-feed", () => {
       }),
     });
 
-    expect(payload.phase).toBe("FIGHTING");
+    expect(payload.phase).toBe("COUNTDOWN");
     expect(payload.broadcastTimeline).toEqual({
       phase: "COUNTDOWN",
       betOpenTime: 5_000,
@@ -382,7 +402,7 @@ describe("streaming-betting-feed", () => {
       }),
     });
 
-    expect(payload.phase).toBe("ANNOUNCEMENT");
+    expect(payload.phase).toBe("IDLE");
     expect(payload.broadcastTimeline).toEqual({
       phase: "IDLE",
       betOpenTime: 5_000,

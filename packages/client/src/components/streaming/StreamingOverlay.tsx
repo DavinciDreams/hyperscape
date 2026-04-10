@@ -237,8 +237,13 @@ export function StreamingOverlay({
   const matchupLine =
     agent1 && agent2 ? `${agent1.name} vs ${agent2.name}` : null;
 
+  const debugCombatLogEnabled =
+    import.meta.env.VITE_STREAMING_DEBUG_COMBAT_LOG === "1";
   const showCombatLog =
-    phase === "FIGHTING" || phase === "COUNTDOWN" || phase === "RESOLUTION";
+    debugCombatLogEnabled &&
+    (phase === "FIGHTING" ||
+      phase === "COUNTDOWN" ||
+      phase === "RESOLUTION");
 
   return (
     <div className="streaming-overlay-root" style={styles.overlay}>

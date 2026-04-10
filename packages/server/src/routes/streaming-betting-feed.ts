@@ -370,7 +370,7 @@ export function buildBettingFeedPayload(params: {
     emittedAt: params.emittedAt,
     duelId: cycle?.duelId ?? null,
     duelKey: cycle?.duelKeyHex ?? null,
-    phase: cycle?.phase ?? null,
+    phase: broadcastTimeline.phase ?? cycle?.phase ?? null,
     phaseVersion: cycle?.phaseVersion ?? 0,
     broadcastTimeline,
     betOpenTime: cycle?.betOpenTime ?? null,
