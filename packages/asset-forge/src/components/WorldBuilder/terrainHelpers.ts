@@ -12,9 +12,12 @@ import {
 import {
   calculateRoadInfluence,
   getRoadHeightAtPoint,
+  getRoadHeightAndInfluence,
+  computeRoadBounds,
   ROAD_BLEND_WIDTH,
   ROAD_MINIMUM_WIDTH,
   type RoadPathLike,
+  type RoadBounds,
   calculateMineInfluenceAtPoint,
   getMineEffectiveRadius,
 } from "@hyperscape/shared/world";
@@ -84,6 +87,19 @@ const WATER_OPACITY = 0.75;
 const ROAD_CENTER_COLOR = new THREE.Color(0.4, 0.333, 0.267); // #665544 — compacted dirt
 const ROAD_EDGE_COLOR = new THREE.Color(0.349, 0.29, 0.239); // #594a3d — road edge
 const ROAD_MAIN_COLOR = new THREE.Color(0.32, 0.24, 0.18); // Darker main roads
+
+// Biome name to ID mapping (matching game's shader expectations) — hoisted to module scope
+const BIOME_NAME_TO_ID: Record<string, number> = {
+  plains: 0,
+  forest: 1,
+  valley: 2,
+  desert: 3,
+  tundra: 4,
+  swamp: 5,
+  mountains: 6,
+  lakes: 7,
+  canyon: 8,
+};
 
 // ============== HELPER FUNCTIONS ==============
 
@@ -410,24 +426,61 @@ export function generateTileGeometry(
   // so we need to offset our tile coordinates to be centered around the world center
   const worldCenterOffset = (worldSizeTiles * tileSize) / 2;
 
-  // Biome name to ID mapping (matching game's shader expectations)
-  const biomeNameToId: Record<string, number> = {
-    plains: 0,
-    forest: 1,
-    valley: 2,
-    desert: 3,
-    tundra: 4,
-    swamp: 5,
-    mountains: 6,
-    lakes: 7,
-    canyon: 8,
-  };
-
   // PlaneGeometry is centered at origin, so vertices range from -tileSize/2 to +tileSize/2
   // We need to offset by half a tile to align with the tile grid system where:
   // - Tile (0,0) covers world coords (0, 0) to (tileSize, tileSize)
   // - In terrain generator coords: (-worldCenterOffset, -worldCenterOffset) to (-worldCenterOffset + tileSize, ...)
   const halfTileSize = tileSize / 2;
+
+  // ---- Phase 1B: Spatial pre-filtering for roads per tile ----
+  // Compute tile AABB in world-space and filter roads whose bounding box overlaps.
+  // Most roads are nowhere near the current tile, so this avoids iterating all segments.
+  const tileWorldMinX = tileX * tileSize - worldCenterOffset;
+  const tileWorldMaxX = tileWorldMinX + tileSize;
+  const tileWorldMinZ = tileZ * tileSize - worldCenterOffset;
+  const tileWorldMaxZ = tileWorldMinZ + tileSize;
+
+  let tileRoads: ReadonlyArray<RoadPathLike> | undefined;
+  if (roads && roads.length > 0) {
+    const filtered: RoadPathLike[] = [];
+    for (const road of roads) {
+      if (road.path.length < 2) continue;
+      const bounds = computeRoadBounds(road);
+      // AABB overlap test
+      if (
+        bounds.maxX < tileWorldMinX ||
+        bounds.minX > tileWorldMaxX ||
+        bounds.maxZ < tileWorldMinZ ||
+        bounds.minZ > tileWorldMaxZ
+      )
+        continue;
+      filtered.push(road);
+    }
+    if (filtered.length > 0) tileRoads = filtered;
+  }
+
+  // ---- Phase 1C: Pre-compute squared radii for town/mine rejection ----
+  type TownFlattenPrecomputed = TownFlattenZone & {
+    outerRadiusSq: number;
+    innerRadiusSq: number;
+  };
+  let precomputedTowns: TownFlattenPrecomputed[] | undefined;
+  if (townFlattenZones && townFlattenZones.length > 0) {
+    precomputedTowns = townFlattenZones.map((tz) => ({
+      ...tz,
+      outerRadiusSq: tz.outerRadius * tz.outerRadius,
+      innerRadiusSq: tz.innerRadius * tz.innerRadius,
+    }));
+  }
+
+  type MinePrecomputed = NonNullable<typeof mines>[number] & { maxRSq: number };
+  let precomputedMines: MinePrecomputed[] | undefined;
+  if (mines && mines.length > 0) {
+    precomputedMines = mines.map((m) => ({
+      ...m,
+      maxRSq: m.radius * 1.5 * (m.radius * 1.5),
+    }));
+  }
 
   for (let i = 0; i < positions.count; i++) {
     const localX = positions.getX(i);
@@ -446,17 +499,20 @@ export function generateTileGeometry(
     // smooth hermite blend back to natural terrain at outerRadius
     // Track how much this vertex is influenced by town flattening (0 = none, 1 = fully flat)
     let townFlattenInfluence = 0;
-    if (townFlattenZones && townFlattenZones.length > 0) {
-      for (const tz of townFlattenZones) {
+    if (precomputedTowns) {
+      for (const tz of precomputedTowns) {
         const dx = worldX - tz.x;
         const dz = worldZ - tz.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist >= tz.outerRadius) continue;
-        if (dist <= tz.innerRadius) {
+        const distSq = dx * dx + dz * dz;
+        // Squared distance rejection — avoid sqrt for points clearly outside
+        if (distSq >= tz.outerRadiusSq) continue;
+        if (distSq <= tz.innerRadiusSq) {
           // Fully flat at town center height
           height = tz.centerHeight;
           townFlattenInfluence = 1;
         } else {
+          // Only compute sqrt when inside the blend zone
+          const dist = Math.sqrt(distSq);
           // Smooth blend: 0 at innerRadius (full flatten) → 1 at outerRadius (natural)
           const t = (dist - tz.innerRadius) / (tz.outerRadius - tz.innerRadius);
           // Hermite smoothstep for natural-looking ramp
@@ -468,42 +524,39 @@ export function generateTileGeometry(
       }
     }
 
-    // Flatten terrain under roads: blend vertex height toward the
-    // interpolated road path height based on road influence.
-    // This makes roads sit flat on the terrain instead of following
-    // every bump and ridge.
-    // Skip inside town flatten zones — terrain is already flat there, and road
-    // path Y values reflect raw (unflattened) terrain which would carve trenches.
-    if (roads && roads.length > 0 && townFlattenInfluence < 1) {
-      const roadInfo = getRoadHeightAtPoint(worldX, worldZ, roads);
-      if (roadInfo && roadInfo.influence > 0) {
+    // ---- Phase 1A: Merged road height + influence in single pass ----
+    // Flatten terrain under roads AND compute shader influence attribute together.
+    let roadInfluenceValue = 0;
+    if (tileRoads && townFlattenInfluence < 1) {
+      const roadResult = getRoadHeightAndInfluence(worldX, worldZ, tileRoads);
+      roadInfluenceValue = roadResult.influence;
+      if (roadResult.heightInfluence > 0) {
         // Road path height + small offset so road sits slightly above terrain
-        const targetHeight = roadInfo.height + 0.1;
+        const targetHeight = roadResult.height + 0.1;
         // Reduce road influence proportionally to town flatten influence
         const effectiveInfluence =
-          roadInfo.influence * (1 - townFlattenInfluence);
+          roadResult.heightInfluence * (1 - townFlattenInfluence);
         height = height + (targetHeight - height) * effectiveInfluence;
       }
+    } else if (tileRoads) {
+      // Inside fully-flat town zone — still need influence for shader coloring
+      const roadResult = getRoadHeightAndInfluence(worldX, worldZ, tileRoads);
+      roadInfluenceValue = roadResult.influence;
     }
 
     // RuneScape-style mine depression: gentle, shallow bowl that blends
     // smoothly into the surrounding terrain. No rim or steep walls — just
     // a subtle dip where mining has worn the ground down.
-    //
-    // Profile (cross-section, exaggerated):
-    //  ----__                          __----
-    //        \__                    __/
-    //           \__________________/
-    //              gentle bowl (~1.5m)
-    if (mines && mines.length > 0 && townFlattenInfluence < 1) {
-      for (const mine of mines) {
+    if (precomputedMines && townFlattenInfluence < 1) {
+      for (const mine of precomputedMines) {
         const dx = worldX - mine.position.x;
         const dz = worldZ - mine.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
+        const distSq = dx * dx + dz * dz;
 
-        // Quick AABB reject
-        const maxR = mine.radius * 1.5;
-        if (dist >= maxR) continue;
+        // Quick squared-distance reject (avoids sqrt)
+        if (distSq >= mine.maxRSq) continue;
+
+        const dist = Math.sqrt(distSq);
 
         // Organic boundary: effective radius varies by angle
         const angle = Math.atan2(dz, dx);
@@ -604,13 +657,12 @@ export function generateTileGeometry(
     colors[i * 3 + 2] = b;
 
     // Store biome ID and per-biome weights for shader
-    biomeIds[i] = biomeNameToId[query.biome] ?? 0;
+    biomeIds[i] = BIOME_NAME_TO_ID[query.biome] ?? 0;
     forestWeights[i] = query.biomeForestWeight ?? 0;
     canyonWeights[i] = query.biomeCanyonWeight ?? 0;
 
-    // Road influence for terrain shader — the game shader reads this attribute
-    // to render road coloring directly on the terrain surface.
-    roadInfluences[i] = calculateRoadInfluenceAtPoint(worldX, worldZ, roads);
+    // Road influence already computed in merged pass above
+    roadInfluences[i] = roadInfluenceValue;
 
     // Mine influence for terrain shader — rocky floor color overlay
     const mineResult = calculateMineInfluenceAtPoint(worldX, worldZ, mines);

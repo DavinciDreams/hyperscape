@@ -243,6 +243,8 @@ export interface WorldStudioState {
   gameEntities: GameEntityData | null;
   /** Wizard preview data for 3D viewport ghost overlay */
   wizardPreview: WizardPreviewData | null;
+  /** Live terrain config for real-time slider updates (Phase 1) */
+  liveTerrainConfig: WorldCreationConfig | null;
 }
 
 // ============== ACTION TYPES ==============
@@ -347,6 +349,7 @@ export type StudioSpecificAction =
     }
   | { type: "UNDO_LAST_BRUSH_STROKE"; brushType: BrushType }
   | { type: "CLEAR_BRUSH_OVERLAYS"; brushType?: BrushType }
+  | { type: "RESTORE_BRUSH_OVERLAYS"; overlays: BrushOverlays }
 
   // Extended layer entity actions — POIs
   | { type: "ADD_POI"; poi: PlacedPOI }
@@ -532,8 +535,22 @@ export type StudioSpecificAction =
       type: "SET_FOUNDATION_ROADS";
       roads: GeneratedRoad[];
     }
+  // Replace foundation towns + buildings (selective regeneration)
+  | {
+      type: "SET_FOUNDATION_TOWNS";
+      towns: GeneratedTown[];
+      buildings: GeneratedBuilding[];
+    }
+  // Update foundation config without changing towns/roads (selective regeneration)
+  | {
+      type: "SET_FOUNDATION_CONFIG";
+      config: WorldCreationConfig;
+    }
   // Wizard preview overlay
   | { type: "SET_WIZARD_PREVIEW"; preview: WizardPreviewData }
+  // Live terrain config for real-time slider updates (Phase 1)
+  | { type: "SET_LIVE_TERRAIN_CONFIG"; config: WorldCreationConfig }
+  | { type: "CLEAR_LIVE_TERRAIN_CONFIG" }
   | { type: "CLEAR_WIZARD_PREVIEW" };
 
 /** Union of all world builder + studio-specific actions */
@@ -583,6 +600,32 @@ export interface ViewportCallbacks {
   ) => void;
   /** Show or hide the decorative instanced vegetation layer. */
   setVegetationVisible?: (visible: boolean) => void;
+  /** Get the current terrain querier function (for heightmap export). */
+  getTerrainQuerier?: () =>
+    | ((
+        worldX: number,
+        worldZ: number,
+      ) => {
+        height: number;
+        biome: string;
+        biomeForestWeight?: number;
+        biomeCanyonWeight?: number;
+      })
+    | null;
+  /** Set an imported heightmap querier that overrides procedural terrain. */
+  setImportedQuerier?: (
+    querier:
+      | ((
+          worldX: number,
+          worldZ: number,
+        ) => {
+          height: number;
+          biome: string;
+          biomeForestWeight?: number;
+          biomeCanyonWeight?: number;
+        })
+      | null,
+  ) => void;
 }
 
 // ============== INITIAL STATE ==============
@@ -630,6 +673,7 @@ export const worldStudioInitialState: WorldStudioState = {
   manifestOverrides: EMPTY_MANIFEST_OVERRIDES,
   gameEntities: null,
   wizardPreview: null,
+  liveTerrainConfig: null,
 };
 
 // Re-export commonly-used types from WorldBuilder for convenience

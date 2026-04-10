@@ -23,10 +23,13 @@ export function useAutoSave(projectId: string, enabled: boolean) {
   const isSaving = state.persistence.isSaving;
   const world = state.builder.editing.world;
   const manifestOverrides = state.manifestOverrides;
+  const brushOverlays = state.brushOverlays;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingRef = useRef(false);
   const manifestOverridesRef = useRef(manifestOverrides);
   manifestOverridesRef.current = manifestOverrides;
+  const brushOverlaysRef = useRef(brushOverlays);
+  brushOverlaysRef.current = brushOverlays;
 
   const doSave = useCallback(async () => {
     if (!world || isSavingRef.current) return;
@@ -34,7 +37,15 @@ export function useAutoSave(projectId: string, enabled: boolean) {
     actions.saveStart();
 
     try {
-      const serialized = serializeWorld(world);
+      const serialized = serializeWorld(world) as unknown as Record<
+        string,
+        unknown
+      >;
+      // Persist brush overlays (terrain sculpts, biome paints) alongside world data
+      const bo = brushOverlaysRef.current;
+      if (bo.terrainSculpts.length > 0 || bo.biomePaints.length > 0) {
+        serialized.brushOverlays = bo;
+      }
       const manifestSnapshot = serializeManifestOverrides(
         manifestOverridesRef.current,
       );

@@ -48,6 +48,8 @@ import type {
   HierarchyNode,
   WorldPosition,
   GeneratedRoad,
+  GeneratedTown,
+  GeneratedBuilding,
 } from "../WorldBuilder/types";
 
 import type {
@@ -81,6 +83,7 @@ import type {
   TerrainSculptStroke,
   BiomePaintStroke,
   VegetationPaintStroke,
+  BrushOverlays,
   MusicZone,
   AmbientZone,
   SFXTrigger,
@@ -303,6 +306,7 @@ interface WorldStudioContextValue {
     ) => void;
     undoLastBrushStroke: (brushType: BrushType) => void;
     clearBrushOverlays: (brushType?: BrushType) => void;
+    restoreBrushOverlays: (overlays: BrushOverlays) => void;
 
     // Studio-specific: Placement
     startPlacement: (
@@ -405,6 +409,11 @@ interface WorldStudioContextValue {
       }>,
     ) => void;
     setFoundationRoads: (roads: GeneratedRoad[]) => void;
+    setFoundationTowns: (
+      towns: GeneratedTown[],
+      buildings: GeneratedBuilding[],
+    ) => void;
+    setFoundationConfig: (config: WorldCreationConfig) => void;
 
     // Studio-specific: Danger Sources
     addDangerSource: (dangerSource: PlacedDangerSource) => void;
@@ -504,6 +513,9 @@ interface WorldStudioContextValue {
     // Wizard preview
     setWizardPreview: (preview: WizardPreviewData) => void;
     clearWizardPreview: () => void;
+    // Live terrain config for real-time slider updates
+    setLiveTerrainConfig: (config: WorldCreationConfig) => void;
+    clearLiveTerrainConfig: () => void;
     // Manifest overrides
     setManifestOverride: (
       overrideType: keyof ManifestOverrides,
@@ -747,6 +759,8 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "UNDO_LAST_BRUSH_STROKE", brushType }),
       clearBrushOverlays: (brushType?: BrushType) =>
         dispatch({ type: "CLEAR_BRUSH_OVERLAYS", brushType }),
+      restoreBrushOverlays: (overlays: BrushOverlays) =>
+        dispatch({ type: "RESTORE_BRUSH_OVERLAYS", overlays }),
 
       // Studio-specific: Placement
       startPlacement: (
@@ -879,6 +893,12 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       // Foundation roads
       setFoundationRoads: (roads: GeneratedRoad[]) =>
         dispatch({ type: "SET_FOUNDATION_ROADS", roads }),
+      setFoundationTowns: (
+        towns: GeneratedTown[],
+        buildings: GeneratedBuilding[],
+      ) => dispatch({ type: "SET_FOUNDATION_TOWNS", towns, buildings }),
+      setFoundationConfig: (config: WorldCreationConfig) =>
+        dispatch({ type: "SET_FOUNDATION_CONFIG", config }),
 
       // Studio-specific: Extended layers — Danger Sources
       addDangerSource: (dangerSource: PlacedDangerSource) =>
@@ -1029,6 +1049,11 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       setWizardPreview: (preview: WizardPreviewData) =>
         dispatch({ type: "SET_WIZARD_PREVIEW", preview }),
       clearWizardPreview: () => dispatch({ type: "CLEAR_WIZARD_PREVIEW" }),
+      // Live terrain config for real-time slider updates
+      setLiveTerrainConfig: (config: WorldCreationConfig) =>
+        dispatch({ type: "SET_LIVE_TERRAIN_CONFIG", config }),
+      clearLiveTerrainConfig: () =>
+        dispatch({ type: "CLEAR_LIVE_TERRAIN_CONFIG" }),
       // Manifest overrides
       setManifestOverride: (
         overrideType: keyof ManifestOverrides,

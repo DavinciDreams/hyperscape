@@ -63,7 +63,10 @@ export {
 export {
   calculateRoadInfluence,
   getRoadHeightAtPoint,
+  getRoadHeightAndInfluence,
+  computeRoadBounds,
   type RoadPathLike,
+  type RoadBounds,
   ROAD_BLEND_WIDTH,
   ROAD_MINIMUM_WIDTH,
 } from "./road-influence";

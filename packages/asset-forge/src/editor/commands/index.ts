@@ -1,5 +1,6 @@
 export {
   type Command,
+  type UndoChannel,
   type HistoryChangeListener,
   type MoveEntityTarget,
   type PlaceEntityTarget,

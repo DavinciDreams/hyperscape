@@ -186,6 +186,29 @@ export function useProjectLoader(projectId: string) {
         actions.switchToEditing();
         actions.loadSuccess();
 
+        // Restore brush overlays (terrain sculpts, biome paints) if saved
+        const savedBrushOverlays = (rawData as Record<string, unknown>)
+          ?.brushOverlays as
+          | {
+              terrainSculpts?: unknown[];
+              biomePaints?: unknown[];
+              vegetationPaints?: unknown[];
+              tileCollisions?: unknown[];
+            }
+          | undefined;
+        if (
+          savedBrushOverlays &&
+          typeof savedBrushOverlays === "object" &&
+          (savedBrushOverlays.terrainSculpts?.length ||
+            savedBrushOverlays.biomePaints?.length)
+        ) {
+          actions.restoreBrushOverlays(
+            savedBrushOverlays as Parameters<
+              typeof actions.restoreBrushOverlays
+            >[0],
+          );
+        }
+
         // Restore manifest overrides from snapshot
         if (project.manifestSnapshot) {
           try {

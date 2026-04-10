@@ -6,6 +6,10 @@
  * generation parameters with live preview and apply functionality.
  */
 
+import type {
+  TerrainNoiseConfig,
+  NoiseLayerConfig,
+} from "@hyperscape/procgen/terrain";
 import { TERRAIN_PRESETS } from "@hyperscape/procgen/terrain";
 import {
   Mountain,
@@ -21,8 +25,19 @@ import {
   Waves,
   TreePine,
   RotateCcw,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Upload,
 } from "lucide-react";
-import React, { useState, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+} from "react";
 
 import type {
   WorldCreationConfig,
@@ -33,9 +48,21 @@ import type {
   VegetationConfig,
 } from "../../WorldBuilder/types";
 import { DEFAULT_VEGETATION_CONFIG } from "../../WorldBuilder/types";
+import {
+  generateTerrainAndBiomes,
+  generateTownsAndBuildings,
+  generateRoadsForTowns,
+} from "../../WorldBuilder/worldGeneration";
 import { useWorldGenerationWorker } from "../hooks/useWorldGenerationWorker";
 import { useWorldStudio } from "../WorldStudioContext";
 
+import {
+  exportHeightmap,
+  downloadHeightmap,
+  loadHeightmapFromFile,
+  loadHeightmapMetadata,
+  createHeightmapQuerier,
+} from "../utils/heightmapIO";
 import { ComparisonOverlay } from "./ComparisonOverlay";
 import {
   PropertySection,
@@ -67,6 +94,7 @@ const BIOME_COLORS: Record<string, string> = {
 // ============== PRESET ICON MAP ==============
 
 const PRESET_ICONS: Record<string, string> = {
+  "demo-island": "🎮",
   "small-island": "🏝️",
   "large-island": "🌍",
   archipelago: "🗺️",
@@ -149,6 +177,7 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
     null,
   );
   const [showNoiseViz, setShowNoiseViz] = useState(false);
+  const [showAdvancedNoise, setShowAdvancedNoise] = useState(false);
   const [activeBiomeTab, setActiveBiomeTab] = useState<string>("forest");
   const [previewStats, setPreviewStats] = useState<{
     tiles: number;
@@ -163,6 +192,24 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
   // Use world's current config or local override
   const config = localConfig ?? world?.foundation.config ?? null;
   const hasLocalChanges = localConfig !== null;
+
+  // Debounced live config dispatch — updates viewport terrain in ~150ms
+  const liveConfigTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dispatchLiveConfig = useCallback(
+    (cfg: WorldCreationConfig) => {
+      if (liveConfigTimerRef.current) clearTimeout(liveConfigTimerRef.current);
+      liveConfigTimerRef.current = setTimeout(() => {
+        actions.setLiveTerrainConfig(cfg);
+      }, 150);
+    },
+    [actions],
+  );
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (liveConfigTimerRef.current) clearTimeout(liveConfigTimerRef.current);
+    };
+  }, []);
 
   // Compute world stats from current foundation
   const worldStats = useMemo(() => {
@@ -203,15 +250,19 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
 
   const handleConfigChange = useCallback(
     (partial: Partial<WorldCreationConfig>) => {
+      let merged: WorldCreationConfig | null = null;
       setLocalConfig((prev) => {
         const base = prev ?? world?.foundation.config;
         if (!base) return null;
-        return { ...base, ...partial };
+        merged = { ...base, ...partial };
+        return merged;
       });
+      // Dispatch live config so the viewport updates terrain in real-time
+      if (merged) dispatchLiveConfig(merged);
       // Clear preview stats when config changes
       setPreviewStats(null);
     },
-    [world?.foundation.config],
+    [world?.foundation.config, dispatchLiveConfig],
   );
 
   const handleTerrainChange = useCallback(
@@ -227,6 +278,20 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
               waterThreshold: 5.4,
             }),
           ...partial,
+        },
+      });
+    },
+    [handleConfigChange, localConfig, world],
+  );
+
+  const handleNoiseChannelChange = useCallback(
+    (channel: keyof TerrainNoiseConfig, partial: Partial<NoiseLayerConfig>) => {
+      const currentNoise = localConfig?.noise ?? world?.foundation.config.noise;
+      if (!currentNoise) return;
+      handleConfigChange({
+        noise: {
+          ...currentNoise,
+          [channel]: { ...currentNoise[channel], ...partial },
         },
       });
     },
@@ -439,7 +504,8 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
     setOriginalWorld(null);
     setPreviewStats(null);
     setLocalConfig(null);
-  }, []);
+    actions.clearLiveTerrainConfig();
+  }, [actions]);
 
   const handleRejectPreview = useCallback(() => {
     // Revert to the original world
@@ -448,6 +514,7 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
     }
     setOriginalWorld(null);
     setPreviewStats(null);
+    actions.clearLiveTerrainConfig();
   }, [originalWorld, actions]);
 
   const handleRegenerate = useCallback(async () => {
@@ -460,12 +527,142 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
       setLocalConfig(null);
       setPreviewStats(null);
       setOriginalWorld(null);
+      actions.clearLiveTerrainConfig();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Regeneration failed");
     } finally {
       setIsGenerating(false);
     }
   }, [config, actions, generateWorld]);
+
+  // Selective regeneration: towns only (keeps terrain and roads)
+  const handleRegenerateTowns = useCallback(async () => {
+    if (!config || !world) return;
+    setIsGenerating(true);
+    setError(null);
+    try {
+      const { terrainGenerator, biomes } = generateTerrainAndBiomes(config);
+      const { towns, buildings } = generateTownsAndBuildings(
+        config,
+        terrainGenerator,
+        biomes,
+      );
+      actions.setFoundationTowns(towns, buildings);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Town regeneration failed");
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [config, world, actions]);
+
+  // Selective regeneration: roads only (keeps terrain and towns)
+  const handleRegenerateRoads = useCallback(async () => {
+    if (!config || !world) return;
+    setIsGenerating(true);
+    setError(null);
+    try {
+      const { terrainGenerator, biomes } = generateTerrainAndBiomes(config);
+      // Use existing towns, regenerate just roads
+      const { rawTowns } = generateTownsAndBuildings(
+        config,
+        terrainGenerator,
+        biomes,
+      );
+      const roads = generateRoadsForTowns(
+        config,
+        terrainGenerator,
+        world.foundation.towns,
+        rawTowns,
+      );
+      actions.setFoundationRoads(roads);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Road regeneration failed");
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [config, world, actions]);
+
+  // Heightmap export
+  const [isExporting, setIsExporting] = useState(false);
+  const handleExportHeightmap = useCallback(async () => {
+    if (!config) return;
+    const querier = viewportRef.current.getTerrainQuerier?.();
+    if (!querier) {
+      setError("Terrain not ready — wait for tiles to load");
+      return;
+    }
+    setIsExporting(true);
+    setError(null);
+    try {
+      const result = await exportHeightmap(
+        querier,
+        config.terrain.worldSize,
+        config.terrain.tileSize,
+        config.terrain.maxHeight,
+        config.terrain.waterThreshold,
+      );
+      downloadHeightmap(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Heightmap export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [config, viewportRef]);
+
+  // Heightmap import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const metaInputRef = useRef<HTMLInputElement>(null);
+  const [pendingHeightmap, setPendingHeightmap] = useState<{
+    heights: Float32Array;
+    width: number;
+    height: number;
+  } | null>(null);
+
+  const handleImportPng = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const data = await loadHeightmapFromFile(file);
+        setPendingHeightmap(data);
+        // Now request the metadata JSON
+        metaInputRef.current?.click();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to load heightmap PNG",
+        );
+      }
+      // Reset input so same file can be re-selected
+      e.target.value = "";
+    },
+    [],
+  );
+
+  const handleImportMeta = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !pendingHeightmap) return;
+      try {
+        const meta = await loadHeightmapMetadata(file);
+        const querier = createHeightmapQuerier(
+          pendingHeightmap.heights,
+          pendingHeightmap.width,
+          pendingHeightmap.height,
+          meta,
+        );
+        viewportRef.current.setImportedQuerier?.(querier);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load heightmap metadata",
+        );
+      }
+      setPendingHeightmap(null);
+      e.target.value = "";
+    },
+    [pendingHeightmap, viewportRef],
+  );
 
   if (!world || !config) {
     return (
@@ -475,7 +672,8 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
     );
   }
 
-  const busy = isGenerating || isPreviewing || isRegeneratingTrees;
+  const busy =
+    isGenerating || isPreviewing || isRegeneratingTrees || isExporting;
 
   return (
     <div className="flex flex-col h-full">
@@ -586,6 +784,42 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
             )}
           </div>
 
+          {/* Game Mode / Creative Mode toggle */}
+          <div className="space-y-1">
+            <label className="text-xs text-text-secondary">
+              Terrain Pipeline
+            </label>
+            <div className="flex gap-1 rounded border border-border-primary overflow-hidden">
+              <button
+                className={`flex-1 py-1 text-[10px] font-medium transition-colors ${
+                  config.useGamePipeline !== false
+                    ? "bg-primary/20 text-primary border-r border-primary/30"
+                    : "bg-bg-tertiary text-text-tertiary hover:text-text-secondary border-r border-border-primary"
+                }`}
+                onClick={() => handleConfigChange({ useGamePipeline: true })}
+                disabled={busy}
+              >
+                Game Mode
+              </button>
+              <button
+                className={`flex-1 py-1 text-[10px] font-medium transition-colors ${
+                  config.useGamePipeline === false
+                    ? "bg-amber-500/20 text-amber-400"
+                    : "bg-bg-tertiary text-text-tertiary hover:text-text-secondary"
+                }`}
+                onClick={() => handleConfigChange({ useGamePipeline: false })}
+                disabled={busy}
+              >
+                Creative Mode
+              </button>
+            </div>
+            <p className="text-[9px] text-text-tertiary leading-tight">
+              {config.useGamePipeline !== false
+                ? "Terrain matches the live game exactly."
+                : "Experimental terrain with full noise control. May not match game."}
+            </p>
+          </div>
+
           {/* Seed with randomize */}
           <div className="space-y-0.5">
             <label className="text-xs text-text-secondary">Seed</label>
@@ -659,6 +893,123 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
             value={showNoiseViz}
             onChange={setShowNoiseViz}
           />
+        </PropertySection>
+
+        {/* ============== TERRAIN SHAPE (NOISE CHANNELS) ============== */}
+        <PropertySection
+          title="Terrain Shape"
+          icon={<SlidersHorizontal size={10} />}
+          defaultOpen={false}
+        >
+          <p className="text-[10px] text-text-tertiary leading-tight mb-2">
+            Control how bumpy or flat the terrain is. Weight = strength of each
+            noise layer in the final heightmap.
+          </p>
+
+          {/* Channel weight sliders */}
+          {(
+            [
+              {
+                key: "continent",
+                label: "Continent",
+                hint: "Broad landmass shape",
+              },
+              { key: "ridge", label: "Ridges", hint: "Sharp mountain ridges" },
+              { key: "hill", label: "Hills", hint: "Rolling hills" },
+              { key: "erosion", label: "Erosion", hint: "Valley carving" },
+              { key: "detail", label: "Detail", hint: "Fine micro-variation" },
+            ] as const
+          ).map(({ key, label, hint }) => (
+            <div key={key}>
+              <SliderInput
+                label={`${label} Weight`}
+                value={config.noise[key].weight}
+                onChange={(v) => handleNoiseChannelChange(key, { weight: v })}
+                min={0}
+                max={0.6}
+                step={0.01}
+                hint={hint}
+              />
+
+              {/* Advanced controls per channel */}
+              {showAdvancedNoise && (
+                <div className="ml-3 pl-2 border-l border-border-primary/50 space-y-1 mb-2">
+                  <SliderInput
+                    label="Scale"
+                    value={config.noise[key].scale}
+                    onChange={(v) =>
+                      handleNoiseChannelChange(key, { scale: v })
+                    }
+                    min={0.0001}
+                    max={0.06}
+                    step={0.0001}
+                    hint="Frequency — lower = broader features"
+                  />
+                  {config.noise[key].octaves !== undefined && (
+                    <SliderInput
+                      label="Octaves"
+                      value={config.noise[key].octaves ?? 4}
+                      onChange={(v) =>
+                        handleNoiseChannelChange(key, { octaves: v })
+                      }
+                      min={1}
+                      max={8}
+                      step={1}
+                      hint="Layers of detail"
+                    />
+                  )}
+                  {config.noise[key].persistence !== undefined && (
+                    <SliderInput
+                      label="Persistence"
+                      value={config.noise[key].persistence ?? 0.5}
+                      onChange={(v) =>
+                        handleNoiseChannelChange(key, { persistence: v })
+                      }
+                      min={0.1}
+                      max={0.9}
+                      step={0.05}
+                      hint="How much each octave contributes"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Total weight indicator */}
+          <div className="flex items-center justify-between px-1 py-1.5 rounded bg-bg-tertiary/30 mt-1">
+            <span className="text-[10px] text-text-tertiary">Total Weight</span>
+            <span
+              className={`text-[10px] font-mono font-semibold ${(() => {
+                const total = Object.values(config.noise).reduce(
+                  (sum: number, ch: NoiseLayerConfig) => sum + ch.weight,
+                  0,
+                );
+                return total > 0.8 ? "text-amber-400" : "text-text-secondary";
+              })()}`}
+            >
+              {Object.values(config.noise)
+                .reduce(
+                  (sum: number, ch: NoiseLayerConfig) => sum + ch.weight,
+                  0,
+                )
+                .toFixed(2)}
+            </span>
+          </div>
+
+          {/* Advanced toggle */}
+          <button
+            className="flex items-center gap-1 text-[10px] text-text-tertiary hover:text-text-secondary transition-colors mt-1"
+            onClick={() => setShowAdvancedNoise((p) => !p)}
+          >
+            {showAdvancedNoise ? (
+              <ChevronDown size={10} />
+            ) : (
+              <ChevronRight size={10} />
+            )}
+            {showAdvancedNoise ? "Hide" : "Show"} advanced (scale, octaves,
+            persistence)
+          </button>
         </PropertySection>
 
         {/* ============== BIOMES SECTION ============== */}
@@ -915,6 +1266,16 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
               <span className="text-purple-400">Town</span>
             </div>
           </div>
+
+          {/* Regenerate towns only */}
+          <button
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 mt-2 text-[10px] font-medium rounded border border-border-primary bg-bg-tertiary text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors disabled:opacity-40"
+            onClick={handleRegenerateTowns}
+            disabled={busy}
+          >
+            <RefreshCw size={10} />
+            Regenerate Towns
+          </button>
         </PropertySection>
 
         {/* ============== ROADS SECTION ============== */}
@@ -973,6 +1334,16 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
             step={10}
             hint="Pathfinding penalty for crossing water"
           />
+
+          {/* Regenerate roads only */}
+          <button
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 mt-2 text-[10px] font-medium rounded border border-border-primary bg-bg-tertiary text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors disabled:opacity-40"
+            onClick={handleRegenerateRoads}
+            disabled={busy}
+          >
+            <RefreshCw size={10} />
+            Regenerate Roads
+          </button>
         </PropertySection>
 
         {/* ============== ISLAND & COASTLINE SECTION ============== */}
@@ -1306,6 +1677,70 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
             <p className="text-[9px] text-text-tertiary mt-1 text-center">
               Trees only — terrain is not affected.
             </p>
+          </div>
+        </PropertySection>
+
+        {/* ============== HEIGHTMAP SECTION ============== */}
+        <PropertySection
+          title="Heightmap"
+          icon={<Layers size={10} />}
+          defaultOpen={false}
+        >
+          <div className="space-y-2">
+            <p className="text-[9px] text-text-tertiary leading-relaxed">
+              Export terrain as a 16-bit PNG heightmap for editing in external
+              tools (World Machine, Gaea, Photoshop), then re-import.
+            </p>
+
+            <button
+              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-medium rounded border border-border-primary bg-bg-tertiary text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors disabled:opacity-40"
+              onClick={handleExportHeightmap}
+              disabled={busy || isExporting}
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 size={10} className="animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download size={10} />
+                  Export Heightmap
+                </>
+              )}
+            </button>
+
+            <button
+              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-medium rounded border border-border-primary bg-bg-tertiary text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors disabled:opacity-40"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy}
+            >
+              <Upload size={10} />
+              Import Heightmap
+            </button>
+
+            {/* Hidden file inputs for import */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png"
+              className="hidden"
+              onChange={handleImportPng}
+            />
+            <input
+              ref={metaInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleImportMeta}
+            />
+
+            {pendingHeightmap && (
+              <div className="p-2 bg-blue-500/10 border border-blue-500/20 rounded text-[10px] text-blue-400">
+                PNG loaded ({pendingHeightmap.width}x{pendingHeightmap.height}).
+                Select the .meta.json file...
+              </div>
+            )}
           </div>
         </PropertySection>
 

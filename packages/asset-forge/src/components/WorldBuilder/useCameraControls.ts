@@ -30,6 +30,9 @@ export interface CameraControlsConfig {
   onFlyModeChange?: (enabled: boolean) => void;
   onMoveSpeedChange?: (speed: number) => void;
   onViewportContextMenu?: (x: number, y: number) => void;
+  onPlayerModeChange?: (enabled: boolean) => void;
+  /** Terrain height sampler for player mode ground lock. */
+  getTerrainHeight?: (sceneX: number, sceneZ: number) => number;
 }
 
 export interface CameraControlsReturn {
@@ -43,11 +46,14 @@ export interface CameraControlsReturn {
   rmbFlyActiveRef: React.MutableRefObject<boolean>;
   rmbDidFlyRef: React.MutableRefObject<boolean>;
   pendingOrbitCreateRef: React.MutableRefObject<number>;
+  playerModeRef: React.MutableRefObject<boolean>;
 
   // Callbacks
   updateCamera: (deltaTime: number) => void;
   createOrbitControls: () => void;
   enterFlyMode: () => void;
+  enterPlayerMode: () => void;
+  exitPlayerMode: () => void;
 
   // Event handlers (attach to container / document)
   handleMouseMove: (event: MouseEvent) => void;
@@ -86,6 +92,16 @@ const _dir = new THREE.Vector3();
 const _offset = new THREE.Vector3();
 const _spherical = new THREE.Spherical();
 
+// Player mode constants
+const PLAYER_EYE_HEIGHT = 1.7; // meters
+const PLAYER_WALK_SPEED = 5; // m/s
+const PLAYER_SPRINT_SPEED = 15; // m/s
+const PLAYER_FOV = 60;
+
+// Pre-allocated for player mode XZ movement
+const _playerForward = new THREE.Vector3();
+const _playerRight = new THREE.Vector3();
+
 // ============== Hook ==============
 
 export function useCameraControls(
@@ -97,6 +113,8 @@ export function useCameraControls(
     onFlyModeChange,
     onMoveSpeedChange,
     onViewportContextMenu,
+    onPlayerModeChange,
+    getTerrainHeight,
   } = config;
 
   // Core refs
@@ -125,6 +143,12 @@ export function useCameraControls(
   const rmbDidFlyRef = useRef(false);
   const flySkipMovesRef = useRef(0);
   const pendingOrbitCreateRef = useRef(0);
+
+  // Player preview mode
+  const playerModeRef = useRef(false);
+  const savedCameraFovRef = useRef(75);
+  const getTerrainHeightRef = useRef(getTerrainHeight);
+  getTerrainHeightRef.current = getTerrainHeight;
 
   // Create a fresh OrbitControls synced to the current camera position.
   // Called from the animation loop AFTER pointer-lock events have settled.
@@ -198,7 +222,61 @@ export function useCameraControls(
 
       if (!camera) return;
 
-      if (rmbFlyActiveRef.current) {
+      if (playerModeRef.current) {
+        // Player preview mode: WASD on XZ plane, mouse look always active, ground-locked
+        const keys = keysRef.current;
+        const isSprinting = keys.has("ShiftLeft") || keys.has("ShiftRight");
+        const speed = isSprinting ? PLAYER_SPRINT_SPEED : PLAYER_WALK_SPEED;
+
+        // Forward direction projected onto XZ plane
+        _playerForward.set(0, 0, -1).applyEuler(state.euler);
+        _playerForward.y = 0;
+        _playerForward.normalize();
+
+        _playerRight.set(1, 0, 0).applyEuler(state.euler);
+        _playerRight.y = 0;
+        _playerRight.normalize();
+
+        _targetVelocity.set(0, 0, 0);
+        if (keys.has("KeyW") || keys.has("ArrowUp"))
+          _targetVelocity.add(_playerForward);
+        if (keys.has("KeyS") || keys.has("ArrowDown"))
+          _targetVelocity.sub(_playerForward);
+        if (keys.has("KeyA") || keys.has("ArrowLeft"))
+          _targetVelocity.sub(_playerRight);
+        if (keys.has("KeyD") || keys.has("ArrowRight"))
+          _targetVelocity.add(_playerRight);
+
+        if (_targetVelocity.length() > 0) {
+          _targetVelocity.normalize().multiplyScalar(speed);
+        }
+
+        state.velocity.lerp(_targetVelocity, 1 - Math.exp(-10 * deltaTime));
+        _velocityDelta.copy(state.velocity).multiplyScalar(deltaTime);
+        state.position.add(_velocityDelta);
+
+        // Clamp to world bounds
+        const worldSizeMeters = worldSize * tileSize;
+        const margin = tileSize;
+        state.position.x = Math.max(
+          margin,
+          Math.min(worldSizeMeters - margin, state.position.x),
+        );
+        state.position.z = Math.max(
+          margin,
+          Math.min(worldSizeMeters - margin, state.position.z),
+        );
+
+        // Ground lock: sample terrain height and set Y
+        const heightFn = getTerrainHeightRef.current;
+        if (heightFn) {
+          const terrainY = heightFn(state.position.x, state.position.z);
+          state.position.y = terrainY + PLAYER_EYE_HEIGHT;
+        }
+
+        camera.position.copy(state.position);
+        camera.quaternion.setFromEuler(state.euler);
+      } else if (rmbFlyActiveRef.current) {
         // Fly mode: WASD + Q/E movement (UE5-style)
         // Uses pre-allocated vectors — zero per-frame allocations
         _forward.set(0, 0, -1).applyEuler(state.euler);
@@ -274,7 +352,7 @@ export function useCameraControls(
 
   // Shared fly-mode activation (called by hold timer OR drag threshold)
   const enterFlyMode = useCallback(() => {
-    if (rmbFlyActiveRef.current) return;
+    if (rmbFlyActiveRef.current || playerModeRef.current) return;
     rmbFlyActiveRef.current = true;
     rmbDidFlyRef.current = true;
     // Skip first 2 mouse-move events — macOS pointer lock fires bogus movementY
@@ -302,6 +380,62 @@ export function useCameraControls(
     onFlyModeChange?.(true);
   }, [onFlyModeChange]);
 
+  // Enter player preview mode: ground-locked, WASD walk, mouse look always active
+  const enterPlayerMode = useCallback(() => {
+    if (playerModeRef.current) return;
+
+    // Save current FOV to restore on exit
+    const cam = cameraRef.current;
+    if (cam) {
+      savedCameraFovRef.current = cam.fov;
+      cam.fov = PLAYER_FOV;
+      cam.updateProjectionMatrix();
+
+      // Sync state from current camera
+      cameraStateRef.current.euler.setFromQuaternion(cam.quaternion, "YXZ");
+      cameraStateRef.current.position.copy(cam.position);
+      cameraStateRef.current.velocity.set(0, 0, 0);
+    }
+
+    // Destroy orbit controls
+    const controls = orbitControlsRef.current;
+    if (controls) {
+      controls.dispose();
+      orbitControlsRef.current = null;
+    }
+
+    playerModeRef.current = true;
+    flySkipMovesRef.current = 2;
+
+    // Request pointer lock for mouse look
+    containerRef.current?.requestPointerLock();
+
+    onPlayerModeChange?.(true);
+  }, [onPlayerModeChange]);
+
+  // Exit player preview mode: restore orbit camera
+  const exitPlayerMode = useCallback(() => {
+    if (!playerModeRef.current) return;
+    playerModeRef.current = false;
+
+    const cam = cameraRef.current;
+    if (cam) {
+      cam.fov = savedCameraFovRef.current;
+      cam.updateProjectionMatrix();
+    }
+
+    cameraStateRef.current.velocity.set(0, 0, 0);
+
+    // Exit pointer lock
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+
+    // Defer orbit controls creation (same as fly→orbit transition)
+    pendingOrbitCreateRef.current = 5;
+    onPlayerModeChange?.(false);
+  }, [onPlayerModeChange]);
+
   // Handle mouse movement for camera look + RMB drag threshold
   const handleMouseMove = useCallback(
     (event: MouseEvent) => {
@@ -320,9 +454,9 @@ export function useCameraControls(
         return;
       }
 
-      if (!rmbFlyActiveRef.current) return;
+      if (!rmbFlyActiveRef.current && !playerModeRef.current) return;
 
-      // Skip initial events after entering fly mode — macOS pointer lock
+      // Skip initial events after entering fly/player mode — macOS pointer lock
       // produces a bogus large movementY that snaps the camera downward
       if (flySkipMovesRef.current > 0) {
         flySkipMovesRef.current--;
@@ -464,17 +598,23 @@ export function useCameraControls(
     isPointerLockedRef.current =
       document.pointerLockElement === containerRef.current;
 
-    // Handle unexpected pointer lock exit (e.g., user pressed Esc while RMB held)
-    if (!isPointerLockedRef.current && rmbFlyActiveRef.current) {
-      isRmbHeldRef.current = false;
-      rmbFlyActiveRef.current = false;
-      cameraStateRef.current.velocity.set(0, 0, 0);
+    // Handle pointer lock exit (Escape key or programmatic)
+    if (!isPointerLockedRef.current) {
+      if (playerModeRef.current) {
+        // Exit player mode when pointer lock is lost (Escape key)
+        exitPlayerMode();
+      } else if (rmbFlyActiveRef.current) {
+        // Handle unexpected pointer lock exit during fly mode
+        isRmbHeldRef.current = false;
+        rmbFlyActiveRef.current = false;
+        cameraStateRef.current.velocity.set(0, 0, 0);
 
-      // Defer OrbitControls creation (same as handleMouseUp path)
-      pendingOrbitCreateRef.current = 5;
-      onFlyModeChange?.(false);
+        // Defer OrbitControls creation (same as handleMouseUp path)
+        pendingOrbitCreateRef.current = 5;
+        onFlyModeChange?.(false);
+      }
     }
-  }, [onFlyModeChange]);
+  }, [onFlyModeChange, exitPlayerMode]);
 
   // Initialize orbit controls on a camera + container pair.
   // Called once during scene setup (not during fly-to-orbit transitions —
@@ -529,10 +669,13 @@ export function useCameraControls(
     rmbFlyActiveRef,
     rmbDidFlyRef,
     pendingOrbitCreateRef,
+    playerModeRef,
 
     updateCamera,
     createOrbitControls,
     enterFlyMode,
+    enterPlayerMode,
+    exitPlayerMode,
 
     handleMouseMove,
     handleKeyDown,

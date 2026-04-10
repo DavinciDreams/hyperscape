@@ -16,237 +16,13 @@ import { useEffect, useRef } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type { WorldStudioState } from "../WorldStudioContext";
-import type {
-  TerrainSculptStroke,
-  BiomePaintStroke,
-  VegetationPaintStroke,
-  BrushFalloff,
-  TileCollisionOverride,
-} from "../types";
+import type { VegetationPaintStroke, TileCollisionOverride } from "../types";
 
-// ============== CONSTANTS ==============
-
-const SCULPT_HEIGHT_STEP = 2.0; // meters per full-strength application
-
-// Biome colors (must match TileBasedTerrain BIOME_COLORS)
-const BIOME_COLORS: Record<string, [number, number, number]> = {
-  plains: [0.486, 0.729, 0.373],
-  forest: [0.227, 0.42, 0.208],
-  valley: [0.353, 0.541, 0.31],
-  desert: [0.769, 0.639, 0.353],
-  tundra: [0.722, 0.784, 0.784],
-  swamp: [0.29, 0.353, 0.227],
-  mountains: [0.541, 0.541, 0.541],
-  lakes: [0.29, 0.478, 0.722],
-  canyon: [0.6, 0.45, 0.3],
-};
-
-// ============== BRUSH MATH ==============
-
-function brushInfluence(
-  dist: number,
-  radius: number,
-  falloff: BrushFalloff,
-): number {
-  if (dist >= radius) return 0;
-  const t = dist / radius;
-  switch (falloff) {
-    case "sharp":
-      return t < 0.7 ? 1.0 : Math.max(0, (1 - t) / 0.3);
-    case "linear":
-      return 1 - t;
-    case "smooth":
-    default:
-      return 1 - t * t * (3 - 2 * t);
-  }
-}
-
-/** Check if a circle overlaps an AABB (2D in XZ plane) */
-function circleOverlapsAABB(
-  cx: number,
-  cz: number,
-  radius: number,
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-): boolean {
-  const nearX = Math.max(minX, Math.min(cx, maxX));
-  const nearZ = Math.max(minZ, Math.min(cz, maxZ));
-  return (nearX - cx) ** 2 + (nearZ - cz) ** 2 <= radius * radius;
-}
-
-// ============== TERRAIN SCULPT ==============
-
-/** Set of meshes that need normals recomputed after a batch of sculpt strokes. */
-const _dirtyMeshes = new Set<THREE.Mesh>();
-
-function applyTerrainSculptToTiles(
-  terrainContainer: THREE.Group,
-  stroke: TerrainSculptStroke,
-): void {
-  const { center, radius, strength, mode, falloff, flattenTarget } = stroke;
-
-  for (const child of terrainContainer.children) {
-    if (!(child instanceof THREE.Mesh)) continue;
-
-    const mesh = child;
-    const positions = mesh.geometry.getAttribute(
-      "position",
-    ) as THREE.BufferAttribute;
-    if (!positions) continue;
-
-    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-    const bb = mesh.geometry.boundingBox!;
-
-    // Quick culling — skip tiles that don't overlap the stroke circle
-    if (
-      !circleOverlapsAABB(
-        center.x,
-        center.z,
-        radius,
-        mesh.position.x + bb.min.x,
-        mesh.position.x + bb.max.x,
-        mesh.position.z + bb.min.z,
-        mesh.position.z + bb.max.z,
-      )
-    )
-      continue;
-
-    let modified = false;
-
-    for (let i = 0; i < positions.count; i++) {
-      const worldX = mesh.position.x + positions.getX(i);
-      const worldZ = mesh.position.z + positions.getZ(i);
-
-      const dx = worldX - center.x;
-      const dz = worldZ - center.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist >= radius) continue;
-
-      const inf = brushInfluence(dist, radius, falloff) * strength;
-      const y = positions.getY(i);
-
-      switch (mode) {
-        case "raise":
-          positions.setY(i, y + inf * SCULPT_HEIGHT_STEP);
-          break;
-        case "lower":
-          positions.setY(i, y - inf * SCULPT_HEIGHT_STEP);
-          break;
-        case "flatten": {
-          const target = flattenTarget ?? y;
-          positions.setY(i, y + (target - y) * inf);
-          break;
-        }
-        case "smooth": {
-          // Approximate smooth: lerp toward average of nearby vertices
-          // Use grid-stride neighbor sampling
-          const stride = Math.round(Math.sqrt(positions.count));
-          let sum = 0;
-          let cnt = 0;
-          for (const di of [-1, 0, 1]) {
-            for (const dj of [-1, 0, 1]) {
-              if (di === 0 && dj === 0) continue;
-              const ni = i + di + dj * stride;
-              if (ni >= 0 && ni < positions.count) {
-                sum += positions.getY(ni);
-                cnt++;
-              }
-            }
-          }
-          if (cnt > 0) {
-            positions.setY(i, y + (sum / cnt - y) * inf * 0.5);
-          }
-          break;
-        }
-      }
-      modified = true;
-    }
-
-    if (modified) {
-      positions.needsUpdate = true;
-      mesh.geometry.computeBoundingBox();
-      // Defer normal computation — batched after all strokes in this tick
-      _dirtyMeshes.add(mesh);
-    }
-  }
-}
-
-/** Flush deferred vertex normal computation for all modified meshes. */
-function flushDirtyNormals(): void {
-  for (const mesh of _dirtyMeshes) {
-    mesh.geometry.computeVertexNormals();
-  }
-  _dirtyMeshes.clear();
-}
-
-// ============== BIOME PAINT ==============
-
-function applyBiomePaintToTiles(
-  terrainContainer: THREE.Group,
-  stroke: BiomePaintStroke,
-): void {
-  const { center, radius, strength, falloff, targetBiome } = stroke;
-  const bc = BIOME_COLORS[targetBiome] ?? BIOME_COLORS.plains;
-
-  for (const child of terrainContainer.children) {
-    if (!(child instanceof THREE.Mesh)) continue;
-
-    const mesh = child;
-    const positions = mesh.geometry.getAttribute(
-      "position",
-    ) as THREE.BufferAttribute;
-    const colors = mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
-    if (!positions || !colors) continue;
-
-    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-    const bb = mesh.geometry.boundingBox!;
-
-    if (
-      !circleOverlapsAABB(
-        center.x,
-        center.z,
-        radius,
-        mesh.position.x + bb.min.x,
-        mesh.position.x + bb.max.x,
-        mesh.position.z + bb.min.z,
-        mesh.position.z + bb.max.z,
-      )
-    )
-      continue;
-
-    let modified = false;
-
-    for (let i = 0; i < positions.count; i++) {
-      const worldX = mesh.position.x + positions.getX(i);
-      const worldZ = mesh.position.z + positions.getZ(i);
-
-      const dx = worldX - center.x;
-      const dz = worldZ - center.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist >= radius) continue;
-
-      const inf = brushInfluence(dist, radius, falloff) * strength;
-
-      const r = colors.getX(i);
-      const g = colors.getY(i);
-      const b = colors.getZ(i);
-
-      colors.setXYZ(
-        i,
-        r + (bc[0] - r) * inf,
-        g + (bc[1] - g) * inf,
-        b + (bc[2] - b) * inf,
-      );
-      modified = true;
-    }
-
-    if (modified) {
-      colors.needsUpdate = true;
-    }
-  }
-}
+import {
+  applyTerrainSculptToTiles,
+  applyBiomePaintToTiles,
+  flushDirtyNormals,
+} from "../utils/brushApplication";
 
 // ============== VEGETATION OVERLAY ==============
 
@@ -272,12 +48,18 @@ const VEGETATION_DOT_SIZE = 0.6;
 function buildVegetationOverlay(
   strokes: VegetationPaintStroke[],
   terrainContainer: THREE.Group,
+  getTerrainHeight?: (x: number, z: number) => number,
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = "vegetation-overlay";
   group.renderOrder = 998;
 
   if (strokes.length === 0) return group;
+
+  // Phase 5A: Use analytical O(1) height query when available, fall back to O(V) vertex scan
+  const getHeight = getTerrainHeight
+    ? (x: number, z: number) => getTerrainHeight(x, z)
+    : (x: number, z: number) => sampleTerrainHeight(terrainContainer, x, z);
 
   // Collect dot positions from all strokes
   const addDots: Array<{ x: number; y: number; z: number; color: number }> = [];
@@ -299,7 +81,7 @@ function buildVegetationOverlay(
       const dist = (i / dotCount) * stroke.radius * 0.85;
       const x = stroke.center.x + Math.cos(angle) * dist;
       const z = stroke.center.z + Math.sin(angle) * dist;
-      const y = sampleTerrainHeight(terrainContainer, x, z);
+      const y = getHeight(x, z);
 
       if (stroke.mode === "add") {
         addDots.push({ x, y: y + 0.2, z, color });
@@ -570,6 +352,7 @@ export function useBrushOverlaySync({
       const overlay = buildVegetationOverlay(
         strokes,
         sceneRefs.terrainContainer,
+        sceneRefs.getTerrainHeight,
       );
       sceneRefs.scene.add(overlay);
       sync.vegetationOverlay = overlay;

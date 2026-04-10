@@ -123,12 +123,13 @@ function getSelectableIdFromSelection(
 export function ViewportContainer() {
   const { state, actions, viewportRef } = useWorldStudio();
   const isEditing = state.builder.mode === "editing";
-  // In editing mode, use the loaded world's foundation config (preserves useGamePipeline, etc.)
-  // In creation mode, use the creation panel config
-  const config =
+  // Live terrain config (from slider drags) takes priority, then editing config, then creation config.
+  // This allows real-time slider updates without full scene teardown.
+  const baseConfig =
     isEditing && state.builder.editing.world
       ? state.builder.editing.world.foundation.config
       : state.builder.creation.config;
+  const config = state.liveTerrainConfig ?? baseConfig;
 
   // Ref-stable state for async callbacks (avoids stale closures in setTimeout)
   const stateRef = useRef(state);
@@ -137,6 +138,20 @@ export function ViewportContainer() {
   // Scene refs from TileBasedTerrain for editing tool integration
   const sceneRefsRef = useRef<TerrainSceneRefs | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
+
+  // Imported heightmap querier (overrides procedural terrain)
+  const [importedQuerier, setImportedQuerier] = useState<
+    | ((
+        worldX: number,
+        worldZ: number,
+      ) => {
+        height: number;
+        biome: string;
+        biomeForestWeight?: number;
+        biomeCanyonWeight?: number;
+      })
+    | null
+  >(null);
 
   const handleSceneReady = useCallback(
     (refs: TerrainSceneRefs) => {
@@ -164,6 +179,8 @@ export function ViewportContainer() {
       });
       viewportRef.current.refreshTownMarkers = refs.refreshTownMarkers;
       viewportRef.current.setVegetationVisible = refs.setVegetationVisible;
+      viewportRef.current.getTerrainQuerier = refs.getTerrainQuerier;
+      viewportRef.current.setImportedQuerier = setImportedQuerier;
       setSceneReady(true);
     },
     [viewportRef],
@@ -207,6 +224,20 @@ export function ViewportContainer() {
   // ----- Fly mode state -----
   const [flyMode, setFlyMode] = useState(false);
   const [cameraMoveSpeed, setCameraMoveSpeed] = useState(200);
+
+  // ----- Player preview mode -----
+  const [playerMode, setPlayerMode] = useState(false);
+  const [timeOfDay, setTimeOfDay] = useState(12);
+
+  const handleTogglePlayerMode = useCallback(() => {
+    const refs = sceneRefsRef.current;
+    if (!refs) return;
+    if (refs.isPlayerMode()) {
+      refs.exitPlayerMode();
+    } else {
+      refs.enterPlayerMode();
+    }
+  }, []);
 
   // ----- Difficulty heatmap -----
   const [showDifficultyHeatmap, setShowDifficultyHeatmap] = useState(false);
@@ -1127,6 +1158,26 @@ export function ViewportContainer() {
     }));
   }, [extendedMines, worldCenterOffsetForMines]);
 
+  // Phase 3C: Memoize biomes and towns arrays for ViewportOverlay to prevent
+  // re-renders from inline .map() creating new references every render
+  const foundationBiomes = state.builder.editing.world?.foundation.biomes;
+  const memoizedBiomes = useMemo(
+    () =>
+      foundationBiomes?.map((b) => ({ type: b.type, tileKeys: b.tileKeys })),
+    [foundationBiomes],
+  );
+  const foundationTowns = state.builder.editing.world?.foundation.towns;
+  const memoizedTowns = useMemo(
+    () =>
+      foundationTowns?.map((t) => ({
+        id: t.id,
+        name: t.name,
+        position: t.position,
+        size: t.size,
+      })),
+    [foundationTowns],
+  );
+
   // ----- Editing hooks (self-guard on null sceneRefs / inactive tools) -----
 
   // Sync extended-layer entity markers and ghost preview to the 3D scene
@@ -1709,12 +1760,16 @@ export function ViewportContainer() {
         onGameEntitiesLoaded={handleGameEntitiesLoaded}
         onViewportContextMenu={handleViewportContextMenu}
         onFlyModeChange={setFlyMode}
+        onPlayerModeChange={setPlayerMode}
         onMoveSpeedChange={setCameraMoveSpeed}
         showDifficultyHeatmap={showDifficultyHeatmap}
         dangerSources={heatmapDangerSources}
-        roads={state.builder.editing.world?.foundation.roads}
+        roads={foundationRoads}
         mines={memoizedMines}
         onTownsGenerated={handleTownsGenerated}
+        brushOverlays={state.brushOverlays}
+        importedQuerier={importedQuerier}
+        timeOfDay={timeOfDay}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
       {isEditing && (
@@ -1731,17 +1786,9 @@ export function ViewportContainer() {
           tileProgress={tileProgress}
           worldSizeTiles={config?.terrain.worldSize}
           tileSize={config?.terrain.tileSize}
-          biomes={state.builder.editing.world?.foundation.biomes.map((b) => ({
-            type: b.type,
-            tileKeys: b.tileKeys,
-          }))}
+          biomes={memoizedBiomes}
           roads={memoizedRoads}
-          towns={state.builder.editing.world?.foundation.towns.map((t) => ({
-            id: t.id,
-            name: t.name,
-            position: t.position,
-            size: t.size,
-          }))}
+          towns={memoizedTowns}
           onNavigateCamera={(x, z) =>
             viewportRef.current.navigateCamera?.(x, z)
           }
@@ -1756,13 +1803,49 @@ export function ViewportContainer() {
         />
       )}
 
-      {/* View mode dropdown (top-right, above overlay z-level) */}
+      {/* View mode dropdown + player preview button (top-right) */}
       {isEditing && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+          <button
+            className={`px-2 py-1 text-xs rounded border ${
+              playerMode
+                ? "bg-blue-600 border-blue-500 text-white"
+                : "bg-bg-secondary border-border-primary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+            }`}
+            onClick={handleTogglePlayerMode}
+            title="Player Preview (walk the world at eye height)"
+          >
+            Player Preview
+          </button>
+          {/* Time of day slider */}
+          <div className="flex items-center gap-1 px-2 py-1 bg-bg-secondary border border-border-primary rounded text-[10px] text-text-secondary">
+            <span className="whitespace-nowrap">
+              {timeOfDay < 10 ? "0" : ""}
+              {Math.floor(timeOfDay)}:
+              {String(Math.round((timeOfDay % 1) * 60)).padStart(2, "0")}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={0.25}
+              value={timeOfDay}
+              onChange={(e) => setTimeOfDay(Number(e.target.value))}
+              className="w-20 h-1 accent-primary"
+              title="Time of day"
+            />
+          </div>
           <ViewModeDropdown
             currentMode={viewMode}
             onModeChange={handleViewModeChange}
           />
+        </div>
+      )}
+
+      {/* Player preview overlay indicator */}
+      {playerMode && (
+        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-blue-600/90 text-white text-xs rounded-md shadow-lg">
+          Player Preview — Escape to exit
         </div>
       )}
 

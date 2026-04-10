@@ -225,43 +225,38 @@ function generateRoadNetwork(
   return roads;
 }
 
-// ============== WORLD GENERATION ==============
+// ============== STAGE FUNCTIONS ==============
 
 /**
- * Generate a complete WorldData object from a WorldCreationConfig.
- * This runs terrain generation, biome assignment, town placement,
- * road network generation, and creates the locked world foundation.
+ * Stage 1: Create terrain generator + biome system from config.
+ * Returns the generator, biome system, and generated biomes.
  */
-export function generateWorldFromConfig(
-  config: WorldCreationConfig,
-): WorldData {
+export function generateTerrainAndBiomes(config: WorldCreationConfig): {
+  terrainGenerator: TerrainGenerator;
+  biomeSystem: BiomeSystem;
+  biomes: GeneratedBiome[];
+} {
   const worldSizeMeters = config.terrain.worldSize * config.terrain.tileSize;
 
-  // Create terrain generator
-  let terrainConfig;
-  if (config.preset && TERRAIN_PRESETS[config.preset]) {
-    terrainConfig = createConfigFromPreset(config.preset, {
-      seed: config.seed,
-      worldSize: config.terrain.worldSize,
-      tileSize: config.terrain.tileSize,
-      tileResolution: config.terrain.tileResolution,
-      maxHeight: config.terrain.maxHeight,
-      waterThreshold: config.terrain.waterThreshold,
-    });
-  } else {
-    terrainConfig = createConfigFromPreset("large-island", {
-      seed: config.seed,
-      worldSize: config.terrain.worldSize,
-      tileSize: config.terrain.tileSize,
-      tileResolution: config.terrain.tileResolution,
-      maxHeight: config.terrain.maxHeight,
-      waterThreshold: config.terrain.waterThreshold,
-    });
-  }
+  const presetId =
+    config.preset && TERRAIN_PRESETS[config.preset]
+      ? config.preset
+      : "large-island";
+  const terrainConfig = createConfigFromPreset(presetId, {
+    seed: config.seed,
+    worldSize: config.terrain.worldSize,
+    tileSize: config.terrain.tileSize,
+    tileResolution: config.terrain.tileResolution,
+    maxHeight: config.terrain.maxHeight,
+    waterThreshold: config.terrain.waterThreshold,
+    noise: config.noise,
+    biomes: config.biomes,
+    island: config.island,
+    shoreline: config.shoreline,
+  });
 
   const terrainGenerator = new TerrainGenerator(terrainConfig);
 
-  // Generate biomes
   const biomeSystem = new BiomeSystem(
     config.seed,
     worldSizeMeters,
@@ -306,7 +301,24 @@ export function generateWorldFromConfig(
     }
   }
 
-  // Generate towns
+  return { terrainGenerator, biomeSystem, biomes };
+}
+
+/**
+ * Stage 2: Generate towns and buildings from terrain + biomes.
+ * Can be called independently to regenerate towns without changing terrain.
+ */
+export function generateTownsAndBuildings(
+  config: WorldCreationConfig,
+  terrainGenerator: TerrainGenerator,
+  biomes: GeneratedBiome[],
+): {
+  towns: GeneratedTown[];
+  buildings: GeneratedBuilding[];
+  rawTowns: ProcgenTown[];
+} {
+  const worldSizeMeters = config.terrain.worldSize * config.terrain.tileSize;
+
   const townGenerator = TownGenerator.fromTerrainGenerator(terrainGenerator, {
     seed: config.seed,
     config: {
@@ -364,7 +376,6 @@ export function generateWorldFromConfig(
     },
   );
 
-  // Generate buildings
   const getBuildingFloors = (buildingType: string): number => {
     const floorsByType: Record<string, number> = {
       bank: 2,
@@ -397,7 +408,19 @@ export function generateWorldFromConfig(
       })),
   );
 
-  // Generate road network
+  return { towns, buildings, rawTowns: townResult.towns };
+}
+
+/**
+ * Stage 3: Generate road network between existing towns.
+ * Can be called independently to regenerate roads without changing towns.
+ */
+export function generateRoadsForTowns(
+  config: WorldCreationConfig,
+  terrainGenerator: TerrainGenerator,
+  towns: GeneratedTown[],
+  rawTowns: ProcgenTown[],
+): GeneratedRoad[] {
   const interTownRoads = generateRoadNetwork(towns, terrainGenerator, {
     roadWidth: config.roads.roadWidth,
     extraConnectionsRatio: config.roads.extraConnectionsRatio,
@@ -406,9 +429,8 @@ export function generateWorldFromConfig(
     smoothingIterations: config.roads.smoothingIterations,
   });
 
-  // Town internal roads
   const townInternalRoads: GeneratedRoad[] = [];
-  for (const town of townResult.towns) {
+  for (const town of rawTowns) {
     const internalRoads = town.internalRoads ?? [];
     for (let i = 0; i < internalRoads.length; i++) {
       const road = internalRoads[i];
@@ -488,7 +510,40 @@ export function generateWorldFromConfig(
     }
   }
 
-  // Assign tiles to biomes
+  return roads;
+}
+
+// ============== WORLD GENERATION ==============
+
+/**
+ * Generate a complete WorldData object from a WorldCreationConfig.
+ * This runs terrain generation, biome assignment, town placement,
+ * road network generation, and creates the locked world foundation.
+ *
+ * Internally uses the stage functions above — kept for backward compatibility.
+ */
+export function generateWorldFromConfig(
+  config: WorldCreationConfig,
+): WorldData {
+  // Stage 1: Terrain + Biomes
+  const { terrainGenerator, biomes } = generateTerrainAndBiomes(config);
+
+  // Stage 2: Towns + Buildings
+  const { towns, buildings, rawTowns } = generateTownsAndBuildings(
+    config,
+    terrainGenerator,
+    biomes,
+  );
+
+  // Stage 3: Roads
+  const roads = generateRoadsForTowns(
+    config,
+    terrainGenerator,
+    towns,
+    rawTowns,
+  );
+
+  // Assign tiles to biomes (secondary pass using terrain query for visual biome)
   const tileSize = config.terrain.tileSize;
   for (let tx = 0; tx < config.terrain.worldSize; tx++) {
     for (let tz = 0; tz < config.terrain.worldSize; tz++) {
@@ -515,7 +570,6 @@ export function generateWorldFromConfig(
     heightmapCache: new Map(),
   };
 
-  // Create and return the world
   const world = createNewWorld(
     foundation,
     generateWorldName(config.seed),

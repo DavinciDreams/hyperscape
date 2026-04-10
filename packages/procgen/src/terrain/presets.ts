@@ -333,9 +333,69 @@ export const DESERT_PRESET: TerrainPreset = {
 };
 
 /**
+ * Demo Island preset
+ * RuneScape Tutorial Island-sized: small, mostly flat, walkable in a few minutes.
+ * Gentle terrain with 2-3 biomes — perfect for prototyping gameplay loops.
+ */
+export const DEMO_ISLAND_PRESET: TerrainPreset = {
+  id: "demo-island",
+  name: "Demo Island",
+  description:
+    "Tiny, mostly flat island inspired by RuneScape Tutorial Island — ideal for gameplay prototyping",
+  config: {
+    tileSize: 100,
+    worldSize: 20, // 2km × 2km — crossable in ~2 min at walk speed
+    maxHeight: 15, // Gentle hills, nothing steep
+    waterThreshold: 3.0,
+    island: {
+      enabled: true,
+      maxWorldSizeTiles: 20,
+      falloffTiles: 2,
+      edgeNoiseScale: 0.004, // Organic coastline wobble
+      edgeNoiseStrength: 0.06,
+    },
+    biomes: {
+      gridSize: 2, // 2-3 biomes max for this size
+      jitter: 0.3,
+      minInfluence: 300,
+      maxInfluence: 500,
+      gaussianCoeff: 0.25,
+      boundaryNoiseScale: 0.006,
+      boundaryNoiseAmount: 0.08,
+    },
+    noise: {
+      continent: {
+        scale: 0.0006,
+        weight: 0.55, // Dominant — broad gentle shape
+        octaves: 3, // Few octaves = smoother
+        persistence: 0.35,
+        lacunarity: 2.0,
+      },
+      ridge: { scale: 0.002, weight: 0.02 }, // Nearly zero — no sharp ridges
+      hill: {
+        scale: 0.008,
+        weight: 0.05, // Very subtle rolling
+        octaves: 2,
+        persistence: 0.3,
+        lacunarity: 2.0,
+      },
+      erosion: { scale: 0.005, weight: 0.02, octaves: 2 }, // Minimal erosion detail
+      detail: {
+        scale: 0.04,
+        weight: 0.01, // Almost no micro-detail
+        octaves: 1,
+        persistence: 0.2,
+        lacunarity: 2.0,
+      },
+    },
+  },
+};
+
+/**
  * All terrain presets
  */
 export const TERRAIN_PRESETS: Record<string, TerrainPreset> = {
+  "demo-island": DEMO_ISLAND_PRESET,
   "small-island": SMALL_ISLAND_PRESET,
   "large-island": LARGE_ISLAND_PRESET,
   archipelago: ARCHIPELAGO_PRESET,

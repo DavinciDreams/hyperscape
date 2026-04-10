@@ -69,6 +69,30 @@ interface DisposalItem {
   geometryOnly: boolean;
 }
 
+/** Dispose textures referenced by a material (map, normalMap, etc.) */
+function disposeMaterialTextures(material: THREE.Material): void {
+  const mat = material as unknown as Record<string, unknown>;
+  const textureProps = [
+    "map",
+    "normalMap",
+    "roughnessMap",
+    "metalnessMap",
+    "aoMap",
+    "emissiveMap",
+    "alphaMap",
+    "envMap",
+    "lightMap",
+    "bumpMap",
+    "displacementMap",
+  ];
+  for (const prop of textureProps) {
+    const tex = mat[prop];
+    if (tex instanceof THREE.Texture) {
+      tex.dispose();
+    }
+  }
+}
+
 function disposeItem(item: DisposalItem): void {
   item.object.traverse((child) => {
     if (child instanceof THREE.InstancedMesh) {
@@ -78,6 +102,7 @@ function disposeItem(item: DisposalItem): void {
     } else if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
       child.geometry?.dispose();
       if (!item.geometryOnly && child.material instanceof THREE.Material) {
+        disposeMaterialTextures(child.material);
         child.material.dispose();
       }
     }

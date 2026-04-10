@@ -58,8 +58,22 @@ export function useWorldStudioShortcuts() {
 
       // ---- Modifier shortcuts ----
 
-      // Ctrl+Z → Undo
-      if (isMod && e.key === "z" && !e.shiftKey) {
+      // Ctrl+Alt+Z → Undo terrain only (subsystem undo)
+      if (isMod && e.altKey && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        commandHistory.undoChannel("terrain");
+        return;
+      }
+
+      // Ctrl+Alt+Shift+Z → Redo terrain only
+      if (isMod && e.altKey && e.key === "z" && e.shiftKey) {
+        e.preventDefault();
+        commandHistory.redoChannel("terrain");
+        return;
+      }
+
+      // Ctrl+Z → Undo (most recent, any channel)
+      if (isMod && e.key === "z" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         if (commandHistory.canUndo()) commandHistory.undo();
         else if (computed.canUndo) actions.undo();
@@ -67,7 +81,7 @@ export function useWorldStudioShortcuts() {
       }
 
       // Ctrl+Shift+Z → Redo
-      if (isMod && e.key === "z" && e.shiftKey) {
+      if (isMod && e.key === "z" && e.shiftKey && !e.altKey) {
         e.preventDefault();
         if (commandHistory.canRedo()) commandHistory.redo();
         else if (computed.canRedo) actions.redo();

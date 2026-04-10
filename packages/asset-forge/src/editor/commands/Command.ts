@@ -8,8 +8,13 @@
 
 // ============== COMMAND INTERFACE ==============
 
+/** Undo channels — allows subsystem-specific undo (Ctrl+Alt+Z = terrain only). */
+export type UndoChannel = "terrain" | "entities" | "zones" | "global";
+
 export interface Command {
   readonly type: string;
+  /** Undo channel for subsystem-specific undo. Defaults to "global". */
+  readonly channel?: UndoChannel;
   execute(): void;
   undo(): void;
   /** For continuous operations (dragging), merge with previous command of same type */
@@ -68,12 +73,55 @@ export class CommandHistory {
     return true;
   }
 
+  /**
+   * Undo the most recent command in the specified channel.
+   * Skips over commands from other channels (they stay in the stack).
+   */
+  undoChannel(channel: UndoChannel): boolean {
+    for (let i = this.undoStack.length - 1; i >= 0; i--) {
+      const cmd = this.undoStack[i];
+      if ((cmd.channel ?? "global") === channel) {
+        this.undoStack.splice(i, 1);
+        cmd.undo();
+        this.redoStack.push(cmd);
+        this.notify();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Redo the most recent command in the specified channel.
+   */
+  redoChannel(channel: UndoChannel): boolean {
+    for (let i = this.redoStack.length - 1; i >= 0; i--) {
+      const cmd = this.redoStack[i];
+      if ((cmd.channel ?? "global") === channel) {
+        this.redoStack.splice(i, 1);
+        cmd.execute();
+        this.undoStack.push(cmd);
+        this.notify();
+        return true;
+      }
+    }
+    return false;
+  }
+
   canUndo(): boolean {
     return this.undoStack.length > 0;
   }
 
   canRedo(): boolean {
     return this.redoStack.length > 0;
+  }
+
+  canUndoChannel(channel: UndoChannel): boolean {
+    return this.undoStack.some((cmd) => (cmd.channel ?? "global") === channel);
+  }
+
+  canRedoChannel(channel: UndoChannel): boolean {
+    return this.redoStack.some((cmd) => (cmd.channel ?? "global") === channel);
   }
 
   get undoCount(): number {
@@ -130,6 +178,7 @@ export interface MoveEntityTarget {
 
 export class MoveEntityCommand implements Command {
   readonly type = "MoveEntity";
+  readonly channel = "entities" as const;
   private target: MoveEntityTarget;
   private oldPosition: { x: number; y: number; z: number };
   private newPosition: { x: number; y: number; z: number };
@@ -177,6 +226,7 @@ export class MoveEntityCommand implements Command {
 
 export class RotateEntityCommand implements Command {
   readonly type = "RotateEntity";
+  readonly channel = "entities" as const;
   private target: {
     object3D: {
       rotation: {
@@ -247,6 +297,7 @@ export class RotateEntityCommand implements Command {
 
 export class ScaleEntityCommand implements Command {
   readonly type = "ScaleEntity";
+  readonly channel = "entities" as const;
   private target: {
     object3D: {
       scale: {
@@ -320,6 +371,7 @@ export interface PlaceEntityTarget {
 
 export class PlaceEntityCommand implements Command {
   readonly type = "PlaceEntity";
+  readonly channel = "entities" as const;
   private target: PlaceEntityTarget;
   private entityId: string;
 
@@ -348,6 +400,7 @@ export interface DeleteEntityTarget {
 
 export class DeleteEntityCommand implements Command {
   readonly type = "DeleteEntity";
+  readonly channel = "entities" as const;
   private target: DeleteEntityTarget;
   private entityId: string;
 
@@ -377,6 +430,7 @@ export interface TerrainSculptStroke {
 
 export class TerrainSculptCommand implements Command {
   readonly type = "TerrainSculpt";
+  readonly channel = "terrain" as const;
   private strokes: TerrainSculptStroke[];
   private onApply: (strokes: TerrainSculptStroke[]) => void;
   private onRevert: (strokes: TerrainSculptStroke[]) => void;
@@ -422,6 +476,7 @@ export interface BiomePaintStroke {
 
 export class BiomePaintCommand implements Command {
   readonly type = "BiomePaint";
+  readonly channel = "terrain" as const;
   private strokes: BiomePaintStroke[];
   private onApply: (strokes: BiomePaintStroke[]) => void;
   private onRevert: (strokes: BiomePaintStroke[]) => void;
@@ -466,6 +521,7 @@ export interface DuplicateEntityTarget {
 
 export class DuplicateEntityCommand implements Command {
   readonly type = "DuplicateEntity";
+  readonly channel = "entities" as const;
   private target: DuplicateEntityTarget;
   private generatedId: string;
 
@@ -511,6 +567,7 @@ export interface BatchDeleteTarget {
 
 export class BatchDeleteCommand implements Command {
   readonly type = "BatchDelete";
+  readonly channel = "entities" as const;
   private target: BatchDeleteTarget;
 
   constructor(target: BatchDeleteTarget) {
@@ -535,6 +592,7 @@ export class BatchDeleteCommand implements Command {
 
 export class ModifyPropertyCommand<T> implements Command {
   readonly type = "ModifyProperty";
+  readonly channel = "entities" as const;
   private entityId: string;
   private propertyPath: string;
   private oldValue: T;

@@ -78,6 +78,7 @@ import {
   getGpuLifecycleStats,
   processDeferredFrame,
 } from "../WorldStudio/utils/deferredGpuDisposal";
+import { applySculptStrokesToGeometry } from "../WorldStudio/utils/brushApplication";
 import type {
   WorldCreationConfig,
   GeneratedRoad,
@@ -104,6 +105,23 @@ const TownBasicMat = MeshBasicNodeMaterial;
 const TownLineMat = LineBasicNodeMaterial;
 const TownStdMat = MeshStandardNodeMaterial;
 // VegStdMat alias removed — rocks are now generated server-side
+
+// ============== SHARED GEOMETRY SINGLETONS (Phase 4B) ==============
+
+let _townConeGeom: THREE.ConeGeometry | null = null;
+let _townPillarGeom: THREE.CylinderGeometry | null = null;
+let _townRingBaseGeom: THREE.RingGeometry | null = null;
+
+function getTownConeGeom(): THREE.ConeGeometry {
+  if (!_townConeGeom) _townConeGeom = new THREE.ConeGeometry(20, 50, 8);
+  return _townConeGeom;
+}
+
+function getTownPillarGeom(): THREE.CylinderGeometry {
+  if (!_townPillarGeom)
+    _townPillarGeom = new THREE.CylinderGeometry(3, 3, 30, 8);
+  return _townPillarGeom;
+}
 
 // ============== CONSTANTS ==============
 
@@ -136,6 +154,144 @@ function getDynamicLoadRadius(cameraY: number, isStudio: boolean): number {
 const BUILDING_LOD_FULL_DISTANCE = 200; // Full detail within this distance
 const BUILDING_LOD_SIMPLE_DISTANCE = 500; // Simple boxes beyond this distance
 
+// ============== TIME-OF-DAY LIGHTING ==============
+
+// Time-of-day color presets (RGB, 0-1 range)
+const TOD_COLORS = {
+  midnight: {
+    sun: { r: 0.1, g: 0.1, b: 0.3 },
+    ambient: { r: 0.05, g: 0.05, b: 0.15 },
+    sky: 0x0a0a2e,
+    fog: 0x0a0a2e,
+  },
+  dawn: {
+    sun: { r: 1.0, g: 0.6, b: 0.3 },
+    ambient: { r: 0.3, g: 0.2, b: 0.15 },
+    sky: 0xff9966,
+    fog: 0xffccaa,
+  },
+  morning: {
+    sun: { r: 1.0, g: 0.9, b: 0.7 },
+    ambient: { r: 0.4, g: 0.35, b: 0.3 },
+    sky: 0x87ceeb,
+    fog: 0x87ceeb,
+  },
+  noon: {
+    sun: { r: 1.0, g: 1.0, b: 1.0 },
+    ambient: { r: 0.5, g: 0.5, b: 0.5 },
+    sky: 0x87ceeb,
+    fog: 0x87ceeb,
+  },
+  afternoon: {
+    sun: { r: 1.0, g: 0.95, b: 0.8 },
+    ambient: { r: 0.45, g: 0.4, b: 0.35 },
+    sky: 0x87ceeb,
+    fog: 0x87ceeb,
+  },
+  dusk: {
+    sun: { r: 1.0, g: 0.4, b: 0.2 },
+    ambient: { r: 0.3, g: 0.15, b: 0.1 },
+    sky: 0xff6633,
+    fog: 0xff9966,
+  },
+  night: {
+    sun: { r: 0.15, g: 0.15, b: 0.4 },
+    ambient: { r: 0.08, g: 0.08, b: 0.2 },
+    sky: 0x0a0a2e,
+    fog: 0x0a0a2e,
+  },
+} as const;
+
+// Time-of-day keyframes: [hour, preset]
+const TOD_KEYFRAMES: Array<[number, keyof typeof TOD_COLORS]> = [
+  [0, "midnight"],
+  [5, "dawn"],
+  [7, "morning"],
+  [12, "noon"],
+  [15, "afternoon"],
+  [19, "dusk"],
+  [21, "night"],
+  [24, "midnight"],
+];
+
+/** Write interpolated color directly to target THREE.Color (no allocation) */
+function lerpColorTo(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number },
+  t: number,
+  out: THREE.Color,
+): void {
+  out.setRGB(
+    a.r + (b.r - a.r) * t,
+    a.g + (b.g - a.g) * t,
+    a.b + (b.b - a.b) * t,
+  );
+}
+
+function lerpHex(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 0xff,
+    ag = (a >> 8) & 0xff,
+    ab = a & 0xff;
+  const br = (b >> 16) & 0xff,
+    bg = (b >> 8) & 0xff,
+    bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bv = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bv;
+}
+
+/** Update sun/ambient/fog/sky based on time of day (0-24). */
+function updateTimeOfDayLighting(
+  hour: number,
+  sun: THREE.DirectionalLight,
+  ambient: THREE.AmbientLight,
+  scene: THREE.Scene,
+) {
+  // Wrap to 0-24
+  const h = ((hour % 24) + 24) % 24;
+
+  // Find surrounding keyframes
+  let fromIdx = 0;
+  for (let i = 0; i < TOD_KEYFRAMES.length - 1; i++) {
+    if (h >= TOD_KEYFRAMES[i][0]) fromIdx = i;
+  }
+  const toIdx = Math.min(fromIdx + 1, TOD_KEYFRAMES.length - 1);
+  const [fromHour, fromKey] = TOD_KEYFRAMES[fromIdx];
+  const [toHour, toKey] = TOD_KEYFRAMES[toIdx];
+
+  const range = toHour - fromHour;
+  const t = range > 0 ? (h - fromHour) / range : 0;
+
+  const from = TOD_COLORS[fromKey];
+  const to = TOD_COLORS[toKey];
+
+  // Interpolate colors directly into light.color (no intermediate object)
+  lerpColorTo(from.sun, to.sun, t, sun.color);
+  lerpColorTo(from.ambient, to.ambient, t, ambient.color);
+
+  // Sun intensity — brighter at noon, dim at night
+  const sunElevation = Math.sin(((h - 6) / 12) * Math.PI); // peaks at noon (12)
+  sun.intensity = Math.max(0.1, sunElevation * 1.2);
+  ambient.intensity = 0.3 + Math.max(0, sunElevation) * 0.3;
+
+  // Sun position — orbits from east to west
+  const angle = ((h - 6) / 24) * Math.PI * 2; // 6am = east horizon
+  const elevation = Math.max(0.05, Math.sin(((h - 6) / 12) * Math.PI));
+  sun.position.set(
+    Math.cos(angle) * 2000,
+    elevation * 2000,
+    Math.sin(angle) * 1000,
+  );
+
+  // Sky + fog color
+  const skyHex = lerpHex(from.sky, to.sky, t);
+  (scene.background as THREE.Color).setHex(skyHex);
+  if (scene.fog instanceof THREE.Fog) {
+    scene.fog.color.setHex(lerpHex(from.fog, to.fog, t));
+  }
+}
+
 // Town marker colors by size
 const TOWN_SIZE_COLORS: Record<string, number> = {
   town: 0xff0000, // Red - large towns
@@ -153,6 +309,8 @@ interface TileData {
   lastAccessed: number;
   /** Vertex resolution (e.g. 32 for full, 8 for LOD far tiles) */
   resolution: number;
+  /** Dirty flag — geometry needs regeneration due to config change */
+  dirty?: boolean;
 }
 
 /** Selection info returned when clicking objects in the viewport */
@@ -336,6 +494,12 @@ export interface TerrainSceneRefs {
   wasRecentlyFlying: () => boolean;
   /** Sample terrain height at scene coordinates (analytical — no raycasting). Returns 0 if querier not ready. */
   getTerrainHeight: (sceneX: number, sceneZ: number) => number;
+  /** Enter player preview mode: ground-locked, WASD walk, mouse look. Press Escape to exit. */
+  enterPlayerMode: () => void;
+  /** Exit player preview mode and return to orbit camera. */
+  exitPlayerMode: () => void;
+  /** Whether player preview mode is currently active. */
+  isPlayerMode: () => boolean;
   /** Offset to convert between scene-space (0..worldSize) and game-space (-half..+half). sceneX = gameX + offset. */
   worldCenterOffset: number;
   /** Query biome + height at world coordinates (game space). Used by auto-gen pipeline. */
@@ -386,6 +550,10 @@ export interface TerrainSceneRefs {
   getLastProcgenTowns: () => ProcgenTown[];
   /** Show or hide the decorative instanced vegetation layer. */
   setVegetationVisible: (visible: boolean) => void;
+  /** Get the current terrain querier function (for heightmap export). */
+  getTerrainQuerier: () =>
+    | ((worldX: number, worldZ: number) => TerrainQueryResult)
+    | null;
 }
 
 export interface TileBasedTerrainProps {
@@ -402,6 +570,8 @@ export interface TileBasedTerrainProps {
   flyModeEnabled?: boolean;
   /** Called when fly mode state changes */
   onFlyModeChange?: (enabled: boolean) => void;
+  /** Called when player preview mode state changes */
+  onPlayerModeChange?: (enabled: boolean) => void;
   /** Called when camera move speed changes (scroll wheel or [ ] keys) */
   onMoveSpeedChange?: (speed: number) => void;
   /** Pre-generated road network (uses actual pathfinding data) */
@@ -437,6 +607,25 @@ export interface TileBasedTerrainProps {
       biomeId?: string;
     }>,
   ) => void;
+  /** Brush overlay strokes (terrain sculpt, biome paint) to re-apply on tile generation */
+  brushOverlays?: {
+    terrainSculpts: Array<{
+      id: string;
+      center: { x: number; z: number };
+      radius: number;
+      strength: number;
+      falloff: "smooth" | "linear" | "sharp";
+      mode: "raise" | "lower" | "flatten" | "smooth";
+      flattenTarget?: number;
+      timestamp: number;
+    }>;
+  };
+  /** Override the terrain querier with an imported heightmap querier */
+  importedQuerier?:
+    | ((worldX: number, worldZ: number) => TerrainQueryResult)
+    | null;
+  /** Time of day for lighting (0-24, where 0/24=midnight, 6=dawn, 12=noon, 18=dusk) */
+  timeOfDay?: number;
 }
 
 export type { GameEntityData };
@@ -465,7 +654,26 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   showDifficultyHeatmap = false,
   dangerSources,
   onTownsGenerated,
+  onPlayerModeChange,
+  brushOverlays,
+  importedQuerier,
+  timeOfDay = 12,
 }) => {
+  // Terrain querier ref (defined early so camera hook can use it for player mode)
+  const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
+  const worldCenterOffsetRef = useRef<number>(0);
+
+  // Stable terrain height callback for player-mode ground lock
+  const getTerrainHeightForCamera = useCallback(
+    (sceneX: number, sceneZ: number): number => {
+      const querier = terrainQuerierRef.current;
+      if (!querier) return 0;
+      const offset = worldCenterOffsetRef.current;
+      return querier(sceneX - offset, sceneZ - offset).height;
+    },
+    [],
+  );
+
   // Camera controller — handles fly mode, orbit controls, all input handlers
   const cam = useCameraControls({
     worldSize: config.terrain.worldSize,
@@ -473,6 +681,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     onFlyModeChange,
     onMoveSpeedChange,
     onViewportContextMenu,
+    onPlayerModeChange,
+    getTerrainHeight: getTerrainHeightForCamera,
   });
   const {
     cameraRef,
@@ -483,6 +693,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     rmbFlyActiveRef,
     rmbDidFlyRef,
     pendingOrbitCreateRef,
+    playerModeRef: camPlayerModeRef,
     updateCamera,
     handleMouseMove,
     handleKeyDown,
@@ -493,10 +704,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     handleContextMenu,
     handlePointerLockChange,
     initOrbitControls,
+    enterPlayerMode: camEnterPlayerMode,
+    exitPlayerMode: camExitPlayerMode,
   } = cam;
 
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
+  const sunRef = useRef<THREE.DirectionalLight | null>(null);
+  const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
+  const timeOfDayRef = useRef(timeOfDay);
+  timeOfDayRef.current = timeOfDay;
   const viewHelperRef = useRef<ViewHelper | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const viewModeRef = useRef<ViewMode>("lit");
@@ -527,10 +744,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const vegetationTreesRef = useRef<
     Array<{ s: string; x: number; y: number; z: number; sc: number; r: number }>
   >([]);
-  /** Cached world center offset for vegetation refresh (set in main effect) */
-  const worldCenterOffsetRef = useRef<number>(0);
   const generatorRef = useRef<TerrainGenerator | null>(null);
-  const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
   const heatmapManagerRef = useRef<DifficultyHeatmapManager | null>(null);
   /** Ref-stable copies of props that should NOT trigger full scene rebuild.
    *  Roads ref is ONLY updated via rebuildRoadRibbons() or the useEffect that
@@ -549,6 +763,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     Array<{ tileX: number; tileZ: number; resolution: number }>
   >([]);
   const tileQueueSetRef = useRef<Set<string>>(new Set());
+
+  // Dirty tile queue for incremental regeneration (Phase 6)
+  const dirtyTileKeysRef = useRef<string[]>([]);
+  /** Previous maxHeight for fast-path scaling */
+  const prevMaxHeightRef = useRef<number>(config.terrain.maxHeight);
+  /** Previous waterThreshold for fast-path water plane move */
+  const prevWaterThresholdRef = useRef<number>(config.terrain.waterThreshold);
 
   // GPU resource lifecycle manager — handles staged object addition and
   // deferred GPU disposal to prevent Metal WebGPU device loss.
@@ -632,11 +853,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     return createConfigFromPreset("large-island", overrides);
   }, [config]);
 
-  // Get tile key
+  // Get tile key — numeric for fast Map lookups (no string allocations)
+  // Uses a Cantor-like pairing that handles negative coords via offset
   const getTileKey = useCallback(
     (tileX: number, tileZ: number) => `${tileX}_${tileZ}`,
     [],
   );
+
+  // Track last camera tile position for early-return optimization
+  const lastCameraTileRef = useRef({ tileX: -Infinity, tileZ: -Infinity });
 
   // Check if tile is within world bounds
   const isInBounds = useCallback(
@@ -739,6 +964,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         flattenZones,
         minesForTile,
       );
+
+      // Re-apply any brush sculpt strokes so they persist across tile unload/reload
+      const sculpts = brushOverlaysRef.current?.terrainSculpts;
+      if (sculpts && sculpts.length > 0) {
+        const halfTileOffset = tileSize / 2;
+        applySculptStrokesToGeometry(
+          geometry,
+          tileX * tileSize + halfTileOffset,
+          tileZ * tileSize + halfTileOffset,
+          sculpts,
+        );
+      }
 
       // One-time diagnostic: check if road influence is being baked into regenerated tiles.
       // Log every 100th tile to track progress without flooding the console.
@@ -880,134 +1117,295 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     setLoadedTiles(tilesRef.current.size);
   }, []);
 
+  // Regenerate a tile's geometry in-place (incremental update without unload/reload).
+  // Used by dirty-tile processing when terrain config changes.
+  const regenerateTileInPlace = useCallback(
+    (key: string) => {
+      const tile = tilesRef.current.get(key);
+      if (!tile) return;
+
+      const querier = terrainQuerierRef.current;
+      const fullTemplate = templateGeometryRef.current;
+      const lowResTemplate = lowResTemplateGeometryRef.current;
+      const waterContainer = waterContainerRef.current;
+
+      if (!querier || !fullTemplate) return;
+
+      const isLowRes =
+        lowResTemplate && tile.resolution <= TILE_LOD_LOW_RESOLUTION;
+      const template = isLowRes ? lowResTemplate : fullTemplate;
+
+      const roadsForTile = providedRoadsRef.current;
+      const minesForTile = runtimeMinesRef.current;
+      const towns = runtimeTownsRef.current;
+      const wcOffset = (worldSize * tileSize) / 2;
+      let flattenZones: TownFlattenZone[] | undefined;
+      if (towns.length > 0) {
+        const tileMinX = tile.tileX * tileSize - wcOffset;
+        const tileMaxX = tileMinX + tileSize;
+        const tileMinZ = tile.tileZ * tileSize - wcOffset;
+        const tileMaxZ = tileMinZ + tileSize;
+        flattenZones = [];
+        for (const t of towns) {
+          const r = t.safeZoneRadius;
+          const outerR = r * 1.4;
+          if (
+            t.position.x + outerR < tileMinX ||
+            t.position.x - outerR > tileMaxX ||
+            t.position.z + outerR < tileMinZ ||
+            t.position.z - outerR > tileMaxZ
+          )
+            continue;
+          flattenZones.push({
+            x: t.position.x,
+            z: t.position.z,
+            centerHeight: querier(t.position.x, t.position.z).height,
+            innerRadius: r * 0.85,
+            outerRadius: outerR,
+          });
+        }
+        if (flattenZones.length === 0) flattenZones = undefined;
+      }
+
+      const { geometry, hasWater } = generateTileGeometry(
+        tile.tileX,
+        tile.tileZ,
+        template,
+        querier,
+        tileSize,
+        waterThreshold,
+        maxHeight,
+        worldSize,
+        roadsForTile,
+        flattenZones,
+        minesForTile,
+      );
+
+      // Apply brush strokes
+      const sculpts = brushOverlaysRef.current?.terrainSculpts;
+      if (sculpts && sculpts.length > 0) {
+        const halfTileOffset = tileSize / 2;
+        applySculptStrokesToGeometry(
+          geometry,
+          tile.tileX * tileSize + halfTileOffset,
+          tile.tileZ * tileSize + halfTileOffset,
+          sculpts,
+        );
+      }
+
+      // Swap geometry on existing mesh (no scene remove/add)
+      const oldGeometry = tile.mesh.geometry;
+      tile.mesh.geometry = geometry;
+      oldGeometry.dispose();
+
+      // Update water
+      if (tile.water && waterContainer) {
+        if (!hasWater) {
+          waterContainer.remove(tile.water);
+          tile.water.geometry.dispose();
+          tile.water = null;
+        } else {
+          tile.water.position.y = waterThreshold;
+        }
+      } else if (hasWater && waterContainer) {
+        const waterGeometry = waterTemplateGeometryRef.current
+          ? waterTemplateGeometryRef.current.clone()
+          : (() => {
+              const g = new THREE.PlaneGeometry(tileSize, tileSize);
+              g.rotateX(-Math.PI / 2);
+              return g;
+            })();
+        const waterMat = waterMaterialRef.current;
+        if (waterMat) {
+          const wm = new THREE.Mesh(waterGeometry, waterMat);
+          wm.position.set(
+            tile.tileX * tileSize + tileSize / 2,
+            waterThreshold,
+            tile.tileZ * tileSize + tileSize / 2,
+          );
+          waterContainer.add(wm);
+          tile.water = wm;
+        }
+      }
+
+      tile.dirty = false;
+    },
+    [tileSize, tileResolution, waterThreshold, maxHeight, worldSize],
+  );
+
   // Update tiles based on camera position with two-tier LOD:
   //   - Near tiles (within fullDetailRadius): full resolution geometry
   //   - Far tiles (beyond that, up to dynamic farRadius): low-res LOD geometry
-  const updateTiles = useCallback(() => {
-    const camera = cameraRef.current;
-    if (!camera) return;
-    const { tileX: cameraTileX, tileZ: cameraTileZ } = getCameraTile();
+  const updateTiles = useCallback(
+    (frameTime: number) => {
+      const camera = cameraRef.current;
+      if (!camera) return;
+      const { tileX: cameraTileX, tileZ: cameraTileZ } = getCameraTile();
 
-    const isStudio = isStudioModeRef.current;
+      // Phase 2A: Skip full tile scan when camera tile hasn't changed.
+      // Still process the tile queue and dirty tiles even when stationary.
+      const cameraTileChanged =
+        cameraTileX !== lastCameraTileRef.current.tileX ||
+        cameraTileZ !== lastCameraTileRef.current.tileZ;
 
-    // Full-detail radius stays constant
-    const fullDetailRadius = isStudio
-      ? TILE_LOAD_RADIUS_STUDIO
-      : TILE_LOAD_RADIUS;
+      if (cameraTileChanged) {
+        lastCameraTileRef.current.tileX = cameraTileX;
+        lastCameraTileRef.current.tileZ = cameraTileZ;
 
-    // Far radius scales with camera altitude — covers visible area when zoomed out
-    const farRadius = getDynamicLoadRadius(camera.position.y, isStudio);
+        const isStudio = isStudioModeRef.current;
 
-    // Unload radius is slightly beyond the far radius
-    const unloadRadius = farRadius + 2;
+        // Full-detail radius stays constant
+        const fullDetailRadius = isStudio
+          ? TILE_LOAD_RADIUS_STUDIO
+          : TILE_LOAD_RADIUS;
 
-    // Queue tiles to load across the full dynamic radius
-    for (let dx = -farRadius; dx <= farRadius; dx++) {
-      for (let dz = -farRadius; dz <= farRadius; dz++) {
-        const tileX = cameraTileX + dx;
-        const tileZ = cameraTileZ + dz;
+        // Far radius scales with camera altitude — covers visible area when zoomed out
+        const farRadius = getDynamicLoadRadius(camera.position.y, isStudio);
 
-        if (!isInBounds(tileX, tileZ)) continue;
+        // Unload radius is slightly beyond the far radius
+        const unloadRadius = farRadius + 2;
 
-        const key = getTileKey(tileX, tileZ);
-        const dist = Math.max(Math.abs(dx), Math.abs(dz)); // Chebyshev distance
-        const wantFullRes = dist <= fullDetailRadius;
-        const wantRes = wantFullRes ? tileResolution : TILE_LOD_LOW_RESOLUTION;
+        // Collect new entries to sort once rather than findIndex + splice per entry
+        const newEntries: Array<{
+          tileX: number;
+          tileZ: number;
+          resolution: number;
+          distance: number;
+        }> = [];
 
-        const existing = tilesRef.current.get(key);
-        if (existing) {
-          existing.lastAccessed = performance.now();
-          // LOD upgrade: tile is low-res but camera moved close enough for full detail
-          if (wantFullRes && existing.resolution <= TILE_LOD_LOW_RESOLUTION) {
-            unloadTile(key);
-            // Falls through to queue for full-res generation
-          } else {
-            continue;
+        // Queue tiles to load across the full dynamic radius
+        for (let dx = -farRadius; dx <= farRadius; dx++) {
+          for (let dz = -farRadius; dz <= farRadius; dz++) {
+            const tileX = cameraTileX + dx;
+            const tileZ = cameraTileZ + dz;
+
+            if (!isInBounds(tileX, tileZ)) continue;
+
+            const key = getTileKey(tileX, tileZ);
+            const dist = Math.max(Math.abs(dx), Math.abs(dz)); // Chebyshev distance
+            const wantFullRes = dist <= fullDetailRadius;
+            const wantRes = wantFullRes
+              ? tileResolution
+              : TILE_LOD_LOW_RESOLUTION;
+
+            const existing = tilesRef.current.get(key);
+            if (existing) {
+              // Phase 2C: Use cached frame timestamp instead of per-tile performance.now()
+              existing.lastAccessed = frameTime;
+              // LOD upgrade: tile is low-res but camera moved close enough for full detail
+              if (
+                wantFullRes &&
+                existing.resolution <= TILE_LOD_LOW_RESOLUTION
+              ) {
+                unloadTile(key);
+                // Falls through to queue for full-res generation
+              } else {
+                continue;
+              }
+            }
+
+            if (!tileQueueSetRef.current.has(key)) {
+              tileQueueSetRef.current.add(key);
+              const distance = Math.abs(dx) + Math.abs(dz);
+              newEntries.push({ tileX, tileZ, resolution: wantRes, distance });
+            }
           }
         }
 
-        if (!tileQueueSetRef.current.has(key)) {
-          tileQueueSetRef.current.add(key);
-          const distance = Math.abs(dx) + Math.abs(dz);
-          const entry = { tileX, tileZ, resolution: wantRes };
-          const insertIndex = tileQueueRef.current.findIndex(
-            (t) =>
-              Math.abs(t.tileX - cameraTileX) +
-                Math.abs(t.tileZ - cameraTileZ) >
-              distance,
-          );
-          if (insertIndex === -1) {
+        // Sort new entries by distance and append to queue (avoids O(n) findIndex+splice per entry)
+        if (newEntries.length > 0) {
+          newEntries.sort((a, b) => a.distance - b.distance);
+          for (const entry of newEntries) {
             tileQueueRef.current.push(entry);
-          } else {
-            tileQueueRef.current.splice(insertIndex, 0, entry);
+          }
+        }
+
+        // Phase 2F: Only check for unloads when camera tile changes
+        for (const [key, tile] of tilesRef.current) {
+          const dx = Math.abs(tile.tileX - cameraTileX);
+          const dz = Math.abs(tile.tileZ - cameraTileZ);
+
+          if (dx > unloadRadius || dz > unloadRadius) {
+            if (frameTime - tile.lastAccessed > 1000) {
+              unloadTile(key);
+            }
           }
         }
       }
-    }
 
-    // When the scene staging queue is draining (buildings/vegetation being added),
-    // reduce tile generation budget but DON'T pause entirely. Low-res tiles are
-    // tiny (8×8 = 64 vertices) — a few per frame combined with staging is fine.
-    // Full-res tiles (32×32 = 1024 vertices) are paused during staging.
-    const hasStagedWork = resourceManager.hasStagedWork;
-    const maxFullThisFrame = hasStagedWork ? 0 : MAX_TILES_PER_FRAME;
-    const maxLowThisFrame = hasStagedWork ? 4 : MAX_LOW_RES_TILES_PER_FRAME;
+      // When the scene staging queue is draining (buildings/vegetation being added),
+      // reduce tile generation budget but DON'T pause entirely. Low-res tiles are
+      // tiny (8×8 = 64 vertices) — a few per frame combined with staging is fine.
+      // Full-res tiles (32×32 = 1024 vertices) are paused during staging.
+      const hasStagedWork = resourceManager.hasStagedWork;
+      const maxFullThisFrame = hasStagedWork ? 0 : MAX_TILES_PER_FRAME;
+      const maxLowThisFrame = hasStagedWork ? 4 : MAX_LOW_RES_TILES_PER_FRAME;
 
-    // Process tile queue with separate budgets for full-res and low-res
-    let fullResGen = 0;
-    let lowResGen = 0;
-    const remaining: typeof tileQueueRef.current = [];
+      // Process tile queue with separate budgets for full-res and low-res
+      let fullResGen = 0;
+      let lowResGen = 0;
+      const remaining: typeof tileQueueRef.current = [];
 
-    for (const entry of tileQueueRef.current) {
-      const isFullRes = entry.resolution > TILE_LOD_LOW_RESOLUTION;
+      for (const entry of tileQueueRef.current) {
+        const isFullRes = entry.resolution > TILE_LOD_LOW_RESOLUTION;
 
-      if (isFullRes && fullResGen >= maxFullThisFrame) {
-        remaining.push(entry);
-        continue;
-      }
-      if (!isFullRes && lowResGen >= maxLowThisFrame) {
-        remaining.push(entry);
-        continue;
-      }
+        if (isFullRes && fullResGen >= maxFullThisFrame) {
+          remaining.push(entry);
+          continue;
+        }
+        if (!isFullRes && lowResGen >= maxLowThisFrame) {
+          remaining.push(entry);
+          continue;
+        }
 
-      const qKey = getTileKey(entry.tileX, entry.tileZ);
-      tileQueueSetRef.current.delete(qKey);
-      if (isInBounds(entry.tileX, entry.tileZ) && !tilesRef.current.has(qKey)) {
-        generateTile(entry.tileX, entry.tileZ, entry.resolution);
-        if (isFullRes) fullResGen++;
-        else lowResGen++;
-      }
-    }
-    tileQueueRef.current = remaining;
-
-    // Unload tiles beyond dynamic radius
-    const now = performance.now();
-    for (const [key, tile] of tilesRef.current) {
-      const dx = Math.abs(tile.tileX - cameraTileX);
-      const dz = Math.abs(tile.tileZ - cameraTileZ);
-
-      if (dx > unloadRadius || dz > unloadRadius) {
-        if (now - tile.lastAccessed > 1000) {
-          unloadTile(key);
+        const qKey = getTileKey(entry.tileX, entry.tileZ);
+        tileQueueSetRef.current.delete(qKey);
+        if (
+          isInBounds(entry.tileX, entry.tileZ) &&
+          !tilesRef.current.has(qKey)
+        ) {
+          generateTile(entry.tileX, entry.tileZ, entry.resolution);
+          if (isFullRes) fullResGen++;
+          else lowResGen++;
         }
       }
-    }
+      tileQueueRef.current = remaining;
 
-    // Update generating state — only call setState when the value actually changes
-    // to avoid triggering React reconciliation on every animation frame.
-    const isStillGenerating = tileQueueRef.current.length > 0;
-    if (isGeneratingRef.current !== isStillGenerating) {
-      isGeneratingRef.current = isStillGenerating;
-      setIsGenerating(isStillGenerating);
-    }
-  }, [
-    getCameraTile,
-    isInBounds,
-    getTileKey,
-    generateTile,
-    unloadTile,
-    tileResolution,
-  ]);
+      // Process dirty tiles progressively — regenerate geometry in-place without
+      // unloading. Budget is shared with new tile generation to avoid GPU spikes.
+      let dirtyProcessed = 0;
+      const dirtyBudget = hasStagedWork ? 1 : MAX_TILES_PER_FRAME;
+      while (
+        dirtyTileKeysRef.current.length > 0 &&
+        dirtyProcessed < dirtyBudget
+      ) {
+        const dirtyKey = dirtyTileKeysRef.current.shift()!;
+        const dirtyTile = tilesRef.current.get(dirtyKey);
+        if (dirtyTile?.dirty) {
+          regenerateTileInPlace(dirtyKey);
+          dirtyProcessed++;
+        }
+      }
+
+      // Update generating state — only call setState when the value actually changes
+      // to avoid triggering React reconciliation on every animation frame.
+      const isStillGenerating =
+        tileQueueRef.current.length > 0 || dirtyTileKeysRef.current.length > 0;
+      if (isGeneratingRef.current !== isStillGenerating) {
+        isGeneratingRef.current = isStillGenerating;
+        setIsGenerating(isStillGenerating);
+      }
+    },
+    [
+      getCameraTile,
+      isInBounds,
+      getTileKey,
+      generateTile,
+      unloadTile,
+      tileResolution,
+      regenerateTileInPlace,
+    ],
+  );
 
   // Handle viewport click for selection
   const handleClick = useCallback(
@@ -1277,12 +1675,64 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     [onSelect, worldSize, tileSize, waterThreshold],
   );
 
+  // ---- Stable refs for the mount-once scene effect ----
+  // These allow the effect to always call the latest callback / read the
+  // latest config without the callbacks themselves being in the dep array,
+  // which previously caused the entire WebGPU scene to tear down on every
+  // slider change or re-render.
+  const terrainConfigRef = useRef(terrainConfig);
+  terrainConfigRef.current = terrainConfig;
+  const useGamePipelineRef = useRef(config.useGamePipeline);
+  useGamePipelineRef.current = config.useGamePipeline;
+  const showVegetationRef = useRef(showVegetation);
+  showVegetationRef.current = showVegetation;
+  const waterThresholdRef = useRef(waterThreshold);
+  waterThresholdRef.current = waterThreshold;
+
+  const handleMouseMoveRef = useRef(handleMouseMove);
+  handleMouseMoveRef.current = handleMouseMove;
+  const handleKeyDownRef = useRef(handleKeyDown);
+  handleKeyDownRef.current = handleKeyDown;
+  const handleKeyUpRef = useRef(handleKeyUp);
+  handleKeyUpRef.current = handleKeyUp;
+  const handleMouseDownRef = useRef(handleMouseDown);
+  handleMouseDownRef.current = handleMouseDown;
+  const handleMouseUpRef = useRef(handleMouseUp);
+  handleMouseUpRef.current = handleMouseUp;
+  const handleWheelRef = useRef(handleWheel);
+  handleWheelRef.current = handleWheel;
+  const handleContextMenuRef = useRef(handleContextMenu);
+  handleContextMenuRef.current = handleContextMenu;
+  const handlePointerLockChangeRef = useRef(handlePointerLockChange);
+  handlePointerLockChangeRef.current = handlePointerLockChange;
+  const handleClickRef = useRef(handleClick);
+  handleClickRef.current = handleClick;
+  const updateCameraRef = useRef(updateCamera);
+  updateCameraRef.current = updateCamera;
+  const updateTilesRef = useRef(updateTiles);
+  updateTilesRef.current = updateTiles;
+  const brushOverlaysRef = useRef(brushOverlays);
+  brushOverlaysRef.current = brushOverlays;
+
   // Initialize Three.js scene with WebGPU
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let mounted = true;
+
+    // Stable event handler wrappers — delegate to latest callback via refs.
+    // This lets the effect run once (mount) without re-attaching listeners
+    // when handlers change due to config/state updates.
+    const _onMouseMove = (e: MouseEvent) => handleMouseMoveRef.current(e);
+    const _onKeyDown = (e: KeyboardEvent) => handleKeyDownRef.current(e);
+    const _onKeyUp = (e: KeyboardEvent) => handleKeyUpRef.current(e);
+    const _onMouseDown = (e: MouseEvent) => handleMouseDownRef.current(e);
+    const _onMouseUp = (e: MouseEvent) => handleMouseUpRef.current(e);
+    const _onWheel = (e: WheelEvent) => handleWheelRef.current(e);
+    const _onContextMenu = (e: MouseEvent) => handleContextMenuRef.current(e);
+    const _onPointerLockChange = () => handlePointerLockChangeRef.current();
+    const _onClick = (e: MouseEvent) => handleClickRef.current(e);
 
     // Scene (create before async renderer init)
     const scene = new THREE.Scene();
@@ -1321,7 +1771,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     townMarkersRef.current = townMarkers;
 
     const vegetationContainer = new THREE.Group();
-    vegetationContainer.visible = showVegetation;
+    vegetationContainer.visible = showVegetationRef.current;
     scene.add(vegetationContainer);
     vegetationContainerRef.current = vegetationContainer;
 
@@ -1453,7 +1903,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       50, // High above terrain
       wildernessDepth / 4, // Centered in wilderness zone
     );
-    scene.add(skullSprite);
+    // Phase 4E: Add skull to wildernessGroup (not scene) so cleanup traverses it
+    wildernessGroup.add(skullSprite);
 
     // Store reference for cleanup (use group as main reference)
     wildernessOverlayRef.current = wildernessGroup as unknown as THREE.Mesh;
@@ -1462,14 +1913,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       wildernessGroup as THREE.Group & { skullSprite?: THREE.Sprite }
     ).skullSprite = skullSprite;
 
-    // Lighting
+    // Lighting — positions/colors updated per-frame by time-of-day system
     const ambient = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambient);
+    ambientLightRef.current = ambient;
 
     const sun = new THREE.DirectionalLight(0xffffff, 1.0);
     sun.position.set(1000, 2000, 1000);
+    sunRef.current = sun;
     // Skip shadow casting entirely in World Studio (shadows disabled on renderer)
-    sun.castShadow = !hideBuiltinOverlays;
+    sun.castShadow = !isStudioModeRef.current;
     if (sun.castShadow) {
       sun.shadow.mapSize.width = 2048;
       sun.shadow.mapSize.height = 2048;
@@ -1498,13 +1951,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     waterMaterialRef.current = createWaterMaterial();
 
     // Create terrain generator and querier
-    const generator = new TerrainGenerator(terrainConfig);
+    const generator = new TerrainGenerator(terrainConfigRef.current);
     generatorRef.current = generator;
 
     // Build the terrain querier — game pipeline uses exact game algorithm,
     // procgen pipeline wraps TerrainGenerator.queryPoint
-    if (config.useGamePipeline) {
-      const gameQuerier = createGameTerrainQuerier(config.seed);
+    if (useGamePipelineRef.current) {
+      const gameQuerier = createGameTerrainQuerier(configSeedRef.current);
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = gameQuerier.queryPoint(worldX, worldZ);
         return {
@@ -1548,7 +2001,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     const heatmapQuerier = terrainQuerierRef.current!;
     const heatmapManager = new DifficultyHeatmapManager({
       scene,
-      seed: config.seed,
+      seed: configSeedRef.current,
       tileSize,
       worldCenterOffset,
       queryBiome: (wx, wz) => {
@@ -1565,7 +2018,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     // ---- Game pipeline: fetch exact towns + roads from server-side game code ----
     // The Asset Forge API runs the ACTUAL TownGenerator + BFS road pathfinding
     // from the game, producing pixel-identical town/road layouts.
-    if (config.useGamePipeline) {
+    if (useGamePipelineRef.current) {
       const initLayout = async () => {
         const layoutRes = await fetch("/api/world/layout");
         if (!mounted) return;
@@ -1709,7 +2162,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           };
 
           // Cone marker pointing down — shared material per town-size color
-          const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
+          const coneGeometry = getTownConeGeom();
           if (!initConeMats.has(color)) {
             const mat = new MeshBasicNodeMaterial();
             mat.color = new THREE.Color(color);
@@ -1750,7 +2203,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           });
 
           // Town center pillar — shared material
-          const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
+          const pillarGeometry = getTownPillarGeom();
           const pillar = new THREE.Mesh(pillarGeometry, initPillarMat);
           pillar.position.set(markerX, markerY + 15, markerZ);
           pillar.userData = townUserData;
@@ -2012,12 +2465,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       );
 
       const townGenerator = TownGenerator.fromTerrainGenerator(generator, {
-        seed: config.seed,
+        seed: configSeedRef.current,
         config: {
           townCount: townCfg.townCount,
           worldSize: worldSizeMeters,
           minTownSpacing: scaledMinSpacing,
-          waterThreshold: waterThreshold,
+          waterThreshold: waterThresholdRef.current,
           landmarks: {
             fencesEnabled: townCfg.landmarks.fencesEnabled,
             fenceDensity: townCfg.landmarks.fenceDensity,
@@ -2106,7 +2559,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         };
 
         // Cone marker — shared material per town-size color
-        const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
+        const coneGeometry = getTownConeGeom();
         if (!stConeMats.has(color)) {
           const mat = new MeshBasicNodeMaterial();
           mat.color = new THREE.Color(color);
@@ -2146,8 +2599,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           onAdd: () => selectableObjectsRef.current.push(ring),
         });
 
-        // Town center pillar — shared material
-        const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
+        // Town center pillar — shared material + shared geometry
+        const pillarGeometry = getTownPillarGeom();
         const pillar = new THREE.Mesh(pillarGeometry, stPillarMat);
         pillar.position.set(markerX, markerY + 15, markerZ);
         pillar.userData = townUserData;
@@ -2449,7 +2902,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // that produces different biome/height maps. Generating locally with
       // terrainQuerierRef guarantees trees match the terrain the user sees.
       const initQuerier = terrainQuerierRef.current;
-      const initSeed = config.seed;
+      const initSeed = configSeedRef.current;
       const initGenStart = performance.now();
       const initTrees: Array<{
         s: string;
@@ -2665,7 +3118,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     initVegetation();
 
     // ---- Game structures: bridges + duel arena + manifest entities ----
-    if (config.useGamePipeline) {
+    if (useGamePipelineRef.current) {
       const heightQuerier = terrainQuerierRef.current;
       if (heightQuerier) {
         const getH = (wx: number, wz: number) => heightQuerier(wx, wz).height;
@@ -2689,48 +3142,50 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
 
         // All manifest entities (NPCs, stations, resources, mob spawns, fishing)
-        createGameWorldEntities(worldCenterOffset, getH, waterThreshold).then(
-          (result) => {
-            if (!mounted) {
-              disposeEntitySync(result.group);
-              return;
-            }
-            scene.add(result.group);
-            entitySyncRef.current = result.group;
+        createGameWorldEntities(
+          worldCenterOffset,
+          getH,
+          waterThresholdRef.current,
+        ).then((result) => {
+          if (!mounted) {
+            disposeEntitySync(result.group);
+            return;
+          }
+          scene.add(result.group);
+          entitySyncRef.current = result.group;
 
-            // Register entity groups as selectable for click-to-select
-            for (const subGroup of result.group.children) {
-              if (!(subGroup instanceof THREE.Group)) continue;
-              for (const entity of subGroup.children) {
-                if (entity.userData?.selectable) {
-                  selectableObjectsRef.current.push(entity);
-                }
+          // Register entity groups as selectable for click-to-select
+          for (const subGroup of result.group.children) {
+            if (!(subGroup instanceof THREE.Group)) continue;
+            for (const entity of subGroup.children) {
+              if (entity.userData?.selectable) {
+                selectableObjectsRef.current.push(entity);
               }
             }
+          }
 
-            // Report entity data to parent
-            onGameEntitiesLoaded?.(result.entities);
-          },
-        );
+          // Report entity data to parent
+          onGameEntitiesLoaded?.(result.entities);
+        });
       }
     }
 
-    // Event listeners
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("keyup", handleKeyUp);
-    document.addEventListener("pointerlockchange", handlePointerLockChange);
-    document.addEventListener("mouseup", handleMouseUp);
-    container.addEventListener("click", handleClick);
-    container.addEventListener("mousedown", handleMouseDown);
-    container.addEventListener("wheel", handleWheel, { passive: false });
-    document.addEventListener("contextmenu", handleContextMenu, true);
+    // Event listeners — use stable wrappers that delegate to refs
+    document.addEventListener("mousemove", _onMouseMove);
+    document.addEventListener("keydown", _onKeyDown);
+    document.addEventListener("keyup", _onKeyUp);
+    document.addEventListener("pointerlockchange", _onPointerLockChange);
+    document.addEventListener("mouseup", _onMouseUp);
+    container.addEventListener("click", _onClick);
+    container.addEventListener("mousedown", _onMouseDown);
+    container.addEventListener("wheel", _onWheel, { passive: false });
+    document.addEventListener("contextmenu", _onContextMenu, true);
 
     // Async WebGPU renderer initialization
     const initRenderer = async () => {
       const renderer = await createWebGPURenderer({
         // Disable antialiasing in World Studio for better FPS
-        antialias: !hideBuiltinOverlays,
+        antialias: !isStudioModeRef.current,
         alpha: true,
       });
 
@@ -2741,7 +3196,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
       // World Studio: cap pixel ratio at 1 and disable shadows for FPS
       // (editors don't need Retina resolution or shadow maps)
-      const maxPixelRatio = hideBuiltinOverlays
+      const maxPixelRatio = isStudioModeRef.current
         ? 1
         : Math.min(window.devicePixelRatio, 2);
       renderer.setPixelRatio(maxPixelRatio);
@@ -2750,7 +3205,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const h = container.clientHeight || 1;
       renderer.setSize(w, h);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.shadowMap.enabled = !hideBuiltinOverlays;
+      renderer.shadowMap.enabled = !isStudioModeRef.current;
       if (renderer.shadowMap.enabled) {
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       }
@@ -2758,11 +3213,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       rendererRef.current = renderer;
 
       // Monitor GPU device loss — logs the actual reason from Metal/WebGPU
+      // "destroyed" reason is expected during effect cleanup (preset/config changes);
+      // only log unexpected device losses as errors.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const backend = (renderer as any).backend;
       if (backend?.device?.lost) {
         backend.device.lost.then(
           (info: { reason: string; message: string }) => {
+            if (info.reason === "destroyed") {
+              console.debug(
+                `[GPU-DEBUG] Device disposed (expected during config change)`,
+              );
+              return;
+            }
             const stats = getGpuLifecycleStats();
             console.error(
               `[GPU-DEBUG] DEVICE LOST reason="${info.reason}" message="${info.message}"`,
@@ -3252,6 +3715,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const offset = worldCenterOffsetRef.current;
           return querier(sceneX - offset, sceneZ - offset).height;
         },
+        enterPlayerMode: camEnterPlayerMode,
+        exitPlayerMode: camExitPlayerMode,
+        isPlayerMode: () => camPlayerModeRef.current,
         worldCenterOffset: worldCenterOffsetRef.current,
         queryBiome: (worldX: number, worldZ: number) => {
           const querier = terrainQuerierRef.current;
@@ -3363,8 +3829,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               townName: town.name,
             };
 
-            // Cone marker pointing down — shared material per town-size color
-            const coneGeo = new THREE.ConeGeometry(20, 50, 8);
+            // Cone marker pointing down — shared material per town-size color + shared geometry
+            const coneGeo = getTownConeGeom();
             if (!coneMaterialCache.has(color)) {
               const mat = new MeshBasicNodeMaterial();
               mat.color = new THREE.Color(color);
@@ -3404,8 +3870,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               onAdd: () => selectableObjectsRef.current.push(ring),
             });
 
-            // Center pillar — shared material
-            const pillarGeo = new THREE.CylinderGeometry(3, 3, 30, 8);
+            // Center pillar — shared material + shared geometry
+            const pillarGeo = getTownPillarGeom();
             const pillar = new THREE.Mesh(pillarGeo, sharedPillarMat);
             pillar.position.set(mx, my + 15, mz);
             pillar.userData = townUserData;
@@ -3647,6 +4113,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             }
             tileQueueRef.current = [];
             tileQueueSetRef.current.clear();
+            // Force updateTiles to re-scan on next frame after bulk unload
+            lastCameraTileRef.current.tileX = -Infinity;
           }
 
           console.warn(
@@ -3742,6 +4210,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             vegetationContainerRef.current.visible = visible;
           }
         },
+        getTerrainQuerier: () => terrainQuerierRef.current,
       });
 
       // Animation loop
@@ -3750,8 +4219,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       let lastRotationUpdate = 0;
       // Pre-allocated vector for label world position query (avoids GC)
       const _labelWorldPos = new THREE.Vector3();
-      // GPU diagnostic: log scene stats every N frames to correlate with device loss
-      let _gpuDiagFrame = 0;
+      // Phase 2D: Cache last time-of-day value to skip unchanged frames
+      let lastToDValue = -1;
+      // Phase 2E: Throttle LOD updates — every 10 frames or when camera moves
+      let lodFrameCounter = 0;
+      let lastLodCameraX = 0;
+      let lastLodCameraZ = 0;
 
       const animate = () => {
         if (!mounted) return;
@@ -3762,8 +4235,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         lastTime = now;
         const elapsedSeconds = now / 1000;
 
-        updateCamera(deltaTime);
-        updateTiles();
+        updateCameraRef.current(deltaTime);
+        // Phase 2C: Pass cached frame timestamp to updateTiles
+        updateTilesRef.current(now);
+
+        // Phase 2D: Only run time-of-day lighting when value changes
+        const todValue = timeOfDayRef.current;
+        if (
+          todValue !== lastToDValue &&
+          sunRef.current &&
+          ambientLightRef.current
+        ) {
+          lastToDValue = todValue;
+          updateTimeOfDayLighting(
+            todValue,
+            sunRef.current,
+            ambientLightRef.current,
+            scene,
+          );
+        }
 
         // GPU resource staging — see SceneResourceManager for invariants.
         // Must run BEFORE LOD updates so newly added LOD objects get their
@@ -3778,9 +4268,17 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             camera.position.y < MARKER_HIDE_ALTITUDE;
         }
 
-        // Update LOD objects based on camera position
-        for (const lod of lodObjectsRef.current) {
-          lod.update(camera);
+        // Phase 2E: Throttle LOD updates — every 10 frames or when camera moves > 5 units
+        lodFrameCounter++;
+        const camDx = camera.position.x - lastLodCameraX;
+        const camDz = camera.position.z - lastLodCameraZ;
+        if (lodFrameCounter >= 10 || camDx * camDx + camDz * camDz > 25) {
+          lodFrameCounter = 0;
+          lastLodCameraX = camera.position.x;
+          lastLodCameraZ = camera.position.z;
+          for (const lod of lodObjectsRef.current) {
+            lod.update(camera);
+          }
         }
 
         // Animate wilderness skull (bobbing and pulsing)
@@ -3809,7 +4307,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
 
         // Update camera rotation for minimap (only when built-in minimap is shown)
-        if (!hideBuiltinOverlays && now - lastRotationUpdate > 100) {
+        if (!isStudioModeRef.current && now - lastRotationUpdate > 100) {
           setCameraRotationY(cameraStateRef.current.euler.y);
           lastRotationUpdate = now;
         }
@@ -3838,9 +4336,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             sprite.scale.set(worldHeight * aspect, worldHeight, 1);
           }
         }
-
-        // GPU diagnostic — periodic logging only
-        _gpuDiagFrame++;
 
         try {
           renderer.render(scene, camera);
@@ -3914,18 +4409,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("keyup", handleKeyUp);
-      document.removeEventListener(
-        "pointerlockchange",
-        handlePointerLockChange,
-      );
-      document.removeEventListener("mouseup", handleMouseUp);
-      container.removeEventListener("click", handleClick);
-      container.removeEventListener("mousedown", handleMouseDown);
-      container.removeEventListener("wheel", handleWheel);
-      document.removeEventListener("contextmenu", handleContextMenu, true);
+      document.removeEventListener("mousemove", _onMouseMove);
+      document.removeEventListener("keydown", _onKeyDown);
+      document.removeEventListener("keyup", _onKeyUp);
+      document.removeEventListener("pointerlockchange", _onPointerLockChange);
+      document.removeEventListener("mouseup", _onMouseUp);
+      container.removeEventListener("click", _onClick);
+      container.removeEventListener("mousedown", _onMouseDown);
+      container.removeEventListener("wheel", _onWheel);
+      document.removeEventListener("contextmenu", _onContextMenu, true);
 
       cancelAnimationFrame(currentAnimationId.current);
 
@@ -4035,42 +4527,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
     };
   }, [
-    terrainConfig,
+    // Only STRUCTURAL params that warrant a full scene rebuild.
+    // Noise weights, maxHeight, waterThreshold, seed → handled by the
+    // terrain-config effect below (clears tiles, updates generator).
+    // Event handlers + animation callbacks → delegated via stable refs.
     worldSize,
     tileSize,
     tileResolution,
-    waterThreshold,
-    config.seed,
-    config.useGamePipeline,
-    // config.towns and providedRoads read from refs to avoid full scene rebuild
-    handleMouseMove,
-    handleKeyDown,
-    handleKeyUp,
-    handlePointerLockChange,
-    handleClick,
-    handleMouseDown,
-    handleMouseUp,
-    handleWheel,
-    handleContextMenu,
-    updateCamera,
-    updateTiles,
-    showVegetation,
   ]);
 
-  // Regenerate terrain when config changes
+  // Regenerate terrain when config changes — marks existing tiles dirty for
+  // incremental in-place regeneration instead of unloading everything.
   useEffect(() => {
-    // Clear existing tiles
-    for (const key of tilesRef.current.keys()) {
-      unloadTile(key);
-    }
-    tileQueueRef.current = [];
-    tileQueueSetRef.current.clear();
-
     // Update generator and querier
     const newGenerator = new TerrainGenerator(terrainConfig);
     generatorRef.current = newGenerator;
 
-    if (config.useGamePipeline) {
+    // If an imported heightmap querier is active, use it instead of the
+    // procedural generator/game pipeline querier.
+    if (importedQuerier) {
+      terrainQuerierRef.current = importedQuerier;
+    } else if (config.useGamePipeline) {
       const gameQuerier = createGameTerrainQuerier(config.seed);
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = gameQuerier.queryPoint(worldX, worldZ);
@@ -4113,14 +4590,68 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         TILE_LOD_LOW_RESOLUTION,
       );
     }
+
+    // Mark all loaded tiles as dirty for progressive in-place regeneration
+    // instead of tearing them all down and rebuilding from scratch.
+    if (tilesRef.current.size > 0) {
+      dirtyTileKeysRef.current = [];
+      for (const [key, tile] of tilesRef.current) {
+        tile.dirty = true;
+        dirtyTileKeysRef.current.push(key);
+      }
+    }
+
+    prevMaxHeightRef.current = maxHeight;
   }, [
     terrainConfig,
     tileSize,
     tileResolution,
-    unloadTile,
     config.useGamePipeline,
     config.seed,
+    maxHeight,
+    importedQuerier,
   ]);
+
+  // Fast-path: when ONLY waterThreshold changes, move water planes without
+  // regenerating terrain geometry. This runs in addition to the terrain config
+  // effect which marks tiles dirty — the dirty regen will also update water,
+  // but this gives an instant visual response before dirty tiles process.
+  useEffect(() => {
+    const prev = prevWaterThresholdRef.current;
+    if (waterThreshold === prev) return;
+    prevWaterThresholdRef.current = waterThreshold;
+
+    // Instantly reposition all existing water meshes
+    for (const [, tile] of tilesRef.current) {
+      if (tile.water) {
+        tile.water.position.y = waterThreshold;
+      }
+    }
+  }, [waterThreshold]);
+
+  // Fast-path: when ONLY maxHeight changes, scale vertex Y positions on all
+  // loaded tiles by the ratio newMax/oldMax. This gives immediate visual
+  // feedback; the dirty-tile queue will do a proper full regen progressively.
+  useEffect(() => {
+    const prev = prevMaxHeightRef.current;
+    if (maxHeight === prev) return;
+    // prevMaxHeightRef is updated by the terrain config effect
+
+    const scale = maxHeight / prev;
+    if (!isFinite(scale) || scale === 0) return;
+
+    for (const [, tile] of tilesRef.current) {
+      const posAttr = tile.mesh.geometry.getAttribute("position");
+      if (!posAttr) continue;
+      const arr = posAttr.array as Float32Array;
+      // Y is at stride index 1 (x,y,z per vertex)
+      for (let i = 1; i < arr.length; i += 3) {
+        arr[i] *= scale;
+      }
+      posAttr.needsUpdate = true;
+      tile.mesh.geometry.computeBoundingSphere();
+    }
+  }, [maxHeight]);
 
   // Regenerate ALL tiles when roads change so the terrain shader picks up
   // road influence (road coloring baked into terrain surface) and height
@@ -4135,15 +4666,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     if (tilesRef.current.size === 0) return; // No tiles loaded yet
 
     console.log(
-      `[TileBasedTerrain] Roads changed — unloading ${tilesRef.current.size} tiles for ${providedRoads.length} roads`,
+      `[TileBasedTerrain] Roads changed — marking ${tilesRef.current.size} tiles dirty for ${providedRoads.length} roads`,
     );
 
-    for (const key of tilesRef.current.keys()) {
-      unloadTile(key);
+    dirtyTileKeysRef.current = [];
+    for (const [key, tile] of tilesRef.current) {
+      tile.dirty = true;
+      dirtyTileKeysRef.current.push(key);
     }
-    tileQueueRef.current = [];
-    tileQueueSetRef.current.clear();
-  }, [providedRoads, unloadTile]);
+  }, [providedRoads]);
 
   // Regenerate ALL tiles when mines change so the terrain shader picks up
   // mine influence (rocky floor coloring) and height flattening.
@@ -4158,15 +4689,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     if (tilesRef.current.size === 0) return;
 
     console.log(
-      `[TileBasedTerrain] Mines changed — unloading ${tilesRef.current.size} tiles for ${providedMines.length} mines`,
+      `[TileBasedTerrain] Mines changed — marking ${tilesRef.current.size} tiles dirty for ${providedMines.length} mines`,
     );
 
-    for (const key of tilesRef.current.keys()) {
-      unloadTile(key);
+    dirtyTileKeysRef.current = [];
+    for (const [key, tile] of tilesRef.current) {
+      tile.dirty = true;
+      dirtyTileKeysRef.current.push(key);
     }
-    tileQueueRef.current = [];
-    tileQueueSetRef.current.clear();
-  }, [providedMines, unloadTile]);
+  }, [providedMines]);
 
   // Notify parent of tile count changes
   useEffect(() => {

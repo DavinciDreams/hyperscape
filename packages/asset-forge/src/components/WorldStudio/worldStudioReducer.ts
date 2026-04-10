@@ -335,6 +335,51 @@ function studioReducer(
       };
     }
 
+    case "SET_FOUNDATION_TOWNS": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            hasUnsavedChanges: true,
+            world: {
+              ...world,
+              foundation: {
+                ...world.foundation,
+                towns: action.towns,
+                buildings: action.buildings,
+              },
+            },
+          },
+        },
+      };
+    }
+
+    case "SET_FOUNDATION_CONFIG": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            hasUnsavedChanges: true,
+            world: {
+              ...world,
+              foundation: {
+                ...world.foundation,
+                config: action.config,
+              },
+            },
+          },
+        },
+      };
+    }
+
     // Manifest loading
     case "MANIFESTS_LOAD_START":
       return {
@@ -819,6 +864,13 @@ function studioReducer(
 
     case "CLEAR_ALL_MANIFEST_OVERRIDES":
       return { ...state, manifestOverrides: EMPTY_MANIFEST_OVERRIDES };
+
+    // Live terrain config for real-time slider updates
+    case "SET_LIVE_TERRAIN_CONFIG":
+      return { ...state, liveTerrainConfig: action.config };
+
+    case "CLEAR_LIVE_TERRAIN_CONFIG":
+      return { ...state, liveTerrainConfig: null };
 
     default:
       return null; // Not a studio-specific action

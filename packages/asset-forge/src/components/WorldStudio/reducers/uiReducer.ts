@@ -220,6 +220,9 @@ export function uiReducer(
       return { ...state, brushOverlays: overlays };
     }
 
+    case "RESTORE_BRUSH_OVERLAYS":
+      return { ...state, brushOverlays: action.overlays };
+
     case "CLEAR_BRUSH_OVERLAYS": {
       if (action.brushType) {
         const cleared = { ...state.brushOverlays };

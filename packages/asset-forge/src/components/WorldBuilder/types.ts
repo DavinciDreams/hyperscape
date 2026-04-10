@@ -1395,6 +1395,7 @@ export const DEFAULT_VEGETATION_CONFIG: VegetationConfig = {
 export const DEFAULT_CREATION_CONFIG: WorldCreationConfig = {
   seed: 12345,
   preset: "large-island",
+  useGamePipeline: true,
   terrain: {
     tileSize: 100,
     worldSize: 20, // 20x20 tiles = 2km x 2km (preview-friendly, increase for production)
