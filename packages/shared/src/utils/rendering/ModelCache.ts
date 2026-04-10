@@ -380,7 +380,7 @@ export class ModelCache {
       },
     ) => arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength);
 
-    // Extract a geometry attribute's data into a contiguous Float32 buffer.
+    // Extract a geometry attribute's data into a contiguous typed array buffer.
     // InterleavedBufferAttribute.array returns the FULL interleaved buffer
     // (containing positions + normals + UVs all packed together), so we must
     // deinterleave by reading each component individually via getComponent().
@@ -393,7 +393,10 @@ export class ModelCache {
         (attr as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute
       ) {
         const iba = attr as THREE.InterleavedBufferAttribute;
-        const out = new Float32Array(iba.count * iba.itemSize);
+        const TypedArrayCtor = iba.data.array.constructor as new (
+          len: number,
+        ) => Float32Array | Uint16Array | Uint8Array | Int16Array;
+        const out = new TypedArrayCtor(iba.count * iba.itemSize);
         for (let i = 0; i < iba.count; i++) {
           for (let j = 0; j < iba.itemSize; j++) {
             out[i * iba.itemSize + j] = iba.getComponent(i, j);
@@ -1194,7 +1197,12 @@ export class ModelCache {
   ): THREE.Texture {
     if ((texture as THREE.DataTexture).isDataTexture) return texture;
     const pixelData = this.textureToPixelData(texture);
-    if (!pixelData) return texture;
+    if (!pixelData) {
+      console.warn(
+        `[ModelCache] ensureDataTexture: could not read pixels from "${texture.name}" — sRGB decode may be incorrect`,
+      );
+      return texture;
+    }
     const dt = new THREE.DataTexture(
       new Uint8ClampedArray(pixelData.pixels),
       pixelData.width,
@@ -1205,6 +1213,11 @@ export class ModelCache {
     dt.name = texture.name;
     dt.wrapS = texture.wrapS;
     dt.wrapT = texture.wrapT;
+    dt.minFilter = texture.minFilter;
+    dt.magFilter = texture.magFilter;
+    dt.generateMipmaps = texture.generateMipmaps;
+    dt.repeat.copy(texture.repeat);
+    dt.offset.copy(texture.offset);
     dt.flipY = texture.flipY;
     dt.needsUpdate = true;
     return dt;
