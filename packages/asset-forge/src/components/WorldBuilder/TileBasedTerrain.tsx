@@ -1339,7 +1339,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Full-res tiles (32×32 = 1024 vertices) are paused during staging.
       const hasStagedWork = resourceManager.hasStagedWork;
       const maxFullThisFrame = hasStagedWork ? 0 : MAX_TILES_PER_FRAME;
-      const maxLowThisFrame = hasStagedWork ? 4 : MAX_LOW_RES_TILES_PER_FRAME;
+
+      // Low-res tiles use a time-based budget: generate as many as possible
+      // within 8ms to fill the world overview quickly (~1-2 seconds for 10k tiles)
+      // without dropping below 60fps.
+      const LOW_RES_TIME_BUDGET_MS = 8;
+      const lowResDeadline = frameTime + LOW_RES_TIME_BUDGET_MS;
 
       // Process tile queue with separate budgets for full-res and low-res
       let fullResGen = 0;
@@ -1353,7 +1358,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           remaining.push(entry);
           continue;
         }
-        if (!isFullRes && lowResGen >= maxLowThisFrame) {
+        if (
+          !isFullRes &&
+          lowResGen >= MAX_LOW_RES_TILES_PER_FRAME &&
+          performance.now() >= lowResDeadline
+        ) {
           remaining.push(entry);
           continue;
         }
@@ -1711,6 +1720,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   updateCameraRef.current = updateCamera;
   const updateTilesRef = useRef(updateTiles);
   updateTilesRef.current = updateTiles;
+  const generateTileRef = useRef(generateTile);
+  generateTileRef.current = generateTile;
   const brushOverlaysRef = useRef(brushOverlays);
   brushOverlaysRef.current = brushOverlays;
 
@@ -4212,6 +4223,37 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         },
         getTerrainQuerier: () => terrainQuerierRef.current,
       });
+
+      // ---- Pre-seed entire world with low-res tiles for instant overview ----
+      // Queue ALL world tiles as low-res so the entire map appears quickly
+      // instead of chunk-by-chunk. The regular per-frame budget handles
+      // generation, but we dramatically increase the low-res budget during
+      // this initial phase. Full-res tiles near the camera are generated
+      // separately by updateTiles as normal.
+      if (isStudioModeRef.current && terrainQuerierRef.current) {
+        const queue = tileQueueRef.current;
+        const queueSet = tileQueueSetRef.current;
+        let preSeedQueued = 0;
+        for (let tx = 0; tx < worldSize; tx++) {
+          for (let tz = 0; tz < worldSize; tz++) {
+            const key = `${tx}_${tz}`;
+            if (!tilesRef.current.has(key) && !queueSet.has(key)) {
+              queueSet.add(key);
+              queue.push({
+                tileX: tx,
+                tileZ: tz,
+                resolution: TILE_LOD_LOW_RESOLUTION,
+              });
+              preSeedQueued++;
+            }
+          }
+        }
+        if (preSeedQueued > 0) {
+          console.log(
+            `[TileBasedTerrain] Queued ${preSeedQueued} low-res tiles for instant world overview`,
+          );
+        }
+      }
 
       // Animation loop
       let lastTime = performance.now();
