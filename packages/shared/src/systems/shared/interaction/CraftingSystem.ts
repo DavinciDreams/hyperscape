@@ -258,7 +258,6 @@ export class CraftingSystem extends SystemBase {
     quantity: number;
   }): void {
     const { playerId, recipeId, quantity } = data;
-
     // Check if already crafting
     if (this.activeSessions.has(playerId)) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {

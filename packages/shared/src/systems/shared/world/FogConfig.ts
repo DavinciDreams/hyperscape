@@ -39,6 +39,7 @@ import {
   mix,
   dot,
   sub,
+  mul,
   smoothstep,
   Fn,
   output,
@@ -48,8 +49,8 @@ import {
 // Fog distance parameters
 // smoothstep(NEAR_SQ, FAR_SQ, distSq) gives 0% fog at NEAR, 100% at FAR.
 // ---------------------------------------------------------------------------
-export const FOG_NEAR = 60;
-export const FOG_FAR = 150;
+export const FOG_NEAR = 400;
+export const FOG_FAR = 800;
 
 // Pre-computed squared distances — avoids per-fragment sqrt on the GPU.
 // Shaders compare dot(toCamera, toCamera) directly against these.
@@ -106,5 +107,22 @@ export function applySkyFog(material: {
   material.outputNode = Fn(() => {
     const litColor = output;
     return vec4(mix(litColor.rgb, fogTex.rgb, fogFactor), litColor.a);
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// HELPER: Apply elevation-based fade to cloud materials.
+// Reduces cloud opacity based on elevation angle so lower clouds
+// gradually dissolve into the sky at the horizon.
+// fadeAmount: 0 = fully visible, 1 = fully transparent
+// ---------------------------------------------------------------------------
+export function applyCloudFog(
+  material: { fog: boolean; outputNode: unknown },
+  fadeAmount: number,
+): void {
+  material.fog = false;
+  material.outputNode = Fn(() => {
+    const litColor = output;
+    return vec4(litColor.rgb, mul(litColor.a, float(1.0 - fadeAmount)));
   })();
 }

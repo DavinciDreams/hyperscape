@@ -183,20 +183,29 @@ jobs:
       - name: Determine environment URLs
         id: env
         shell: bash
+        env:
+          PRODUCTION_API_URL: ${{ vars.PRODUCTION_PUBLIC_API_URL }}
+          PRODUCTION_WS_URL: ${{ vars.PRODUCTION_PUBLIC_WS_URL }}
+          PRODUCTION_APP_URL: ${{ vars.PRODUCTION_PUBLIC_APP_URL }}
+          PRODUCTION_CDN_URL: ${{ vars.PRODUCTION_PUBLIC_CDN_URL }}
+          STAGING_API_URL: ${{ vars.STAGING_PUBLIC_API_URL }}
+          STAGING_WS_URL: ${{ vars.STAGING_PUBLIC_WS_URL }}
+          STAGING_APP_URL: ${{ vars.STAGING_PUBLIC_APP_URL }}
+          STAGING_CDN_URL: ${{ vars.STAGING_PUBLIC_CDN_URL }}
         run: |
           TARGET_ENV="${{ github.event_name == 'workflow_dispatch' && inputs.environment }}"
 
           if [[ "${GITHUB_REF_NAME}" == "staging" || "$TARGET_ENV" == "staging" ]]; then
-            echo "api_url=https://staging-api.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "ws_url=wss://staging-api.hyperscape.club/ws" >> "$GITHUB_OUTPUT"
-            echo "app_url=https://staging.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=https://staging-assets.hyperscape.club" >> "$GITHUB_OUTPUT"
+            echo "api_url=${STAGING_API_URL:-https://staging-api.hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "ws_url=${STAGING_WS_URL:-wss://staging-api.hyperscape.club/ws}" >> "$GITHUB_OUTPUT"
+            echo "app_url=${STAGING_APP_URL:-https://staging.hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${STAGING_CDN_URL:-https://staging-assets.hyperscape.club}" >> "$GITHUB_OUTPUT"
             echo "Building for staging"
           else
-            echo "api_url=https://api.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "ws_url=wss://api.hyperscape.club/ws" >> "$GITHUB_OUTPUT"
-            echo "app_url=https://hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=https://assets.hyperscape.club" >> "$GITHUB_OUTPUT"
+            echo "api_url=${PRODUCTION_API_URL:-https://hyperscape-production.up.railway.app}" >> "$GITHUB_OUTPUT"
+            echo "ws_url=${PRODUCTION_WS_URL:-wss://hyperscape-production.up.railway.app/ws}" >> "$GITHUB_OUTPUT"
+            echo "app_url=${PRODUCTION_APP_URL:-https://hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${PRODUCTION_CDN_URL:-https://assets.hyperscape.club}" >> "$GITHUB_OUTPUT"
             echo "Building for production"
           fi
 
@@ -344,20 +353,29 @@ jobs:
       - name: Determine environment URLs
         id: env
         shell: bash
+        env:
+          PRODUCTION_API_URL: ${{ vars.PRODUCTION_PUBLIC_API_URL }}
+          PRODUCTION_WS_URL: ${{ vars.PRODUCTION_PUBLIC_WS_URL }}
+          PRODUCTION_APP_URL: ${{ vars.PRODUCTION_PUBLIC_APP_URL }}
+          PRODUCTION_CDN_URL: ${{ vars.PRODUCTION_PUBLIC_CDN_URL }}
+          STAGING_API_URL: ${{ vars.STAGING_PUBLIC_API_URL }}
+          STAGING_WS_URL: ${{ vars.STAGING_PUBLIC_WS_URL }}
+          STAGING_APP_URL: ${{ vars.STAGING_PUBLIC_APP_URL }}
+          STAGING_CDN_URL: ${{ vars.STAGING_PUBLIC_CDN_URL }}
         run: |
           TARGET_ENV="${{ github.event_name == 'workflow_dispatch' && inputs.environment }}"
 
           if [[ "${GITHUB_REF_NAME}" == "staging" || "$TARGET_ENV" == "staging" ]]; then
-            echo "api_url=https://staging-api.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "ws_url=wss://staging-api.hyperscape.club/ws" >> "$GITHUB_OUTPUT"
-            echo "app_url=https://staging.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=https://staging-assets.hyperscape.club" >> "$GITHUB_OUTPUT"
+            echo "api_url=${STAGING_API_URL:-https://staging-api.hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "ws_url=${STAGING_WS_URL:-wss://staging-api.hyperscape.club/ws}" >> "$GITHUB_OUTPUT"
+            echo "app_url=${STAGING_APP_URL:-https://staging.hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${STAGING_CDN_URL:-https://staging-assets.hyperscape.club}" >> "$GITHUB_OUTPUT"
             echo "Building for staging"
           else
-            echo "api_url=https://api.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "ws_url=wss://api.hyperscape.club/ws" >> "$GITHUB_OUTPUT"
-            echo "app_url=https://hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=https://assets.hyperscape.club" >> "$GITHUB_OUTPUT"
+            echo "api_url=${PRODUCTION_API_URL:-https://hyperscape-production.up.railway.app}" >> "$GITHUB_OUTPUT"
+            echo "ws_url=${PRODUCTION_WS_URL:-wss://hyperscape-production.up.railway.app/ws}" >> "$GITHUB_OUTPUT"
+            echo "app_url=${PRODUCTION_APP_URL:-https://hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${PRODUCTION_CDN_URL:-https://assets.hyperscape.club}" >> "$GITHUB_OUTPUT"
             echo "Building for production"
           fi
 
@@ -464,20 +482,29 @@ jobs:
       - name: Determine environment URLs
         id: env
         shell: bash
+        env:
+          PRODUCTION_API_URL: ${{ vars.PRODUCTION_PUBLIC_API_URL }}
+          PRODUCTION_WS_URL: ${{ vars.PRODUCTION_PUBLIC_WS_URL }}
+          PRODUCTION_APP_URL: ${{ vars.PRODUCTION_PUBLIC_APP_URL }}
+          PRODUCTION_CDN_URL: ${{ vars.PRODUCTION_PUBLIC_CDN_URL }}
+          STAGING_API_URL: ${{ vars.STAGING_PUBLIC_API_URL }}
+          STAGING_WS_URL: ${{ vars.STAGING_PUBLIC_WS_URL }}
+          STAGING_APP_URL: ${{ vars.STAGING_PUBLIC_APP_URL }}
+          STAGING_CDN_URL: ${{ vars.STAGING_PUBLIC_CDN_URL }}
         run: |
           TARGET_ENV="${{ github.event_name == 'workflow_dispatch' && inputs.environment }}"
 
           if [[ "${GITHUB_REF_NAME}" == "staging" || "$TARGET_ENV" == "staging" ]]; then
-            echo "api_url=https://staging-api.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "ws_url=wss://staging-api.hyperscape.club/ws" >> "$GITHUB_OUTPUT"
-            echo "app_url=https://staging.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=https://staging-assets.hyperscape.club" >> "$GITHUB_OUTPUT"
+            echo "api_url=${STAGING_API_URL:-https://staging-api.hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "ws_url=${STAGING_WS_URL:-wss://staging-api.hyperscape.club/ws}" >> "$GITHUB_OUTPUT"
+            echo "app_url=${STAGING_APP_URL:-https://staging.hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${STAGING_CDN_URL:-https://staging-assets.hyperscape.club}" >> "$GITHUB_OUTPUT"
             echo "Building for staging"
           else
-            echo "api_url=https://api.hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "ws_url=wss://api.hyperscape.club/ws" >> "$GITHUB_OUTPUT"
-            echo "app_url=https://hyperscape.club" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=https://assets.hyperscape.club" >> "$GITHUB_OUTPUT"
+            echo "api_url=${PRODUCTION_API_URL:-https://hyperscape-production.up.railway.app}" >> "$GITHUB_OUTPUT"
+            echo "ws_url=${PRODUCTION_WS_URL:-wss://hyperscape-production.up.railway.app/ws}" >> "$GITHUB_OUTPUT"
+            echo "app_url=${PRODUCTION_APP_URL:-https://hyperscape.club}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${PRODUCTION_CDN_URL:-https://assets.hyperscape.club}" >> "$GITHUB_OUTPUT"
             echo "Building for production"
           fi
 

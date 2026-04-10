@@ -114,7 +114,9 @@ export class SkillsSystem extends SystemBase {
     );
     this.subscribe<{ playerId: string; skill: keyof Skills; amount: number }>(
       EventType.SKILLS_XP_GAINED,
-      (data) => this.handleExternalXPGain(data),
+      (data) => {
+        this.handleExternalXPGain(data);
+      },
     );
     this.subscribe(
       EventType.QUEST_COMPLETED,
@@ -184,16 +186,10 @@ export class SkillsSystem extends SystemBase {
     amount: number,
   ): void {
     const entity = this.world.entities.get(entityId) as Entity;
-    if (!entity) {
-      console.warn("[SkillsSystem] Entity not found:", entityId);
-      return;
-    }
+    if (!entity) return;
 
     const stats = getStatsComponent(entity);
-    if (!stats) {
-      console.warn(`[SkillsSystem] Entity ${entityId} has no stats component`);
-      return;
-    }
+    if (!stats) return;
 
     const skillData = stats[skill] as SkillData;
     if (!skillData) {

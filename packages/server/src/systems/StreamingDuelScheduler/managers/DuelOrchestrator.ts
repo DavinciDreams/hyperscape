@@ -11,12 +11,14 @@ import {
   AttackType,
   COMBAT_SPELLS,
   DeathState,
+  DEFAULT_DUEL_RULES,
   ELEMENTAL_STAVES,
   EventType,
   ITEMS,
   PlayerEntity,
   SPELL_ORDER,
   getDuelArenaConfig,
+  getItem,
   isPositionInsideCombatArena,
 } from "@hyperscape/shared";
 import { DuelCombatAI } from "../../../duel/DuelCombatAI.js";
@@ -49,6 +51,14 @@ type InventorySystem = {
         coins: number;
       }
     | undefined;
+  /** Authoritative inventory for UI / streaming (entity.data is often stale). */
+  getInventoryData?: (playerId: string) => {
+    items: Array<{
+      slot?: number;
+      itemId?: string;
+      quantity?: number;
+    }>;
+  };
   addItemDirect?: (
     playerId: string,
     item: { itemId: string; quantity: number; slot?: number },
@@ -91,6 +101,8 @@ type EquipmentSystem = {
     itemId?: string;
     quantity: number;
   }>;
+  /** Slot name → Item or null; same source the game client uses. */
+  getEquipmentData?: (playerId: string) => Record<string, unknown>;
 } | null;
 
 /** Type for network with send method */
@@ -131,7 +143,18 @@ const STALL_NUDGE_ESCALATION_INTERVAL_MS = 10_000;
 const STALL_NUDGE_MAX_DAMAGE = 5;
 
 /** Combat role types for duel arena agents. */
-type DuelCombatRole = "melee" | "ranged" | "mage";
+type DuelCombatRole = "melee" | "ranged" | "mage" | "prayer";
+
+/**
+ * When skill scores tie, prefer ranged/mage over melee so streaming duels
+ * actually exercise bow and magic (default stats are often all equal).
+ */
+const ROLE_SCORE_TIE_ORDER: readonly DuelCombatRole[] = [
+  "ranged",
+  "mage",
+  "prayer",
+  "melee",
+];
 
 /** Fallback gear when skill-based selection fails or entity is missing. */
 const MELEE_FALLBACK_WEAPON = "bronze_shortsword";
@@ -148,12 +171,28 @@ const RUNE_PROVISION_QTY = 500;
 export class DuelOrchestrator {
   // -- Owned state --
   private combatAIs: Map<string, DuelCombatAI> = new Map();
+  /** Services locked into arena mode — bounds cleared and autonomy restored in stopCombatAIs. */
+  private _arenaModeServices: Array<{
+    clearArenaBounds(): void;
+    setAutonomousBehaviorEnabled(enabled: boolean): void;
+  }> = [];
+  private _lastFightStats: Map<
+    string,
+    { attacksLanded: number; healsUsed: number }
+  > = new Map();
   private combatLoopInterval: ReturnType<typeof setInterval> | null = null;
   private combatLoopTickCount: number = 0;
   private combatRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private combatRetryCount: number = 0;
+  private static readonly MAX_COMBAT_RETRIES = 5;
   private duelFoodSlotsByAgent: Map<string, DuelFoodProvisionedSlot[]> =
     new Map();
   private combatRolesByAgent: Map<string, DuelCombatRole> = new Map();
+  /** Debug director: force a contestant's combat style for the next prep only. */
+  private debugCombatRoleOverrideByCharacterId = new Map<
+    string,
+    DuelCombatRole
+  >();
   /** Escalating stall nudge state (#20) */
   private combatStallNudgeCount = 0;
   private lastCombatStallNudgeTime = 0;
@@ -256,9 +295,13 @@ export class DuelOrchestrator {
       cached.maxHp = data.maxHealth ?? constitution;
       cached.wins = stats?.wins || 0;
       cached.losses = stats?.losses || 0;
-      // Update equipment/inventory snapshots
-      cached.equipment = this.snapshotAgentEquipment(data.equipment);
-      cached.inventory = this.snapshotAgentInventory(data.inventory);
+      const loadout = this.snapshotLoadoutFromWorld(agentId, data);
+      cached.equipment = loadout.equipment;
+      cached.inventory = loadout.inventory;
+      cached.itemIconPaths = this.buildItemIconPathsForLoadout(
+        cached.equipment,
+        cached.inventory,
+      );
       return cached;
     }
 
@@ -308,6 +351,11 @@ export class DuelOrchestrator {
       }
     }
 
+    const loadout = this.snapshotLoadoutFromWorld(agentId, data);
+    const itemIconPaths = this.buildItemIconPathsForLoadout(
+      loadout.equipment,
+      loadout.inventory,
+    );
     const contestant: AgentContestant = {
       characterId: agentId,
       name: data.name || agentId,
@@ -320,9 +368,12 @@ export class DuelOrchestrator {
       maxHp: data.maxHealth ?? constitution,
       originalPosition,
       damageDealtThisFight: 0,
-      // Keep a lightweight, serialization-safe snapshot for streaming payloads.
-      equipment: this.snapshotAgentEquipment(data.equipment),
-      inventory: this.snapshotAgentInventory(data.inventory),
+      highestHit: 0,
+      attacksLanded: 0,
+      healsUsed: 0,
+      equipment: loadout.equipment,
+      inventory: loadout.inventory,
+      itemIconPaths,
       rank,
       headToHeadWins,
       headToHeadLosses,
@@ -431,6 +482,86 @@ export class DuelOrchestrator {
     return null;
   }
 
+  /**
+   * Read inventory/equipment from character systems when available.
+   * Streaming overlay icons were empty because entity.data.* is not kept in sync
+   * with InventorySystem / EquipmentSystem.
+   */
+  private snapshotLoadoutFromWorld(
+    playerId: string,
+    entityData: { equipment?: unknown; inventory?: unknown },
+  ): {
+    equipment: Record<string, string>;
+    inventory: Array<{ itemId: string; quantity: number } | null>;
+  } {
+    const invSys = this.world.getSystem("inventory") as InventorySystem | null;
+    const inventory = invSys?.getInventoryData
+      ? this.snapshotAgentInventory(
+          invSys.getInventoryData(playerId).items ?? [],
+        )
+      : this.snapshotAgentInventory(entityData.inventory);
+
+    const eqSys = this.world.getSystem("equipment") as EquipmentSystem | null;
+    const equipment = eqSys?.getEquipmentData
+      ? this.snapshotAgentEquipment(eqSys.getEquipmentData(playerId))
+      : this.snapshotAgentEquipment(entityData.equipment);
+
+    return { equipment, inventory };
+  }
+
+  /**
+   * Map each item id in the loadout to manifest iconPath so the streaming client
+   * can show PNGs without relying on browser-side ITEMS or cross-host manifest fetch.
+   */
+  buildItemIconPathsForLoadout(
+    equipment: Record<string, string>,
+    inventory: Array<{ itemId: string; quantity: number } | null>,
+  ): Record<string, string> {
+    const paths: Record<string, string> = {};
+    const ids = new Set<string>();
+    for (const v of Object.values(equipment)) {
+      if (typeof v === "string" && v.trim()) {
+        ids.add(v.trim());
+      }
+    }
+    for (const cell of inventory) {
+      if (cell?.itemId?.trim()) {
+        ids.add(cell.itemId.trim());
+      }
+    }
+    for (const rawId of ids) {
+      const normalized = rawId.endsWith("_noted")
+        ? rawId.replace(/_noted$/, "")
+        : rawId;
+      const def = getItem(normalized) ?? getItem(rawId);
+      const p = def?.iconPath?.trim();
+      if (!p) {
+        continue;
+      }
+      paths[rawId] = p;
+      if (normalized !== rawId && paths[normalized] === undefined) {
+        paths[normalized] = p;
+      }
+    }
+    return paths;
+  }
+
+  /** Re-sync contestant loadout from world systems (call during fight broadcasts). */
+  refreshContestantLoadout(contestant: AgentContestant): void {
+    const entity = this.world.entities.get(contestant.characterId);
+    const data = (entity?.data ?? {}) as {
+      equipment?: unknown;
+      inventory?: unknown;
+    };
+    const next = this.snapshotLoadoutFromWorld(contestant.characterId, data);
+    contestant.equipment = next.equipment;
+    contestant.inventory = next.inventory;
+    contestant.itemIconPaths = this.buildItemIconPathsForLoadout(
+      contestant.equipment,
+      contestant.inventory,
+    );
+  }
+
   // ============================================================================
   // Duel Preparation
   // ============================================================================
@@ -451,9 +582,17 @@ export class DuelOrchestrator {
     this.world.emit("player:movement:cancel", { playerId: agent1.characterId });
     this.world.emit("player:movement:cancel", { playerId: agent2.characterId });
 
-    // Pick combat roles based on agent skill levels and equip best available gear.
-    const role1 = this.pickCombatRoleBySkills(agent1.characterId);
-    const role2 = this.pickCombatRoleBySkills(agent2.characterId);
+    // Pick complementary combat roles (avoid dual-melee when skills are equal).
+    const [base1, base2] = this.assignCombatRolesForDuelPair(
+      agent1.characterId,
+      agent2.characterId,
+    );
+    const [role1, role2] = this.applyDebugCombatRoleOverrides(
+      agent1.characterId,
+      agent2.characterId,
+      base1,
+      base2,
+    );
     this.combatRolesByAgent.set(agent1.characterId, role1);
     this.combatRolesByAgent.set(agent2.characterId, role2);
 
@@ -466,9 +605,11 @@ export class DuelOrchestrator {
     // through fishing/cooking between duels. They fight with whatever
     // food/gear they've gathered autonomously.
 
-    // Restore full health
+    // Restore full health and prayer points (prayers fail silently at 0 PP)
     this.restoreHealth(agent1.characterId);
     this.restoreHealth(agent2.characterId);
+    this.restorePrayerPointsForDuel(agent1.characterId);
+    this.restorePrayerPointsForDuel(agent2.characterId);
 
     // NOTE: Teleport is handled separately in startCountdown() so agents
     // appear in the arena at the exact moment the countdown begins on screen.
@@ -532,18 +673,124 @@ export class DuelOrchestrator {
     return result;
   }
 
-  /** Pick combat role based on agent's actual skill levels. */
-  pickCombatRoleBySkills(characterId: string): DuelCombatRole {
-    const skills = this.getAgentSkillLevels(characterId);
-    // Melee sums two skills; ranged/magic are single skills scaled ×2 to normalize.
-    const meleeScore = (skills.attack ?? 1) + (skills.strength ?? 1);
-    const rangedScore = (skills.ranged ?? 1) * 2;
-    const mageScore = (skills.magic ?? 1) * 2;
+  /** Per-role skill score (higher = better fit). Used for role ordering. */
+  private roleSkillScore(
+    skills: Record<string, number>,
+    role: DuelCombatRole,
+  ): number {
+    switch (role) {
+      case "melee":
+        return (skills.attack ?? 1) + (skills.strength ?? 1);
+      case "ranged":
+        return (skills.ranged ?? 1) * 2;
+      case "mage":
+        return (skills.magic ?? 1) * 2;
+      case "prayer":
+        return (skills.prayer ?? 1) * 2 + (skills.strength ?? 1);
+    }
+  }
 
-    // Ties break: melee > ranged > mage
-    if (meleeScore >= rangedScore && meleeScore >= mageScore) return "melee";
-    if (rangedScore >= mageScore) return "ranged";
-    return "mage";
+  /**
+   * Best → worst roles for this skill set. Equal scores use ROLE_SCORE_TIE_ORDER
+   * (ranged before mage before melee) so default equal stats yield ranged/mage use.
+   */
+  private sortedCombatRolesBySkills(
+    skills: Record<string, number>,
+  ): DuelCombatRole[] {
+    const roles: DuelCombatRole[] = ["melee", "ranged", "mage", "prayer"];
+    return [...roles].sort((a, b) => {
+      const sa = this.roleSkillScore(skills, a);
+      const sb = this.roleSkillScore(skills, b);
+      if (sb !== sa) return sb - sa;
+      return ROLE_SCORE_TIE_ORDER.indexOf(a) - ROLE_SCORE_TIE_ORDER.indexOf(b);
+    });
+  }
+
+  /**
+   * Assign roles so the two agents usually differ in style (spectacle + weapon variety).
+   * Agent1 gets their top pick; agent2 gets their strongest choice that differs from agent1.
+   */
+  private assignCombatRolesForDuelPair(
+    characterId1: string,
+    characterId2: string,
+  ): [DuelCombatRole, DuelCombatRole] {
+    const s1 = this.getAgentSkillLevels(characterId1);
+    const s2 = this.getAgentSkillLevels(characterId2);
+    const order1 = this.sortedCombatRolesBySkills(s1);
+    const order2 = this.sortedCombatRolesBySkills(s2);
+    let role1 = order1[0];
+    const preferred2 =
+      order2.find((r) => r !== role1) ?? order2[1] ?? order2[0];
+    let role2: DuelCombatRole = preferred2;
+    if (role2 === role1) {
+      // Fully symmetric builds — rotate by stable hash so cycles vary (melee/ranged/mage).
+      const h =
+        (characterId1.codePointAt(0) ?? 0) ^
+        (characterId2.codePointAt(0) ?? 0) ^
+        (characterId1.length ^ characterId2.length);
+      const pool: DuelCombatRole[] = ["melee", "ranged", "mage", "prayer"];
+      role1 = pool[Math.abs(h) % 4];
+      role2 = pool[(Math.abs(h) + 1) % 4];
+    }
+    return [role1, role2];
+  }
+
+  /** Pick combat role based on agent's actual skill levels (single-agent / tests). */
+  pickCombatRoleBySkills(characterId: string): DuelCombatRole {
+    return this.sortedCombatRolesBySkills(
+      this.getAgentSkillLevels(characterId),
+    )[0];
+  }
+
+  /**
+   * Permanently bind a character to a specific combat role.  Unlike the old
+   * one-shot override, this persists across all future duels so agents whose
+   * name advertises a style ("Keldrath Mage") always fight with the matching
+   * weapon and AI config.
+   */
+  setDebugCombatRoleOverride(characterId: string, role: DuelCombatRole): void {
+    this.debugCombatRoleOverrideByCharacterId.set(characterId, role);
+  }
+
+  /** Remove a persistent role override (e.g. when a sparbot is unregistered). */
+  clearDebugCombatRoleOverride(characterId: string): void {
+    this.debugCombatRoleOverrideByCharacterId.delete(characterId);
+  }
+
+  private applyDebugCombatRoleOverrides(
+    id1: string,
+    id2: string,
+    base1: DuelCombatRole,
+    base2: DuelCombatRole,
+  ): [DuelCombatRole, DuelCombatRole] {
+    const o1 = this.debugCombatRoleOverrideByCharacterId.get(id1);
+    const o2 = this.debugCombatRoleOverrideByCharacterId.get(id2);
+    // Do NOT clear — overrides are persistent for sparbot agents whose names
+    // advertise a specific style. They are removed when the agent is unregistered.
+
+    let r1 = o1 !== undefined ? o1 : base1;
+    let r2 = o2 !== undefined ? o2 : base2;
+    if (r1 !== r2) {
+      return [r1, r2];
+    }
+    if (o1 !== undefined && o2 === undefined) {
+      const alt = this.sortedCombatRolesBySkills(
+        this.getAgentSkillLevels(id2),
+      ).find((x) => x !== r1);
+      return [r1, alt ?? "mage"];
+    }
+    if (o1 === undefined && o2 !== undefined) {
+      const alt = this.sortedCombatRolesBySkills(
+        this.getAgentSkillLevels(id1),
+      ).find((x) => x !== r2);
+      return [alt ?? "mage", r2];
+    }
+    if (o1 !== undefined && o2 !== undefined) {
+      const bump: DuelCombatRole =
+        r1 === "ranged" ? "mage" : r1 === "mage" ? "melee" : "ranged";
+      return [r1, bump];
+    }
+    return [base1, base2];
   }
 
   // --------------------------------------------------------------------------
@@ -654,6 +901,8 @@ export class DuelOrchestrator {
       if (item.attackType !== AttackType.MELEE) continue;
       if (item.equipSlot !== "weapon" && item.equipSlot !== "2h") continue;
       if (item.equipable === false) continue;
+      // Limit to bronze tier so mage/ranged matchups stay fair
+      if ((item.tier ?? "").toLowerCase() !== "bronze") continue;
 
       if (
         equipmentSystem?.canPlayerEquipItem &&
@@ -983,13 +1232,43 @@ export class DuelOrchestrator {
     return { staffId, spellId: bestSpellId, runes, staffAlreadyEquipped };
   }
 
-  /** Equip agent based on their assigned combat role with best available gear. */
+  /**
+   * Stackable duel prep (arrows, runes) uses InventorySystem.addItemDirect.
+   * Fresh embedded sparbots may still be loading inventory from DB — wait so
+   * provisions are not dropped on a throwaway placeholder inventory.
+   */
+  private async waitForInventoryReadyPlayer(playerId: string): Promise<void> {
+    const inventorySystem = this.getInventorySystem();
+    if (!inventorySystem?.isInventoryReady) {
+      return;
+    }
+    if (inventorySystem.isInventoryReady(playerId)) {
+      return;
+    }
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (inventorySystem.isInventoryReady(playerId)) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Equip agent for their duel role (melee / ranged / mage).
+   * Weapons and ammo go through EquipmentSystem.equipItemDirect (no prior
+   * inventory needed). Arrows and runes are also written to inventory for
+   * combat paths that read stacks from the bag.
+   */
   async ensureAgentCombatSetup(
     playerId: string,
     role: DuelCombatRole,
   ): Promise<string> {
+    if (role === "ranged" || role === "mage") {
+      await this.waitForInventoryReadyPlayer(playerId);
+    }
     switch (role) {
-      case "melee": {
+      case "melee":
+      case "prayer": {
         const { weaponId, alreadyEquipped } =
           this.pickBestMeleeWeapon(playerId);
         if (!alreadyEquipped) {
@@ -1362,18 +1641,7 @@ export class DuelOrchestrator {
 
     const inventorySystem = this.getInventorySystem();
     if (inventorySystem?.addItemDirect) {
-      // CRITICAL: Wait for inventory to finish loading from DB before adding
-      // runes. Without this, getOrCreateInventory returns a disposable
-      // placeholder (not stored in the Map) and the runes are silently lost.
-      if (
-        inventorySystem.isInventoryReady &&
-        !inventorySystem.isInventoryReady(playerId)
-      ) {
-        for (let i = 0; i < 20; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          if (inventorySystem.isInventoryReady(playerId)) break;
-        }
-      }
+      await this.waitForInventoryReadyPlayer(playerId);
 
       const results: string[] = [];
       try {
@@ -1569,6 +1837,26 @@ export class DuelOrchestrator {
   // Health Restoration
   // ============================================================================
 
+  /**
+   * Top up prayer points before a duel so DuelCombatAI offensive/defensive prayers
+   * are not rejected with "No prayer points remaining".
+   */
+  private restorePrayerPointsForDuel(playerId: string): void {
+    const prayer = this.world.getSystem("prayer") as {
+      getMaxPrayerPoints?: (id: string) => number;
+      getPrayerPoints?: (id: string) => number;
+      restorePrayerPoints?: (id: string, amount: number) => void;
+    } | null;
+    if (!prayer?.restorePrayerPoints) return;
+
+    const max = prayer.getMaxPrayerPoints?.(playerId) ?? 99;
+    const cur = prayer.getPrayerPoints?.(playerId) ?? 0;
+    const need = Math.max(0, max - cur);
+    if (need <= 0) return;
+    // restorePrayerPoints validates amount ≤ 99 per call
+    prayer.restorePrayerPoints(playerId, Math.min(need, 99));
+  }
+
   restoreHealth(playerId: string, quiet = false): void {
     const entity = this.world.entities.get(playerId);
     if (!entity) return;
@@ -1689,22 +1977,32 @@ export class DuelOrchestrator {
       arenaConfig.baseZ +
       row * (arenaConfig.arenaLength + arenaConfig.arenaGap) +
       arenaConfig.arenaLength / 2;
-    const centerTileX = Math.floor(arenaCenterX);
-    const centerTileZ = Math.floor(arenaCenterZ);
+    const cx = arenaCenterX;
+    const cz = arenaCenterZ;
+    const off = arenaConfig.spawnOffset;
 
-    const agent1X = centerTileX + 0.5;
-    const agent1Z = centerTileZ - 0.5;
-    const agent2X = centerTileX + 0.5;
-    const agent2Z = centerTileZ + 0.5;
+    let agent1X: number;
+    let agent1Z: number;
+    let agent2X: number;
+    let agent2Z: number;
+    if (arenaConfig.spawnLayout === "alongWidth") {
+      agent1X = cx - off;
+      agent1Z = cz;
+      agent2X = cx + off;
+      agent2Z = cz;
+    } else {
+      agent1X = cx;
+      agent1Z = cz - off;
+      agent2X = cx;
+      agent2Z = cz + off;
+    }
 
-    // Agent 1 spawns north (negative Z)
     const agent1Pos: [number, number, number] = [
       agent1X,
       this.getGroundedY(agent1X, agent1Z, arenaConfig.baseY),
       agent1Z,
     ];
 
-    // Agent 2 spawns south (positive Z)
     const agent2Pos: [number, number, number] = [
       agent2X,
       this.getGroundedY(agent2X, agent2Z, arenaConfig.baseY),
@@ -1728,6 +2026,117 @@ export class DuelOrchestrator {
       "StreamingDuelScheduler",
       "Contestants teleported to arena, facing each other",
     );
+  }
+
+  /** Arena AABB for clamping agent combat AI strafe / chase targets */
+  /**
+   * Enforce a minimum physical separation between the two fighting agents.
+   * The tile movement system has no player-player collision, so agents can
+   * occupy the same position. When they get within MIN_SEP units, push them
+   * apart symmetrically by teleport. Called every combat loop tick (600ms).
+   */
+  private enforceAgentSeparation(id1: string, id2: string): void {
+    const MIN_SEP = 0.6;
+    const e1 = this.world.entities.get(id1);
+    const e2 = this.world.entities.get(id2);
+    if (!e1?.position || !e2?.position) return;
+    const p1 = e1.position as { x: number; y: number; z: number };
+    const p2 = e2.position as { x: number; y: number; z: number };
+    const dx = p1.x - p2.x;
+    const dz = p1.z - p2.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist >= MIN_SEP) return;
+    const push = (MIN_SEP - dist) / 2 + 0.3;
+    if (dist > 0.05) {
+      const nx = dx / dist;
+      const nz = dz / dist;
+      this.world.emit("player:teleport", {
+        playerId: id1,
+        position: { x: p1.x + nx * push, y: p1.y, z: p1.z + nz * push },
+        suppressEffect: true,
+      });
+      this.world.emit("player:teleport", {
+        playerId: id2,
+        position: { x: p2.x - nx * push, y: p2.y, z: p2.z - nz * push },
+        suppressEffect: true,
+      });
+    } else {
+      // Co-located: push along X axis
+      this.world.emit("player:teleport", {
+        playerId: id1,
+        position: { x: p1.x + push, y: p1.y, z: p1.z },
+        suppressEffect: true,
+      });
+      this.world.emit("player:teleport", {
+        playerId: id2,
+        position: { x: p2.x - push, y: p2.y, z: p2.z },
+        suppressEffect: true,
+      });
+    }
+  }
+
+  /**
+   * Teleport any contestant that has drifted outside the arena back inside.
+   * Called every combat loop tick (600ms) as a hard safety net for physics overshoot.
+   */
+  private enforceStreamingArenaBounds(
+    characterIds: string[],
+    bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+  ): void {
+    const INSET = 1.5;
+    for (const id of characterIds) {
+      const entity = this.world.entities.get(id);
+      if (!entity?.position) continue;
+      const { x, y, z } = entity.position as {
+        x: number;
+        y: number;
+        z: number;
+      };
+      const cx = Math.min(
+        bounds.maxX - INSET,
+        Math.max(bounds.minX + INSET, x),
+      );
+      const cz = Math.min(
+        bounds.maxZ - INSET,
+        Math.max(bounds.minZ + INSET, z),
+      );
+      if (Math.abs(cx - x) > 0.1 || Math.abs(cz - z) > 0.1) {
+        this.world.emit("player:teleport", {
+          playerId: id,
+          position: { x: cx, y, z: cz },
+          suppressEffect: true,
+        });
+      }
+    }
+  }
+
+  getStreamingArenaMovementBounds(): {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  } {
+    const arenaConfig = getDuelArenaConfig();
+    const arenaId = Math.max(
+      1,
+      Math.min(STREAMING_AGENT_ARENA_ID, arenaConfig.arenaCount),
+    );
+    const row = Math.floor((arenaId - 1) / arenaConfig.columns);
+    const col = (arenaId - 1) % arenaConfig.columns;
+    const centerX =
+      arenaConfig.baseX +
+      col * (arenaConfig.arenaWidth + arenaConfig.arenaGap) +
+      arenaConfig.arenaWidth / 2;
+    const centerZ =
+      arenaConfig.baseZ +
+      row * (arenaConfig.arenaLength + arenaConfig.arenaGap) +
+      arenaConfig.arenaLength / 2;
+    return {
+      minX: centerX - arenaConfig.arenaWidth / 2,
+      maxX: centerX + arenaConfig.arenaWidth / 2,
+      minZ: centerZ - arenaConfig.arenaLength / 2,
+      maxZ: centerZ + arenaConfig.arenaLength / 2,
+    };
   }
 
   /**
@@ -1978,6 +2387,7 @@ export class DuelOrchestrator {
    */
   async startCombatAIs(): Promise<void> {
     this.stopCombatAIs();
+    this.combatRetryCount = 0;
 
     const cycle = this.getCurrentCycle();
     if (!cycle?.agent1 || !cycle?.agent2) return;
@@ -2012,14 +2422,33 @@ export class DuelOrchestrator {
 
     const role1 = this.combatRolesByAgent.get(agent1.characterId) ?? "melee";
     const role2 = this.combatRolesByAgent.get(agent2.characterId) ?? "melee";
+    const movementClampBounds = this.getStreamingArenaMovementBounds();
+    const baseAiConfig = {
+      noFood: DEFAULT_DUEL_RULES.noFood,
+      movementClampBounds,
+    };
+
+    // Lock both services into arena mode:
+    // 1. Clamp all movement to arena bounds (no reactive correction teleports).
+    // 2. Disable autonomous behavior loop so agents don't wander off to quest
+    //    or explore between DuelCombatAI ticks.
+    this._arenaModeServices = [];
+    for (const svc of [service1, service2]) {
+      if (!svc) continue;
+      svc.setArenaBounds(movementClampBounds);
+      svc.setAutonomousBehaviorEnabled(false);
+      this._arenaModeServices.push(svc);
+    }
 
     if (service1) {
       const ai1 = new DuelCombatAI(
         service1,
         agent2.characterId,
         {
+          ...baseAiConfig,
           useLlmTactics: llmTacticsEnabled && !!runtime1,
           combatRole: role1,
+          initialStrafeSign: 1,
         },
         runtime1 ?? undefined,
         // Trash talk callback — sends chat as overhead bubble via the agent's service
@@ -2041,8 +2470,10 @@ export class DuelOrchestrator {
         service2,
         agent1.characterId,
         {
+          ...baseAiConfig,
           useLlmTactics: llmTacticsEnabled && !!runtime2,
           combatRole: role2,
+          initialStrafeSign: -1,
         },
         runtime2 ?? undefined,
         // Trash talk callback — sends chat as overhead bubble via the agent's service
@@ -2060,7 +2491,7 @@ export class DuelOrchestrator {
     }
   }
 
-  /** Stop all DuelCombatAI instances and log their stats */
+  /** Stop all DuelCombatAI instances, log and store their final stats */
   stopCombatAIs(): void {
     for (const [characterId, ai] of this.combatAIs) {
       const stats = ai.getStats();
@@ -2068,9 +2499,27 @@ export class DuelOrchestrator {
         "StreamingDuelScheduler",
         `Combat AI stats for ${characterId}: ${stats.attacksLanded} attacks, ${stats.healsUsed} heals, ${stats.totalDamageDealt} dmg dealt`,
       );
+      this._lastFightStats.set(characterId, {
+        attacksLanded: stats.attacksLanded,
+        healsUsed: stats.healsUsed,
+      });
       ai.stop();
     }
     this.combatAIs.clear();
+    // Release arena mode: restore movement freedom and autonomous behavior.
+    for (const svc of this._arenaModeServices) {
+      svc.clearArenaBounds();
+      svc.setAutonomousBehaviorEnabled(true);
+    }
+    this._arenaModeServices = [];
+  }
+
+  /** Returns AI stats captured at the end of the last fight, keyed by characterId */
+  getLastFightStats(): ReadonlyMap<
+    string,
+    { attacksLanded: number; healsUsed: number }
+  > {
+    return this._lastFightStats;
   }
 
   // ============================================================================
@@ -2113,6 +2562,7 @@ export class DuelOrchestrator {
       }
       entity.data.inStreamingDuel = false;
       entity.data.preventRespawn = false;
+      (entity.data as Record<string, unknown>).arenaBounds = null;
     }
   }
 
@@ -2141,6 +2591,7 @@ export class DuelOrchestrator {
       }
       entity.data.inStreamingDuel = false;
       entity.data.preventRespawn = false;
+      (entity.data as Record<string, unknown>).arenaBounds = null;
     }
   }
 
@@ -2165,6 +2616,7 @@ export class DuelOrchestrator {
       ) {
         entity.data.inStreamingDuel = false;
         entity.data.preventRespawn = false;
+        (entity.data as Record<string, unknown>).arenaBounds = null;
       }
     }
   }
@@ -2309,6 +2761,25 @@ export class DuelOrchestrator {
       const cycle = this.getCurrentCycle();
       if (!cycle || cycle.phase !== "FIGHTING") return;
 
+      this.combatRetryCount++;
+      if (this.combatRetryCount > DuelOrchestrator.MAX_COMBAT_RETRIES) {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `Combat retry limit reached (${this.combatRetryCount}/${DuelOrchestrator.MAX_COMBAT_RETRIES}) — aborting duel as draw`,
+        );
+        this.combatRetryCount = 0;
+        // Abort the duel — use startResolution with draw to properly clean up
+        const abortCycle = this.getCurrentCycle();
+        if (abortCycle?.agent1 && abortCycle?.agent2) {
+          this.startResolution(
+            abortCycle.agent1.characterId,
+            abortCycle.agent2.characterId,
+            "draw",
+          );
+        }
+        return;
+      }
+
       const combatSystem = this.world.getSystem("combat") as {
         startCombat?: (
           attackerId: string,
@@ -2326,11 +2797,14 @@ export class DuelOrchestrator {
       const inCombat1 = combatSystem?.isInCombat?.(agent1Id) ?? false;
       const inCombat2 = combatSystem?.isInCombat?.(agent2Id) ?? false;
 
-      if (inCombat1 && inCombat2) return; // Both agents engaged in CombatSystem, OK.
+      if (inCombat1 && inCombat2) {
+        this.combatRetryCount = 0; // Reset on success
+        return;
+      }
 
       Logger.warn(
         "StreamingDuelScheduler",
-        "Combat retry: neither agent in combat after 1.5s, re-teleporting and retrying",
+        `Combat retry ${this.combatRetryCount}/${DuelOrchestrator.MAX_COMBAT_RETRIES}: neither agent in combat, re-teleporting`,
       );
 
       // Re-teleport to fix spacing, then retry combat
@@ -2352,6 +2826,10 @@ export class DuelOrchestrator {
 
       this.setAgentCombatTarget(agent1Id, agent2Id);
       this.setAgentCombatTarget(agent2Id, agent1Id);
+
+      // Schedule another retry check — if combat still hasn't started, the
+      // counter will increment and eventually trigger the abort.
+      this.scheduleCombatRetryIfNeeded(agent1Id, agent2Id);
     }, 3000); // 5 ticks at 600ms - aligned with combat loop re-engagement interval
   }
 
@@ -2429,6 +2907,10 @@ export class DuelOrchestrator {
           );
         });
       }
+
+      // Hard-enforce minimum separation — the tile movement system has no
+      // player-player collision, so we must prevent stacking directly.
+      this.enforceAgentSeparation(agent1.characterId, agent2.characterId);
 
       // Re-engage agents that DON'T have an active AI every ~3 seconds (5 ticks)
       if (this.combatLoopTickCount % 5 !== 0) return;
@@ -3041,8 +3523,10 @@ export class DuelOrchestrator {
     this.stopCombatLoop();
     this.clearCombatRetryTimeout();
     this.stopCombatAIs();
+    this._lastFightStats.clear();
     this.duelFoodSlotsByAgent.clear();
     this.combatRolesByAgent.clear();
+    this.debugCombatRoleOverrideByCharacterId.clear();
     this.combatStallNudgeCount = 0;
     this.lastCombatStallNudgeTime = 0;
     this._contestantCache.clear();

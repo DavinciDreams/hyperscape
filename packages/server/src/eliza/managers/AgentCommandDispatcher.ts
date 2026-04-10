@@ -16,6 +16,15 @@ export interface DispatchableAgent {
   service: EmbeddedHyperscapeService;
   state: AgentState;
   lastActivity: number;
+  operatorCommandAt: number;
+  navigationTarget: {
+    position: [number, number, number];
+    description: string;
+    setAt: number;
+  } | null;
+  currentTargetId: string | null;
+  lastCombatReEngageAt: number;
+  combatPrayerActive: boolean;
 }
 
 /**
@@ -50,13 +59,31 @@ export class AgentCommandDispatcher {
       throw new Error(`Agent ${characterId} is not running`);
     }
 
-    instance.lastActivity = Date.now();
+    const now = Date.now();
+    instance.lastActivity = now;
+    // Mark operator command timestamp so the behavior ticker defers to it
+    // instead of overriding the command with its own autonomous action.
+    instance.operatorCommandAt = now;
 
     const service = instance.service;
     const commandData = data as Record<string, unknown>;
 
     switch (command) {
       case "move":
+        // Disengage from combat so the agent actually moves instead of
+        // re-engaging the mob on the next behavior tick.
+        instance.currentTargetId = null;
+        instance.lastCombatReEngageAt = 0;
+        instance.combatPrayerActive = false;
+        await service.executeStop();
+        // Set persistent navigation target so the bridge re-issues move each
+        // tick until the agent arrives (survives grace period and BFS limits).
+        instance.navigationTarget = {
+          position: commandData.target as [number, number, number],
+          description:
+            (commandData.description as string) || "operator destination",
+          setAt: now,
+        };
         await service.executeMove(
           commandData.target as [number, number, number],
           commandData.runMode as boolean | undefined,
@@ -95,6 +122,10 @@ export class AgentCommandDispatcher {
         break;
 
       case "stop":
+        instance.navigationTarget = null;
+        instance.currentTargetId = null;
+        instance.lastCombatReEngageAt = 0;
+        instance.combatPrayerActive = false;
         await service.executeStop();
         break;
 
@@ -189,6 +220,10 @@ export class AgentCommandDispatcher {
 
       case "respawn":
         await service.executeRespawn();
+        break;
+
+      case "questAccept":
+        await service.executeQuestAccept(commandData.questId as string);
         break;
 
       default:

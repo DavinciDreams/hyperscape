@@ -1930,6 +1930,13 @@ export interface DuelCompletedPayload {
     challengerStakeValue: number;
     targetStakeValue: number;
   };
+  /** PvP / streaming: required for ChainWriterBridge on-chain recordDuel */
+  challengerId?: string;
+  /** Same as targetId in duel session (opponent of challenger). */
+  opponentId?: string;
+  /** Total staked value (GP) for chain record — explicit copy of pre-resolution stakes */
+  challengerStakeValue?: number;
+  opponentStakeValue?: number;
 }
 
 export interface DuelRulesUpdatedPayload {

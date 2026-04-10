@@ -66,6 +66,12 @@ export class MatchmakingManager {
   /** Available agents for dueling */
   availableAgents: Set<string> = new Set();
 
+  /**
+   * Agent IDs opted out of streaming duels (DB `streaming_duel_enabled = false`).
+   * Skipped by registerAgent unless bypassStreamingDuelOptOut is set (debug matchups).
+   */
+  private streamingDuelOptOut: Set<string> = new Set();
+
   /** Agent stats for leaderboard */
   agentStats: Map<string, AgentStatsEntry> = new Map();
 
@@ -109,9 +115,30 @@ export class MatchmakingManager {
   // ==========================================================================
 
   /**
+   * Persisted opt-out from streaming duel matchmaking, or clear opt-out before re-registering.
+   */
+  markStreamingDuelOptOut(agentId: string, optedOut: boolean): void {
+    if (optedOut) {
+      this.streamingDuelOptOut.add(agentId);
+      this.unregisterAgent(agentId);
+    } else {
+      this.streamingDuelOptOut.delete(agentId);
+    }
+  }
+
+  /**
    * Register an agent for duel scheduling
    */
-  registerAgent(agentId: string): void {
+  registerAgent(
+    agentId: string,
+    options?: { bypassStreamingDuelOptOut?: boolean },
+  ): void {
+    if (
+      !options?.bypassStreamingDuelOptOut &&
+      this.streamingDuelOptOut.has(agentId)
+    ) {
+      return;
+    }
     const now = Date.now();
     this.availableAgents.add(agentId);
     this.agentStatsLastSeenAt.set(agentId, now);
@@ -253,40 +280,6 @@ export class MatchmakingManager {
     this.callbacks?.onAgentUnregistered?.(agentId);
 
     this.pruneInactiveAgentStats(now);
-  }
-
-  /**
-   * Scan for agents that may have been spawned before the scheduler started
-   */
-  scanForExistingAgents(): void {
-    // Get all entities from the world
-    const entities = this.world.entities as {
-      getAllEntities?: () => Map<string, unknown>;
-    };
-
-    if (!entities?.getAllEntities) {
-      return;
-    }
-
-    const allEntities = entities.getAllEntities();
-    let agentCount = 0;
-
-    for (const [id, entity] of allEntities) {
-      const entityAny = entity as { type?: string; isAgent?: boolean };
-
-      // Check if this is a player entity marked as an agent
-      if (entityAny.type === "player" && entityAny.isAgent === true) {
-        this.registerAgent(id);
-        agentCount++;
-      }
-    }
-
-    if (agentCount > 0) {
-      Logger.info(
-        "StreamingDuelScheduler",
-        `Found ${agentCount} existing agent(s) during initialization`,
-      );
-    }
   }
 
   // ==========================================================================
@@ -718,6 +711,7 @@ export class MatchmakingManager {
    */
   reset(): void {
     this.availableAgents.clear();
+    this.streamingDuelOptOut.clear();
     this.agentStats.clear();
     this.agentStatsLastSeenAt.clear();
     this.recentDuels = [];

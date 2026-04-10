@@ -993,7 +993,7 @@ export class World extends EventEmitter {
     // - far (2000): Optimized draw distance for performance
     // Sky geometry is scaled to fit within this range (follows camera)
     // This prevents z-fighting without needing expensive logarithmic depth buffers
-    this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.2, 800);
+    this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.2, 10000);
 
     // Enable layer 1 for main camera (vegetation, water, grass, building walls are on layer 1)
     // Enable layer 2 for building floors (walkable surfaces for click-to-move)
@@ -2151,14 +2151,8 @@ export class World extends EventEmitter {
           ? finalAssetsUrl
           : finalAssetsUrl + "/";
         let resolved = url.replace("asset://", assetsUrlStr);
-        // Add cache-busting for localhost to bypass stale browser cache
-        if (
-          typeof window !== "undefined" &&
-          resolved.startsWith("http://localhost")
-        ) {
-          const separator = resolved.includes("?") ? "&" : "?";
-          resolved = `${resolved}${separator}`;
-        }
+        // Cache-busting for localhost removed — IndexedDB handles persistence
+        // and the server now uses short cache lifetimes for dev.
         return resolved;
       } else {
         if (!hasLoggedMissingAssetBase) {

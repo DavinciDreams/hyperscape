@@ -8,8 +8,9 @@
  * To rename a tree type: change the key/enum and update the manifest ID.
  * To remove a tree type: delete the entry from both.
  *
- * The manifest (woodcutting.json) must have a matching "id" entry that equals
- * the TreeId enum value for each tree type listed here.
+ * The manifest (`assets/manifests/gathering/woodcutting.json`) must list each
+ * choppable tree; `TreeId` values match manifest `"id"` fields. GLB paths use
+ * `asset://models/trees/<folder>/...` per on-disk layout under `models/trees/`.
  *
  * Per-biome tree configs (distribution, placement, density) live in
  * TerrainBiomeTypes.ts alongside the BiomeType enum.
@@ -20,19 +21,18 @@
  * Use this instead of hardcoded "tree_xxx" strings everywhere.
  */
 export enum TreeId {
-  Fir = "tree_fir",
   Pine = "tree_pine",
   Oak = "tree_oak",
-  Birch = "tree_birch",
-  Bamboo = "tree_bamboo",
-  ChinaPine = "tree_chinaPine",
   Maple = "tree_maple",
-  Coconut = "tree_coconut",
   Palm = "tree_palm",
+  Banana = "tree_banana",
   Dead = "tree_dead",
-  Cactus = "tree_cactus",
-  Knotwood = "tree_knotwood",
-  WindPine = "tree_windPine",
+  PineDead = "tree_pineDead",
+  Bamboo = "tree_bamboo",
+  Eucalyptus = "tree_eucalyptus",
+  General = "tree_general",
+  Magic = "tree_magic",
+  Mahogany = "tree_mahogany",
 }
 
 /** Extract the subtype key from a TreeId (e.g. TreeId.Oak → "oak") */
@@ -45,10 +45,15 @@ export interface TreePlacementRules {
   /**
    * How strongly this tree prefers water-adjacent placement (0–1).
    * 0 = no preference, 1 = only spawns near water.
-   * At intermediate values, spawn probability scales with water proximity.
+   * When > 0, a radial distance-to-water search is performed and trees
+   * beyond waterMaxDistance are rejected with probability waterAffinity.
    */
   waterAffinity?: number;
-  /** If waterAffinity > 0, the max height above water to consider "near water" */
+  /** Horizontal search radius (meters) when looking for nearby water. Default 40. */
+  waterSearchRadius?: number;
+  /** Max horizontal distance from shore (meters) before rejection kicks in. Default 30. */
+  waterMaxDistance?: number;
+  /** @deprecated Use waterMaxDistance instead. Kept for backward compat. */
   waterProximityHeight?: number;
   /** Reject placement if position is below this height above water threshold */
   avoidsWaterBelow?: number;
@@ -78,22 +83,21 @@ export interface TreeTypeDefinition {
  * in TerrainBiomeTypes.ts.
  */
 export const TREE_TYPES = {
-  fir: { name: "Fir Tree", levelRequired: 1 },
   pine: { name: "Pine Tree", levelRequired: 1 },
   oak: { name: "Oak Tree", levelRequired: 15 },
-  birch: { name: "Birch Tree", levelRequired: 1 },
-  bamboo: { name: "Bamboo Tree", levelRequired: 1 },
-  chinaPine: { name: "China Pine", levelRequired: 1 },
   maple: { name: "Maple Tree", levelRequired: 45 },
-  coconut: { name: "Coconut Palm", levelRequired: 1 },
   palm: { name: "Desert Palm", levelRequired: 1 },
+  banana: { name: "Banana Tree", levelRequired: 1 },
   dead: { name: "Dead Tree", levelRequired: 1 },
-  cactus: { name: "Cactus", levelRequired: 1 },
-  knotwood: { name: "Knotwood Tree", levelRequired: 1 },
-  windPine: { name: "Wind Pine", levelRequired: 1 },
+  pineDead: { name: "Dead Pine", levelRequired: 1 },
+  bamboo: { name: "Bamboo", levelRequired: 1 },
+  eucalyptus: { name: "Eucalyptus Tree", levelRequired: 30 },
+  general: { name: "Tree", levelRequired: 1 },
+  magic: { name: "Magic Tree", levelRequired: 60 },
+  mahogany: { name: "Mahogany Tree", levelRequired: 50 },
 } as const satisfies Record<string, TreeTypeDefinition>;
 
-/** All valid tree subtype keys (e.g., "oak", "willow") */
+/** All valid tree subtype keys (e.g., "oak", "maple") */
 export type TreeSubType = keyof typeof TREE_TYPES;
 
 /** All valid tree subtype keys as a runtime array */

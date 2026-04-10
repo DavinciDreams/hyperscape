@@ -121,11 +121,9 @@ export function createUwsServer(
           userData.query,
         ),
       ).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(
-            `[uWS] onConnection error for ${userData.wsId}: ${msg}`,
-          );
-        });
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[uWS] onConnection error for ${userData.wsId}: ${msg}`);
+      });
     },
 
     message: (ws, message, _isBinary) => {

@@ -252,9 +252,9 @@ describe("streaming-betting-routes", () => {
   });
 
   it("accepts only one explicit internal betting CORS origin", () => {
-    expect(
-      normalizeInternalAllowedOrigin("https://bets.example.com"),
-    ).toBe("https://bets.example.com");
+    expect(normalizeInternalAllowedOrigin("https://bets.example.com")).toBe(
+      "https://bets.example.com",
+    );
     expect(normalizeInternalAllowedOrigin("*")).toBeNull();
     expect(normalizeInternalAllowedOrigin("null")).toBeNull();
     expect(
@@ -297,9 +297,10 @@ describe("streaming-betting-routes", () => {
   });
 
   it("allocates betting client ids without colliding after wraparound", () => {
-    const allocation = allocateNextBettingClientId(Number.MAX_SAFE_INTEGER - 1, [
-      1,
-    ]);
+    const allocation = allocateNextBettingClientId(
+      Number.MAX_SAFE_INTEGER - 1,
+      [1],
+    );
 
     expect(allocation).toEqual({
       clientId: Number.MAX_SAFE_INTEGER - 1,

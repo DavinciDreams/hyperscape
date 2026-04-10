@@ -5,7 +5,7 @@
  * with manifest-loaded item icons, and inventory grid.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentInfo } from "../../screens/StreamingMode";
 import { getRuntimeAssetBaseUrl } from "../../lib/api-config";
 
@@ -128,11 +128,43 @@ const EQUIPPED_SLOTS_VISIBLE = 6;
 // Component
 // ---------------------------------------------------------------------------
 
-export function AgentStatsDisplay({ agent, side }: AgentStatsDisplayProps) {
+export const AgentStatsDisplay = React.memo(function AgentStatsDisplay({
+  agent,
+  side,
+}: AgentStatsDisplayProps) {
   const hpPercent = Math.max(0, Math.min(100, (agent.hp / agent.maxHp) * 100));
   const isCritical = hpPercent < 20;
   const hpColor = isCritical ? "#ff0d3c" : "#00ffcc";
   const isRight = side === "right";
+
+  // Heal flash: tracks when HP increases or healsUsed increments
+  const prevHpRef = useRef<number>(agent.hp);
+  const prevHealRef = useRef<number>(agent.healsUsed ?? 0);
+  const [healFlash, setHealFlash] = useState(false);
+  const [healDelta, setHealDelta] = useState(0);
+  const healTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const healUsedNow = agent.healsUsed ?? 0;
+    const hpNow = agent.hp;
+    const hpPrev = prevHpRef.current;
+    const healsNow = healUsedNow;
+    const healsPrev = prevHealRef.current;
+
+    if (healsNow > healsPrev || hpNow > hpPrev) {
+      const delta = Math.max(0, hpNow - hpPrev);
+      setHealDelta(delta);
+      setHealFlash(true);
+      if (healTimerRef.current) clearTimeout(healTimerRef.current);
+      healTimerRef.current = setTimeout(() => setHealFlash(false), 900);
+    }
+
+    prevHpRef.current = hpNow;
+    prevHealRef.current = healsNow;
+    return () => {
+      if (healTimerRef.current) clearTimeout(healTimerRef.current);
+    };
+  }, [agent.hp, agent.healsUsed]);
 
   const [itemIconMap, setItemIconMap] = useState<Record<string, string>>({});
 
@@ -147,56 +179,65 @@ export function AgentStatsDisplay({ agent, side }: AgentStatsDisplayProps) {
     };
   }, []);
 
-  // Direction-dependent clip paths for the skewed HP bar
-  const hpOuterClipPath = isRight
-    ? "polygon(2% 0, 100% 0, 98% 100%, 0 100%)"
-    : "polygon(0 0, 98% 0, 100% 100%, 2% 100%)";
-  const hpFillClipPath = isRight
-    ? "polygon(10px 0, 100% 0, 100% 100%, 0 100%)"
-    : "polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%)";
-  const skewDir = isRight ? "skew(15deg)" : "skew(-15deg)";
-
-  // Build inventory lookup from positional array
-  const inventoryBySlot = new Map(
-    (agent.inventory ?? [])
-      .map((item, index) =>
-        item
-          ? ({ slot: index, ...item } as {
-              slot: number;
-              itemId: string;
-              quantity: number;
-            })
-          : null,
-      )
-      .filter(
-        (item): item is { slot: number; itemId: string; quantity: number } =>
-          item !== null,
-      )
-      .map((item) => [item.slot, item] as const),
+  // Direction-dependent clip paths for the skewed HP bar (static per side)
+  const { hpOuterClipPath, hpFillClipPath, skewDir } = useMemo(
+    () => ({
+      hpOuterClipPath: isRight
+        ? "polygon(2% 0, 100% 0, 98% 100%, 0 100%)"
+        : "polygon(0 0, 98% 0, 100% 100%, 2% 100%)",
+      hpFillClipPath: isRight
+        ? "polygon(10px 0, 100% 0, 100% 100%, 0 100%)"
+        : "polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%)",
+      skewDir: isRight ? "skew(15deg)" : "skew(-15deg)",
+    }),
+    [isRight],
   );
 
+  // Build inventory lookup from positional array
+  const inventoryBySlot = useMemo(() => {
+    return new Map(
+      (agent.inventory ?? [])
+        .map((item, index) =>
+          item
+            ? ({ slot: index, ...item } as {
+                slot: number;
+                itemId: string;
+                quantity: number;
+              })
+            : null,
+        )
+        .filter(
+          (item): item is { slot: number; itemId: string; quantity: number } =>
+            item !== null,
+        )
+        .map((item) => [item.slot, item] as const),
+    );
+  }, [agent.inventory]);
+
   // Build deduplicated equipped item list
-  const equippedItemIds: string[] = [];
-  const seenEquipped = new Set<string>();
-  for (const slot of EQUIPMENT_SLOT_ORDER) {
-    const itemId = agent.equipment?.[slot];
-    if (!itemId || seenEquipped.has(itemId)) continue;
-    equippedItemIds.push(itemId);
-    seenEquipped.add(itemId);
-  }
-  if (agent.equipment) {
-    for (const itemId of Object.values(agent.equipment)) {
+  const equippedCells = useMemo(() => {
+    const equippedItemIds: string[] = [];
+    const seenEquipped = new Set<string>();
+    for (const slot of EQUIPMENT_SLOT_ORDER) {
+      const itemId = agent.equipment?.[slot];
       if (!itemId || seenEquipped.has(itemId)) continue;
       equippedItemIds.push(itemId);
       seenEquipped.add(itemId);
     }
-  }
-  const equippedCells = [
-    ...equippedItemIds.slice(0, EQUIPPED_SLOTS_VISIBLE),
-    ...Array.from({
-      length: Math.max(0, EQUIPPED_SLOTS_VISIBLE - equippedItemIds.length),
-    }).map(() => null as string | null),
-  ];
+    if (agent.equipment) {
+      for (const itemId of Object.values(agent.equipment)) {
+        if (!itemId || seenEquipped.has(itemId)) continue;
+        equippedItemIds.push(itemId);
+        seenEquipped.add(itemId);
+      }
+    }
+    return [
+      ...equippedItemIds.slice(0, EQUIPPED_SLOTS_VISIBLE),
+      ...Array.from({
+        length: Math.max(0, EQUIPPED_SLOTS_VISIBLE - equippedItemIds.length),
+      }).map(() => null as string | null),
+    ];
+  }, [agent.equipment]);
 
   return (
     <div
@@ -314,61 +355,90 @@ export function AgentStatsDisplay({ agent, side }: AgentStatsDisplayProps) {
       </div>
 
       {/* HP bar - skewed fighting-game style frame + inset fill */}
-      <div
-        style={{
-          width: "100%",
-          height: 28,
-          position: "relative",
-          clipPath: hpOuterClipPath,
-          background: "#fff",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-        }}
-      >
+      <div style={{ position: "relative", width: "100%" }}>
+        {/* Floating heal delta popup */}
+        {healFlash && (
+          <div
+            style={{
+              position: "absolute",
+              top: -26,
+              ...(isRight ? { left: 12 } : { right: 12 }),
+              zIndex: 10,
+              pointerEvents: "none",
+              animation: "heal-float-up 0.9s ease-out forwards",
+              color: "#34d399",
+              fontSize: "1rem",
+              fontWeight: 900,
+              fontFamily: "monospace",
+              textShadow:
+                "0 0 8px rgba(52,211,153,0.8), 1px 1px 0 #000, -1px -1px 0 #000",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {healDelta > 0 ? `+${healDelta}` : "🍖"}
+          </div>
+        )}
         <div
           style={{
-            position: "absolute",
-            inset: 2,
+            width: "100%",
+            height: 28,
+            position: "relative",
             clipPath: hpOuterClipPath,
-            background: "rgba(0,0,0,0.8)",
-            overflow: "hidden",
-            zIndex: 0,
+            background: healFlash ? "#34d399" : "#fff",
+            boxShadow: healFlash
+              ? "0 4px 12px rgba(52,211,153,0.6), 0 0 24px rgba(52,211,153,0.4)"
+              : "0 4px 12px rgba(0,0,0,0.5)",
+            transition: "background 0.15s, box-shadow 0.15s",
           }}
         >
           <div
             style={{
               position: "absolute",
+              inset: 2,
+              clipPath: hpOuterClipPath,
+              background: "rgba(0,0,0,0.8)",
+              overflow: "hidden",
+              zIndex: 0,
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                ...(isRight ? { right: 0 } : { left: 0 }),
+                width: `${hpPercent}%`,
+                background: healFlash ? "#34d399" : hpColor,
+                clipPath: hpFillClipPath,
+                transition: "width 0.15s ease-out, background 0.2s",
+                boxShadow: healFlash
+                  ? "inset 0 0 14px rgba(52,211,153,0.7)"
+                  : isCritical
+                    ? "inset 0 0 8px rgba(255,13,60,0.45)"
+                    : "inset 0 0 8px rgba(0,255,204,0.35)",
+              }}
+            />
+          </div>
+          <div
+            style={{
+              position: "absolute",
               top: 0,
               bottom: 0,
-              ...(isRight ? { right: 0 } : { left: 0 }),
-              width: `${hpPercent}%`,
-              background: hpColor,
-              clipPath: hpFillClipPath,
-              transition: "width 0.15s ease-out, background 0.2s",
-              boxShadow: isCritical
-                ? "inset 0 0 8px rgba(255,13,60,0.45)"
-                : "inset 0 0 8px rgba(0,255,204,0.35)",
+              display: "flex",
+              alignItems: "center",
+              ...(isRight ? { right: 32 } : { left: 32 }),
+              color: "#fff",
+              fontSize: "1.2rem",
+              fontWeight: 900,
+              fontFamily: "monospace",
+              textShadow:
+                "1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
+              pointerEvents: "none",
+              zIndex: 1,
             }}
-          />
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            display: "flex",
-            alignItems: "center",
-            ...(isRight ? { right: 32 } : { left: 32 }),
-            color: "#fff",
-            fontSize: "1.2rem",
-            fontWeight: 900,
-            fontFamily: "monospace",
-            textShadow:
-              "1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
-            pointerEvents: "none",
-            zIndex: 1,
-          }}
-        >
-          {agent.hp}
+          >
+            {agent.hp}
+          </div>
         </div>
       </div>
 
@@ -461,7 +531,7 @@ export function AgentStatsDisplay({ agent, side }: AgentStatsDisplayProps) {
       </div>
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Equipment + Inventory grid renderer (17 cols x 2 rows)

@@ -54,12 +54,23 @@ import { createPlacementRoutes } from "./routes/placements";
 import { createProcgenRoutes } from "./routes/procgen";
 import { ProcgenPresetService } from "./services/ProcgenPresetService";
 
+// Armor Pipeline routes
+import { createArmorPipelineRoutes } from "./routes/armor-pipeline";
+import { ShellTextureService } from "./services/armor-pipeline/ShellTextureService";
+
+// Tripo Pipeline routes
+import { createTripoPipelineRoutes } from "./routes/tripo-pipeline";
+import { TripoService } from "./services/armor-pipeline/TripoService";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
 
-// Ensure temp-images directory exists
+// Ensure temp directories exist
 await fs.promises.mkdir(path.join(ROOT_DIR, "temp-images"), {
+  recursive: true,
+});
+await fs.promises.mkdir(path.join(ROOT_DIR, "temp-shells"), {
   recursive: true,
 });
 
@@ -81,6 +92,17 @@ const lodBakingService = new LODBakingService(PROJECT_ROOT);
 const vatBakingService = new VATBakingService(PROJECT_ROOT);
 const placementService = new PlacementService(PROJECT_ROOT);
 const procgenPresetService = new ProcgenPresetService();
+
+// Armor Pipeline services
+const shellTextureService = new ShellTextureService({
+  meshyApiKey: process.env.MESHY_API_KEY || "",
+  shellDir: path.join(ROOT_DIR, "temp-shells"),
+});
+
+// Tripo service
+const tripoService = new TripoService({
+  tripoApiKey: process.env.TRIPO_API_KEY || "",
+});
 
 // Create Elysia app
 const app = new Elysia()
@@ -206,7 +228,7 @@ const app = new Elysia()
     cors({
       origin:
         process.env.NODE_ENV === "production"
-          ? process.env.FRONTEND_URL || "*"
+          ? process.env.FRONTEND_URL || false
           : true,
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -227,7 +249,8 @@ const app = new Elysia()
 
   // Static file serving - temp images for Meshy AI (custom handler since plugin is disabled)
   .get("/temp-images/:filename", async ({ params, set }) => {
-    const filePath = path.join(ROOT_DIR, "temp-images", params.filename);
+    const safeName = path.basename(params.filename);
+    const filePath = path.join(ROOT_DIR, "temp-images", safeName);
 
     try {
       const file = Bun.file(filePath);
@@ -239,7 +262,7 @@ const app = new Elysia()
       }
 
       // Set appropriate content type based on file extension
-      const ext = path.extname(params.filename).toLowerCase();
+      const ext = path.extname(safeName).toLowerCase();
       const contentTypes: Record<string, string> = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -255,7 +278,7 @@ const app = new Elysia()
 
       return file;
     } catch (error) {
-      console.error(`Error serving temp image ${params.filename}:`, error);
+      console.error(`Error serving temp image ${safeName}:`, error);
       set.status = 500;
       return { error: "Internal server error" };
     }
@@ -268,6 +291,25 @@ const app = new Elysia()
   //     prefix: "/temp-images",
   //   }),
   // )
+
+  // Static file serving - temp shell GLBs (for Meshy AI texturing)
+  .get("/temp-shells/:filename", async ({ params, set }) => {
+    const safeName = path.basename(params.filename);
+    const filePath = path.join(ROOT_DIR, "temp-shells", safeName);
+    try {
+      const file = Bun.file(filePath);
+      if (!(await file.exists())) {
+        set.status = 404;
+        return { error: "Shell file not found" };
+      }
+      set.headers["content-type"] = "model/gltf-binary";
+      set.headers["cache-control"] = "public, max-age=3600";
+      return file;
+    } catch (error) {
+      set.status = 500;
+      return { error: "Failed to serve shell file" };
+    }
+  })
 
   // Static file serving - game model assets (for batch sprite generation)
   .use(
@@ -306,6 +348,10 @@ const app = new Elysia()
   .use(createPlacementRoutes(placementService))
   // Procgen preset management
   .use(createProcgenRoutes(procgenPresetService))
+  // Armor pipeline (POC-2: shell texturing)
+  .use(createArmorPipelineRoutes(shellTextureService))
+  // Tripo pipeline (Tripo 3D AI)
+  .use(createTripoPipelineRoutes(tripoService))
 
   // Start server
   .listen(API_PORT);
@@ -316,7 +362,10 @@ console.log(`🖼️  Temp images: http://localhost:${API_PORT}/temp-images/`);
 console.log(`✨ Performance: 22x faster than Express!`);
 
 if (!process.env.MESHY_API_KEY) {
-  console.warn("⚠️  MESHY_API_KEY not found - retexturing will fail");
+  console.warn("⚠️  MESHY_API_KEY not found - Meshy retexturing will fail");
+}
+if (!process.env.TRIPO_API_KEY) {
+  console.warn("⚠️  TRIPO_API_KEY not found - Tripo pipeline will fail");
 }
 if (!process.env.AI_GATEWAY_API_KEY && !process.env.OPENAI_API_KEY) {
   console.warn(

@@ -310,6 +310,10 @@ export const agentMappings = pgTable(
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
     agentName: text("agent_name").notNull(),
+    /** When false, agent is excluded from streaming duel cycles (summon + matchmaking). */
+    streamingDuelEnabled: boolean("streaming_duel_enabled")
+      .notNull()
+      .default(true),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -2565,5 +2569,30 @@ export const streamingDuelHistory = pgTable(
     ),
     winnerIdx: index("idx_streaming_duel_history_winner").on(table.winnerId),
     loserIdx: index("idx_streaming_duel_history_loser").on(table.loserId),
+  }),
+);
+
+/**
+ * Agent Thoughts Table - Persistent agent decision log
+ *
+ * Stores every LLM/scripted decision an agent makes so that thought history
+ * survives server restarts. The in-memory `ServerNetwork.agentThoughts` map
+ * serves as a hot cache; this table is the durable backing store.
+ */
+export const agentThoughts = pgTable(
+  "agent_thoughts",
+  {
+    id: serial("id").primaryKey(),
+    characterId: text("character_id").notNull(),
+    type: text("type").notNull(), // "thinking" | "action" | "observation"
+    content: text("content").notNull(),
+    decisionPath: text("decision_path"), // "llm" | "scripted" | null
+    timestamp: bigint("timestamp", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    characterTimestampIdx: index("idx_agent_thoughts_char_ts").on(
+      table.characterId,
+      table.timestamp,
+    ),
   }),
 );

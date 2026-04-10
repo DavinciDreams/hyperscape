@@ -165,6 +165,23 @@ export function resolveEquipmentVisualData(options: {
   return options.fallbackItemData ?? null;
 }
 
+/**
+ * Zero metalness on all materials of a mesh.
+ *
+ * WORKAROUND: The game has no environment map (scene.environment = null), so
+ * metallic PBR materials appear black — they derive color from reflections,
+ * not diffuse light. Zero metalness to show base color.
+ * TODO: Revert this when an environment map / IBL probe is added to the scene.
+ */
+function zeroMetalness(mesh: THREE.Mesh): void {
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const mat of mats) {
+    if ("metalness" in mat) {
+      (mat as THREE.MeshStandardMaterial).metalness = 0;
+    }
+  }
+}
+
 function hasSkinnedMesh(root: THREE.Object3D): boolean {
   let found = false;
   root.traverse((child) => {
@@ -239,6 +256,10 @@ export function attachEquipmentVisualToVRM(options: {
       if (child instanceof THREE.SkinnedMesh) {
         child.skeleton = playerSkeleton;
         child.bind(playerSkeleton, child.bindMatrix);
+        // Must match player body renderOrder (100) so equipment renders
+        // on top of the silhouette (renderOrder 50), not underneath it.
+        child.renderOrder = 100;
+        zeroMetalness(child);
       }
     });
 
@@ -254,6 +275,15 @@ export function attachEquipmentVisualToVRM(options: {
   }
 
   removeEquipmentVisual(visuals, slot);
+
+  // Set renderOrder on all meshes so equipment renders on top of the
+  // player silhouette (renderOrder 50), matching player body (100).
+  modelRoot.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.renderOrder = 100;
+      zeroMetalness(child);
+    }
+  });
 
   const hasValidMatrix =
     attachmentData?.version === 2 &&
@@ -275,7 +305,8 @@ export function attachEquipmentVisualToVRM(options: {
     }
 
     const relativeMatrix = new THREE.Matrix4();
-    relativeMatrix.fromArray(attachmentData!.relativeMatrix!);
+    // attachmentData and relativeMatrix are guaranteed non-null by hasValidMatrix guard above
+    relativeMatrix.fromArray(attachmentData.relativeMatrix as number[]);
 
     const wrapperGroup = new THREE.Group();
     wrapperGroup.name = "EquipmentWrapper";

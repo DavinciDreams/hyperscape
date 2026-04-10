@@ -350,8 +350,7 @@ export function GameClient({
       // Default to game server on 5555, CDN on 8080
       const runtimeEnv = await loadRuntimeEnv();
       const runtimeWsUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_WS_URL);
-      const finalWsUrl =
-        initialWsUrlRef.current || runtimeWsUrl || GAME_WS_URL;
+      const finalWsUrl = initialWsUrlRef.current || runtimeWsUrl || GAME_WS_URL;
       const runtimeCdnUrl = normalizeEnvValue(runtimeEnv?.PUBLIC_CDN_URL);
       const buildCdnUrl = normalizeEnvValue(CDN_URL);
       const resolvedCdnUrl = resolveCdnUrlForClient(runtimeCdnUrl, buildCdnUrl);

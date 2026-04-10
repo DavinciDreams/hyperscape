@@ -1840,6 +1840,37 @@ export class TileMovementManager {
       return;
     }
 
+    // Arena bounds clamp: when an agent is locked into the duel arena, clamp
+    // the movement target so combat-follow, pending-attack walk, and every
+    // other path through movePlayerToward stays inside the arena.  This is the
+    // authoritative server-side gate — executeMove has its own clamp on the
+    // service layer, but COMBAT_FOLLOW_TARGET and PendingAttackManager bypass
+    // that and come straight here.
+    const arenaBounds = (
+      entity.data as {
+        arenaBounds?: {
+          minX: number;
+          maxX: number;
+          minZ: number;
+          maxZ: number;
+        } | null;
+      }
+    )?.arenaBounds;
+    if (arenaBounds) {
+      const PAD = 2.0;
+      targetPosition = {
+        x: Math.min(
+          arenaBounds.maxX - PAD,
+          Math.max(arenaBounds.minX + PAD, targetPosition.x),
+        ),
+        y: targetPosition.y,
+        z: Math.min(
+          arenaBounds.maxZ - PAD,
+          Math.max(arenaBounds.minZ + PAD, targetPosition.z),
+        ),
+      };
+    }
+
     const state = this.getOrCreateState(playerId);
 
     // CRITICAL: Sync state.currentTile with entity's actual position
@@ -1862,6 +1893,40 @@ export class TileMovementManager {
     const currentFloor = buildingService
       ? buildingService.getPlayerFloor(playerId as EntityID)
       : 0;
+
+    // Stuck-on-unwalkable recovery: if the agent's current tile is unwalkable
+    // (e.g., spawned on water/slope), find the nearest walkable tile and teleport there.
+    // Runs for all embedded agents to prevent them from being permanently stuck.
+    const isEmbeddedAgent =
+      entity.data &&
+      (entity.data as Record<string, unknown>).isEmbeddedAgent === true;
+    if (isEmbeddedAgent) {
+      const startWalkable = this.isTileWalkable(
+        state.currentTile,
+        currentFloor,
+      );
+      if (!startWalkable) {
+        const nearestWalkable = this.findClosestWalkableTile(
+          { x: entity.position.x, z: entity.position.z },
+          15,
+        );
+        if (nearestWalkable) {
+          tileToWorldInto(nearestWalkable, this._worldPos);
+          const wy = entity.position.y;
+          entity.position.set(this._worldPos.x, wy, this._worldPos.z);
+          (entity.data as Record<string, unknown>).position = [
+            this._worldPos.x,
+            wy,
+            this._worldPos.z,
+          ];
+          state.currentTile.x = nearestWalkable.x;
+          state.currentTile.z = nearestWalkable.z;
+          console.warn(
+            `[TileMov-UNSTUCK] ${playerId.slice(-8)} teleported from unwalkable (${this._actualEntityTile.x},${this._actualEntityTile.z}) to (${nearestWalkable.x},${nearestWalkable.z})`,
+          );
+        }
+      }
+    }
 
     const currentBuildingId = buildingService
       ? buildingService.getBuildingAt(state.currentTile.x, state.currentTile.z)

@@ -1,19 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Brain, Plus, Search, Trash2, Edit2 } from "lucide-react";
+import { Brain, Search, Eye, Target } from "lucide-react";
 import type { Agent } from "./types";
 import { ELIZAOS_API } from "@/lib/api-config";
 
-interface Memory {
+interface MemoryEntry {
   id: string;
-  userId: string;
-  agentId: string;
-  roomId: string;
-  content: {
-    text: string;
-    [key: string]: unknown;
-  };
-  embedding?: number[];
-  createdAt: number;
+  type: string;
+  content: string;
+  timestamp: number;
 }
 
 interface AgentMemoriesProps {
@@ -21,21 +15,21 @@ interface AgentMemoriesProps {
 }
 
 export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMemories();
+    const interval = setInterval(fetchMemories, 10000);
+    return () => clearInterval(interval);
   }, [agent.id]);
 
   const fetchMemories = async () => {
     try {
-      // Fetch memories from ElizaOS API
-      // Note: We need a default roomId - using agent's ID as room for now
       const response = await fetch(
-        `${ELIZAOS_API}/agents/${agent.id}/rooms/${agent.id}/memories?limit=100&tableName=messages`,
+        `${ELIZAOS_API}/agents/${agent.id}/thoughts?limit=200`,
       );
 
       if (!response.ok) {
@@ -46,12 +40,35 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
 
       const data = await response.json();
 
-      // Extract memories array from response
-      const memoriesArray = Array.isArray(data)
-        ? data
-        : data?.data?.memories || data?.data || data?.memories || [];
+      if (!data.success) {
+        setMemories([]);
+        setError(data.message || "Memories unavailable");
+        return;
+      }
 
-      setMemories(memoriesArray);
+      const thoughts: MemoryEntry[] = (data.thoughts || [])
+        .filter(
+          (t: { type: string }) =>
+            t.type === "situation" || t.type === "evaluation",
+        )
+        .map(
+          (t: {
+            id: string;
+            type: string;
+            content: string;
+            timestamp: number;
+          }) => ({
+            id: t.id,
+            type: t.type,
+            content: t.content,
+            timestamp: t.timestamp,
+          }),
+        );
+
+      // Most recent first
+      thoughts.sort((a, b) => b.timestamp - a.timestamp);
+
+      setMemories(thoughts);
       setError(null);
     } catch {
       setMemories([]);
@@ -61,8 +78,8 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
     }
   };
 
-  const filteredMemories = memories.filter((memory) =>
-    memory.content.text.toLowerCase().includes(searchQuery.toLowerCase()),
+  const filteredMemories = memories.filter((m) =>
+    m.content.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   if (loading) {
@@ -82,12 +99,9 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
             <Brain className="text-[#f2d08a]" size={20} />
             <h2 className="font-bold text-[#f2d08a]">Agent Memories</h2>
             <span className="px-2 py-0.5 rounded text-[10px] bg-[#f2d08a]/10 text-[#f2d08a] border border-[#f2d08a]/20">
-              {filteredMemories.length} Memories
+              {filteredMemories.length} Observations
             </span>
           </div>
-          <button className="p-2 hover:bg-[#f2d08a]/10 rounded-lg text-[#f2d08a] transition-colors">
-            <Plus size={18} />
-          </button>
         </div>
 
         {/* Search */}
@@ -119,34 +133,35 @@ export const AgentMemories: React.FC<AgentMemoriesProps> = ({ agent }) => {
             <p className="text-center">
               {searchQuery
                 ? "No memories match your search"
-                : "No memories yet. The agent will build memories through conversations."}
+                : "No memories yet. The agent will build memories through gameplay."}
             </p>
           </div>
         ) : (
           filteredMemories.map((memory) => (
             <div
               key={memory.id}
-              className="bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-4 hover:border-[#f2d08a]/30 transition-colors group"
+              className="bg-[#1a1005] border border-[#8b4513]/30 rounded-lg p-4 hover:border-[#f2d08a]/30 transition-colors"
             >
-              <div className="flex items-start justify-between mb-2">
+              <div className="flex items-start gap-3 mb-2">
+                <div className="mt-0.5">
+                  {memory.type === "situation" ? (
+                    <Eye size={14} className="text-blue-400" />
+                  ) : (
+                    <Target size={14} className="text-purple-400" />
+                  )}
+                </div>
                 <div className="flex-1">
                   <p className="text-[#e8ebf4] text-sm leading-relaxed">
-                    {memory.content.text}
+                    {memory.content}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-3">
-                  <button className="p-1.5 hover:bg-[#f2d08a]/10 rounded text-[#f2d08a]/60 hover:text-[#f2d08a] transition-colors">
-                    <Edit2 size={14} />
-                  </button>
-                  <button className="p-1.5 hover:bg-red-500/10 rounded text-red-400/60 hover:text-red-400 transition-colors">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
               </div>
-              <div className="flex items-center gap-3 text-xs text-[#f2d08a]/40">
-                <span>{new Date(memory.createdAt).toLocaleString()}</span>
+              <div className="flex items-center gap-3 text-xs text-[#f2d08a]/40 pl-7">
+                <span className="capitalize text-[#f2d08a]/60">
+                  {memory.type}
+                </span>
                 <span>•</span>
-                <span>Room: {memory.roomId.substring(0, 8)}...</span>
+                <span>{new Date(memory.timestamp).toLocaleString()}</span>
               </div>
             </div>
           ))

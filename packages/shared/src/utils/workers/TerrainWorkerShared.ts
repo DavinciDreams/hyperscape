@@ -138,6 +138,20 @@ class NoiseGenerator {
     }
     return height;
   }
+
+  simplexFbm2D(x, y, octaves, amplitude, frequency, gain, lacunarity, offset) {
+    var value = 0;
+    var amp = amplitude;
+    var fx = x * frequency;
+    var fy = y * frequency;
+    for (var i = 0; i < octaves; i++) {
+      value += amp * this.simplex2D(fx, fy);
+      fx *= lacunarity;
+      fy *= lacunarity;
+      amp *= gain;
+    }
+    return value + offset;
+  }
 }`;
 }
 
@@ -198,6 +212,27 @@ export function buildHeightHelpersJS(): string {
     }
     const slope = calculateBaseSlopeAt(worldX, worldZ, h);
     return adjustHeightForShoreline(h, slope);
+  }`;
+}
+
+/**
+ * Creates per-biome noise sets in the worker.
+ * Expects: seed (number), BIOME_CONFIGS (object) to be in scope.
+ */
+export function buildCreateBiomeNoiseSetsJS(): string {
+  return `
+  function createBiomeNoiseSets(seed) {
+    var sets = {};
+    for (var key in BIOME_CONFIGS) {
+      var cfg = BIOME_CONFIGS[key];
+      var base = seed + cfg.seedOffset;
+      sets[key] = {
+        main: new NoiseGenerator(base),
+        variation: new NoiseGenerator(base + 4),
+        erosion: new NoiseGenerator(base + 1)
+      };
+    }
+    return sets;
   }`;
 }
 

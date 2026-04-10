@@ -4,7 +4,8 @@
  * Displays:
  * - Duel info panel (top center)
  * - Agent HP bars (bottom)
- * - Leaderboard (left side)
+ * - Leaderboard (left)
+ * - Lower third (brand + live status for viewers)
  * - Countdown timer
  * - Victory announcement
  */
@@ -15,6 +16,13 @@ import { AgentStatsDisplay } from "./AgentStatsDisplay";
 import { LeaderboardPanel } from "./LeaderboardPanel";
 import { CountdownOverlay } from "./CountdownOverlay";
 import { VictoryOverlay } from "./VictoryOverlay";
+import { PostFightStatsCard } from "./PostFightStatsCard";
+import {
+  StreamingBettingRail,
+  type StreamingBettingConfig,
+} from "./StreamingBettingRail";
+import { CombatLog } from "./CombatLog";
+import "./StreamingOverlay.css";
 
 // Delay before showing victory overlay during RESOLUTION phase (ms).
 // Short delay for dramatic effect - text appears as winner starts celebrating.
@@ -26,9 +34,14 @@ const FIGHT_TEXT_LINGER_MS = 2500;
 
 interface StreamingOverlayProps {
   state: StreamingState | null;
+  /** From GET /api/streaming/betting — public bet link for viewers */
+  bettingConfig?: StreamingBettingConfig | null;
 }
 
-export function StreamingOverlay({ state }: StreamingOverlayProps) {
+export function StreamingOverlay({
+  state,
+  bettingConfig = null,
+}: StreamingOverlayProps) {
   const [showVictory, setShowVictory] = useState(false);
   const victoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -82,8 +95,15 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
 
   if (!state) {
     return (
-      <div style={styles.waitingContainer}>
-        <div style={styles.waitingText}>Waiting for duel data...</div>
+      <div className="streaming-overlay-root">
+        <div className="streaming-waiting">
+          <div className="streaming-waiting-eyebrow">Live stream</div>
+          <div className="streaming-waiting-title">Connecting to arena</div>
+          <div className="streaming-waiting-sub">
+            Duel overlay will appear when the broadcast is ready.
+          </div>
+          <div className="streaming-waiting-shimmer" aria-hidden />
+        </div>
       </div>
     );
   }
@@ -92,24 +112,89 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
   const {
     agent1,
     agent2,
-    countdown,
     winnerId,
     winnerName,
     winReason,
     timeRemaining,
+    duelId,
   } = cycle;
 
   // Get winner agent info
   const winnerAgent =
     winnerId === agent1?.id ? agent1 : winnerId === agent2?.id ? agent2 : null;
 
+  const hasMatchup = Boolean(agent1 && agent2);
+  const showActiveFightHud =
+    (phase === "FIGHTING" || phase === "COUNTDOWN") && hasMatchup;
+
+  const showBetweenMatchupStrip =
+    hasMatchup &&
+    (phase === "IDLE" || phase === "ANNOUNCEMENT" || phase === "RESOLUTION") &&
+    !showActiveFightHud;
+
+  const interstitialCopy = (() => {
+    switch (phase) {
+      case "IDLE":
+        return {
+          eyebrow: "Arena",
+          title: "Stand by",
+          sub: "Pairing the next warriors and staging the ring.",
+        };
+      case "ANNOUNCEMENT":
+        return {
+          eyebrow: "Coming up",
+          title: "Next duel loading",
+          sub: "Contestants are entering the arena.",
+        };
+      case "RESOLUTION":
+        return {
+          eyebrow: "Round complete",
+          title: winnerName ? `${winnerName}` : "Victory",
+          sub: winReason
+            ? formatWinReason(winReason)
+            : "Winner decided — next bout lines up shortly.",
+        };
+      default:
+        return {
+          eyebrow: "Intermission",
+          title: "Hyperscape duels",
+          sub: "",
+        };
+    }
+  })();
+
+  const matchupLine =
+    agent1 && agent2 ? `${agent1.name} vs ${agent2.name}` : null;
+
+  const showCombatLog =
+    phase === "FIGHTING" || phase === "COUNTDOWN" || phase === "RESOLUTION";
+
   return (
-    <div style={styles.overlay}>
-      {/* Duel Info - Top Center */}
-      {(phase === "FIGHTING" || phase === "COUNTDOWN") && agent1 && agent2 && (
+    <div className="streaming-overlay-root" style={styles.overlay}>
+      {/* Left panel: combat log during a fight, leaderboard during intermission */}
+      {showCombatLog ? (
+        <CombatLog state={state} />
+      ) : (
+        <aside className="streaming-leaderboard-mount">
+          <LeaderboardPanel leaderboard={leaderboard} />
+        </aside>
+      )}
+
+      <StreamingBettingRail
+        config={bettingConfig}
+        phase={phase}
+        duelId={duelId ?? null}
+        agent1Name={agent1?.name}
+        agent2Name={agent2?.name}
+        timeRemainingMs={timeRemaining}
+      />
+
+      {/* Duel Info - Top Center (live fight + countdown to first swing) */}
+      {showActiveFightHud && agent1 && agent2 && (
         <div style={styles.duelInfoContainer}>
           <AgentStatsDisplay agent={agent1} side="left" />
           <div style={styles.timerContainer}>
+            <span className="streaming-fight-timer-eyebrow">Round timer</span>
             <div style={styles.timerHexOuter}>
               <div style={styles.timerHexInner}>
                 <div style={styles.timerHighlight} />
@@ -122,24 +207,109 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
         </div>
       )}
 
-      {/* Next duel countdown - shown when no active fight */}
-      {(phase === "IDLE" ||
-        phase === "ANNOUNCEMENT" ||
-        phase === "RESOLUTION") && (
-        <div style={styles.nextDuelTimerContainer}>
-          <div style={styles.nextDuelLabel}>NEXT DUEL</div>
-          <div style={styles.nextDuelTimer}>
-            {timeRemaining > 0 ? formatTime(timeRemaining) : "--:--"}
+      {/* Between phases: keep fighter cards when we know the matchup */}
+      {showBetweenMatchupStrip && agent1 && agent2 && (
+        <div className="streaming-between-strip">
+          <div
+            className={
+              phase === "RESOLUTION" && winnerId && winnerId !== agent1.id
+                ? "streaming-between-agents-muted"
+                : phase === "RESOLUTION" && winnerId === agent1.id
+                  ? "streaming-between-agents-winner"
+                  : ""
+            }
+          >
+            <AgentStatsDisplay agent={agent1} side="left" />
+          </div>
+          <div className="streaming-between-center">
+            <span className="streaming-between-eyebrow">
+              {phase === "RESOLUTION"
+                ? "Winner"
+                : phase === "ANNOUNCEMENT"
+                  ? "Matchup set"
+                  : "Up next"}
+            </span>
+            <span className="streaming-between-title">
+              {phase === "RESOLUTION" && winnerName
+                ? winnerName
+                : `${agent1.name} vs ${agent2.name}`}
+            </span>
+            <div className="streaming-between-timer-wrap">
+              <div className="streaming-between-timer-inner">
+                {timeRemaining > 0 ? formatTime(timeRemaining) : "—"}
+              </div>
+            </div>
+            <span
+              style={{
+                marginTop: 6,
+                fontSize: "0.68rem",
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "rgba(148, 163, 184, 0.9)",
+              }}
+            >
+              {phase === "RESOLUTION" ? "Next duel" : "Starts in"}
+            </span>
+          </div>
+          <div
+            className={
+              phase === "RESOLUTION" && winnerId && winnerId !== agent2.id
+                ? "streaming-between-agents-muted"
+                : phase === "RESOLUTION" && winnerId === agent2.id
+                  ? "streaming-between-agents-winner"
+                  : ""
+            }
+          >
+            <AgentStatsDisplay agent={agent2} side="right" />
           </div>
         </div>
       )}
+
+      {/* No lineup yet, or resolution without both cards — full interstitial */}
+      {(phase === "IDLE" ||
+        phase === "ANNOUNCEMENT" ||
+        phase === "RESOLUTION") &&
+        !showBetweenMatchupStrip && (
+          <div className="streaming-interstitial">
+            <span className="streaming-interstitial-eyebrow">
+              {interstitialCopy.eyebrow}
+            </span>
+            <span className="streaming-interstitial-title">
+              {interstitialCopy.title}
+            </span>
+            {interstitialCopy.sub ? (
+              <span className="streaming-interstitial-sub">
+                {interstitialCopy.sub}
+              </span>
+            ) : null}
+            <div className="streaming-interstitial-rule" />
+            <div className="streaming-interstitial-timer">
+              {timeRemaining > 0 ? formatTime(timeRemaining) : "—"}
+            </div>
+            <span
+              style={{
+                fontSize: "0.65rem",
+                fontWeight: 800,
+                letterSpacing: "0.2em",
+                textTransform: "uppercase",
+                color: "rgba(148, 163, 184, 0.85)",
+              }}
+            >
+              {phase === "RESOLUTION" ? "Next round" : "Time to ring"}
+            </span>
+          </div>
+        )}
 
       {/* Countdown Overlay — stays mounted during early FIGHTING for "FIGHT!" linger */}
       {((phase === "COUNTDOWN" && cycle.fightStartTime != null) ||
         (phase === "FIGHTING" &&
           showFightText &&
           cycle.fightStartTime != null)) && (
-        <CountdownOverlay fightStartTime={cycle.fightStartTime} />
+        <CountdownOverlay
+          fightStartTime={cycle.fightStartTime}
+          matchupLine={matchupLine}
+        />
       )}
 
       {/* Victory Overlay — delayed so death animation plays first */}
@@ -147,8 +317,38 @@ export function StreamingOverlay({ state }: StreamingOverlayProps) {
         <VictoryOverlay
           winner={winnerAgent}
           winReason={winReason || "victory"}
+          winReasonLine={formatWinReason(winReason || "victory")}
         />
       )}
+
+      {/* Post-fight stat card — appears alongside victory text during RESOLUTION */}
+      {phase === "RESOLUTION" &&
+        showVictory &&
+        winnerId &&
+        agent1 &&
+        agent2 && (
+          <div style={statCardPositionStyle}>
+            <PostFightStatsCard
+              agent1={agent1}
+              agent2={agent2}
+              winnerId={winnerId}
+              winReason={winReason || "kill"}
+            />
+          </div>
+        )}
+
+      <footer className="streaming-lower-third">
+        <div className="streaming-lower-third-brand">
+          <span className="streaming-lower-third-mark">Hyperscape</span>
+          <span className="streaming-lower-third-divider" aria-hidden>
+            ·
+          </span>
+          <span className="streaming-lower-third-sub">AI duel arena</span>
+        </div>
+        <p className="streaming-lower-third-status">
+          {publicStreamStatusLine(phase, hasMatchup, bettingConfig)}
+        </p>
+      </footer>
     </div>
   );
 }
@@ -160,6 +360,58 @@ function formatTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+/** One line for the lower-third bar (OBS-friendly, readable at a glance). */
+function publicStreamStatusLine(
+  phase: StreamingState["cycle"]["phase"] | undefined,
+  hasMatchup: boolean,
+  betting: StreamingBettingConfig | null,
+): string {
+  switch (phase) {
+    case "IDLE":
+      return hasMatchup
+        ? "Matchup locked — ring opens soon"
+        : "Pairing the next warriors";
+    case "ANNOUNCEMENT":
+      if (betting?.betUrl && hasMatchup) {
+        return "Betting open on this matchup — pick a side before the bell.";
+      }
+      return "Fighters heading to the arena";
+    case "COUNTDOWN":
+      return "Get ready — combat starts after countdown";
+    case "FIGHTING":
+      return "Live — round in progress";
+    case "RESOLUTION":
+      if (betting?.bettingBridgeEnabled && betting?.betUrl) {
+        return "Winner decided — on-chain payouts follow oracle settlement.";
+      }
+      return "Winner decided — next bout loading";
+    default:
+      return "Hyperscape AI duels";
+  }
+}
+
+/** Readable subtitle for victory overlay / interstitials */
+function formatWinReason(reason: string): string {
+  const r = reason.toLowerCase().replace(/_/g, " ");
+  if (r.includes("forfeit")) return "Win by forfeit.";
+  if (r.includes("ko") || r.includes("knock"))
+    return "Knockout — HP reached zero.";
+  if (r.includes("timeout") || r.includes("time"))
+    return "Time expired — judges called it.";
+  if (r.includes("draw")) return "Draw — no victor this round.";
+  return reason.charAt(0).toUpperCase() + reason.slice(1);
+}
+
+/** Position the stat card below center, below the victory text */
+const statCardPositionStyle: React.CSSProperties = {
+  position: "absolute",
+  bottom: "18%",
+  left: "50%",
+  transform: "translateX(-50%)",
+  zIndex: 61,
+  pointerEvents: "none",
+};
+
 const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: "absolute",
@@ -169,24 +421,6 @@ const styles: Record<string, React.CSSProperties> = {
     bottom: 0,
     pointerEvents: "none",
     zIndex: 50,
-  },
-  waitingContainer: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    zIndex: 50,
-  },
-  waitingText: {
-    color: "#f2d08a",
-    fontSize: "1.5rem",
-    textShadow: "0 2px 4px rgba(0,0,0,0.8)",
-  },
-  leaderboardContainer: {
-    position: "absolute",
-    top: "80px",
-    left: "20px",
-    pointerEvents: "auto",
   },
   duelInfoContainer: {
     position: "absolute",
@@ -249,33 +483,5 @@ const styles: Record<string, React.CSSProperties> = {
     clipPath: "polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%)",
     boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)",
     pointerEvents: "none",
-  },
-  nextDuelTimerContainer: {
-    position: "absolute",
-    top: "20px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    background: "rgba(0, 0, 0, 0.6)",
-    padding: "12px 28px",
-    borderRadius: "8px",
-    border: "2px solid rgba(242, 208, 138, 0.5)",
-  },
-  nextDuelLabel: {
-    color: "#f2d08a",
-    fontSize: "0.75rem",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    letterSpacing: "2px",
-    marginBottom: "4px",
-  },
-  nextDuelTimer: {
-    color: "#fff",
-    fontSize: "2rem",
-    fontWeight: "bold",
-    fontFamily: "monospace",
-    textShadow: "0 2px 4px rgba(0,0,0,0.8)",
   },
 };

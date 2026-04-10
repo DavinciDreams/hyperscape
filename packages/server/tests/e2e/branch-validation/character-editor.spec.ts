@@ -208,9 +208,10 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
 
       expect(agentResponse.ok).toBe(true);
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       expect(agentId).toBeDefined();
       logs.push(`[${testName}] ✅ Agent created in ElizaOS: ${agentId}`);
 
@@ -342,9 +343,10 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
       });
 
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       logs.push(`[${testName}] ✅ Agent created: ${agentId}`);
 
       // Simulate mapping failure by using invalid data
@@ -712,9 +714,10 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
       });
 
       const agentData = agentResponse.data as {
-        data: { character: { id: string } };
+        data: { agent?: { id: string }; character?: { id: string } };
       };
-      const agentId = agentData.data?.character?.id;
+      const agentId =
+        agentData.data?.agent?.id ?? agentData.data?.character?.id;
       logs.push(`[${testName}] ✅ Agent created: ${agentId}`);
 
       // Update agent

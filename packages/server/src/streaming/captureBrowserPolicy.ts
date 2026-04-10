@@ -82,7 +82,10 @@ export function shouldAcceptCaptureReadiness(params: {
     return false;
   }
 
-  if (snapshot.degradedReason && snapshot.degradedReason !== "loading_overlay_active") {
+  if (
+    snapshot.degradedReason &&
+    snapshot.degradedReason !== "loading_overlay_active"
+  ) {
     return false;
   }
 

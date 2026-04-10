@@ -52,7 +52,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         />
 
         {/* Content */}
-        <div className="relative z-10 flex-1 flex flex-col h-full overflow-hidden">
+        <div className="relative z-10 flex-1 flex flex-col h-full min-h-0 overflow-hidden">
           {children}
         </div>
       </div>

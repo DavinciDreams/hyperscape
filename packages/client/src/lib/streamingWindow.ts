@@ -4,6 +4,10 @@ export type PublicRuntimeEnv = {
   PUBLIC_API_URL?: string;
   PUBLIC_APP_URL?: string;
   PUBLIC_EMBED_ALLOWED_ORIGINS?: string;
+  PUBLIC_PRIVY_APP_ID?: string;
+  PUBLIC_SOLANA_NETWORK?: string;
+  PUBLIC_SOLANA_RPC_URL?: string;
+  PUBLIC_SOLANA_WS_URL?: string;
 };
 
 export type StreamingWindowRendererHealth = {

@@ -1616,11 +1616,13 @@ export class DuelSystem {
     const dz = faceToward.z - position.z;
     const angle = Math.atan2(dx, dz);
 
-    // Emit teleport event for the network system to handle
+    // Emit teleport event for orientation only — suppress the visual beam since
+    // this is a housekeeping rotation adjustment, not a dramatic arena entrance.
     this.world.emit("player:teleport", {
       playerId,
       position: { x: position.x, y: position.y, z: position.z },
       rotation: angle,
+      suppressEffect: true,
     });
   }
 
@@ -1943,19 +1945,64 @@ export class DuelSystem {
 
   /**
    * Process active duel (rule enforcement)
-   * Note: Arena bounds are enforced by wall collision in CollisionMatrix,
-   * not by teleporting players back. This prevents unexpected teleports.
+   * Arena bounds are enforced by wall collision in CollisionMatrix as the primary
+   * mechanism, but agents (and occasionally physics glitches) can still escape.
+   * This tick-level check acts as a safety net: anyone who drifts outside the
+   * arena AABB is immediately clamped back to just inside the boundary.
    */
   private processActiveDuel(session: ServerDuelSession): void {
     if (session.arenaId === null) return;
 
-    // If noMovement rule is active, freeze players at spawn points
+    // If noMovement rule is active, freeze players exactly at spawn points.
     if (session.rules.noMovement) {
       const spawnPoints = this.arenaPool.getSpawnPoints(session.arenaId);
       if (spawnPoints) {
-        this.enforceNoMovement(session.challengerId, spawnPoints[0]);
-        this.enforceNoMovement(session.targetId, spawnPoints[1]);
+        const [s0, s1] = spawnPoints;
+        this.enforceNoMovement(session.challengerId, s0, s1);
+        this.enforceNoMovement(session.targetId, s1, s0);
       }
+    } else {
+      // For all other duels, clamp players back inside the arena if they escape.
+      // This catches agents whose AI pathfinding routes them through a wall gap and
+      // mobs/players who are nudged out by physics.
+      this.enforceArenaBounds(session.challengerId, session.arenaId);
+      this.enforceArenaBounds(session.targetId, session.arenaId);
+    }
+  }
+
+  /**
+   * Clamp a dueling player's position back inside the arena boundary.
+   * Uses a 1-unit inset from each wall so the player never re-teleports
+   * on consecutive ticks due to floating-point rounding.
+   */
+  private enforceArenaBounds(playerId: string, arenaId: number): void {
+    const player = this.world.entities.players?.get(playerId);
+    if (!player?.position) return;
+
+    const bounds = this.arenaPool.getArenaBounds(arenaId);
+    if (!bounds) return;
+
+    const { x, y, z } = player.position;
+    const WALL_INSET = 1.0; // keep at least 1 unit away from the boundary
+
+    const clampedX = Math.min(
+      bounds.max.x - WALL_INSET,
+      Math.max(bounds.min.x + WALL_INSET, x),
+    );
+    const clampedZ = Math.min(
+      bounds.max.z - WALL_INSET,
+      Math.max(bounds.min.z + WALL_INSET, z),
+    );
+
+    if (
+      Math.abs(clampedX - x) > POSITION_TOLERANCE ||
+      Math.abs(clampedZ - z) > POSITION_TOLERANCE
+    ) {
+      this.world.emit("player:teleport", {
+        playerId,
+        position: { x: clampedX, y, z: clampedZ },
+        suppressEffect: true,
+      });
     }
   }
 
@@ -1963,7 +2010,11 @@ export class DuelSystem {
    * Eject any player who is inside a duel combat arena without an active duel context.
    * This keeps combat pits reserved for active duel participants only.
    */
+  /** Per-player cooldown to avoid teleporting the same player every tick. */
+  private _ejectionCooldowns = new Map<string, number>();
+
   private ejectNonDuelingPlayersFromCombatArenas(): void {
+    const now = Date.now();
     const egress = this.getArenaEgressPosition();
 
     for (const [playerId, player] of this.world.entities.players) {
@@ -1994,28 +2045,38 @@ export class DuelSystem {
         continue;
       }
 
+      // Cooldown: don't re-eject the same player within 30 seconds
+      const lastEjected = this._ejectionCooldowns.get(playerId) ?? 0;
+      if (now - lastEjected < 30_000) {
+        continue;
+      }
+      this._ejectionCooldowns.set(playerId, now);
+
       this.world.emit("player:teleport", {
         playerId,
         position: { x: egress.x, y: egress.y, z: egress.z },
         rotation: 0,
+        suppressEffect: true,
       });
     }
   }
 
   private getArenaEgressPosition(): { x: number; y: number; z: number } {
-    const lobby = getDuelArenaConfig().lobbySpawnPoint;
-    const fallbackY = Number.isFinite(lobby.y) ? lobby.y : 0;
+    // Send ejected players to the starter area center (0, 0) instead of the
+    // lobby (105, 60) which is right next to the arenas and causes re-entry loops.
+    const safeX = 0;
+    const safeZ = 0;
     const terrain = this.world.getSystem("terrain") as {
       getHeightAt?: (x: number, z: number) => number;
     } | null;
 
-    const sampledY = terrain?.getHeightAt?.(lobby.x, lobby.z);
+    const sampledY = terrain?.getHeightAt?.(safeX, safeZ);
     const y =
       typeof sampledY === "number" && Number.isFinite(sampledY)
         ? sampledY + 0.1
-        : fallbackY;
+        : 0.42;
 
-    return { x: lobby.x, y, z: lobby.z };
+    return { x: safeX, y, z: safeZ };
   }
 
   /**
@@ -2024,20 +2085,26 @@ export class DuelSystem {
   private enforceNoMovement(
     playerId: string,
     spawnPoint: { x: number; y: number; z: number },
+    faceToward: { x: number; y: number; z: number },
   ): void {
     const player = this.world.entities.players?.get(playerId);
     if (!player?.position) return;
 
     const { x, z } = player.position;
 
-    const dx = Math.abs(x - spawnPoint.x);
-    const dz = Math.abs(z - spawnPoint.z);
+    const dxp = Math.abs(x - spawnPoint.x);
+    const dzp = Math.abs(z - spawnPoint.z);
 
-    if (dx > POSITION_TOLERANCE || dz > POSITION_TOLERANCE) {
+    const rotDx = faceToward.x - spawnPoint.x;
+    const rotDz = faceToward.z - spawnPoint.z;
+    const angle = Math.atan2(rotDx, rotDz);
+
+    if (dxp > POSITION_TOLERANCE || dzp > POSITION_TOLERANCE) {
       this.world.emit("player:teleport", {
         playerId,
         position: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
-        rotation: 0,
+        rotation: angle,
+        suppressEffect: true,
       });
     }
   }
