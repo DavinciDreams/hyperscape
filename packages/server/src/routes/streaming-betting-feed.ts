@@ -101,6 +101,7 @@ export type BettingFeedPayload = {
   sourceEpoch: number;
   seq: number;
   emittedAt: number;
+  cycle: StreamingDuelCycle | null;
   duelId: string | null;
   duelKey: string | null;
   phase: StreamingPhase | null;
@@ -363,23 +364,27 @@ export function buildBettingFeedPayload(params: {
     emittedAt: params.emittedAt,
     presentationDelayMs,
   });
+  const publicPhase = broadcastTimeline.phase ?? cycle?.phase ?? null;
+  const exposeResolutionOutcome = publicPhase === "RESOLUTION";
   return {
     schemaVersion: BETTING_FEED_SCHEMA_VERSION,
     sourceEpoch: params.sourceEpoch,
     seq: params.seq,
     emittedAt: params.emittedAt,
+    cycle,
     duelId: cycle?.duelId ?? null,
     duelKey: cycle?.duelKeyHex ?? null,
-    phase: broadcastTimeline.phase ?? cycle?.phase ?? null,
+    phase: publicPhase,
     phaseVersion: cycle?.phaseVersion ?? 0,
     broadcastTimeline,
-    betOpenTime: cycle?.betOpenTime ?? null,
-    betCloseTime: cycle?.betCloseTime ?? null,
-    fightStartTime: cycle?.fightStartTime ?? null,
-    duelEndTime: cycle?.duelEndTime ?? null,
-    winnerId: cycle?.winnerId ?? null,
-    winnerName: cycle ? resolveWinnerName(cycle) : null,
-    winReason: cycle?.winReason ?? null,
+    betOpenTime: broadcastTimeline.betOpenTime,
+    betCloseTime: broadcastTimeline.betCloseTime,
+    fightStartTime: broadcastTimeline.fightStartTime,
+    duelEndTime: broadcastTimeline.duelEndTime,
+    winnerId: exposeResolutionOutcome ? (cycle?.winnerId ?? null) : null,
+    winnerName:
+      exposeResolutionOutcome && cycle ? resolveWinnerName(cycle) : null,
+    winReason: exposeResolutionOutcome ? (cycle?.winReason ?? null) : null,
     agent1: toAgentSnapshot(cycle?.agent1 ?? null),
     agent2: toAgentSnapshot(cycle?.agent2 ?? null),
     arenaPositions: cycle?.arenaPositions ?? null,

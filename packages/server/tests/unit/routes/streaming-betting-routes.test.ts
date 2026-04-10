@@ -9,6 +9,7 @@ import {
   parseReplayCursor,
   registerStreamingBettingRoutes,
 } from "../../../src/routes/streaming-betting-routes.js";
+import type { StreamingDuelCycle } from "../../../src/systems/StreamingDuelScheduler/types.js";
 
 const stubbedEnv = new Map<string, string | undefined>();
 
@@ -62,6 +63,72 @@ function createRouteOptions(
       clientConnected: true,
       ffmpegRunning: true,
     }),
+    ...overrides,
+  };
+}
+
+function createCycle(
+  overrides: Partial<StreamingDuelCycle> = {},
+): StreamingDuelCycle {
+  return {
+    cycleId: "cycle-1",
+    phase: "FIGHTING",
+    cycleStartTime: 1_000,
+    phaseStartTime: 2_000,
+    phaseVersion: 3,
+    agent1: {
+      characterId: "agent-a",
+      name: "Agent A",
+      provider: "provider-a",
+      model: "model-a",
+      combatLevel: 10,
+      wins: 7,
+      losses: 2,
+      currentHp: 25,
+      maxHp: 30,
+      originalPosition: [1, 2, 3],
+      damageDealtThisFight: 4,
+      equipment: {},
+      inventory: [],
+      rank: 1,
+      headToHeadWins: 3,
+      headToHeadLosses: 1,
+    },
+    agent2: {
+      characterId: "agent-b",
+      name: "Agent B",
+      provider: "provider-b",
+      model: "model-b",
+      combatLevel: 11,
+      wins: 5,
+      losses: 4,
+      currentHp: 20,
+      maxHp: 30,
+      originalPosition: [4, 5, 6],
+      damageDealtThisFight: 2,
+      equipment: {},
+      inventory: [],
+      rank: 2,
+      headToHeadWins: 1,
+      headToHeadLosses: 3,
+    },
+    duelId: "duel-1",
+    duelKeyHex: "0xabcdef",
+    arenaId: null,
+    betOpenTime: 1_000,
+    betCloseTime: 2_000,
+    countdownValue: null,
+    fightStartTime: 3_000,
+    duelEndTime: null,
+    arenaPositions: {
+      agent1: [10, 11, 12],
+      agent2: [20, 21, 22],
+    },
+    winnerId: null,
+    loserId: null,
+    winReason: null,
+    seed: null,
+    replayHash: null,
     ...overrides,
   };
 }
@@ -140,6 +207,48 @@ describe("streaming-betting-routes", () => {
       replay: expect.objectContaining({
         sourceEpoch: expect.any(Number),
       }),
+    });
+
+    routes.close();
+    await options.fastify.close();
+  });
+
+  it("serializes a coherent non-null bootstrap cycle from the active scheduler", async () => {
+    stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+
+    const options = createRouteOptions({
+      getStreamingDuelScheduler: () => ({
+        getCurrentCycle: () =>
+          createCycle({
+            phase: "RESOLUTION",
+            winnerId: "agent-a",
+            winReason: "knockout",
+          }),
+      }),
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "GET",
+      url: "/api/internal/bet-sync/state",
+      headers: {
+        authorization: "Bearer bet-secret",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      cycle: {
+        duelId: "duel-1",
+        phase: "RESOLUTION",
+        winnerId: "agent-a",
+        winReason: "knockout",
+      },
+      duelId: "duel-1",
+      phase: "FIGHTING",
+      winnerId: null,
+      winnerName: null,
+      winReason: null,
     });
 
     routes.close();

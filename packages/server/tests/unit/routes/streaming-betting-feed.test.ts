@@ -225,6 +225,12 @@ describe("streaming-betting-feed", () => {
       sourceEpoch: 42,
       seq: 7,
       emittedAt: 123_456,
+      cycle: {
+        phase: "FIGHTING",
+        fightStartTime: 3_000,
+        winnerId: "agent-b",
+        winReason: "damage_advantage",
+      },
       duelId: "duel-1",
       duelKey: "0xabcdef",
       phase: "FIGHTING",
@@ -238,13 +244,13 @@ describe("streaming-betting-feed", () => {
         presentationDelayMs: 4_000,
         updatedAt: 123_456,
       },
-      betOpenTime: 1_000,
-      betCloseTime: 2_000,
-      fightStartTime: 3_000,
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
       duelEndTime: null,
-      winnerId: "agent-b",
-      winnerName: "Agent B",
-      winReason: "damage_advantage",
+      winnerId: null,
+      winnerName: null,
+      winReason: null,
       arenaPositions: {
         agent1: [10, 11, 12],
         agent2: [20, 21, 22],
@@ -383,6 +389,10 @@ describe("streaming-betting-feed", () => {
       presentationDelayMs: 4_000,
       updatedAt: 6_500,
     });
+    expect(payload.betOpenTime).toBe(5_000);
+    expect(payload.betCloseTime).toBe(6_000);
+    expect(payload.fightStartTime).toBe(7_000);
+    expect(payload.duelEndTime).toBe(13_000);
   });
 
   it("holds the projected phase at idle until the delayed cycle start arrives", () => {
@@ -411,6 +421,34 @@ describe("streaming-betting-feed", () => {
       duelEndTime: 13_000,
       presentationDelayMs: 4_000,
       updatedAt: 4_500,
+    });
+  });
+
+  it("hides winner metadata until the delayed public phase reaches resolution", () => {
+    const payload = buildBettingFeedPayload({
+      sourceEpoch: 9,
+      seq: 13,
+      emittedAt: 6_500,
+      channel: createChannel({
+        presentationDelayMs: 4_000,
+      }),
+      cycle: createCycle({
+        phase: "RESOLUTION",
+        fightStartTime: 3_000,
+        duelEndTime: 9_000,
+        winnerId: "agent-a",
+        winReason: "knockout",
+      }),
+    });
+
+    expect(payload.phase).toBe("COUNTDOWN");
+    expect(payload.winnerId).toBeNull();
+    expect(payload.winnerName).toBeNull();
+    expect(payload.winReason).toBeNull();
+    expect(payload.cycle).toMatchObject({
+      phase: "RESOLUTION",
+      winnerId: "agent-a",
+      winReason: "knockout",
     });
   });
 

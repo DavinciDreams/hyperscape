@@ -1443,35 +1443,74 @@ export function registerStreamingBettingRoutes(
     };
   };
 
-  const captureBettingFrame = (
-    forceNewFrame = false,
-  ): BettingFeedFrame | null => {
-    const scheduler = getScheduler();
-    const cycle = scheduler?.getCurrentCycle() ?? null;
-    const nextSeq = bettingSequence + 1;
-    const emittedAt = Date.now();
-    const rendererHealth = currentRendererHealthSnapshot(cycle, emittedAt);
+  const buildSerializedBettingFrame = (params: {
+    seq: number;
+    emittedAt: number;
+    cycle: StreamingDuelCycle | null;
+  }): BettingFeedFrame => {
+    const rendererHealth = currentRendererHealthSnapshot(
+      params.cycle,
+      params.emittedAt,
+    );
     const sourceRuntime = currentSourceRuntimeSnapshot(
-      cycle,
-      emittedAt,
+      params.cycle,
+      params.emittedAt,
       rendererHealth,
     );
     const channelSnapshot = currentChannelSnapshot(
-      cycle,
-      emittedAt,
+      params.cycle,
+      params.emittedAt,
       sourceRuntime,
     );
     const payload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
-      seq: nextSeq,
-      emittedAt,
-      cycle,
+      seq: params.seq,
+      emittedAt: params.emittedAt,
+      cycle: params.cycle,
       rendererHealth,
       channel: channelSnapshot.channel,
       canonicalAuthority: channelSnapshot.canonicalAuthority,
       sourceRuntime,
       rendererMetrics: currentRendererMetricsSnapshot(),
     });
+    const payloadJson = JSON.stringify(payload);
+
+    return {
+      seq: params.seq,
+      emittedAt: payload.emittedAt,
+      payload,
+      payloadJson,
+      payloadBytes: Buffer.byteLength(payloadJson, "utf8"),
+    };
+  };
+
+  const buildCurrentBettingFrame = (params: {
+    seq: number;
+    emittedAt?: number;
+  }): BettingFeedFrame | null => {
+    const scheduler = getScheduler();
+    if (!scheduler) {
+      return null;
+    }
+    return buildSerializedBettingFrame({
+      seq: params.seq,
+      emittedAt: params.emittedAt ?? Date.now(),
+      cycle: scheduler.getCurrentCycle() ?? null,
+    });
+  };
+
+  const captureBettingFrame = (
+    forceNewFrame = false,
+  ): BettingFeedFrame | null => {
+    const nextSeq = bettingSequence + 1;
+    const frame = buildCurrentBettingFrame({
+      seq: nextSeq,
+      emittedAt: Date.now(),
+    });
+    if (!frame) {
+      return null;
+    }
+    const payload = frame.payload;
     const dedupKey = buildBettingFeedDedupKey(payload);
 
     if (
@@ -1484,15 +1523,6 @@ export function registerStreamingBettingRoutes(
 
     lastSerializedBettingState = dedupKey;
     bettingSequence = nextSeq;
-    const payloadJson = JSON.stringify(payload);
-
-    const frame: BettingFeedFrame = {
-      seq: nextSeq,
-      emittedAt: payload.emittedAt,
-      payload,
-      payloadJson,
-      payloadBytes: Buffer.byteLength(payloadJson, "utf8"),
-    };
 
     bettingReplayFrames.push(frame);
     bettingReplayFramesTotalBytes += frame.payloadBytes;
@@ -1577,6 +1607,12 @@ export function registerStreamingBettingRoutes(
   };
 
   const buildBettingBootstrapResponse = (frame: BettingFeedFrame | null) => {
+    const currentFrame =
+      frame ??
+      buildCurrentBettingFrame({
+        seq: Math.max(1, bettingSequence),
+        emittedAt: Date.now(),
+      });
     const fallbackEmittedAt = Date.now();
     const fallbackRendererHealth = currentRendererHealthSnapshot(
       null,
@@ -1603,11 +1639,11 @@ export function registerStreamingBettingRoutes(
     });
 
     return {
-      ...(frame?.payload ?? fallbackPayload),
+      ...(currentFrame?.payload ?? fallbackPayload),
       schemaVersion: BETTING_FEED_SCHEMA_VERSION,
       sourceEpoch: bettingSourceEpoch,
-      seq: frame?.seq ?? bettingSequence,
-      emittedAt: frame?.emittedAt ?? fallbackEmittedAt,
+      seq: currentFrame?.seq ?? bettingSequence,
+      emittedAt: currentFrame?.emittedAt ?? fallbackEmittedAt,
       replay: {
         sourceEpoch: bettingSourceEpoch,
         latestSeq:
@@ -1660,6 +1696,10 @@ export function registerStreamingBettingRoutes(
     await externalPlaybackProbePoller?.refresh();
     const latestFrame =
       captureBettingFrame(false) ??
+      buildCurrentBettingFrame({
+        seq: Math.max(1, bettingSequence),
+        emittedAt: Date.now(),
+      }) ??
       bettingReplayFrames[bettingReplayFrames.length - 1] ??
       captureBettingFrame(true);
 
@@ -1669,6 +1709,16 @@ export function registerStreamingBettingRoutes(
           bettingSourceEpoch,
           replayFrames: bettingReplayFrames.length,
           bettingSequence,
+        },
+        "null_bootstrap_frame",
+      );
+    } else if (latestFrame.payload.cycle == null && bettingReplayFrames.length === 0) {
+      request.log.warn(
+        {
+          bettingSourceEpoch,
+          replayFrames: bettingReplayFrames.length,
+          bettingSequence,
+          phase: latestFrame.payload.phase,
         },
         "null_bootstrap_frame",
       );
