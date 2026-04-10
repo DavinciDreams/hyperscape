@@ -18,14 +18,18 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { processAgentTicks, initializeItems } from "../AgentBehaviorEngine";
 import type { AgentTickInput } from "../workerTypes";
 
+/** Monotonic counter to generate unique characterIds per test invocation */
+let nextAgentId = 0;
+
 /** Helper: create a minimal valid AgentTickInput */
 function makeInput(overrides: Partial<AgentTickInput> = {}): AgentTickInput {
+  const uniqueId = `agent-${++nextAgentId}`;
   return {
-    characterId: "agent-1",
-    playerId: "player-1",
+    characterId: uniqueId,
+    playerId: `player-${nextAgentId}`,
     name: "TestBot",
     gameState: {
-      playerId: "player-1",
+      playerId: `player-${nextAgentId}`,
       position: [100, 0, 100],
       health: 80,
       maxHealth: 100,
@@ -58,6 +62,7 @@ function makeInput(overrides: Partial<AgentTickInput> = {}): AgentTickInput {
     resourceSystemAvailable: true,
     spawnAnchors: [{ position: [100, 0, 100], name: "spawn" }],
     worldResources: [],
+    stationPositions: [],
     ...overrides,
   };
 }
@@ -112,12 +117,14 @@ beforeAll(() => {
 describe("AgentBehaviorEngine", () => {
   describe("processAgentTicks", () => {
     it("processes a batch of agents and returns one result per input", () => {
-      const inputs = [makeInput(), makeInput({ characterId: "agent-2" })];
+      const input1 = makeInput();
+      const input2 = makeInput();
+      const inputs = [input1, input2];
       const results = processAgentTicks(inputs);
 
       expect(results).toHaveLength(2);
-      expect(results[0].characterId).toBe("agent-1");
-      expect(results[1].characterId).toBe("agent-2");
+      expect(results[0].characterId).toBe(input1.characterId);
+      expect(results[1].characterId).toBe(input2.characterId);
     });
 
     it("returns action, sideEffects, and updatedState for each agent", () => {
@@ -338,12 +345,13 @@ describe("AgentBehaviorEngine", () => {
   });
 
   describe("Quest Management", () => {
-    it("sets combat goal when no quests available", () => {
+    it("sets exploring goal when no quests or mobs are nearby", () => {
       const input = makeInput();
       const [result] = processAgentTicks([input]);
 
       expect(result.updatedState.goal).not.toBeNull();
-      expect(result.updatedState.goal!.type).toBe("combat");
+      // With no nearby mobs, the agent explores toward spawn anchors
+      expect(result.updatedState.goal!.type).toBe("exploring");
     });
   });
 });

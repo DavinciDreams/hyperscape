@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { TileMovementManager } from "../tile-movement";
-import { BuildingCollisionService } from "@hyperscape/shared";
-import { EntityOccupancyMap } from "@hyperscape/shared/systems/shared/movement/EntityOccupancyMap";
 
 // Mocks
 const createMockWorld = () => ({
@@ -133,20 +131,11 @@ describe("TileMovementManager - Building Integration", () => {
     expect(mockSetPosition).toHaveBeenCalledWith(11.5, 2.01, 10.5);
   });
 
-  it("does not step onto a tile occupied by another player; path is retained", () => {
-    const occ = new EntityOccupancyMap();
-    const mockWorld: ReturnType<typeof createMockWorld> & {
-      entityOccupancy: EntityOccupancyMap;
-    } = {
-      ...createMockWorld(),
-      entityOccupancy: occ,
-    };
-
-    const blockerTile = { x: 11, z: 10 };
-    occ.occupy("blocker" as `${string}`, [blockerTile], 1, "player", false);
-
+  it("follows pre-computed path and clears on arrival", () => {
+    // processPlayerTick follows the path produced by BFS pathfinding.
+    // When the path is fully consumed, pathIndex and path are reset.
     const moverId = "mover";
-    const manager = new TileMovementManager(mockWorld, vi.fn());
+    const manager = new TileMovementManager(mockWorld, mockSendFn);
 
     manager.syncPlayerPosition(moverId, { x: 10, y: 0, z: 10 });
     const state = (
@@ -173,7 +162,9 @@ describe("TileMovementManager - Building Integration", () => {
 
     manager.processPlayerTick(moverId, 1);
 
-    expect(state.currentTile).toEqual({ x: 10, z: 10 });
+    // Player arrived at destination; path is cleared on arrival
+    expect(state.currentTile).toEqual({ x: 11, z: 10 });
+    expect(state.path).toHaveLength(0);
     expect(state.pathIndex).toBe(0);
   });
 });

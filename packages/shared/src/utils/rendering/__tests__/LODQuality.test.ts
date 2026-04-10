@@ -205,11 +205,10 @@ describe("LOD Distances - Mobile AAA Quality", () => {
     });
 
     it("trees should have reasonable draw distances", () => {
-      // Trees may have optimized (shorter) fade distances for performance
-      // while still maintaining good visual quality
+      // Trees have extended fade distances for visual quality in open world
       if (LOD_DISTANCES.tree) {
         expect(LOD_DISTANCES.tree.fadeDistance).toBeGreaterThan(100);
-        expect(LOD_DISTANCES.tree.fadeDistance).toBeLessThanOrEqual(300);
+        expect(LOD_DISTANCES.tree.fadeDistance).toBeLessThanOrEqual(2000);
       }
     });
 

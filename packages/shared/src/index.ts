@@ -1108,6 +1108,16 @@ export {
   ZONE_SIZE,
 } from "./systems/shared/movement/CollisionMatrix";
 export type { ICollisionMatrix } from "./systems/shared/movement/CollisionMatrix";
+export {
+  EntityOccupancyMap,
+  entityOccupancyMap,
+} from "./systems/shared/movement/EntityOccupancyMap";
+export type {
+  OccupantType,
+  OccupancyEntry,
+  OccupancyStats,
+  IEntityOccupancy,
+} from "./systems/shared/movement/EntityOccupancyMap";
 
 // ============================================================================
 // Interaction System (Store, Bank, Dialogue)

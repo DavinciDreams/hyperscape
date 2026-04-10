@@ -722,7 +722,6 @@ describe("DuelSystem", () => {
 
     it("teleports non-dueling players out of combat arenas", () => {
       const arenaPos = getCombatArenaPosition();
-      const lobby = getDuelArenaConfig().lobbySpawnPoint;
 
       world.setPlayerPosition("player1", arenaPos.x, arenaPos.y, arenaPos.z);
       world._emit.mockClear();
@@ -733,10 +732,11 @@ describe("DuelSystem", () => {
         (call: unknown[]) => call[0] === "player:teleport",
       );
       expect(teleports).toHaveLength(1);
+      // Ejected players are sent to the starter area center (0, 0) to avoid re-entry loops
       expect(teleports[0][1]).toEqual(
         expect.objectContaining({
           playerId: "player1",
-          position: expect.objectContaining({ x: lobby.x, z: lobby.z }),
+          position: expect.objectContaining({ x: 0, z: 0 }),
         }),
       );
     });
