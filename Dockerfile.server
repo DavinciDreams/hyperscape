@@ -104,7 +104,8 @@ RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
     cd /app/packages/web3 && bun run build && \
     cd /app/packages/server && bun run build && \
-    cd /app/packages/client && bun run build:cf
+    cd /app/packages/client && bun run build:cf && \
+    python3 /app/scripts/fix-esm-specifiers.py
 
 # ─── Runtime ────────────────────────────────────────────────────────────────
 #
