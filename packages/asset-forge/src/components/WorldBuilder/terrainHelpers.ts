@@ -10,8 +10,6 @@ import {
   type TerrainUniforms,
 } from "@hyperscape/procgen/terrain";
 import {
-  calculateRoadInfluence,
-  getRoadHeightAtPoint,
   getRoadHeightAndInfluence,
   computeRoadBounds,
   ROAD_BLEND_WIDTH,
@@ -63,18 +61,17 @@ export interface TownFlattenZone {
 // ============== CONSTANTS ==============
 
 // Biome colors matching the game's BIOMES data
-export const BIOME_COLORS: Record<string, { r: number; g: number; b: number }> =
-  {
-    plains: { r: 0.486, g: 0.729, b: 0.373 },
-    forest: { r: 0.227, g: 0.42, b: 0.208 },
-    valley: { r: 0.353, g: 0.541, b: 0.31 },
-    desert: { r: 0.769, g: 0.639, b: 0.353 },
-    tundra: { r: 0.722, g: 0.784, b: 0.784 },
-    swamp: { r: 0.29, g: 0.353, b: 0.227 },
-    mountains: { r: 0.541, g: 0.541, b: 0.541 },
-    lakes: { r: 0.29, g: 0.478, b: 0.722 },
-    canyon: { r: 0.553, g: 0.431, b: 0.388 },
-  };
+const BIOME_COLORS: Record<string, { r: number; g: number; b: number }> = {
+  plains: { r: 0.486, g: 0.729, b: 0.373 },
+  forest: { r: 0.227, g: 0.42, b: 0.208 },
+  valley: { r: 0.353, g: 0.541, b: 0.31 },
+  desert: { r: 0.769, g: 0.639, b: 0.353 },
+  tundra: { r: 0.722, g: 0.784, b: 0.784 },
+  swamp: { r: 0.29, g: 0.353, b: 0.227 },
+  mountains: { r: 0.541, g: 0.541, b: 0.541 },
+  lakes: { r: 0.29, g: 0.478, b: 0.722 },
+  canyon: { r: 0.553, g: 0.431, b: 0.388 },
+};
 
 // Shoreline tint color (sandy brown)
 const SHORELINE_COLOR = { r: 0.545, g: 0.451, b: 0.333 };
@@ -208,174 +205,6 @@ export function clipRoadPathAtTowns<T extends { x: number; z: number }>(
 
 // Road influence and height blending — delegated to shared pure functions
 // from @hyperscape/shared/world (imported at top of file).
-
-/**
- * Thin wrapper — adapts GeneratedRoad[] to the shared calculateRoadInfluence().
- */
-export function calculateRoadInfluenceAtPoint(
-  worldX: number,
-  worldZ: number,
-  roads: GeneratedRoad[] | undefined,
-): number {
-  if (!roads || roads.length === 0) return 0;
-  return calculateRoadInfluence(
-    worldX,
-    worldZ,
-    roads as ReadonlyArray<RoadPathLike>,
-    ROAD_BLEND_WIDTH,
-    ROAD_MINIMUM_WIDTH,
-  );
-}
-
-/**
- * Create flat ribbon geometry for a road path that hugs the terrain surface.
- * Matches the game's flat dirt-path look instead of cylindrical tubes.
- *
- * Generates a triangle strip: for each path point, two vertices are placed
- * perpendicular to the path direction at ±halfWidth. Vertex colors blend
- * from center (road color) to edge (road edge color) for the soft-edge look.
- */
-export function createRoadRibbonGeometry(
-  pathPoints: THREE.Vector3[],
-  halfWidth: number,
-  isMainRoad: boolean,
-): THREE.BufferGeometry {
-  if (pathPoints.length < 2) return new THREE.BufferGeometry();
-
-  const vertCount = pathPoints.length * 2;
-  const positions = new Float32Array(vertCount * 3);
-  const colors = new Float32Array(vertCount * 3);
-  const indices: number[] = [];
-
-  const centerColor = isMainRoad ? ROAD_MAIN_COLOR : ROAD_CENTER_COLOR;
-  const edgeColor = ROAD_EDGE_COLOR;
-
-  // Temporary vectors
-  const tangent = new THREE.Vector3();
-  const perp = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
-
-  for (let i = 0; i < pathPoints.length; i++) {
-    const p = pathPoints[i];
-
-    // Calculate tangent direction (forward along path)
-    if (i < pathPoints.length - 1) {
-      tangent.subVectors(pathPoints[i + 1], p).normalize();
-    }
-    // else keep previous tangent for the last point
-
-    // Perpendicular in the XZ plane (cross tangent with up)
-    perp.crossVectors(tangent, up).normalize();
-
-    // Left and right vertices
-    const li = i * 2; // left vertex index
-    const ri = i * 2 + 1; // right vertex index
-
-    positions[li * 3] = p.x - perp.x * halfWidth;
-    positions[li * 3 + 1] = p.y;
-    positions[li * 3 + 2] = p.z - perp.z * halfWidth;
-
-    positions[ri * 3] = p.x + perp.x * halfWidth;
-    positions[ri * 3 + 1] = p.y;
-    positions[ri * 3 + 2] = p.z + perp.z * halfWidth;
-
-    // Vertex colors: edges slightly darker for soft-edge look
-    colors[li * 3] = edgeColor.r;
-    colors[li * 3 + 1] = edgeColor.g;
-    colors[li * 3 + 2] = edgeColor.b;
-
-    colors[ri * 3] = edgeColor.r;
-    colors[ri * 3 + 1] = edgeColor.g;
-    colors[ri * 3 + 2] = edgeColor.b;
-
-    // Build triangle strip (two triangles per segment)
-    if (i < pathPoints.length - 1) {
-      const bl = li;
-      const br = ri;
-      const tl = (i + 1) * 2;
-      const tr = (i + 1) * 2 + 1;
-      indices.push(bl, br, tl); // first triangle
-      indices.push(br, tr, tl); // second triangle
-    }
-  }
-
-  // Add center vertices for a 3-strip ribbon: edge | center | edge
-  // This gives a flat path with darkened edges like the game shader
-  const centerPositions = new Float32Array(pathPoints.length * 3);
-  const centerColors = new Float32Array(pathPoints.length * 3);
-  for (let i = 0; i < pathPoints.length; i++) {
-    centerPositions[i * 3] = pathPoints[i].x;
-    centerPositions[i * 3 + 1] = pathPoints[i].y;
-    centerPositions[i * 3 + 2] = pathPoints[i].z;
-    centerColors[i * 3] = centerColor.r;
-    centerColors[i * 3 + 1] = centerColor.g;
-    centerColors[i * 3 + 2] = centerColor.b;
-  }
-
-  // Merge: [left edges, right edges, centers]
-  // Rebuild with 3 verts per point: left edge, center, right edge
-  const totalVerts = pathPoints.length * 3;
-  const finalPositions = new Float32Array(totalVerts * 3);
-  const finalColors = new Float32Array(totalVerts * 3);
-  const finalIndices: number[] = [];
-
-  const narrowEdge = halfWidth * 0.15; // Edge band is 15% of half-width on each side
-
-  for (let i = 0; i < pathPoints.length; i++) {
-    const p = pathPoints[i];
-    if (i < pathPoints.length - 1) {
-      tangent.subVectors(pathPoints[i + 1], p).normalize();
-    }
-    perp.crossVectors(tangent, up).normalize();
-
-    const base = i * 3;
-
-    // Left edge vertex
-    finalPositions[base * 3] = p.x - perp.x * halfWidth;
-    finalPositions[base * 3 + 1] = p.y;
-    finalPositions[base * 3 + 2] = p.z - perp.z * halfWidth;
-    finalColors[base * 3] = edgeColor.r;
-    finalColors[base * 3 + 1] = edgeColor.g;
-    finalColors[base * 3 + 2] = edgeColor.b;
-
-    // Center vertex
-    finalPositions[(base + 1) * 3] = p.x;
-    finalPositions[(base + 1) * 3 + 1] = p.y;
-    finalPositions[(base + 1) * 3 + 2] = p.z;
-    finalColors[(base + 1) * 3] = centerColor.r;
-    finalColors[(base + 1) * 3 + 1] = centerColor.g;
-    finalColors[(base + 1) * 3 + 2] = centerColor.b;
-
-    // Right edge vertex
-    finalPositions[(base + 2) * 3] = p.x + perp.x * halfWidth;
-    finalPositions[(base + 2) * 3 + 1] = p.y;
-    finalPositions[(base + 2) * 3 + 2] = p.z + perp.z * halfWidth;
-    finalColors[(base + 2) * 3] = edgeColor.r;
-    finalColors[(base + 2) * 3 + 1] = edgeColor.g;
-    finalColors[(base + 2) * 3 + 2] = edgeColor.b;
-
-    // Triangles: connect left-center-right strips to next row
-    if (i < pathPoints.length - 1) {
-      const nBase = (i + 1) * 3;
-      // Left strip (left edge → center)
-      finalIndices.push(base, base + 1, nBase);
-      finalIndices.push(base + 1, nBase + 1, nBase);
-      // Right strip (center → right edge)
-      finalIndices.push(base + 1, base + 2, nBase + 1);
-      finalIndices.push(base + 2, nBase + 2, nBase + 1);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.BufferAttribute(finalPositions, 3),
-  );
-  geometry.setAttribute("color", new THREE.BufferAttribute(finalColors, 3));
-  geometry.setIndex(finalIndices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
 
 /**
  * Create water material
@@ -664,10 +493,13 @@ export function generateTileGeometry(
     // Road influence already computed in merged pass above
     roadInfluences[i] = roadInfluenceValue;
 
-    // Mine influence for terrain shader — rocky floor color overlay
-    const mineResult = calculateMineInfluenceAtPoint(worldX, worldZ, mines);
-    mineInfluences[i] = mineResult.influence;
-    mineBiomeIds[i] = mineResult.biomeIndex;
+    // Mine influence for terrain shader — rocky floor color overlay.
+    // Skip function call overhead when no mines exist (common case for most tiles).
+    if (precomputedMines) {
+      const mineResult = calculateMineInfluenceAtPoint(worldX, worldZ, mines);
+      mineInfluences[i] = mineResult.influence;
+      mineBiomeIds[i] = mineResult.biomeIndex;
+    }
   }
 
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));

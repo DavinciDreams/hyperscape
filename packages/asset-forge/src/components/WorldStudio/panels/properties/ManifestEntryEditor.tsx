@@ -35,7 +35,7 @@ import {
 
 // ============== COMBAT SPELL EDITOR ==============
 
-export function CombatSpellEditor({ spell }: { spell: ManifestCombatSpell }) {
+function CombatSpellEditor({ spell }: { spell: ManifestCombatSpell }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(
@@ -172,7 +172,7 @@ export function CombatSpellEditor({ spell }: { spell: ManifestCombatSpell }) {
 
 // ============== PRAYER EDITOR ==============
 
-export function PrayerEditor({ prayer }: { prayer: ManifestPrayer }) {
+function PrayerEditor({ prayer }: { prayer: ManifestPrayer }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(
@@ -267,7 +267,7 @@ export function PrayerEditor({ prayer }: { prayer: ManifestPrayer }) {
 
 // ============== RECIPE EDITOR ==============
 
-export function RecipeEditor({ recipe }: { recipe: ManifestRecipe }) {
+function RecipeEditor({ recipe }: { recipe: ManifestRecipe }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(
@@ -393,7 +393,7 @@ export function RecipeEditor({ recipe }: { recipe: ManifestRecipe }) {
 
 // ============== AMMUNITION EDITOR ==============
 
-export function AmmunitionEditor({ ammo }: { ammo: ManifestAmmunition }) {
+function AmmunitionEditor({ ammo }: { ammo: ManifestAmmunition }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(
@@ -446,7 +446,7 @@ export function AmmunitionEditor({ ammo }: { ammo: ManifestAmmunition }) {
 
 // ============== RUNE EDITOR ==============
 
-export function RuneEditor({ rune }: { rune: ManifestRune }) {
+function RuneEditor({ rune }: { rune: ManifestRune }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(
@@ -495,7 +495,7 @@ export function RuneEditor({ rune }: { rune: ManifestRune }) {
 
 // ============== ITEM EDITOR ==============
 
-export function ItemEditor({ item }: { item: ManifestItem }) {
+function ItemEditor({ item }: { item: ManifestItem }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(
@@ -583,7 +583,7 @@ export function ItemEditor({ item }: { item: ManifestItem }) {
 
 // ============== NPC MANIFEST EDITOR ==============
 
-export function NPCManifestEditor({ npc }: { npc: ManifestNPC }) {
+function NPCManifestEditor({ npc }: { npc: ManifestNPC }) {
   const { state, actions } = useWorldStudio();
 
   const update = useCallback(

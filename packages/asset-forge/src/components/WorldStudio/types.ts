@@ -496,30 +496,6 @@ export function parseTileKey(key: string): { x: number; z: number } {
   return { x, z };
 }
 
-/** Convert world position to tile coordinates */
-export function worldToTile(
-  worldX: number,
-  worldZ: number,
-  tileSize: number,
-): { x: number; z: number } {
-  return {
-    x: Math.floor(worldX / tileSize),
-    z: Math.floor(worldZ / tileSize),
-  };
-}
-
-/** Get tile center in world coordinates */
-export function tileCenterWorld(
-  tileX: number,
-  tileZ: number,
-  tileSize: number,
-): { x: number; z: number } {
-  return {
-    x: tileX * tileSize + tileSize / 2,
-    z: tileZ * tileSize + tileSize / 2,
-  };
-}
-
 /** Get bounding box of a tile set in world coordinates */
 export function tileBoundsWorld(
   tileKeys: string[],

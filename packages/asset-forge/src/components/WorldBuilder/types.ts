@@ -705,19 +705,6 @@ export interface WildernessZone {
 }
 
 /**
- * Default wilderness configuration (RuneScape-style, north direction)
- */
-export const DEFAULT_WILDERNESS: WildernessZone = {
-  id: "wilderness-main",
-  name: "The Wilderness",
-  direction: "north",
-  startBoundary: 0.3, // 30% from center
-  multiCombat: true,
-  baseLevelAtBoundary: 1,
-  levelPerHundredMeters: 1,
-};
-
-/**
  * A custom object placement
  */
 export interface CustomPlacement {
@@ -1413,21 +1400,6 @@ export const DEFAULT_CREATION_CONFIG: WorldCreationConfig = {
 };
 
 /**
- * Empty world layers
- */
-export const EMPTY_WORLD_LAYERS: WorldLayers = {
-  biomeOverrides: new Map(),
-  townOverrides: new Map(),
-  npcs: [],
-  quests: [],
-  bosses: [],
-  events: [],
-  lore: [],
-  difficultyZones: [],
-  customPlacements: [],
-};
-
-/**
  * Default viewport overlays
  */
 export const DEFAULT_VIEWPORT_OVERLAYS: ViewportOverlays = {
@@ -1460,166 +1432,6 @@ export type WorldLayer =
   | "quests" // Layer 10: Quest definitions
   | "events" // Layer 11: Events
   | "lore"; // Layer 12: Lore entries
-
-/**
- * Layer dependency definitions
- */
-export interface LayerDependency {
-  /** Layer ID */
-  layer: WorldLayer;
-  /** Display name */
-  name: string;
-  /** Layer number (lower = more foundational) */
-  order: number;
-  /** Layers this depends on */
-  dependsOn: WorldLayer[];
-  /** Whether this layer is part of the locked foundation */
-  isFoundation: boolean;
-  /** Human-readable description */
-  description: string;
-}
-
-/**
- * Complete layer dependency graph
- */
-export const LAYER_DEPENDENCIES: LayerDependency[] = [
-  {
-    layer: "terrain",
-    name: "Terrain",
-    order: 0,
-    dependsOn: [],
-    isFoundation: true,
-    description: "Base heightmap and terrain shape",
-  },
-  {
-    layer: "biomes",
-    name: "Biomes",
-    order: 1,
-    dependsOn: ["terrain"],
-    isFoundation: true,
-    description: "Biome regions and boundaries",
-  },
-  {
-    layer: "towns",
-    name: "Towns",
-    order: 2,
-    dependsOn: ["terrain", "biomes"],
-    isFoundation: true,
-    description: "Town positions and sizes",
-  },
-  {
-    layer: "buildings",
-    name: "Buildings",
-    order: 3,
-    dependsOn: ["towns"],
-    isFoundation: true,
-    description: "Building placements within towns",
-  },
-  {
-    layer: "roads",
-    name: "Roads",
-    order: 4,
-    dependsOn: ["terrain", "towns"],
-    isFoundation: true,
-    description: "Road network between towns",
-  },
-  {
-    layer: "difficulty",
-    name: "Difficulty Zones",
-    order: 5,
-    dependsOn: ["terrain", "biomes", "towns"],
-    isFoundation: false,
-    description: "Combat difficulty regions",
-  },
-  {
-    layer: "wilderness",
-    name: "Wilderness (PVP)",
-    order: 6,
-    dependsOn: ["terrain"],
-    isFoundation: false,
-    description: "Player vs Player combat zone",
-  },
-  {
-    layer: "mobSpawns",
-    name: "Mob Spawns",
-    order: 7,
-    dependsOn: ["biomes", "difficulty"],
-    isFoundation: false,
-    description: "Monster spawn configuration",
-  },
-  {
-    layer: "npcs",
-    name: "NPCs",
-    order: 8,
-    dependsOn: ["towns", "buildings"],
-    isFoundation: false,
-    description: "Non-player character placements",
-  },
-  {
-    layer: "bosses",
-    name: "Bosses",
-    order: 9,
-    dependsOn: ["biomes", "difficulty"],
-    isFoundation: false,
-    description: "Boss encounter placements",
-  },
-  {
-    layer: "quests",
-    name: "Quests",
-    order: 10,
-    dependsOn: ["npcs", "bosses", "towns"],
-    isFoundation: false,
-    description: "Quest definitions and chains",
-  },
-  {
-    layer: "events",
-    name: "Events",
-    order: 11,
-    dependsOn: ["towns", "biomes"],
-    isFoundation: false,
-    description: "World events and triggers",
-  },
-  {
-    layer: "lore",
-    name: "Lore",
-    order: 12,
-    dependsOn: [],
-    isFoundation: false,
-    description: "World lore and history",
-  },
-];
-
-/**
- * Get all layers that depend on a given layer (directly or transitively)
- */
-export function getDependentLayers(layer: WorldLayer): WorldLayer[] {
-  const dependents: WorldLayer[] = [];
-  const visited = new Set<WorldLayer>();
-
-  function findDependents(targetLayer: WorldLayer) {
-    for (const dep of LAYER_DEPENDENCIES) {
-      if (dep.dependsOn.includes(targetLayer) && !visited.has(dep.layer)) {
-        visited.add(dep.layer);
-        dependents.push(dep.layer);
-        findDependents(dep.layer);
-      }
-    }
-  }
-
-  findDependents(layer);
-  return dependents.sort((a, b) => {
-    const orderA = LAYER_DEPENDENCIES.find((d) => d.layer === a)?.order ?? 0;
-    const orderB = LAYER_DEPENDENCIES.find((d) => d.layer === b)?.order ?? 0;
-    return orderA - orderB;
-  });
-}
-
-/**
- * Get layer info by ID
- */
-export function getLayerInfo(layer: WorldLayer): LayerDependency | undefined {
-  return LAYER_DEPENDENCIES.find((d) => d.layer === layer);
-}
 
 /**
  * Validation result for world data

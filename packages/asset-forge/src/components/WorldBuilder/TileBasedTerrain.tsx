@@ -128,7 +128,6 @@ function getTownPillarGeom(): THREE.CylinderGeometry {
 const TILE_LOAD_RADIUS = 5; // tiles in each direction from camera (standalone)
 const TILE_LOAD_RADIUS_STUDIO = 3; // full-detail radius for World Studio
 const TILE_UNLOAD_RADIUS = 7; // tiles beyond this are unloaded
-const TILE_UNLOAD_RADIUS_STUDIO = 5;
 const MAX_TILES_PER_FRAME = 2; // limit tile generation per frame for performance
 // GPU resource lifecycle (staging + disposal) is managed by SceneResourceManager.
 // See SceneResourceManager.ts for rate-limiting constants and phase separation logic.
@@ -148,6 +147,42 @@ function getDynamicLoadRadius(cameraY: number, isStudio: boolean): number {
   const base = TILE_LOAD_RADIUS_STUDIO;
   const extra = Math.max(0, cameraY - 50) / 80;
   return Math.min(50, Math.round(base + extra));
+}
+
+/** Build town flatten zones for a tile, with AABB rejection to skip distant towns. */
+function buildTownFlattenZones(
+  towns: TerrainSceneRefs["runtimeTowns"],
+  tileX: number,
+  tileZ: number,
+  tileSize: number,
+  wcOffset: number,
+  querier: TerrainQuerier,
+): TownFlattenZone[] | undefined {
+  if (towns.length === 0) return undefined;
+  const tileMinX = tileX * tileSize - wcOffset;
+  const tileMaxX = tileMinX + tileSize;
+  const tileMinZ = tileZ * tileSize - wcOffset;
+  const tileMaxZ = tileMinZ + tileSize;
+  const zones: TownFlattenZone[] = [];
+  for (const t of towns) {
+    const r = t.safeZoneRadius;
+    const outerR = r * 1.4;
+    if (
+      t.position.x + outerR < tileMinX ||
+      t.position.x - outerR > tileMaxX ||
+      t.position.z + outerR < tileMinZ ||
+      t.position.z - outerR > tileMaxZ
+    )
+      continue;
+    zones.push({
+      x: t.position.x,
+      z: t.position.z,
+      centerHeight: querier(t.position.x, t.position.z).height,
+      innerRadius: r * 0.85,
+      outerRadius: outerR,
+    });
+  }
+  return zones.length > 0 ? zones : undefined;
 }
 
 // LOD distances for buildings
@@ -766,6 +801,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
   // Dirty tile queue for incremental regeneration (Phase 6)
   const dirtyTileKeysRef = useRef<string[]>([]);
+
+  // LOD upgrade queue — swap geometry in-place without removing mesh from scene (no flash)
+  const lodUpgradeQueueRef = useRef<
+    Array<{ key: string; tileX: number; tileZ: number }>
+  >([]);
+  const lodUpgradeQueueSetRef = useRef<Set<string>>(new Set());
+
+  // LOD downgrade queue — swap distant full-res tiles back to low-res to reclaim GPU memory
+  const lodDowngradeQueueRef = useRef<
+    Array<{ key: string; tileX: number; tileZ: number }>
+  >([]);
+  const lodDowngradeQueueSetRef = useRef<Set<string>>(new Set());
+
   /** Previous maxHeight for fast-path scaling */
   const prevMaxHeightRef = useRef<number>(config.terrain.maxHeight);
   /** Previous waterThreshold for fast-path water plane move */
@@ -797,6 +845,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const isGeneratingRef = useRef(false);
   const [loadedTiles, setLoadedTiles] = useState(0);
+  // Initial load tracking — loading overlay shown until all low-res tiles are seeded.
+  // Two-phase: initialLoadComplete triggers fade-out, loadingOverlayVisible controls DOM removal.
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const initialLoadCompleteRef = useRef(false);
+  const [loadingOverlayVisible, setLoadingOverlayVisible] = useState(true);
   const [townCount, setTownCount] = useState(0);
   /** Runtime town data from terrain generation (game-space coordinates + safeZoneRadius) */
   const runtimeTownsRef = useRef<TerrainSceneRefs["runtimeTowns"]>([]);
@@ -912,41 +965,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const isLowRes = lowResTemplate && useRes <= TILE_LOD_LOW_RESOLUTION;
       const template = isLowRes ? lowResTemplate : fullTemplate;
 
-      // Build town flatten zones from runtime towns (game-space coords)
-      // innerRadius = 85% of safeZoneRadius — covers all buildings (building placement
-      //   radius is ~70% of safeZoneRadius, so 85% leaves margin)
-      // outerRadius = 140% of safeZoneRadius — wide blend zone for smooth ramp to
-      //   natural terrain, prevents visible cliffs and terrain gaps
-      const towns = runtimeTownsRef.current;
+      // Build town flatten zones with AABB rejection
       const wcOffset = (worldSize * tileSize) / 2;
-      let flattenZones: TownFlattenZone[] | undefined;
-      if (towns.length > 0) {
-        // Quick AABB reject: only include towns whose outer radius could overlap this tile
-        const tileMinX = tileX * tileSize - wcOffset;
-        const tileMaxX = tileMinX + tileSize;
-        const tileMinZ = tileZ * tileSize - wcOffset;
-        const tileMaxZ = tileMinZ + tileSize;
-        flattenZones = [];
-        for (const t of towns) {
-          const r = t.safeZoneRadius;
-          const outerR = r * 1.4;
-          if (
-            t.position.x + outerR < tileMinX ||
-            t.position.x - outerR > tileMaxX ||
-            t.position.z + outerR < tileMinZ ||
-            t.position.z - outerR > tileMaxZ
-          )
-            continue;
-          flattenZones.push({
-            x: t.position.x,
-            z: t.position.z,
-            centerHeight: querier(t.position.x, t.position.z).height,
-            innerRadius: r * 0.85,
-            outerRadius: outerR,
-          });
-        }
-        if (flattenZones.length === 0) flattenZones = undefined;
-      }
+      const flattenZones = buildTownFlattenZones(
+        runtimeTownsRef.current,
+        tileX,
+        tileZ,
+        tileSize,
+        wcOffset,
+        querier,
+      );
 
       // Generate tile geometry with road influence + town flattening + mine influence
       const roadsForTile = providedRoadsRef.current;
@@ -1042,9 +1070,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       };
       terrainContainer.add(mesh);
 
-      // Create water mesh if needed
+      // Create water mesh if needed — skip in studio mode (uses single world-sized water plane)
       let waterMesh: THREE.Mesh | null = null;
-      if (hasWater) {
+      if (hasWater && !isStudioModeRef.current) {
         const waterGeometry = waterTemplateGeometryRef.current
           ? waterTemplateGeometryRef.current.clone()
           : (() => {
@@ -1117,10 +1145,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     setLoadedTiles(tilesRef.current.size);
   }, []);
 
-  // Regenerate a tile's geometry in-place (incremental update without unload/reload).
-  // Used by dirty-tile processing when terrain config changes.
-  const regenerateTileInPlace = useCallback(
-    (key: string) => {
+  // Swap a tile's geometry to a target resolution in-place — mesh stays in
+  // scene the whole time (no flash). Used for both LOD upgrades/downgrades
+  // and dirty-tile regeneration (regenerateTileInPlace delegates here).
+  const swapTileResolution = useCallback(
+    (key: string, targetResolution: number) => {
       const tile = tilesRef.current.get(key);
       if (!tile) return;
 
@@ -1132,40 +1161,20 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       if (!querier || !fullTemplate) return;
 
       const isLowRes =
-        lowResTemplate && tile.resolution <= TILE_LOD_LOW_RESOLUTION;
+        lowResTemplate && targetResolution <= TILE_LOD_LOW_RESOLUTION;
       const template = isLowRes ? lowResTemplate : fullTemplate;
 
       const roadsForTile = providedRoadsRef.current;
       const minesForTile = runtimeMinesRef.current;
-      const towns = runtimeTownsRef.current;
       const wcOffset = (worldSize * tileSize) / 2;
-      let flattenZones: TownFlattenZone[] | undefined;
-      if (towns.length > 0) {
-        const tileMinX = tile.tileX * tileSize - wcOffset;
-        const tileMaxX = tileMinX + tileSize;
-        const tileMinZ = tile.tileZ * tileSize - wcOffset;
-        const tileMaxZ = tileMinZ + tileSize;
-        flattenZones = [];
-        for (const t of towns) {
-          const r = t.safeZoneRadius;
-          const outerR = r * 1.4;
-          if (
-            t.position.x + outerR < tileMinX ||
-            t.position.x - outerR > tileMaxX ||
-            t.position.z + outerR < tileMinZ ||
-            t.position.z - outerR > tileMaxZ
-          )
-            continue;
-          flattenZones.push({
-            x: t.position.x,
-            z: t.position.z,
-            centerHeight: querier(t.position.x, t.position.z).height,
-            innerRadius: r * 0.85,
-            outerRadius: outerR,
-          });
-        }
-        if (flattenZones.length === 0) flattenZones = undefined;
-      }
+      const flattenZones = buildTownFlattenZones(
+        runtimeTownsRef.current,
+        tile.tileX,
+        tile.tileZ,
+        tileSize,
+        wcOffset,
+        querier,
+      );
 
       const { geometry, hasWater } = generateTileGeometry(
         tile.tileX,
@@ -1193,49 +1202,66 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         );
       }
 
-      // Swap geometry on existing mesh (no scene remove/add)
+      // Atomic geometry swap — mesh stays in scene (no flash)
       const oldGeometry = tile.mesh.geometry;
       tile.mesh.geometry = geometry;
       oldGeometry.dispose();
 
-      // Update water
-      if (tile.water && waterContainer) {
-        if (!hasWater) {
-          waterContainer.remove(tile.water);
-          tile.water.geometry.dispose();
-          tile.water = null;
-        } else {
-          tile.water.position.y = waterThreshold;
-        }
-      } else if (hasWater && waterContainer) {
-        const waterGeometry = waterTemplateGeometryRef.current
-          ? waterTemplateGeometryRef.current.clone()
-          : (() => {
-              const g = new THREE.PlaneGeometry(tileSize, tileSize);
-              g.rotateX(-Math.PI / 2);
-              return g;
-            })();
-        const waterMat = waterMaterialRef.current;
-        if (waterMat) {
-          const wm = new THREE.Mesh(waterGeometry, waterMat);
-          wm.position.set(
-            tile.tileX * tileSize + tileSize / 2,
-            waterThreshold,
-            tile.tileZ * tileSize + tileSize / 2,
-          );
-          waterContainer.add(wm);
-          tile.water = wm;
+      // Update per-tile water — skip in studio mode (uses single world-sized water plane)
+      if (!isStudioModeRef.current) {
+        if (tile.water && waterContainer) {
+          if (!hasWater) {
+            waterContainer.remove(tile.water);
+            tile.water.geometry.dispose();
+            tile.water = null;
+          } else {
+            tile.water.position.y = waterThreshold;
+          }
+        } else if (hasWater && waterContainer) {
+          const waterGeometry = waterTemplateGeometryRef.current
+            ? waterTemplateGeometryRef.current.clone()
+            : (() => {
+                const g = new THREE.PlaneGeometry(tileSize, tileSize);
+                g.rotateX(-Math.PI / 2);
+                return g;
+              })();
+          const waterMat = waterMaterialRef.current;
+          if (waterMat) {
+            const wm = new THREE.Mesh(waterGeometry, waterMat);
+            wm.position.set(
+              tile.tileX * tileSize + tileSize / 2,
+              waterThreshold,
+              tile.tileZ * tileSize + tileSize / 2,
+            );
+            waterContainer.add(wm);
+            tile.water = wm;
+          }
         }
       }
 
-      tile.dirty = false;
+      tile.resolution = targetResolution;
     },
     [tileSize, tileResolution, waterThreshold, maxHeight, worldSize],
+  );
+
+  // Regenerate a tile's geometry in-place (incremental update without unload/reload).
+  // Used by dirty-tile processing when terrain config changes.
+  // Delegates to swapTileResolution at the tile's current resolution.
+  const regenerateTileInPlace = useCallback(
+    (key: string) => {
+      const tile = tilesRef.current.get(key);
+      if (!tile) return;
+      swapTileResolution(key, tile.resolution);
+      tile.dirty = false;
+    },
+    [swapTileResolution],
   );
 
   // Update tiles based on camera position with two-tier LOD:
   //   - Near tiles (within fullDetailRadius): full resolution geometry
   //   - Far tiles (beyond that, up to dynamic farRadius): low-res LOD geometry
+  //   - In World Studio mode: tiles are NEVER evicted (full map always visible).
+  //     LOD upgrades/downgrades use in-place geometry swap (no flash).
   const updateTiles = useCallback(
     (frameTime: number) => {
       const camera = cameraRef.current;
@@ -1243,7 +1269,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const { tileX: cameraTileX, tileZ: cameraTileZ } = getCameraTile();
 
       // Phase 2A: Skip full tile scan when camera tile hasn't changed.
-      // Still process the tile queue and dirty tiles even when stationary.
+      // Still process the tile queue, dirty tiles, and LOD queues even when stationary.
       const cameraTileChanged =
         cameraTileX !== lastCameraTileRef.current.tileX ||
         cameraTileZ !== lastCameraTileRef.current.tileZ;
@@ -1262,8 +1288,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         // Far radius scales with camera altitude — covers visible area when zoomed out
         const farRadius = getDynamicLoadRadius(camera.position.y, isStudio);
 
-        // Unload radius is slightly beyond the far radius
-        const unloadRadius = farRadius + 2;
+        // In World Studio mode, tiles are never evicted — the full map fits in memory.
+        // In standalone mode, evict tiles beyond farRadius + 2.
+        const unloadRadius = isStudio ? Infinity : farRadius + 2;
 
         // Collect new entries to sort once rather than findIndex + splice per entry
         const newEntries: Array<{
@@ -1292,13 +1319,43 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             if (existing) {
               // Phase 2C: Use cached frame timestamp instead of per-tile performance.now()
               existing.lastAccessed = frameTime;
-              // LOD upgrade: tile is low-res but camera moved close enough for full detail
+              // LOD upgrade: tile is low-res but camera moved close enough for full detail.
+              // In studio mode, use in-place geometry swap (no flash). In standalone, unload+regen.
               if (
                 wantFullRes &&
                 existing.resolution <= TILE_LOD_LOW_RESOLUTION
               ) {
-                unloadTile(key);
-                // Falls through to queue for full-res generation
+                if (isStudio) {
+                  // Queue in-place LOD upgrade — mesh stays in scene (no flash)
+                  if (!lodUpgradeQueueSetRef.current.has(key)) {
+                    lodUpgradeQueueSetRef.current.add(key);
+                    lodUpgradeQueueRef.current.push({
+                      key,
+                      tileX: existing.tileX,
+                      tileZ: existing.tileZ,
+                    });
+                  }
+                  continue;
+                } else {
+                  unloadTile(key);
+                  // Falls through to queue for full-res generation
+                }
+              } else if (
+                isStudio &&
+                !wantFullRes &&
+                existing.resolution > TILE_LOD_LOW_RESOLUTION
+              ) {
+                // LOD downgrade: camera moved away from a full-res tile.
+                // Queue in-place downgrade to reclaim GPU memory.
+                if (!lodDowngradeQueueSetRef.current.has(key)) {
+                  lodDowngradeQueueSetRef.current.add(key);
+                  lodDowngradeQueueRef.current.push({
+                    key,
+                    tileX: existing.tileX,
+                    tileZ: existing.tileZ,
+                  });
+                }
+                continue;
               } else {
                 continue;
               }
@@ -1320,14 +1377,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        // Phase 2F: Only check for unloads when camera tile changes
-        for (const [key, tile] of tilesRef.current) {
-          const dx = Math.abs(tile.tileX - cameraTileX);
-          const dz = Math.abs(tile.tileZ - cameraTileZ);
+        // Eviction check: only in non-studio mode (studio never evicts)
+        if (!isStudio) {
+          for (const [key, tile] of tilesRef.current) {
+            const dx = Math.abs(tile.tileX - cameraTileX);
+            const dz = Math.abs(tile.tileZ - cameraTileZ);
 
-          if (dx > unloadRadius || dz > unloadRadius) {
-            if (frameTime - tile.lastAccessed > 1000) {
-              unloadTile(key);
+            if (dx > unloadRadius || dz > unloadRadius) {
+              if (frameTime - tile.lastAccessed > 1000) {
+                unloadTile(key);
+              }
             }
           }
         }
@@ -1340,15 +1399,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const hasStagedWork = resourceManager.hasStagedWork;
       const maxFullThisFrame = hasStagedWork ? 0 : MAX_TILES_PER_FRAME;
 
-      // Low-res tiles use a time-based budget: generate as many as possible
-      // within 8ms to fill the world overview quickly (~1-2 seconds for 10k tiles)
-      // without dropping below 60fps.
-      const LOW_RES_TIME_BUDGET_MS = 8;
+      // Low-res tiles use a time-based budget. During initial load (loading
+      // overlay visible), spend up to 32ms/frame since the viewport is hidden —
+      // fills the map 4× faster. After initial load, cap at 8ms for 60fps.
+      const duringInitialLoad = !initialLoadCompleteRef.current;
+      const LOW_RES_TIME_BUDGET_MS = duringInitialLoad ? 32 : 8;
       const lowResDeadline = frameTime + LOW_RES_TIME_BUDGET_MS;
 
       // Process tile queue with separate budgets for full-res and low-res
       let fullResGen = 0;
       let lowResGen = 0;
+      const lowResCountLimit = duringInitialLoad
+        ? MAX_LOW_RES_TILES_PER_FRAME * 4
+        : MAX_LOW_RES_TILES_PER_FRAME;
       const remaining: typeof tileQueueRef.current = [];
 
       for (const entry of tileQueueRef.current) {
@@ -1360,7 +1423,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
         if (
           !isFullRes &&
-          lowResGen >= MAX_LOW_RES_TILES_PER_FRAME &&
+          lowResGen >= lowResCountLimit &&
           performance.now() >= lowResDeadline
         ) {
           remaining.push(entry);
@@ -1379,6 +1442,37 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         }
       }
       tileQueueRef.current = remaining;
+
+      // Process LOD upgrade queue — swap low-res geometry to full-res in-place (no flash).
+      // Budget: MAX_TILES_PER_FRAME per frame (same as new tile generation).
+      let lodUpgraded = 0;
+      const lodUpgradeBudget = hasStagedWork ? 0 : MAX_TILES_PER_FRAME;
+      while (
+        lodUpgradeQueueRef.current.length > 0 &&
+        lodUpgraded < lodUpgradeBudget
+      ) {
+        const entry = lodUpgradeQueueRef.current.shift()!;
+        lodUpgradeQueueSetRef.current.delete(entry.key);
+        const tile = tilesRef.current.get(entry.key);
+        if (tile && tile.resolution <= TILE_LOD_LOW_RESOLUTION) {
+          swapTileResolution(entry.key, tileResolution);
+          lodUpgraded++;
+        }
+      }
+
+      // Process LOD downgrade queue — swap distant full-res to low-res (1 per frame, low priority).
+      if (
+        lodDowngradeQueueRef.current.length > 0 &&
+        lodUpgraded === 0 &&
+        !hasStagedWork
+      ) {
+        const entry = lodDowngradeQueueRef.current.shift()!;
+        lodDowngradeQueueSetRef.current.delete(entry.key);
+        const tile = tilesRef.current.get(entry.key);
+        if (tile && tile.resolution > TILE_LOD_LOW_RESOLUTION) {
+          swapTileResolution(entry.key, TILE_LOD_LOW_RESOLUTION);
+        }
+      }
 
       // Process dirty tiles progressively — regenerate geometry in-place without
       // unloading. Budget is shared with new tile generation to avoid GPU spikes.
@@ -1399,7 +1493,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Update generating state — only call setState when the value actually changes
       // to avoid triggering React reconciliation on every animation frame.
       const isStillGenerating =
-        tileQueueRef.current.length > 0 || dirtyTileKeysRef.current.length > 0;
+        tileQueueRef.current.length > 0 ||
+        dirtyTileKeysRef.current.length > 0 ||
+        lodUpgradeQueueRef.current.length > 0;
       if (isGeneratingRef.current !== isStillGenerating) {
         isGeneratingRef.current = isStillGenerating;
         setIsGenerating(isStillGenerating);
@@ -1413,6 +1509,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       unloadTile,
       tileResolution,
       regenerateTileInPlace,
+      swapTileResolution,
     ],
   );
 
@@ -1777,6 +1874,22 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     scene.add(waterContainer);
     waterContainerRef.current = waterContainer;
 
+    // Single world-sized water plane — replaces per-tile water meshes.
+    // One draw call instead of potentially hundreds.
+    if (isStudioModeRef.current) {
+      const worldSizeMeters = worldSize * tileSize;
+      const wg = new THREE.PlaneGeometry(worldSizeMeters, worldSizeMeters);
+      wg.rotateX(-Math.PI / 2);
+      const wMat = createWaterMaterial();
+      const worldWater = new THREE.Mesh(wg, wMat);
+      worldWater.position.set(
+        worldSizeMeters / 2,
+        waterThreshold,
+        worldSizeMeters / 2,
+      );
+      waterContainer.add(worldWater);
+    }
+
     const townMarkers = new THREE.Group();
     scene.add(townMarkers);
     townMarkersRef.current = townMarkers;
@@ -1969,17 +2082,31 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     // procgen pipeline wraps TerrainGenerator.queryPoint
     if (useGamePipelineRef.current) {
       const gameQuerier = createGameTerrainQuerier(configSeedRef.current);
+      // Pre-allocated result object — queryPoint already pools internally,
+      // but the wrapper previously allocated a new object per call.
+      const _gameResult: import("./terrainHelpers").TerrainQueryResult = {
+        height: 0,
+        biome: "forest",
+        biomeForestWeight: 0,
+        biomeCanyonWeight: 0,
+      };
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = gameQuerier.queryPoint(worldX, worldZ);
-        return {
-          height: q.height,
-          biome: q.biomeId,
-          color: q.biomeColor,
-          biomeForestWeight: q.biomeForestWeight,
-          biomeCanyonWeight: q.biomeCanyonWeight,
-        };
+        _gameResult.height = q.height;
+        _gameResult.biome = q.biomeId;
+        _gameResult.color = q.biomeColor;
+        _gameResult.biomeForestWeight = q.biomeForestWeight;
+        _gameResult.biomeCanyonWeight = q.biomeCanyonWeight;
+        return _gameResult;
       };
     } else {
+      // Pre-allocated result object for procgen pipeline
+      const _procgenResult: import("./terrainHelpers").TerrainQueryResult = {
+        height: 0,
+        biome: "forest",
+        biomeForestWeight: 0,
+        biomeCanyonWeight: 0,
+      };
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = generator.queryPoint(worldX, worldZ);
         // Extract per-biome weights for shader blending
@@ -1987,12 +2114,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           q.biomeInfluences?.find((b) => b.type === "forest")?.weight ?? 0;
         const cW =
           q.biomeInfluences?.find((b) => b.type === "canyon")?.weight ?? 0;
-        return {
-          height: q.height,
-          biome: q.biome,
-          biomeForestWeight: fW,
-          biomeCanyonWeight: cW,
-        };
+        _procgenResult.height = q.height;
+        _procgenResult.biome = q.biome;
+        _procgenResult.biomeForestWeight = fW;
+        _procgenResult.biomeCanyonWeight = cW;
+        return _procgenResult;
       };
     }
 
@@ -4114,17 +4240,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           // Inter-town roads are rendered by the terrain shader via roadInfluence
           // vertex attribute — no ribbon meshes needed. Tile regen below handles it.
 
-          // Regenerate terrain tiles under/near towns so flattening takes effect
+          // Regenerate terrain tiles under/near towns so flattening takes effect.
+          // Use dirty-tile mechanism instead of unload+reload to avoid blanking
+          // the entire map momentarily (tiles stay visible during regen).
           if (tilesRef.current.size > 0) {
             console.log(
-              `[refreshTownMarkers] Regenerating ${tilesRef.current.size} tiles for town terrain flattening`,
+              `[refreshTownMarkers] Marking ${tilesRef.current.size} tiles dirty for town terrain flattening`,
             );
-            for (const key of tilesRef.current.keys()) {
-              unloadTile(key);
+            for (const [key, tile] of tilesRef.current) {
+              tile.dirty = true;
+              dirtyTileKeysRef.current.push(key);
             }
-            tileQueueRef.current = [];
-            tileQueueSetRef.current.clear();
-            // Force updateTiles to re-scan on next frame after bulk unload
+            // Force updateTiles to re-scan on next frame
             lastCameraTileRef.current.tileX = -Infinity;
           }
 
@@ -4225,34 +4352,135 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       });
 
       // ---- Pre-seed entire world with low-res tiles for instant overview ----
-      // Queue ALL world tiles as low-res so the entire map appears quickly
-      // instead of chunk-by-chunk. The regular per-frame budget handles
-      // generation, but we dramatically increase the low-res budget during
-      // this initial phase. Full-res tiles near the camera are generated
-      // separately by updateTiles as normal.
+      // Fast path: bypass generateTile() overhead for the initial batch.
+      // Saves: per-tile town flatten zone recomputation, per-tile setLoadedTiles
+      // React setState, diagnostic logging, water mesh creation, and heatmap
+      // notifications. Roads/mines are skipped (invisible at 8×8 from distance);
+      // LOD upgrade to full-res will include them when the camera zooms in.
+      const totalTileCount = worldSize * worldSize;
       if (isStudioModeRef.current && terrainQuerierRef.current) {
-        const queue = tileQueueRef.current;
-        const queueSet = tileQueueSetRef.current;
-        let preSeedQueued = 0;
-        for (let tx = 0; tx < worldSize; tx++) {
-          for (let tz = 0; tz < worldSize; tz++) {
-            const key = `${tx}_${tz}`;
-            if (!tilesRef.current.has(key) && !queueSet.has(key)) {
-              queueSet.add(key);
-              queue.push({
+        const querier = terrainQuerierRef.current;
+        const lowTemplate = lowResTemplateGeometryRef.current;
+        const tMaterial = terrainMaterialRef.current;
+        const tContainer = terrainContainerRef.current;
+
+        const MAX_SYNC_WORLD_SIZE = 50; // 50×50 = 2,500 tiles = ~16MB at 8×8
+        if (
+          worldSize <= MAX_SYNC_WORLD_SIZE &&
+          lowTemplate &&
+          tMaterial &&
+          tContainer
+        ) {
+          const startT = performance.now();
+
+          // Pre-compute town flatten zones once for the entire batch
+          const towns = runtimeTownsRef.current;
+          const wcOffset = (worldSize * tileSize) / 2;
+          let batchFlattenZones: TownFlattenZone[] | undefined;
+          if (towns.length > 0) {
+            batchFlattenZones = [];
+            for (const t of towns) {
+              const r = t.safeZoneRadius;
+              batchFlattenZones.push({
+                x: t.position.x,
+                z: t.position.z,
+                centerHeight: querier(t.position.x, t.position.z).height,
+                innerRadius: r * 0.85,
+                outerRadius: r * 1.4,
+              });
+            }
+            if (batchFlattenZones.length === 0) batchFlattenZones = undefined;
+          }
+
+          const halfTile = tileSize / 2;
+          const now = performance.now();
+          let syncGenCount = 0;
+
+          for (let tx = 0; tx < worldSize; tx++) {
+            for (let tz = 0; tz < worldSize; tz++) {
+              const key = `${tx}_${tz}`;
+              if (tilesRef.current.has(key)) continue;
+
+              // Generate geometry — skip roads/mines for speed (invisible at low-res distance)
+              const { geometry, hasWater } = generateTileGeometry(
+                tx,
+                tz,
+                lowTemplate,
+                querier,
+                tileSize,
+                waterThreshold,
+                maxHeight,
+                worldSize,
+                undefined, // roads — skipped for speed
+                batchFlattenZones,
+                undefined, // mines — skipped for speed
+              );
+
+              const mesh = new THREE.Mesh(geometry, tMaterial);
+              mesh.position.set(
+                tx * tileSize + halfTile,
+                0,
+                tz * tileSize + halfTile,
+              );
+              mesh.receiveShadow = true;
+              mesh.userData = { tileX: tx, tileZ: tz, tileKey: key };
+              tContainer.add(mesh);
+
+              // Skip water mesh creation during pre-seed (deferred to LOD upgrade)
+
+              tilesRef.current.set(key, {
+                mesh,
+                water: null,
                 tileX: tx,
                 tileZ: tz,
+                lastAccessed: now,
                 resolution: TILE_LOD_LOW_RESOLUTION,
               });
-              preSeedQueued++;
+              syncGenCount++;
             }
           }
+
+          // Single batched React state update + heatmap notification
+          if (syncGenCount > 0) {
+            setLoadedTiles(tilesRef.current.size);
+            console.log(
+              `[TileBasedTerrain] Pre-seeded ${syncGenCount} low-res tiles in ${(performance.now() - startT).toFixed(1)}ms`,
+            );
+          }
+
+          // Sync path: all tiles exist immediately
+          initialLoadCompleteRef.current = true;
+          setInitialLoadComplete(true);
+        } else {
+          // Large world (or missing refs): queue-based progressive generation
+          const queue = tileQueueRef.current;
+          const queueSet = tileQueueSetRef.current;
+          let preSeedQueued = 0;
+          for (let tx = 0; tx < worldSize; tx++) {
+            for (let tz = 0; tz < worldSize; tz++) {
+              const key = `${tx}_${tz}`;
+              if (!tilesRef.current.has(key) && !queueSet.has(key)) {
+                queueSet.add(key);
+                queue.push({
+                  tileX: tx,
+                  tileZ: tz,
+                  resolution: TILE_LOD_LOW_RESOLUTION,
+                });
+                preSeedQueued++;
+              }
+            }
+          }
+          if (preSeedQueued > 0) {
+            console.log(
+              `[TileBasedTerrain] Queued ${preSeedQueued} low-res tiles for progressive world overview`,
+            );
+          }
+          // Async path: initialLoadComplete will be set in the animation loop
         }
-        if (preSeedQueued > 0) {
-          console.log(
-            `[TileBasedTerrain] Queued ${preSeedQueued} low-res tiles for instant world overview`,
-          );
-        }
+      } else {
+        // Non-studio mode: mark as complete immediately (no loading overlay)
+        initialLoadCompleteRef.current = true;
+        setInitialLoadComplete(true);
       }
 
       // Animation loop
@@ -4280,6 +4508,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         updateCameraRef.current(deltaTime);
         // Phase 2C: Pass cached frame timestamp to updateTiles
         updateTilesRef.current(now);
+
+        // Check if initial world load is complete (async path for large worlds).
+        // Once all low-res tiles exist, dismiss the loading overlay.
+        if (!initialLoadCompleteRef.current) {
+          if (tilesRef.current.size >= totalTileCount) {
+            initialLoadCompleteRef.current = true;
+            setInitialLoadComplete(true);
+          }
+        }
 
         // Phase 2D: Only run time-of-day lighting when value changes
         const todValue = timeOfDayRef.current;
@@ -4591,29 +4828,39 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       terrainQuerierRef.current = importedQuerier;
     } else if (config.useGamePipeline) {
       const gameQuerier = createGameTerrainQuerier(config.seed);
+      const _gr: import("./terrainHelpers").TerrainQueryResult = {
+        height: 0,
+        biome: "forest",
+        biomeForestWeight: 0,
+        biomeCanyonWeight: 0,
+      };
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = gameQuerier.queryPoint(worldX, worldZ);
-        return {
-          height: q.height,
-          biome: q.biomeId,
-          color: q.biomeColor,
-          biomeForestWeight: q.biomeForestWeight,
-          biomeCanyonWeight: q.biomeCanyonWeight,
-        };
+        _gr.height = q.height;
+        _gr.biome = q.biomeId;
+        _gr.color = q.biomeColor;
+        _gr.biomeForestWeight = q.biomeForestWeight;
+        _gr.biomeCanyonWeight = q.biomeCanyonWeight;
+        return _gr;
       };
     } else {
+      const _pr: import("./terrainHelpers").TerrainQueryResult = {
+        height: 0,
+        biome: "forest",
+        biomeForestWeight: 0,
+        biomeCanyonWeight: 0,
+      };
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = newGenerator.queryPoint(worldX, worldZ);
         const fW =
           q.biomeInfluences?.find((b) => b.type === "forest")?.weight ?? 0;
         const cW =
           q.biomeInfluences?.find((b) => b.type === "canyon")?.weight ?? 0;
-        return {
-          height: q.height,
-          biome: q.biome,
-          biomeForestWeight: fW,
-          biomeCanyonWeight: cW,
-        };
+        _pr.height = q.height;
+        _pr.biome = q.biome;
+        _pr.biomeForestWeight = fW;
+        _pr.biomeCanyonWeight = cW;
+        return _pr;
       };
     }
 
@@ -4978,9 +5225,76 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       document.removeEventListener("pointerlockchange", checkPointerLock);
   }, []);
 
+  // Remove loading overlay from DOM after fade-out animation completes
+  useEffect(() => {
+    if (initialLoadComplete && loadingOverlayVisible) {
+      const timer = setTimeout(() => setLoadingOverlayVisible(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [initialLoadComplete, loadingOverlayVisible]);
+
+  const totalTiles = worldSize * worldSize;
+  const loadProgress =
+    totalTiles > 0 ? Math.min(loadedTiles / totalTiles, 1) : 0;
+
   return (
     <div className={`relative w-full h-full ${className}`}>
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* ---- Loading overlay — shown until all low-res tiles are seeded ---- */}
+      {loadingOverlayVisible && (
+        <div
+          className="absolute inset-0 z-50 flex flex-col items-center justify-center pointer-events-none"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(15,17,21,0.95) 0%, rgba(10,12,16,0.98) 100%)",
+            opacity: initialLoadComplete ? 0 : 1,
+            transition: "opacity 0.4s ease-out",
+          }}
+        >
+          {/* Spinner */}
+          <div
+            className="mb-6"
+            style={{
+              width: 48,
+              height: 48,
+              border: "3px solid rgba(255,255,255,0.1)",
+              borderTopColor: "rgba(99,179,237,0.9)",
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }}
+          />
+
+          <div className="text-sm font-medium text-white/90 mb-1">
+            Building Terrain
+          </div>
+          <div className="text-xs text-white/50 mb-4">
+            {loadedTiles} / {totalTiles} tiles
+          </div>
+
+          {/* Progress bar */}
+          <div
+            className="rounded-full overflow-hidden"
+            style={{
+              width: 240,
+              height: 4,
+              backgroundColor: "rgba(255,255,255,0.08)",
+            }}
+          >
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${loadProgress * 100}%`,
+                backgroundColor: "rgba(99,179,237,0.85)",
+                transition: "width 0.15s ease-out",
+              }}
+            />
+          </div>
+
+          {/* Inline keyframe for spinner */}
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
 
       {/* ---- Built-in HUD (hidden when World Studio provides its own overlay) ---- */}
       {!hideBuiltinOverlays && (

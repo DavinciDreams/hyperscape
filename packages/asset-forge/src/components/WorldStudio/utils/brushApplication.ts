@@ -16,10 +16,10 @@ import type {
 
 // ============== CONSTANTS ==============
 
-export const SCULPT_HEIGHT_STEP = 2.0; // meters per full-strength application
+const SCULPT_HEIGHT_STEP = 2.0; // meters per full-strength application
 
 // Biome colors (must match TileBasedTerrain BIOME_COLORS)
-export const BIOME_COLORS: Record<string, [number, number, number]> = {
+const BIOME_COLORS: Record<string, [number, number, number]> = {
   plains: [0.486, 0.729, 0.373],
   forest: [0.227, 0.42, 0.208],
   valley: [0.353, 0.541, 0.31],
@@ -33,7 +33,7 @@ export const BIOME_COLORS: Record<string, [number, number, number]> = {
 
 // ============== BRUSH MATH ==============
 
-export function brushInfluence(
+function brushInfluence(
   dist: number,
   radius: number,
   falloff: BrushFalloff,
@@ -52,7 +52,7 @@ export function brushInfluence(
 }
 
 /** Check if a circle overlaps an AABB (2D in XZ plane) */
-export function circleOverlapsAABB(
+function circleOverlapsAABB(
   cx: number,
   cz: number,
   radius: number,

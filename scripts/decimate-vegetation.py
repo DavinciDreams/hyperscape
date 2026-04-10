@@ -23,7 +23,6 @@ Requirements:
 
 import bpy
 import sys
-import os
 from pathlib import Path
 
 # Parse arguments after "--"

@@ -386,7 +386,7 @@ function buildResourceLevelTiers(
   return tiers;
 }
 
-export function validateSkillProgression(
+function validateSkillProgression(
   resources: PlacedResource[],
   regions: PlacedRegion[],
   tileSize: number,

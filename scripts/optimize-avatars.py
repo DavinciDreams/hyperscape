@@ -35,12 +35,8 @@ Output:
 
 import bpy
 import sys
-import os
-import json
-import struct
-import base64
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict
 from dataclasses import dataclass
 
 # Parse arguments after "--"

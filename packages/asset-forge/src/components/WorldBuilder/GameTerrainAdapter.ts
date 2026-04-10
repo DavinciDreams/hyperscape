@@ -148,6 +148,14 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
 
   const biomeCenters = biomeSystem.getBiomeCenters();
 
+  // Pre-allocated biome weight pool — avoids per-vertex Record<string,number> allocation.
+  // Only 3 biome types exist (tundra, forest, canyon), so a fixed object is sufficient.
+  const _weightsPool: Record<string, number> = {
+    tundra: 0,
+    forest: 0,
+    canyon: 0,
+  };
+
   function computeBiomeWeights(
     worldX: number,
     worldZ: number,
@@ -157,7 +165,10 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
       worldZ * BIOME_CONFIG.boundaryNoiseScale,
     );
 
-    const weights: Record<string, number> = {};
+    // Reset pool instead of allocating new object
+    _weightsPool.tundra = 0;
+    _weightsPool.forest = 0;
+    _weightsPool.canyon = 0;
     let totalWeight = 0;
 
     for (const center of biomeCenters) {
@@ -169,17 +180,17 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
       const normDist = noisyDist / center.influence;
       const w = Math.exp(-normDist * normDist * BIOME_CONFIG.gaussianCoeff);
 
-      weights[center.type] = (weights[center.type] || 0) + w;
+      _weightsPool[center.type] = (_weightsPool[center.type] || 0) + w;
       totalWeight += w;
     }
 
     if (totalWeight > 0) {
-      for (const key of Object.keys(weights)) weights[key] /= totalWeight;
+      for (const key of biomeTypes) _weightsPool[key] /= totalWeight;
     } else {
-      weights[DEFAULT_BIOME] = 1.0;
+      _weightsPool[DEFAULT_BIOME] = 1.0;
     }
 
-    return weights;
+    return _weightsPool;
   }
 
   function getDominantBiome(weights: Record<string, number>): string {
@@ -194,30 +205,37 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
     return dominant;
   }
 
-  function getBiomeColor(biomeId: string): { r: number; g: number; b: number } {
-    const hex = GAME_BIOME_COLORS[biomeId] ?? 0x388e3c;
-    return {
+  // Pre-computed biome colors (avoid per-call hex→RGB conversion)
+  const _biomeRGB: Record<string, { r: number; g: number; b: number }> = {};
+  for (const [id, hex] of Object.entries(GAME_BIOME_COLORS)) {
+    _biomeRGB[id] = {
       r: ((hex >> 16) & 0xff) / 255,
       g: ((hex >> 8) & 0xff) / 255,
       b: (hex & 0xff) / 255,
     };
   }
+  const _defaultBiomeRGB = _biomeRGB[DEFAULT_BIOME]!;
+
+  // Pre-allocated color pool — avoids per-vertex {r,g,b} allocation
+  const _colorPool = { r: 0, g: 0, b: 0 };
 
   function blendBiomeColor(weights: Record<string, number>): {
     r: number;
     g: number;
     b: number;
   } {
-    let r = 0,
-      g = 0,
-      b = 0;
-    for (const [biomeId, w] of Object.entries(weights)) {
-      const c = getBiomeColor(biomeId);
-      r += c.r * w;
-      g += c.g * w;
-      b += c.b * w;
+    _colorPool.r = 0;
+    _colorPool.g = 0;
+    _colorPool.b = 0;
+    for (const biomeId of biomeTypes) {
+      const w = weights[biomeId];
+      if (!w) continue;
+      const c = _biomeRGB[biomeId] ?? _defaultBiomeRGB;
+      _colorPool.r += c.r * w;
+      _colorPool.g += c.g * w;
+      _colorPool.b += c.b * w;
     }
-    return { r, g, b };
+    return _colorPool;
   }
 
   /**
@@ -279,43 +297,68 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
     return mask;
   }
 
+  // Pre-allocated shoreline config — avoids per-vertex object literal
+  const _shorelineConfig = {
+    waterThreshold: GAME_WATER_THRESHOLD,
+    shorelineLandBand: SHORELINE.landBand,
+    shorelineUnderwaterBand: SHORELINE.underwaterBand,
+    shorelineMinSlope: SHORELINE.minSlope,
+    shorelineLandMaxMultiplier: SHORELINE.landMaxMultiplier,
+    underwaterDepthMultiplier: SHORELINE.underwaterDepthMultiplier,
+  };
+
+  // Pre-allocated query result — avoids per-vertex {height,biomeId,...} allocation.
+  // IMPORTANT: Callers must consume or copy values before the next queryPoint call.
+  const _queryResult: GameTerrainQuery = {
+    height: 0,
+    biomeId: DEFAULT_BIOME,
+    biomeColor: _colorPool,
+    islandMask: 0,
+    biomeForestWeight: 0,
+    biomeCanyonWeight: 0,
+  };
+
+  const sampleDist = SHORELINE.slopeSampleDistance;
+  // Max band distance from waterThreshold where shoreline adjustment applies.
+  // Vertices outside this band skip 4 extra computeHeight calls entirely.
+  const shorelineBandMax = Math.max(
+    SHORELINE.landBand,
+    SHORELINE.underwaterBand,
+  );
+
   function queryPoint(worldX: number, worldZ: number): GameTerrainQuery {
     const biomeWeights = computeBiomeWeights(worldX, worldZ);
     const baseHeight = computeHeight(worldX, worldZ, biomeWeights);
 
-    // Shoreline adjustment
-    const sampleDist = SHORELINE.slopeSampleDistance;
-    const hn = computeHeight(worldX, worldZ + sampleDist, biomeWeights);
-    const hs = computeHeight(worldX, worldZ - sampleDist, biomeWeights);
-    const he = computeHeight(worldX + sampleDist, worldZ, biomeWeights);
-    const hw = computeHeight(worldX - sampleDist, worldZ, biomeWeights);
-    const slope = Math.max(
-      Math.abs(hn - baseHeight) / sampleDist,
-      Math.abs(hs - baseHeight) / sampleDist,
-      Math.abs(he - baseHeight) / sampleDist,
-      Math.abs(hw - baseHeight) / sampleDist,
-    );
-    const finalHeight = adjustShorelineHeight(baseHeight, slope, {
-      waterThreshold: GAME_WATER_THRESHOLD,
-      shorelineLandBand: SHORELINE.landBand,
-      shorelineUnderwaterBand: SHORELINE.underwaterBand,
-      shorelineMinSlope: SHORELINE.minSlope,
-      shorelineLandMaxMultiplier: SHORELINE.landMaxMultiplier,
-      underwaterDepthMultiplier: SHORELINE.underwaterDepthMultiplier,
-    });
+    // Fast path: skip slope computation for vertices far from the shoreline
+    let finalHeight = baseHeight;
+    const delta = Math.abs(baseHeight - GAME_WATER_THRESHOLD);
+    if (delta < shorelineBandMax) {
+      const hn = computeHeight(worldX, worldZ + sampleDist, biomeWeights);
+      const hs = computeHeight(worldX, worldZ - sampleDist, biomeWeights);
+      const he = computeHeight(worldX + sampleDist, worldZ, biomeWeights);
+      const hw = computeHeight(worldX - sampleDist, worldZ, biomeWeights);
+      const slope = Math.max(
+        Math.abs(hn - baseHeight) / sampleDist,
+        Math.abs(hs - baseHeight) / sampleDist,
+        Math.abs(he - baseHeight) / sampleDist,
+        Math.abs(hw - baseHeight) / sampleDist,
+      );
+      finalHeight = adjustShorelineHeight(baseHeight, slope, _shorelineConfig);
+    }
 
-    const dominant = getDominantBiome(biomeWeights);
     const color = blendBiomeColor(biomeWeights);
     const mask = computeIslandMask(worldX, worldZ);
 
-    return {
-      height: finalHeight,
-      biomeId: dominant,
-      biomeColor: color,
-      islandMask: mask,
-      biomeForestWeight: biomeWeights["forest"] ?? 0,
-      biomeCanyonWeight: biomeWeights["canyon"] ?? 0,
-    };
+    // Write into pooled result (no allocation)
+    _queryResult.height = finalHeight;
+    _queryResult.biomeId = getDominantBiome(biomeWeights);
+    _queryResult.biomeColor = color;
+    _queryResult.islandMask = mask;
+    _queryResult.biomeForestWeight = biomeWeights["forest"] ?? 0;
+    _queryResult.biomeCanyonWeight = biomeWeights["canyon"] ?? 0;
+
+    return _queryResult;
   }
 
   function getHeightAt(worldX: number, worldZ: number): number {

@@ -18,7 +18,7 @@ import {
 // Action name map — maps selection type → context action names
 // ---------------------------------------------------------------------------
 
-export const ENTITY_ACTIONS: Record<string, { remove: string; add: string }> = {
+const ENTITY_ACTIONS: Record<string, { remove: string; add: string }> = {
   npc: { remove: "removeNPC", add: "addNPC" },
   quest: { remove: "removeQuest", add: "addQuest" },
   boss: { remove: "removeBoss", add: "addBoss" },
@@ -54,7 +54,7 @@ type StudioActions = ReturnType<typeof useWorldStudio>["actions"];
 // Find entity data by type + id
 // ---------------------------------------------------------------------------
 
-export function findEntityData(
+function findEntityData(
   state: StudioState,
   type: string,
   id: string,

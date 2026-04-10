@@ -25,7 +25,6 @@ Requirements:
 import bpy
 import sys
 import os
-import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 

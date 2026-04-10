@@ -86,7 +86,7 @@ function generateRadialOffsets(rng: () => number): number[] {
  * Get effective mine radius at a given angle using radial offsets.
  * Cosine-interpolates between control points for smooth organic shape.
  */
-export function getEffectiveRadius(
+function getEffectiveRadius(
   baseRadius: number,
   offsets: number[],
   angle: number,

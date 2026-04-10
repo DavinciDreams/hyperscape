@@ -68,7 +68,7 @@ function notify() {
  * Push a toast notification from anywhere in the app.
  * No React context required.
  */
-export function pushToast(input: ToastInput): void {
+function pushToast(input: ToastInput): void {
   const toast: Toast = {
     id: nextId++,
     type: input.type,

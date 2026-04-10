@@ -38,11 +38,6 @@ export function isDatabaseEnabled(): boolean {
   return _isDatabaseEnabled;
 }
 
-/** Get the raw postgres query client. Returns null if DB is not connected. */
-export function getQueryClient(): Sql | null {
-  return _queryClient;
-}
-
 /**
  * Initialize the database connection.
  * Called from server startup (api-elysia.ts) BEFORE routes are registered.

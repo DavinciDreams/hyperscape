@@ -362,7 +362,7 @@ export interface AutoGenDeps {
 
 // ============== STAGE 1: TOWN GENERATION ==============
 
-export function runTownStage(
+function runTownStage(
   config: AutoGenConfig,
   deps: AutoGenDeps,
 ): TownStageResult | null {
@@ -732,7 +732,7 @@ function computeEffectiveLandRadius(
   return Math.max(200, p95Distance);
 }
 
-export function runRoadZoneStage(
+function runRoadZoneStage(
   config: AutoGenConfig,
   deps: AutoGenDeps,
   townResult: TownStageResult,
@@ -945,7 +945,7 @@ export function runRoadZoneStage(
 
 // ============== STAGE 3: POPULATION ==============
 
-export function runPopulationStage(
+function runPopulationStage(
   config: AutoGenConfig,
   deps: AutoGenDeps,
   townResult: TownStageResult,

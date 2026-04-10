@@ -16,10 +16,10 @@ import { NoiseGenerator } from "@hyperscape/procgen/terrain";
 // ============== DIFFICULTY CONSTANTS ==============
 // Must match TerrainSystem.ts CONFIG values exactly
 
-export const DIFFICULTY_NOISE_SCALE = 0.0007;
-export const DIFFICULTY_NOISE_WEIGHT = 0.3;
-export const DIFFICULTY_CURVE_EXPONENT = 2.2;
-export const DIFFICULTY_TOWN_FALLOFF_RADIUS = 300;
+const DIFFICULTY_NOISE_SCALE = 0.0007;
+const DIFFICULTY_NOISE_WEIGHT = 0.3;
+const DIFFICULTY_CURVE_EXPONENT = 2.2;
+const DIFFICULTY_TOWN_FALLOFF_RADIUS = 300;
 
 // ============== TYPES ==============
 
@@ -85,7 +85,7 @@ export function withBiomeDifficultyFallback(
  * Compute danger source influence at a position.
  * Returns an additive difficulty bonus (0 to max intensity).
  */
-export function computeDangerInfluence(
+function computeDangerInfluence(
   worldX: number,
   worldZ: number,
   dangerSources: DangerSourceInfo[],
@@ -108,7 +108,7 @@ export function computeDangerInfluence(
  * Replicates TerrainSystem.getDifficultyAtWorldPosition() exactly,
  * extended with danger source influence overlay.
  */
-export function computeDifficulty(
+function computeDifficulty(
   worldX: number,
   worldZ: number,
   biome: string,
@@ -345,7 +345,7 @@ function getHeatmapMaterial(): MeshBasicNodeMaterial {
  * @param towns - Array of town positions + safe zone radii
  * @param dangerSources - Array of danger source positions + radii
  */
-export function createHeatmapTile(
+function createHeatmapTile(
   tileX: number,
   tileZ: number,
   tileSize: number,
