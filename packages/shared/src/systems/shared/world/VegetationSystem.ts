@@ -1448,7 +1448,9 @@ export class VegetationSystem extends System {
         const height = getHeight(placement.x, placement.z);
 
         // Check water avoidance (ocean)
-        if (height < waterThreshold) continue;
+        if (height < waterThreshold) {
+          continue;
+        }
 
         // Check elevated water body avoidance (mountain ponds, highland lakes, rivers)
         if (bodyRegistry) {
@@ -1458,33 +1460,48 @@ export class VegetationSystem extends System {
               placement.x,
               placement.z,
             );
-            if (height < waterY + WATER_EDGE_BUFFER) continue;
+            if (height < waterY + WATER_EDGE_BUFFER) {
+              continue;
+            }
           } else {
             const body = bodyRegistry.getBodyAt(placement.x, placement.z);
-            if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+            if (body && height < body.surfaceY + WATER_EDGE_BUFFER) {
+              continue;
+            }
           }
         }
 
         // Check road avoidance
-        if (this.roadNetworkSystem?.isOnRoad(placement.x, placement.z))
+        if (this.roadNetworkSystem?.isOnRoad(placement.x, placement.z)) {
           continue;
+        }
 
         // Keep duel arena floors clear of decorative vegetation.
-        if (isPositionInsideDuelArenaZone(placement.x, placement.z)) continue;
+        if (isPositionInsideDuelArenaZone(placement.x, placement.z)) {
+          continue;
+        }
 
         // Get asset definition for slope constraints
         const asset = this.assetDefinitions.get(placement.assetId);
-        if (!asset) continue;
+        if (!asset) {
+          continue;
+        }
 
         // Get asset data (guaranteed to be loaded from Phase 1)
         const assetDataRef = this.assetData.get(placement.assetId);
-        if (!assetDataRef) continue;
+        if (!assetDataRef) {
+          continue;
+        }
 
         // Calculate slope only when the selected asset has slope constraints.
         if (asset.minSlope !== undefined || asset.maxSlope !== undefined) {
           const slope = this.estimateSlope(placement.x, placement.z, getHeight);
-          if (asset.minSlope !== undefined && slope < asset.minSlope) continue;
-          if (asset.maxSlope !== undefined && slope > asset.maxSlope) continue;
+          if (asset.minSlope !== undefined && slope < asset.minSlope) {
+            continue;
+          }
+          if (asset.maxSlope !== undefined && slope > asset.maxSlope) {
+            continue;
+          }
         }
 
         // Calculate rotation from terrain normal if needed
@@ -2363,7 +2380,9 @@ export class VegetationSystem extends System {
       instance.position.y + assetDataRef.modelBaseOffset * instance.scale;
 
     // Skip instances with invalid height (terrain data not ready yet)
-    if (!Number.isFinite(worldY)) return false;
+    if (!Number.isFinite(worldY)) {
+      return false;
+    }
 
     // Water check — ocean level
     const waterCutoff = WATER_LEVEL + WATER_EDGE_BUFFER;
@@ -2543,7 +2562,6 @@ export class VegetationSystem extends System {
 
     // Update mesh count
     chunked.mesh.count = chunked.count;
-
     // Mark attributes for upload
     chunked.positionAttr.needsUpdate = true;
     chunked.scaleAttr.needsUpdate = true;
@@ -2610,9 +2628,10 @@ export class VegetationSystem extends System {
         radius,
       );
       if (!indexed) {
-        // console.warn(
-        //   `[VegetationSystem] Chunk ${chunkKey} at (${centerX.toFixed(0)}, ${centerZ.toFixed(0)}) outside quadtree bounds - using fallback linear iteration`,
-        // );
+        // Chunk is outside quadtree bounds — will never be made visible by updateChunkVisibility()
+        console.warn(
+          `[VegetationSystem] Chunk "${chunkKey}" at (${centerX.toFixed(1)}, ${centerZ.toFixed(1)}) outside quadtree bounds — check world size config`,
+        );
       }
     }
   }
@@ -2649,10 +2668,6 @@ export class VegetationSystem extends System {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     }
-
-    console.log(
-      `[VegetationSystem] Finalized ${totalChunks} chunks (${totalInstances} instances)`,
-    );
   }
 
   /**
@@ -2717,7 +2732,9 @@ export class VegetationSystem extends System {
       });
 
       if (!geometry) {
-        console.warn(`[VegetationSystem] No geometry found in ${asset.id}`);
+        console.warn(
+          `[VegetationSystem] loadAssetData: no geometry found in model "${asset.id}"`,
+        );
         return null;
       }
 
@@ -2785,7 +2802,10 @@ export class VegetationSystem extends System {
 
       return data;
     } catch (err) {
-      console.error(`[VegetationSystem] Failed to load ${asset.id}:`, err);
+      console.error(
+        `[VegetationSystem] loadAssetData failed for "${asset.id}":`,
+        err,
+      );
       return null;
     } finally {
       this.pendingAssetLoads.delete(asset.id);
