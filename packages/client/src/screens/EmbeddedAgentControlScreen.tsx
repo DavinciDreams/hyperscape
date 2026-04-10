@@ -172,7 +172,7 @@ export function EmbeddedAgentControlScreen() {
     cloneEmbeddedConfig(getEmbeddedConfig()),
   );
   const [agent, setAgent] = useState<Agent | null>(() =>
-    buildFallbackAgent(cloneEmbeddedConfig(getEmbeddedConfig())),
+    buildFallbackAgent(config),
   );
   const [agentError, setAgentError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ControlTab>("command");
