@@ -89,10 +89,10 @@ it; they do not reconstruct equivalent state from local env vars.
 
 - `canonical`
   - the only destination that controls betting-page public readiness
-  - selected from provider priority and current health
+  - Cloudflare on `enoomian/staging`, with operator-only failover outside the bettor path
 - `fallback`
   - warm standby rail tracked independently from canonical truth
-  - promoted only by authority-layer provider selection, not by the browser
+  - promoted only by an explicit authority/operator path, never by the browser
 - `mirror`
   - downstream promotional outputs
   - Twitch, Kick, YouTube, custom

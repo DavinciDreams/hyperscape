@@ -162,8 +162,6 @@ export async function createHttpServer(
     "https://hyperscape.pages.dev",
     "https://hyperscape-betting.pages.dev",
     "https://hyperbet.pages.dev",
-    "https://hyperbet-solana.pages.dev",
-    "https://hyperbet-bsc.pages.dev",
     "https://hyperscape-production.up.railway.app",
     "https://api.hyperbet.win",
     "https://bsc-api.hyperbet.win",
@@ -171,8 +169,6 @@ export async function createHttpServer(
     "http://hyperscape.pages.dev",
     "http://hyperscape-betting.pages.dev",
     "http://hyperbet.pages.dev",
-    "http://hyperbet-solana.pages.dev",
-    "http://hyperbet-bsc.pages.dev",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
     clientUrl, // Game Client
@@ -183,8 +179,6 @@ export async function createHttpServer(
     /^https?:\/\/.+\.hyperbet\.win$/, // hyperbet.win subdomains
     /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/, // Existing Hyperbet Pages preview deployments
     /^https?:\/\/.+\.hyperbet\.pages\.dev$/, // Hyperbet Pages preview deployments
-    /^https?:\/\/.+\.hyperbet-solana\.pages\.dev$/, // Hyperbet Solana preview deployments
-    /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
     /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
