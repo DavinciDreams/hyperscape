@@ -400,7 +400,7 @@ function QuestDetailPanel({
 
 // ============== MAIN COMPONENT ==============
 
-export function QuestGraphPanel() {
+export const QuestGraphPanel = React.memo(function QuestGraphPanel() {
   const { state } = useWorldStudio();
   const quests = state.manifests.quests;
 
@@ -870,4 +870,4 @@ export function QuestGraphPanel() {
       )}
     </div>
   );
-}
+});

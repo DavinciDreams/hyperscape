@@ -137,7 +137,7 @@ function normalizeDistribution(
 
 // ============== COMPONENT ==============
 
-export function ProcgenPanel() {
+export const ProcgenPanel = React.memo(function ProcgenPanel() {
   const { state, actions, viewportRef } = useWorldStudio();
   const { generateWorld } = useWorldGenerationWorker();
   const world = state.builder.editing.world;
@@ -1405,4 +1405,4 @@ export function ProcgenPanel() {
       )}
     </div>
   );
-}
+});

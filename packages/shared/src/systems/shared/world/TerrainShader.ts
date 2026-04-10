@@ -50,7 +50,7 @@ import { getRoadInfluenceTextureState } from "./RoadInfluenceMask";
 import { getLamppostLightTextureState } from "./LamppostLightMask";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
-import { applyTerrainSunShade } from "./GPUMaterials";
+
 import { MINE_BIOME_PALETTES, ROAD_COLORS } from "../../../world/biome-colors";
 import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
 

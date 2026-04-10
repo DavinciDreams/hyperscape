@@ -3059,7 +3059,6 @@ export class TerrainSystem extends System {
     }
 
     // CLIENT: Full visual attribute generation
-    const colors = new Float32Array(positions.count * 3);
     const biomeIds = new Float32Array(positions.count);
     const roadInfluences = new Float32Array(positions.count);
     const forestWeights = new Float32Array(positions.count);
@@ -3115,11 +3114,6 @@ export class TerrainSystem extends System {
           }
         }
       }
-
-      // Store biome color (kept for potential fallback/debug rendering)
-      colors[i * 3] = colorR;
-      colors[i * 3 + 1] = colorG;
-      colors[i * 3 + 2] = colorB;
     }
 
     geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
@@ -3882,9 +3876,8 @@ export class TerrainSystem extends System {
       worldX,
       worldZ,
       this.noise!,
+      this.biomeNoiseSets,
       weights,
-      this.landscapeFeatures,
-      MAX_HEIGHT,
     );
     // Quick escape for positions far from shore — no adjustment needed
     const wt = this.CONFIG.WATER_THRESHOLD;
@@ -3900,33 +3893,29 @@ export class TerrainSystem extends System {
       worldX,
       worldZ + sd,
       this.noise!,
+      this.biomeNoiseSets,
       weights,
-      this.landscapeFeatures,
-      MAX_HEIGHT,
     );
     const hs = computeBaseHeight(
       worldX,
       worldZ - sd,
       this.noise!,
+      this.biomeNoiseSets,
       weights,
-      this.landscapeFeatures,
-      MAX_HEIGHT,
     );
     const he = computeBaseHeight(
       worldX + sd,
       worldZ,
       this.noise!,
+      this.biomeNoiseSets,
       weights,
-      this.landscapeFeatures,
-      MAX_HEIGHT,
     );
     const hw = computeBaseHeight(
       worldX - sd,
       worldZ,
       this.noise!,
+      this.biomeNoiseSets,
       weights,
-      this.landscapeFeatures,
-      MAX_HEIGHT,
     );
     const slope = Math.max(
       Math.abs(hn - baseHeight) / sd,
@@ -4475,62 +4464,6 @@ export class TerrainSystem extends System {
       towns,
       this.getProceduralHeightAt.bind(this),
     );
-  }
-
-  /**
-   * Get terrain color at a world position by sampling the nearest terrain tile vertex.
-   * Used by ProceduralGrassSystem to match grass color to terrain.
-   *
-   * @param worldX - World X coordinate
-   * @param worldZ - World Z coordinate
-   * @returns RGB color (0-1 range) or null if no terrain data available
-   */
-  getTerrainColorAt(
-    worldX: number,
-    worldZ: number,
-  ): { r: number; g: number; b: number } | null {
-    const tileX = this.worldToTerrainTileIndex(worldX);
-    const tileZ = this.worldToTerrainTileIndex(worldZ);
-    const key = `${tileX}_${tileZ}`;
-
-    const tile = this.terrainTiles.get(key);
-    if (!tile?.mesh) {
-      return null;
-    }
-
-    // Get vertex colors from geometry
-    const geometry = tile.mesh.geometry as THREE.BufferGeometry;
-    const colorAttr = geometry.getAttribute("color") as
-      | THREE.BufferAttribute
-      | undefined;
-    if (!colorAttr) {
-      return null;
-    }
-
-    const localX = worldX - tileX * this.CONFIG.TILE_SIZE;
-    const localZ = worldZ - tileZ * this.CONFIG.TILE_SIZE;
-
-    const resolution = this.CONFIG.TILE_RESOLUTION;
-    const vertexX = Math.round(
-      Math.max(0, Math.min(resolution - 1, this.localToGridIndex(localX))),
-    );
-    const vertexZ = Math.round(
-      Math.max(0, Math.min(resolution - 1, this.localToGridIndex(localZ))),
-    );
-    const vertexIndex = vertexZ * resolution + vertexX;
-
-    if (
-      vertexIndex < 0 ||
-      vertexIndex * 3 + 2 >= colorAttr.count * colorAttr.itemSize
-    ) {
-      return null;
-    }
-
-    return {
-      r: colorAttr.getX(vertexIndex),
-      g: colorAttr.getY(vertexIndex),
-      b: colorAttr.getZ(vertexIndex),
-    };
   }
 
   /**

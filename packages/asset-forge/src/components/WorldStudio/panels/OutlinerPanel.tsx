@@ -678,7 +678,7 @@ function OutlinerNode({
 
 // ============== OUTLINER PANEL ==============
 
-export function OutlinerPanel() {
+export const OutlinerPanel = React.memo(function OutlinerPanel() {
   const { state, actions, computed } = useWorldStudio();
   const multiSelection = useSelectionStore((store) => store.multiSelection);
   const addToMulti = useSelectionStore((store) => store.addToMultiSelection);
@@ -1483,7 +1483,7 @@ export function OutlinerPanel() {
       )}
     </div>
   );
-}
+});
 
 // ============== HELPER ==============
 

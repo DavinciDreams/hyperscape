@@ -15,6 +15,11 @@ import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type { WizardPreviewData } from "../WorldStudioContext";
 import { useWorldStudio } from "../WorldStudioContext";
 import { DEFAULT_TIERS } from "./useZoneAutoGen";
+import {
+  deferredDisposeGroup,
+  stageAddition,
+  cancelStagedAdditions,
+} from "../utils/deferredGpuDisposal";
 
 // ============== CONSTANTS ==============
 
@@ -448,30 +453,6 @@ function buildPopulationOverlay(
   }
 }
 
-// ============== DISPOSAL ==============
-
-function disposeGroup(group: THREE.Group): void {
-  group.traverse((child) => {
-    if (
-      child instanceof THREE.Line ||
-      child instanceof THREE.Mesh ||
-      child instanceof THREE.InstancedMesh
-    ) {
-      child.geometry.dispose();
-      if (Array.isArray(child.material)) {
-        child.material.forEach((m) => m.dispose());
-      } else {
-        child.material.dispose();
-      }
-    }
-    if (child instanceof THREE.Sprite) {
-      child.material.map?.dispose();
-      child.material.dispose();
-    }
-  });
-  group.clear();
-}
-
 // ============== HOOK ==============
 
 export function useWizardPreviewOverlay(
@@ -487,45 +468,60 @@ export function useWizardPreviewOverlay(
   useEffect(() => {
     if (!sceneRefs) return;
 
-    // Tear down previous group
+    // Tear down previous group — cancel staged additions, remove from scene,
+    // defer GPU resource disposal
     if (overlayGroup.current) {
+      cancelStagedAdditions(overlayGroup.current);
       sceneRefs.scene.remove(overlayGroup.current);
-      disposeGroup(overlayGroup.current);
+      deferredDisposeGroup(overlayGroup.current);
       overlayGroup.current = null;
     }
 
     // Nothing to render if no preview data
     if (!wizardPreview) return;
 
-    const group = new THREE.Group();
-    group.name = "wizard-preview-overlay";
-    group.renderOrder = GHOST_RENDER_ORDER;
-
+    // Build children into a temporary group, then stage them in batches
+    const tmpGroup = new THREE.Group();
     const offset = wizardPreview.worldCenterOffset;
     const queryBiome = sceneRefs.queryBiome;
 
     // Town stage preview
     if (wizardPreview.towns) {
-      buildTownOverlay(group, wizardPreview.towns, offset, queryBiome);
+      buildTownOverlay(tmpGroup, wizardPreview.towns, offset, queryBiome);
     }
 
     // Roads + Zones stage preview
     if (wizardPreview.roadsZones) {
-      buildRoadZoneOverlay(group, wizardPreview.roadsZones, offset, queryBiome);
+      buildRoadZoneOverlay(
+        tmpGroup,
+        wizardPreview.roadsZones,
+        offset,
+        queryBiome,
+      );
     }
 
     // Population stage preview
     if (wizardPreview.population) {
       buildPopulationOverlay(
-        group,
+        tmpGroup,
         wizardPreview.population,
         offset,
         queryBiome,
       );
     }
 
+    // Add empty group to scene, stage children in batches
+    const group = new THREE.Group();
+    group.name = "wizard-preview-overlay";
+    group.renderOrder = GHOST_RENDER_ORDER;
     sceneRefs.scene.add(group);
     overlayGroup.current = group;
+
+    const children = [...tmpGroup.children];
+    tmpGroup.clear();
+    for (const child of children) {
+      stageAddition(child, group);
+    }
   }, [sceneRefs, wizardPreview]);
 
   // Cleanup on unmount
@@ -535,7 +531,7 @@ export function useWizardPreviewOverlay(
       const group = overlayGroup.current;
       if (refs && group) {
         refs.scene.remove(group);
-        disposeGroup(group);
+        deferredDisposeGroup(group);
       }
     };
   }, []);

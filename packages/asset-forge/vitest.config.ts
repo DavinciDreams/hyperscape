@@ -18,7 +18,11 @@ export default defineConfig({
       reporter: ["text", "json", "html"],
       include: [
         "src/components/WorldBuilder/**/*.{ts,tsx}",
+        "src/components/WorldStudio/**/*.{ts,tsx}",
         "src/services/**/*.{ts,tsx}",
+        "src/utils/**/*.{ts,tsx}",
+        "server/middleware/**/*.ts",
+        "server/models/**/*.ts",
       ],
       exclude: ["**/*.test.{ts,tsx}", "**/index.ts"],
     },

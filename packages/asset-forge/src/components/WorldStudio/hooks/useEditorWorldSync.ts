@@ -26,16 +26,13 @@ import {
   getTreeSpeciesInstance,
 } from "../../WorldBuilder/GameWorldAssets";
 import { MaterialPool } from "../utils/MaterialPool";
+import {
+  queueDisposal,
+  stageAddition,
+  cancelStagedAdditions,
+  cancelStagedObject,
+} from "../utils/deferredGpuDisposal";
 
-/** Safe material dispose — WebGPU renderer can race with React cleanup */
-function safeDispose(mat: THREE.Material | THREE.Material[]): void {
-  try {
-    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-    else mat.dispose();
-  } catch {
-    /* WebGPU internal state already cleaned up */
-  }
-}
 import type { WorldStudioState } from "../WorldStudioContext";
 import type {
   ExtendedWorldLayers,
@@ -345,7 +342,7 @@ function disposeModelGroup(
       // Only dispose material if it's a ghost clone (not the cached original)
       if (child.userData._ghostClone) {
         const mat = child.material as THREE.Material;
-        safeDispose(mat);
+        queueDisposal(mat);
         cloneTracker?.delete(mat);
       }
     }
@@ -518,8 +515,11 @@ export function useEditorWorldSync({
           if (child instanceof THREE.Mesh) child.userData = { ...selectData };
         });
 
-        overlay.add(group);
-        refs.addSelectable(group);
+        // Stage the group addition — GPU buffers created gradually, not all at once.
+        // Register as selectable in the onAdd callback so it's queryable once visible.
+        stageAddition(group, overlay, () => {
+          refs.addSelectable(group);
+        });
 
         sync.markers.set(id, { id, type, mesh, label, group, hasRealModel });
       }
@@ -613,19 +613,25 @@ export function useEditorWorldSync({
 
     // Teleport network connection lines
     if (sync.connectionLines) {
+      cancelStagedAdditions(sync.connectionLines);
       refs.scene.remove(sync.connectionLines);
+      // Dispose geometries per line; material is shared — dispose once
+      let sharedMat: THREE.Material | null = null;
       sync.connectionLines.traverse((child) => {
         if (child instanceof THREE.Line) {
-          child.geometry.dispose();
-          safeDispose(child.material as THREE.Material);
+          queueDisposal(child.geometry);
+          if (!sharedMat) sharedMat = child.material as THREE.Material;
         }
       });
+      if (sharedMat) queueDisposal(sharedMat);
       sync.connectionLines = null;
     }
 
     const lineGroup = new THREE.Group();
     lineGroup.name = "teleport-connections";
     const drawnPairs = new Set<string>();
+    // Shared material instance — all teleport lines look the same,
+    // no need for separate GPU pipeline per connection
     const lineMat = new LineBasicNodeMaterial();
     lineMat.color = new THREE.Color(0x8b5cf6);
     lineMat.transparent = true;
@@ -651,20 +657,32 @@ export function useEditorWorldSync({
           ),
         ];
         const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(lineGeo, lineMat.clone());
+        const line = new THREE.Line(lineGeo, lineMat);
         line.renderOrder = 998;
         lineGroup.add(line);
       }
     }
 
     if (lineGroup.children.length > 0) {
+      // Stage children — each line gets its GPU buffer created gradually
       refs.scene.add(lineGroup);
+      const lineChildren = [...lineGroup.children];
+      lineGroup.clear();
+      for (const child of lineChildren) {
+        stageAddition(child, lineGroup);
+      }
       sync.connectionLines = lineGroup;
     }
 
     // Remove markers that no longer exist in state
+    let removedCount = 0;
     for (const [id, marker] of sync.markers) {
       if (!activeIds.has(id)) {
+        // Cancel any pending staged addition for this specific marker group.
+        // Uses cancelStagedObject (matches by object) rather than
+        // cancelStagedAdditions (matches by parent) — the latter would
+        // cancel ALL pending marker additions to the overlay.
+        cancelStagedObject(marker.group);
         overlay.remove(marker.group);
         refs.removeSelectable(marker.group);
         // Only dispose the abstract marker mesh material if it's NOT pooled.
@@ -672,19 +690,24 @@ export function useEditorWorldSync({
         // and disposed when the pool itself is disposed (on hook unmount).
         if (marker.mesh) {
           if (!marker.mesh.userData._pooledMaterial) {
-            safeDispose(marker.mesh.material as THREE.Material);
+            queueDisposal(marker.mesh.material as THREE.Material);
           } else {
             sync.materialPool.releaseMarker(marker.type);
           }
         }
-        try {
-          (marker.label.material as THREE.SpriteMaterial).map?.dispose();
-        } catch {
-          /* noop */
-        }
-        safeDispose(marker.label.material as THREE.Material);
+        const labelMat = marker.label.material as THREE.SpriteMaterial;
+        if (labelMat.map) queueDisposal(labelMat.map);
+        queueDisposal(labelMat);
         sync.markers.delete(id);
+        removedCount++;
       }
+    }
+
+    const newCount = activeIds.size - (sync.markers.size - removedCount);
+    if (newCount > 0 || removedCount > 0) {
+      console.log(
+        `[GPU-DEBUG] entity-sync: created=${newCount > 0 ? newCount : 0} removed=${removedCount} total=${sync.markers.size}`,
+      );
     }
   }, []);
 
@@ -698,7 +721,7 @@ export function useEditorWorldSync({
       } else if (ghost instanceof THREE.Mesh) {
         if (ghost.userData._fallbackGhost) {
           const mat = ghost.material as THREE.Material;
-          safeDispose(mat);
+          queueDisposal(mat);
           sync.ghostClones.delete(mat);
         }
       }
@@ -780,8 +803,8 @@ export function useEditorWorldSync({
     if (!worldData?.foundation.config.island?.enabled) {
       if (sync.boundaryRing) {
         refs.scene.remove(sync.boundaryRing);
-        sync.boundaryRing.geometry.dispose();
-        safeDispose(sync.boundaryRing.material as THREE.Material);
+        queueDisposal(sync.boundaryRing.geometry);
+        queueDisposal(sync.boundaryRing.material as THREE.Material);
         sync.boundaryRing = null;
       }
       return;
@@ -793,8 +816,8 @@ export function useEditorWorldSync({
 
     if (sync.boundaryRing) {
       refs.scene.remove(sync.boundaryRing);
-      sync.boundaryRing.geometry.dispose();
-      safeDispose(sync.boundaryRing.material as THREE.Material);
+      queueDisposal(sync.boundaryRing.geometry);
+      queueDisposal(sync.boundaryRing.material as THREE.Material);
       sync.boundaryRing = null;
     }
 
@@ -820,8 +843,8 @@ export function useEditorWorldSync({
     return () => {
       if (sync.boundaryRing) {
         refs.scene.remove(sync.boundaryRing);
-        sync.boundaryRing.geometry.dispose();
-        safeDispose(sync.boundaryRing.material as THREE.Material);
+        queueDisposal(sync.boundaryRing.geometry);
+        queueDisposal(sync.boundaryRing.material as THREE.Material);
         sync.boundaryRing = null;
       }
     };
@@ -841,15 +864,12 @@ export function useEditorWorldSync({
         if (marker.mesh) {
           // Skip pooled materials — pool.dispose() handles them below
           if (!marker.mesh.userData._pooledMaterial) {
-            safeDispose(marker.mesh.material as THREE.Material);
+            queueDisposal(marker.mesh.material as THREE.Material);
           }
         }
-        try {
-          (marker.label.material as THREE.SpriteMaterial).map?.dispose();
-        } catch {
-          /* noop */
-        }
-        safeDispose(marker.label.material as THREE.Material);
+        const labelMat = marker.label.material as THREE.SpriteMaterial;
+        if (labelMat.map) queueDisposal(labelMat.map);
+        queueDisposal(labelMat);
       }
       sync.markers.clear();
 
@@ -861,35 +881,39 @@ export function useEditorWorldSync({
           sync.ghostObject instanceof THREE.Mesh &&
           sync.ghostObject.userData._fallbackGhost
         ) {
-          safeDispose(sync.ghostObject.material as THREE.Material);
+          queueDisposal(sync.ghostObject.material as THREE.Material);
         }
         sync.ghostObject = null;
       }
 
       // Dispose any remaining tracked ghost clone materials
       for (const mat of sync.ghostClones) {
-        safeDispose(mat);
+        queueDisposal(mat);
       }
       sync.ghostClones.clear();
 
       if (sync.connectionLines) {
         refs.scene.remove(sync.connectionLines);
+        let sharedLineMat: THREE.Material | null = null;
         sync.connectionLines.traverse((child) => {
           if (child instanceof THREE.Line) {
-            child.geometry.dispose();
-            safeDispose(child.material as THREE.Material);
+            queueDisposal(child.geometry);
+            if (!sharedLineMat)
+              sharedLineMat = child.material as THREE.Material;
           }
         });
+        if (sharedLineMat) queueDisposal(sharedLineMat);
         sync.connectionLines = null;
       }
 
       // Dispose material pool — frees all shared marker materials
+      // (pool.dispose is a batch operation but only ~9 materials total)
       sync.materialPool.dispose();
 
       // Dispose cached marker geometries — prevents accumulation across
       // mount/unmount cycles (these are module-level singletons)
       for (const [, geo] of MARKER_GEOMETRY_CACHE) {
-        geo.dispose();
+        queueDisposal(geo);
       }
       MARKER_GEOMETRY_CACHE.clear();
     };

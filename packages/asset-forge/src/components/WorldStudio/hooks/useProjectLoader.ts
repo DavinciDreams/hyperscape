@@ -49,7 +49,7 @@ const HYPERSCAPE_GAME_WORLD_CONFIG: WorldCreationConfig = {
     worldSize: 100,
     tileResolution: 64,
     maxHeight: 50,
-    waterThreshold: 8.0,
+    waterThreshold: 16,
   },
   noise: DEFAULT_NOISE_CONFIG,
   biomes: DEFAULT_BIOME_CONFIG,

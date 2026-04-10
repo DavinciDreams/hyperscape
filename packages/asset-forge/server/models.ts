@@ -92,7 +92,7 @@ export const AssetMetadata = t.Object({
   // Variant metadata
   isVariant: t.Optional(t.Boolean()),
   parentBaseModel: t.Optional(t.String()),
-  materialPreset: t.Optional(t.Any()),
+  materialPreset: t.Optional(t.Unknown()),
   baseModelTaskId: t.Optional(t.String()),
   retextureTaskId: t.Optional(t.String()),
   retextureStatus: t.Optional(t.String()),
@@ -102,7 +102,7 @@ export const AssetMetadata = t.Object({
   riggingStatus: t.Optional(t.String()),
   rigType: t.Optional(t.String()),
   characterHeight: t.Optional(t.Number()),
-  animations: t.Optional(t.Any()),
+  animations: t.Optional(t.Unknown()),
   riggedModelPath: t.Optional(t.String()),
   tposeModelPath: t.Optional(t.String()),
   supportsAnimation: t.Optional(t.Boolean()),
@@ -128,7 +128,7 @@ export const AssetResponse = t.Object({
   name: t.String(),
   description: t.String(),
   type: t.String(),
-  metadata: t.Any(), // Full metadata.json content (dynamic structure with many optional fields)
+  metadata: t.Unknown(), // Full metadata.json content (dynamic structure with many optional fields)
   hasModel: t.Boolean(),
   modelFile: t.Optional(t.String()),
   modelFormat: t.Optional(t.Union([t.Literal("glb"), t.Literal("vrm")])), // Model file format
@@ -142,11 +142,11 @@ export const AssetUpdate = t.Object({
   type: t.Optional(t.String()),
   tier: t.Optional(t.Number()),
   category: t.Optional(t.String()),
-  metadata: t.Optional(t.Record(t.String(), t.Any())),
+  metadata: t.Optional(t.Record(t.String(), t.Unknown())),
 });
 
 export const BatchApplyFittingRequest = t.Object({
-  config: t.Record(t.String(), t.Any()),
+  config: t.Record(t.String(), t.Unknown()),
   assetIds: t.Array(t.String({ minLength: 1 }), { minItems: 1 }),
 });
 
@@ -262,8 +262,8 @@ export const PipelineStatus = t.Object({
   id: t.String(),
   status: t.String(),
   progress: t.Number(),
-  stages: t.Any(), // Complex nested type, using Any for simplicity
-  results: t.Record(t.String(), t.Any()),
+  stages: t.Unknown(), // Complex nested type, using Any for simplicity
+  results: t.Record(t.String(), t.Unknown()),
   error: t.Optional(t.String()),
   createdAt: t.String(),
   completedAt: t.Optional(t.String()),
@@ -417,7 +417,7 @@ export const BatchVoiceResponse = t.Object({
 export const GenerateMusicRequest = t.Object({
   prompt: t.Optional(t.String()),
   musicLengthMs: t.Optional(t.Number({ minimum: 1000, maximum: 300000 })),
-  compositionPlan: t.Optional(t.Any()),
+  compositionPlan: t.Optional(t.Unknown()),
   forceInstrumental: t.Optional(t.Boolean()),
   respectSectionsDurations: t.Optional(t.Boolean()),
   storeForInpainting: t.Optional(t.Boolean()),
@@ -428,7 +428,7 @@ export const GenerateMusicRequest = t.Object({
 export const CreateCompositionPlanRequest = t.Object({
   prompt: t.String({ minLength: 1 }),
   musicLengthMs: t.Optional(t.Number()),
-  sourceCompositionPlan: t.Optional(t.Any()),
+  sourceCompositionPlan: t.Optional(t.Unknown()),
   modelId: t.Optional(t.String()),
 });
 
@@ -529,7 +529,7 @@ export const NPCDataResponse = t.Object({
     schedule: t.String(),
     relationships: t.Array(t.String()),
   }),
-  metadata: t.Any(),
+  metadata: t.Unknown(),
 });
 
 export const GenerateNPCRequest = t.Object({
@@ -576,7 +576,7 @@ export const QuestDataResponse = t.Object({
   story: t.String(),
   difficulty: t.String(),
   questType: t.String(),
-  metadata: t.Any(),
+  metadata: t.Unknown(),
 });
 
 export const GenerateQuestRequest = t.Object({
@@ -602,7 +602,7 @@ export const LoreDataResponse = t.Object({
   relatedTopics: t.Array(t.String()),
   timeline: t.Optional(t.String()),
   characters: t.Optional(t.Array(t.String())),
-  metadata: t.Any(),
+  metadata: t.Unknown(),
 });
 
 export const GenerateLoreRequest = t.Object({
@@ -641,13 +641,13 @@ export const ManifestListResponse = t.Array(ManifestListItem);
 export const ManifestContent = t.Object({
   name: t.String(),
   filename: t.String(),
-  content: t.Any(), // Dynamic JSON content
+  content: t.Unknown(), // Dynamic JSON content
   lastModified: t.String(),
   size: t.Number(),
 });
 
 export const ManifestWriteRequest = t.Object({
-  content: t.Any(), // Dynamic JSON content to write
+  content: t.Unknown(), // Dynamic JSON content to write
 });
 
 export const ManifestWriteResponse = t.Object({
@@ -661,7 +661,7 @@ export const ManifestWriteResponse = t.Object({
 export const ValidationError = t.Object({
   path: t.String(),
   message: t.String(),
-  value: t.Any(),
+  value: t.Unknown(),
 });
 
 export const ManifestValidationResult = t.Object({

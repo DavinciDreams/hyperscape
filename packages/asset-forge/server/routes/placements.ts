@@ -30,7 +30,7 @@ const BasePlacementSchema = t.Object({
   position: PositionSchema,
   rotation: t.Optional(RotationSchema),
   scale: t.Optional(t.Number()),
-  metadata: t.Optional(t.Record(t.String(), t.Any())),
+  metadata: t.Optional(t.Record(t.String(), t.Unknown())),
   tags: t.Optional(t.Array(t.String())),
   enabled: t.Optional(t.Boolean()),
 });

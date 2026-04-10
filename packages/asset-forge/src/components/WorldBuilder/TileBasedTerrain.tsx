@@ -18,9 +18,7 @@ import {
   TerrainGenerator,
   createConfigFromPreset,
   TERRAIN_PRESETS,
-  createTerrainMaterial as createGameTerrainMaterial,
   type TerrainConfig,
-  type TerrainUniforms,
 } from "@hyperscape/procgen/terrain";
 import React, {
   useEffect,
@@ -35,10 +33,11 @@ import {
   LineBasicNodeMaterial,
 } from "three/webgpu";
 
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { useCameraControls } from "./useCameraControls";
 import { ViewHelper } from "three/examples/jsm/helpers/ViewHelper.js";
 
 import { buildingWalkabilityService } from "./BuildingWalkabilityService";
+import { Minimap, WILDERNESS_START_PERCENT } from "./Minimap";
 import {
   createGameTerrainQuerier,
   GAME_MAX_HEIGHT,
@@ -50,13 +49,6 @@ import {
   generateTrees,
   type ResourceGenerationContext,
   getTreeConfigForBiome,
-  calculateRoadInfluence,
-  getRoadHeightAtPoint,
-  ROAD_BLEND_WIDTH,
-  ROAD_MINIMUM_WIDTH,
-  type RoadPathLike,
-  calculateMineInfluenceAtPoint,
-  getMineEffectiveRadius,
   precomputeExclusions,
   filterTreesByExclusions,
   type VegetationExclusionInput,
@@ -81,23 +73,25 @@ import {
   disposeEntitySyncGeometry,
   type GameEntityData,
 } from "./GameWorldEntitySync";
+import { SceneResourceManager } from "./SceneResourceManager";
+import {
+  getGpuLifecycleStats,
+  processDeferredFrame,
+} from "../WorldStudio/utils/deferredGpuDisposal";
 import type {
   WorldCreationConfig,
   GeneratedRoad,
   VegetationConfig,
 } from "./types";
-
-/** Generic terrain query interface — satisfied by both procgen TerrainGenerator and GameTerrainAdapter */
-interface TerrainQueryResult {
-  height: number;
-  biome: string;
-  color?: { r: number; g: number; b: number };
-  /** Forest biome weight 0-1 for per-biome shader blending */
-  biomeForestWeight?: number;
-  /** Canyon biome weight 0-1 for per-biome shader blending */
-  biomeCanyonWeight?: number;
-}
-type TerrainQuerier = (worldX: number, worldZ: number) => TerrainQueryResult;
+import {
+  type TerrainQueryResult,
+  type TerrainQuerier,
+  type TownFlattenZone,
+  createTemplateGeometry,
+  createTerrainMaterial,
+  createWaterMaterial,
+  generateTileGeometry,
+} from "./terrainHelpers";
 
 import {
   THREE,
@@ -118,10 +112,15 @@ const TILE_LOAD_RADIUS_STUDIO = 3; // full-detail radius for World Studio
 const TILE_UNLOAD_RADIUS = 7; // tiles beyond this are unloaded
 const TILE_UNLOAD_RADIUS_STUDIO = 5;
 const MAX_TILES_PER_FRAME = 2; // limit tile generation per frame for performance
+// GPU resource lifecycle (staging + disposal) is managed by SceneResourceManager.
+// See SceneResourceManager.ts for rate-limiting constants and phase separation logic.
 
 // LOD terrain: low-res tiles fill the horizon when zoomed out
 const TILE_LOD_LOW_RESOLUTION = 8; // 8×8 grid for far tiles (vs 32×32 full)
-const MAX_LOW_RES_TILES_PER_FRAME = 8; // low-res tiles are 16× cheaper to generate
+const MAX_LOW_RES_TILES_PER_FRAME = 32; // low-res tiles are 16× cheaper to generate
+
+/** Camera altitude above which entity markers are hidden (saves thousands of draw calls) */
+const MARKER_HIDE_ALTITUDE = 400;
 
 /** Compute how many tiles to load based on camera altitude */
 function getDynamicLoadRadius(cameraY: number, isStudio: boolean): number {
@@ -136,25 +135,6 @@ function getDynamicLoadRadius(cameraY: number, isStudio: boolean): number {
 // LOD distances for buildings
 const BUILDING_LOD_FULL_DISTANCE = 200; // Full detail within this distance
 const BUILDING_LOD_SIMPLE_DISTANCE = 500; // Simple boxes beyond this distance
-
-// Biome colors matching the game's BIOMES data
-const BIOME_COLORS: Record<string, { r: number; g: number; b: number }> = {
-  plains: { r: 0.486, g: 0.729, b: 0.373 },
-  forest: { r: 0.227, g: 0.42, b: 0.208 },
-  valley: { r: 0.353, g: 0.541, b: 0.31 },
-  desert: { r: 0.769, g: 0.639, b: 0.353 },
-  tundra: { r: 0.722, g: 0.784, b: 0.784 },
-  swamp: { r: 0.29, g: 0.353, b: 0.227 },
-  mountains: { r: 0.541, g: 0.541, b: 0.541 },
-  lakes: { r: 0.29, g: 0.478, b: 0.722 },
-};
-
-// Shoreline tint color (sandy brown)
-const SHORELINE_COLOR = { r: 0.545, g: 0.451, b: 0.333 };
-
-// Water colors
-const WATER_COLOR = 0x2a5599;
-const WATER_OPACITY = 0.75;
 
 // Town marker colors by size
 const TOWN_SIZE_COLORS: Record<string, number> = {
@@ -173,14 +153,6 @@ interface TileData {
   lastAccessed: number;
   /** Vertex resolution (e.g. 32 for full, 8 for LOD far tiles) */
   resolution: number;
-}
-
-interface CameraState {
-  position: THREE.Vector3;
-  velocity: THREE.Vector3;
-  euler: THREE.Euler;
-  moveSpeed: number;
-  lookSpeed: number;
 }
 
 /** Selection info returned when clicking objects in the viewport */
@@ -469,929 +441,8 @@ export interface TileBasedTerrainProps {
 
 export type { GameEntityData };
 
-// ============== MINIMAP COMPONENT ==============
-
-interface MinimapProps {
-  worldSize: number; // World size in meters
-  cameraPosition: THREE.Vector3;
-  cameraRotationY: number;
-  towns: Array<{
-    id: string;
-    name: string;
-    position: { x: number; z: number };
-    size: string;
-  }>;
-  roads: Array<{ path: Array<{ x: number; z: number }> }>;
-  className?: string;
-  onNavigate?: (x: number, z: number) => void;
-  showWilderness?: boolean;
-}
-
-const MINIMAP_SIZE = 180; // pixels
-const WILDERNESS_START_PERCENT = 0.7; // Wilderness starts at 70% from south
-
-const Minimap: React.FC<MinimapProps> = ({
-  worldSize,
-  cameraPosition,
-  cameraRotationY,
-  towns,
-  roads,
-  className = "",
-  onNavigate,
-  showWilderness = true,
-}) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // Convert world coords to minimap coords
-  // World coordinates: X increases east, Z increases north
-  // Minimap coordinates: X increases right, Y increases DOWN (canvas standard)
-  // So we need to flip Z to Y: high Z (north) should be low Y (top of minimap)
-  const worldToMinimap = useCallback(
-    (worldX: number, worldZ: number) => {
-      const normalizedX = worldX / worldSize;
-      const normalizedZ = worldZ / worldSize;
-      return {
-        x: Math.max(0, Math.min(MINIMAP_SIZE, normalizedX * MINIMAP_SIZE)),
-        y: Math.max(
-          0,
-          Math.min(MINIMAP_SIZE, (1 - normalizedZ) * MINIMAP_SIZE),
-        ), // Flip Z to Y
-      };
-    },
-    [worldSize],
-  );
-
-  // Convert minimap coords to world coords
-  // Reverse the flip: low Y (top/north) should be high Z
-  const minimapToWorld = useCallback(
-    (minimapX: number, minimapY: number) => {
-      const normalizedX = minimapX / MINIMAP_SIZE;
-      const normalizedZ = 1 - minimapY / MINIMAP_SIZE; // Flip Y back to Z
-      return {
-        x: normalizedX * worldSize,
-        z: normalizedZ * worldSize,
-      };
-    },
-    [worldSize],
-  );
-
-  // Update minimap on each frame
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let animationId: number;
-
-    const drawMinimap = () => {
-      // Clear with dark background
-      ctx.fillStyle = "#0d1117";
-      ctx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
-
-      const centerX = MINIMAP_SIZE / 2;
-      const centerY = MINIMAP_SIZE / 2;
-      const radius = MINIMAP_SIZE / 2 - 4;
-
-      // Water background
-      ctx.fillStyle = "#1e3a5f";
-      ctx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
-
-      // Create clipping path for island shape
-      ctx.save();
-      ctx.beginPath();
-      for (let angle = 0; angle < Math.PI * 2; angle += 0.05) {
-        const variation =
-          0.85 + Math.sin(angle * 8) * 0.1 + Math.cos(angle * 5) * 0.05;
-        const r = radius * variation;
-        const x = centerX + Math.cos(angle) * r;
-        const y = centerY + Math.sin(angle) * r;
-        if (angle === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.clip();
-
-      // Draw safe zone (southern green area)
-      const wildernessY = MINIMAP_SIZE * (1 - WILDERNESS_START_PERCENT);
-      ctx.fillStyle = "#2d4a1c";
-      ctx.fillRect(0, wildernessY, MINIMAP_SIZE, MINIMAP_SIZE - wildernessY);
-
-      // Draw wilderness zone (northern red-tinted area) if enabled
-      if (showWilderness) {
-        // Gradient from green to red as you go north
-        const gradient = ctx.createLinearGradient(0, wildernessY, 0, 0);
-        gradient.addColorStop(0, "#3d5a2c"); // Transition zone
-        gradient.addColorStop(0.3, "#4a3c2c"); // Dark transition
-        gradient.addColorStop(1, "#5a2a2a"); // Deep wilderness (red-brown)
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, MINIMAP_SIZE, wildernessY + 10);
-
-        // Add wilderness danger line
-        ctx.strokeStyle = "rgba(255, 50, 50, 0.6)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(0, wildernessY);
-        ctx.lineTo(MINIMAP_SIZE, wildernessY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else {
-        // Just green if wilderness not shown
-        ctx.fillStyle = "#2d4a1c";
-        ctx.fillRect(0, 0, MINIMAP_SIZE, wildernessY);
-      }
-
-      // Restore clipping
-      ctx.restore();
-
-      // Redraw island outline
-      ctx.strokeStyle = "rgba(100, 150, 100, 0.4)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let angle = 0; angle < Math.PI * 2; angle += 0.05) {
-        const variation =
-          0.85 + Math.sin(angle * 8) * 0.1 + Math.cos(angle * 5) * 0.05;
-        const r = radius * variation;
-        const x = centerX + Math.cos(angle) * r;
-        const y = centerY + Math.sin(angle) * r;
-        if (angle === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.stroke();
-
-      // Draw grid lines
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-      ctx.lineWidth = 1;
-      for (let i = 1; i < 4; i++) {
-        const pos = (i / 4) * MINIMAP_SIZE;
-        ctx.beginPath();
-        ctx.moveTo(pos, 0);
-        ctx.lineTo(pos, MINIMAP_SIZE);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, pos);
-        ctx.lineTo(MINIMAP_SIZE, pos);
-        ctx.stroke();
-      }
-
-      // Draw roads
-      ctx.strokeStyle = "#8b7355";
-      ctx.lineWidth = 2;
-      for (const road of roads) {
-        if (road.path.length < 2) continue;
-        ctx.beginPath();
-        const start = worldToMinimap(road.path[0].x, road.path[0].z);
-        ctx.moveTo(start.x, start.y);
-        for (let i = 1; i < road.path.length; i++) {
-          const point = worldToMinimap(road.path[i].x, road.path[i].z);
-          ctx.lineTo(point.x, point.y);
-        }
-        ctx.stroke();
-      }
-
-      // Draw towns
-      for (const town of towns) {
-        const pos = worldToMinimap(town.position.x, town.position.z);
-
-        // Town size determines marker size
-        const markerSize =
-          town.size === "town" ? 6 : town.size === "village" ? 4 : 3;
-        const color =
-          town.size === "town"
-            ? "#ffd700"
-            : town.size === "village"
-              ? "#c0c0c0"
-              : "#cd7f32";
-
-        // Draw town marker (square)
-        ctx.fillStyle = color;
-        ctx.fillRect(
-          pos.x - markerSize / 2,
-          pos.y - markerSize / 2,
-          markerSize,
-          markerSize,
-        );
-
-        // Draw town border
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(
-          pos.x - markerSize / 2,
-          pos.y - markerSize / 2,
-          markerSize,
-          markerSize,
-        );
-      }
-
-      // Draw camera position and view cone
-      const camPos = worldToMinimap(cameraPosition.x, cameraPosition.z);
-
-      // View cone (field of view indicator)
-      const coneLength = 20;
-      const coneAngle = Math.PI / 4; // 45 degree FOV on each side
-      const facing = -cameraRotationY - Math.PI / 2; // Adjust for coordinate system
-
-      ctx.fillStyle = "rgba(255, 100, 100, 0.2)";
-      ctx.beginPath();
-      ctx.moveTo(camPos.x, camPos.y);
-      ctx.lineTo(
-        camPos.x + Math.cos(facing - coneAngle) * coneLength,
-        camPos.y + Math.sin(facing - coneAngle) * coneLength,
-      );
-      ctx.lineTo(
-        camPos.x + Math.cos(facing + coneAngle) * coneLength,
-        camPos.y + Math.sin(facing + coneAngle) * coneLength,
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      // Camera marker (triangle pointing in view direction)
-      ctx.fillStyle = "#ff4444";
-      ctx.beginPath();
-      const triSize = 6;
-      ctx.moveTo(
-        camPos.x + Math.cos(facing) * triSize,
-        camPos.y + Math.sin(facing) * triSize,
-      );
-      ctx.lineTo(
-        camPos.x + Math.cos(facing + 2.5) * triSize,
-        camPos.y + Math.sin(facing + 2.5) * triSize,
-      );
-      ctx.lineTo(
-        camPos.x + Math.cos(facing - 2.5) * triSize,
-        camPos.y + Math.sin(facing - 2.5) * triSize,
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      // White outline around camera
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(camPos.x, camPos.y, 8, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Border
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
-
-      // Compass directions
-      ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-      ctx.font = "10px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("N", MINIMAP_SIZE / 2, 12);
-      ctx.fillText("S", MINIMAP_SIZE / 2, MINIMAP_SIZE - 4);
-      ctx.fillText("W", 8, MINIMAP_SIZE / 2 + 4);
-      ctx.fillText("E", MINIMAP_SIZE - 8, MINIMAP_SIZE / 2 + 4);
-
-      animationId = requestAnimationFrame(drawMinimap);
-    };
-
-    drawMinimap();
-
-    return () => {
-      cancelAnimationFrame(animationId);
-    };
-  }, [
-    worldSize,
-    cameraPosition,
-    cameraRotationY,
-    towns,
-    roads,
-    worldToMinimap,
-    showWilderness,
-  ]);
-
-  // Handle click to navigate
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = canvasRef.current;
-      if (!canvas || !onNavigate) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-
-      // Convert minimap coords to world coords
-      const world = minimapToWorld(x, y);
-      onNavigate(world.x, world.z);
-    },
-    [minimapToWorld, onNavigate],
-  );
-
-  return (
-    <div className={`${className} pointer-events-auto`}>
-      <canvas
-        ref={canvasRef}
-        width={MINIMAP_SIZE}
-        height={MINIMAP_SIZE}
-        className="shadow-lg cursor-crosshair rounded border-2 border-white/30"
-        onClick={handleClick}
-        title="Click to teleport camera"
-      />
-      <div className="flex flex-col gap-0.5 text-xs text-text-muted mt-1 px-1">
-        <div className="flex justify-between">
-          <span>Click to teleport</span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 bg-yellow-500" /> Town
-          </span>
-        </div>
-        {showWilderness && (
-          <div className="flex items-center gap-1 text-red-400/80">
-            <span className="w-2 h-2 bg-red-800/80" />
-            <span>Wilderness (PVP)</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ============== HELPER FUNCTIONS ==============
-
-/**
- * Create template geometry for tiles (cloned for each tile)
- */
-function createTemplateGeometry(
-  tileSize: number,
-  resolution: number,
-): THREE.PlaneGeometry {
-  const geometry = new THREE.PlaneGeometry(
-    tileSize,
-    tileSize,
-    resolution - 1,
-    resolution - 1,
-  );
-  geometry.rotateX(-Math.PI / 2);
-  // Center at origin - tiles will be positioned by their mesh
-  geometry.translate(tileSize / 2, 0, tileSize / 2);
-  return geometry;
-}
-
-/**
- * Create terrain material using the game's terrain shader.
- * This ensures Asset Forge renders terrain identically to the game,
- * including road influence blending via the roadInfluence vertex attribute.
- *
- * No fallback - the game shader must load for correct road rendering.
- */
-function createTerrainMaterial(): THREE.Material & {
-  terrainUniforms: TerrainUniforms;
-} {
-  // Use the game's terrain shader for unified rendering.
-  // Disable fog — the World Studio camera is at altitude 200m+
-  // where the game's 150-350m fog range makes everything invisible.
-  const material = createGameTerrainMaterial({
-    fogEnabled: false,
-    fogNear: 5000,
-    fogFar: 10000,
-  });
-  console.log(
-    "[TileBasedTerrain] Created terrain material (fog disabled for World Studio)",
-  );
-  return material;
-}
-
-/**
- * Clip a road path so it stops at town safe zone boundaries instead of
- * going through town centers. Inter-town roads connect edge-to-edge,
- * and internal town streets handle the interior.
- *
- * Uses the town's innerRadius (safeZoneRadius * 0.85) as the clip boundary
- * to match the flat terrain zone.
- */
-function clipRoadPathAtTowns<T extends { x: number; z: number }>(
-  path: T[],
-  connectedTowns: [string, string],
-  runtimeTowns: Array<{
-    id: string;
-    position: { x: number; z: number };
-    safeZoneRadius: number;
-  }>,
-): T[] {
-  if (path.length < 2) return path;
-
-  const townA = runtimeTowns.find((t) => t.id === connectedTowns[0]);
-  const townB = runtimeTowns.find((t) => t.id === connectedTowns[1]);
-
-  let startIdx = 0;
-  let endIdx = path.length - 1;
-
-  // Clip from start: skip points inside Town A
-  if (townA) {
-    const clipR = townA.safeZoneRadius * 0.85;
-    const clipRSq = clipR * clipR;
-    for (let i = 0; i < path.length - 1; i++) {
-      const dx = path[i].x - townA.position.x;
-      const dz = path[i].z - townA.position.z;
-      if (dx * dx + dz * dz < clipRSq) {
-        startIdx = i + 1;
-      } else {
-        break;
-      }
-    }
-  }
-
-  // Clip from end: skip points inside Town B
-  if (townB) {
-    const clipR = townB.safeZoneRadius * 0.85;
-    const clipRSq = clipR * clipR;
-    for (let i = path.length - 1; i > startIdx; i--) {
-      const dx = path[i].x - townB.position.x;
-      const dz = path[i].z - townB.position.z;
-      if (dx * dx + dz * dz < clipRSq) {
-        endIdx = i - 1;
-      } else {
-        break;
-      }
-    }
-  }
-
-  if (endIdx <= startIdx) return path.slice(0, 2); // Degenerate: towns overlap
-
-  return path.slice(startIdx, endIdx + 1);
-}
-
-// Road influence and height blending — delegated to shared pure functions
-// from @hyperscape/shared/world (imported at top of file).
-
-/**
- * Thin wrapper — adapts GeneratedRoad[] to the shared calculateRoadInfluence().
- */
-function calculateRoadInfluenceAtPoint(
-  worldX: number,
-  worldZ: number,
-  roads: GeneratedRoad[] | undefined,
-): number {
-  if (!roads || roads.length === 0) return 0;
-  return calculateRoadInfluence(
-    worldX,
-    worldZ,
-    roads as ReadonlyArray<RoadPathLike>,
-    ROAD_BLEND_WIDTH,
-    ROAD_MINIMUM_WIDTH,
-  );
-}
-
-// Mine area type alias for backwards compatibility with prop types
-type MineAreaData = import("@hyperscape/shared/world").MineArea;
-
-// Road colors matching the game's terrain shader (compacted dirt with gravel)
-const ROAD_CENTER_COLOR = new THREE.Color(0.4, 0.333, 0.267); // #665544 — compacted dirt
-const ROAD_EDGE_COLOR = new THREE.Color(0.349, 0.29, 0.239); // #594a3d — road edge
-const ROAD_MAIN_COLOR = new THREE.Color(0.32, 0.24, 0.18); // Darker main roads
-
-/**
- * Create flat ribbon geometry for a road path that hugs the terrain surface.
- * Matches the game's flat dirt-path look instead of cylindrical tubes.
- *
- * Generates a triangle strip: for each path point, two vertices are placed
- * perpendicular to the path direction at ±halfWidth. Vertex colors blend
- * from center (road color) to edge (road edge color) for the soft-edge look.
- */
-function createRoadRibbonGeometry(
-  pathPoints: THREE.Vector3[],
-  halfWidth: number,
-  isMainRoad: boolean,
-): THREE.BufferGeometry {
-  if (pathPoints.length < 2) return new THREE.BufferGeometry();
-
-  const vertCount = pathPoints.length * 2;
-  const positions = new Float32Array(vertCount * 3);
-  const colors = new Float32Array(vertCount * 3);
-  const indices: number[] = [];
-
-  const centerColor = isMainRoad ? ROAD_MAIN_COLOR : ROAD_CENTER_COLOR;
-  const edgeColor = ROAD_EDGE_COLOR;
-
-  // Temporary vectors
-  const tangent = new THREE.Vector3();
-  const perp = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
-
-  for (let i = 0; i < pathPoints.length; i++) {
-    const p = pathPoints[i];
-
-    // Calculate tangent direction (forward along path)
-    if (i < pathPoints.length - 1) {
-      tangent.subVectors(pathPoints[i + 1], p).normalize();
-    }
-    // else keep previous tangent for the last point
-
-    // Perpendicular in the XZ plane (cross tangent with up)
-    perp.crossVectors(tangent, up).normalize();
-
-    // Left and right vertices
-    const li = i * 2; // left vertex index
-    const ri = i * 2 + 1; // right vertex index
-
-    positions[li * 3] = p.x - perp.x * halfWidth;
-    positions[li * 3 + 1] = p.y;
-    positions[li * 3 + 2] = p.z - perp.z * halfWidth;
-
-    positions[ri * 3] = p.x + perp.x * halfWidth;
-    positions[ri * 3 + 1] = p.y;
-    positions[ri * 3 + 2] = p.z + perp.z * halfWidth;
-
-    // Vertex colors: edges slightly darker for soft-edge look
-    colors[li * 3] = edgeColor.r;
-    colors[li * 3 + 1] = edgeColor.g;
-    colors[li * 3 + 2] = edgeColor.b;
-
-    colors[ri * 3] = edgeColor.r;
-    colors[ri * 3 + 1] = edgeColor.g;
-    colors[ri * 3 + 2] = edgeColor.b;
-
-    // Build triangle strip (two triangles per segment)
-    if (i < pathPoints.length - 1) {
-      const bl = li;
-      const br = ri;
-      const tl = (i + 1) * 2;
-      const tr = (i + 1) * 2 + 1;
-      indices.push(bl, br, tl); // first triangle
-      indices.push(br, tr, tl); // second triangle
-    }
-  }
-
-  // Add center vertices for a 3-strip ribbon: edge | center | edge
-  // This gives a flat path with darkened edges like the game shader
-  const centerPositions = new Float32Array(pathPoints.length * 3);
-  const centerColors = new Float32Array(pathPoints.length * 3);
-  for (let i = 0; i < pathPoints.length; i++) {
-    centerPositions[i * 3] = pathPoints[i].x;
-    centerPositions[i * 3 + 1] = pathPoints[i].y;
-    centerPositions[i * 3 + 2] = pathPoints[i].z;
-    centerColors[i * 3] = centerColor.r;
-    centerColors[i * 3 + 1] = centerColor.g;
-    centerColors[i * 3 + 2] = centerColor.b;
-  }
-
-  // Merge: [left edges, right edges, centers]
-  // Rebuild with 3 verts per point: left edge, center, right edge
-  const totalVerts = pathPoints.length * 3;
-  const finalPositions = new Float32Array(totalVerts * 3);
-  const finalColors = new Float32Array(totalVerts * 3);
-  const finalIndices: number[] = [];
-
-  const narrowEdge = halfWidth * 0.15; // Edge band is 15% of half-width on each side
-
-  for (let i = 0; i < pathPoints.length; i++) {
-    const p = pathPoints[i];
-    if (i < pathPoints.length - 1) {
-      tangent.subVectors(pathPoints[i + 1], p).normalize();
-    }
-    perp.crossVectors(tangent, up).normalize();
-
-    const base = i * 3;
-
-    // Left edge vertex
-    finalPositions[base * 3] = p.x - perp.x * halfWidth;
-    finalPositions[base * 3 + 1] = p.y;
-    finalPositions[base * 3 + 2] = p.z - perp.z * halfWidth;
-    finalColors[base * 3] = edgeColor.r;
-    finalColors[base * 3 + 1] = edgeColor.g;
-    finalColors[base * 3 + 2] = edgeColor.b;
-
-    // Center vertex
-    finalPositions[(base + 1) * 3] = p.x;
-    finalPositions[(base + 1) * 3 + 1] = p.y;
-    finalPositions[(base + 1) * 3 + 2] = p.z;
-    finalColors[(base + 1) * 3] = centerColor.r;
-    finalColors[(base + 1) * 3 + 1] = centerColor.g;
-    finalColors[(base + 1) * 3 + 2] = centerColor.b;
-
-    // Right edge vertex
-    finalPositions[(base + 2) * 3] = p.x + perp.x * halfWidth;
-    finalPositions[(base + 2) * 3 + 1] = p.y;
-    finalPositions[(base + 2) * 3 + 2] = p.z + perp.z * halfWidth;
-    finalColors[(base + 2) * 3] = edgeColor.r;
-    finalColors[(base + 2) * 3 + 1] = edgeColor.g;
-    finalColors[(base + 2) * 3 + 2] = edgeColor.b;
-
-    // Triangles: connect left-center-right strips to next row
-    if (i < pathPoints.length - 1) {
-      const nBase = (i + 1) * 3;
-      // Left strip (left edge → center)
-      finalIndices.push(base, base + 1, nBase);
-      finalIndices.push(base + 1, nBase + 1, nBase);
-      // Right strip (center → right edge)
-      finalIndices.push(base + 1, base + 2, nBase + 1);
-      finalIndices.push(base + 2, nBase + 2, nBase + 1);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.BufferAttribute(finalPositions, 3),
-  );
-  geometry.setAttribute("color", new THREE.BufferAttribute(finalColors, 3));
-  geometry.setIndex(finalIndices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-/**
- * Create water material
- * Uses MeshStandardNodeMaterial for WebGPU compatibility
- */
-function createWaterMaterial(): THREE.Material {
-  const material = new MeshStandardNodeMaterial();
-  material.color = new THREE.Color(WATER_COLOR);
-  material.transparent = true;
-  material.opacity = WATER_OPACITY;
-  material.roughness = 0.1;
-  material.metalness = 0.3;
-  material.side = THREE.DoubleSide;
-  return material;
-}
-
-/**
- * Generate tile geometry with proper heightmap, colors, and road influence.
- * Uses the same approach as the game's TerrainSystem for unified rendering.
- */
-/** Town flatten data passed into tile generation */
-interface TownFlattenZone {
-  /** Game-space X */
-  x: number;
-  /** Game-space Z */
-  z: number;
-  /** Terrain height at town center */
-  centerHeight: number;
-  /** Radius of fully-flat inner zone (buildings sit here) */
-  innerRadius: number;
-  /** Radius of outer blend zone (smooth ramp back to natural terrain) */
-  outerRadius: number;
-}
-
-function generateTileGeometry(
-  tileX: number,
-  tileZ: number,
-  templateGeometry: THREE.PlaneGeometry,
-  queryTerrain: TerrainQuerier,
-  tileSize: number,
-  waterThreshold: number,
-  maxHeight: number,
-  worldSizeTiles: number,
-  roads?: GeneratedRoad[],
-  townFlattenZones?: TownFlattenZone[],
-  mines?: MineAreaData[],
-): { geometry: THREE.PlaneGeometry; hasWater: boolean } {
-  const geometry = templateGeometry.clone();
-  const positions = geometry.attributes.position;
-  const colors = new Float32Array(positions.count * 3);
-  const roadInfluences = new Float32Array(positions.count);
-  const mineInfluences = new Float32Array(positions.count);
-  const mineBiomeIds = new Float32Array(positions.count);
-  const biomeIds = new Float32Array(positions.count);
-  const forestWeights = new Float32Array(positions.count);
-  const canyonWeights = new Float32Array(positions.count);
-
-  let hasWater = false;
-  const shorelineThreshold = waterThreshold / maxHeight + 0.1; // Normalized
-
-  // Calculate world center offset - island mask is centered at (0,0)
-  // so we need to offset our tile coordinates to be centered around the world center
-  const worldCenterOffset = (worldSizeTiles * tileSize) / 2;
-
-  // Biome name to ID mapping (matching game's shader expectations)
-  const biomeNameToId: Record<string, number> = {
-    plains: 0,
-    forest: 1,
-    valley: 2,
-    desert: 3,
-    tundra: 4,
-    swamp: 5,
-    mountains: 6,
-    lakes: 7,
-  };
-
-  // PlaneGeometry is centered at origin, so vertices range from -tileSize/2 to +tileSize/2
-  // We need to offset by half a tile to align with the tile grid system where:
-  // - Tile (0,0) covers world coords (0, 0) to (tileSize, tileSize)
-  // - In terrain generator coords: (-worldCenterOffset, -worldCenterOffset) to (-worldCenterOffset + tileSize, ...)
-  const halfTileSize = tileSize / 2;
-
-  for (let i = 0; i < positions.count; i++) {
-    const localX = positions.getX(i);
-    const localZ = positions.getZ(i);
-
-    // World coordinates in terrain generator space (centered at 0,0)
-    // Add halfTileSize to convert from centered geometry coords to tile-corner coords
-    const worldX = localX + halfTileSize + tileX * tileSize - worldCenterOffset;
-    const worldZ = localZ + halfTileSize + tileZ * tileSize - worldCenterOffset;
-
-    // Query terrain
-    const query = queryTerrain(worldX, worldZ);
-    let height = query.height;
-
-    // Flatten terrain under towns: full-flat inside innerRadius,
-    // smooth hermite blend back to natural terrain at outerRadius
-    // Track how much this vertex is influenced by town flattening (0 = none, 1 = fully flat)
-    let townFlattenInfluence = 0;
-    if (townFlattenZones && townFlattenZones.length > 0) {
-      for (const tz of townFlattenZones) {
-        const dx = worldX - tz.x;
-        const dz = worldZ - tz.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist >= tz.outerRadius) continue;
-        if (dist <= tz.innerRadius) {
-          // Fully flat at town center height
-          height = tz.centerHeight;
-          townFlattenInfluence = 1;
-        } else {
-          // Smooth blend: 0 at innerRadius (full flatten) → 1 at outerRadius (natural)
-          const t = (dist - tz.innerRadius) / (tz.outerRadius - tz.innerRadius);
-          // Hermite smoothstep for natural-looking ramp
-          const blend = t * t * (3 - 2 * t);
-          height = tz.centerHeight + (height - tz.centerHeight) * blend;
-          townFlattenInfluence = 1 - blend;
-        }
-        break; // Only one town per vertex (first match)
-      }
-    }
-
-    // Flatten terrain under roads: blend vertex height toward the
-    // interpolated road path height based on road influence.
-    // This makes roads sit flat on the terrain instead of following
-    // every bump and ridge.
-    // Skip inside town flatten zones — terrain is already flat there, and road
-    // path Y values reflect raw (unflattened) terrain which would carve trenches.
-    if (roads && roads.length > 0 && townFlattenInfluence < 1) {
-      const roadInfo = getRoadHeightAtPoint(worldX, worldZ, roads);
-      if (roadInfo && roadInfo.influence > 0) {
-        // Road path height + small offset so road sits slightly above terrain
-        const targetHeight = roadInfo.height + 0.1;
-        // Reduce road influence proportionally to town flatten influence
-        const effectiveInfluence =
-          roadInfo.influence * (1 - townFlattenInfluence);
-        height = height + (targetHeight - height) * effectiveInfluence;
-      }
-    }
-
-    // RuneScape-style mine depression: gentle, shallow bowl that blends
-    // smoothly into the surrounding terrain. No rim or steep walls — just
-    // a subtle dip where mining has worn the ground down.
-    //
-    // Profile (cross-section, exaggerated):
-    //  ----__                          __----
-    //        \__                    __/
-    //           \__________________/
-    //              gentle bowl (~1.5m)
-    if (mines && mines.length > 0 && townFlattenInfluence < 1) {
-      for (const mine of mines) {
-        const dx = worldX - mine.position.x;
-        const dz = worldZ - mine.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-
-        // Quick AABB reject
-        const maxR = mine.radius * 1.5;
-        if (dist >= maxR) continue;
-
-        // Organic boundary: effective radius varies by angle
-        const angle = Math.atan2(dz, dx);
-        const R = getMineEffectiveRadius(
-          mine.radius,
-          mine.radialOffsets,
-          angle,
-        );
-        if (dist >= R * 1.2) continue;
-
-        const centerHeight = mine.position.y;
-        const townBlend = 1 - townFlattenInfluence;
-
-        // Smooth cosine bowl: deepest at center, level at edge
-        const t = Math.min(dist / R, 1.0);
-        const bowlFactor = 0.5 * (1 + Math.cos(Math.PI * t));
-
-        // Asymmetric depth: gentle entry ramp (40%), steep back wall (100%)
-        // Must match minePlacement.ts getMineBowlHeight exactly
-        let afe = Math.abs(angle - mine.entryAngle);
-        if (afe > Math.PI) afe = 2 * Math.PI - afe;
-        const depthMul = 0.4 + 0.6 * (afe / Math.PI);
-
-        // Micro-undulation: rocky, uneven mine floor (deterministic from position)
-        const undulation1 =
-          Math.sin(worldX * 0.7 + 1.3) * Math.cos(worldZ * 0.9 + 2.1) * 0.3;
-        const undulation2 = Math.sin(worldX * 2.3 + worldZ * 1.7) * 0.15;
-        const undulation3 = Math.cos(worldX * 4.1 - worldZ * 3.3) * 0.06;
-        const floorNoise =
-          (undulation1 + undulation2 + undulation3) * bowlFactor;
-
-        // Rim bumps: suppressed on entry side for smooth ramp
-        const rimT = Math.max(0, 1 - Math.abs(t - 0.88) / 0.12);
-        const rimSuppression = Math.min(1, afe / (Math.PI * 0.4));
-        const rimBump =
-          (Math.sin(worldX * 1.5 + worldZ * 2.1) * 0.3 +
-            Math.cos(worldX * 2.7 - worldZ * 1.3) * 0.15) *
-          rimT *
-          rimSuppression;
-
-        const targetHeight =
-          centerHeight - 3.0 * depthMul * bowlFactor + floorNoise + rimBump;
-
-        // Blend bowl into natural terrain — full blend inside R, fade to 0 by 1.2R
-        let blend = 1.0;
-        if (dist > R) {
-          const fadeT = (dist - R) / (R * 0.2);
-          blend = 1.0 - fadeT * fadeT * (3 - 2 * fadeT);
-        }
-        blend *= townBlend;
-
-        height = height + (targetHeight - height) * blend;
-        break;
-      }
-    }
-
-    // Set vertex height
-    positions.setY(i, height);
-
-    // Check if this tile has water
-    if (height < waterThreshold) {
-      hasWater = true;
-    }
-
-    // Get biome color — use query-provided color (game pipeline) or look up from table
-    let r: number, g: number, b: number;
-    if (query.color) {
-      r = query.color.r;
-      g = query.color.g;
-      b = query.color.b;
-    } else {
-      const biomeColor = BIOME_COLORS[query.biome] || BIOME_COLORS.plains;
-      r = biomeColor.r;
-      g = biomeColor.g;
-      b = biomeColor.b;
-    }
-
-    // Apply shoreline tinting near water level
-    const normalizedHeight = height / maxHeight;
-    const waterLevel = waterThreshold / maxHeight;
-
-    if (
-      normalizedHeight > waterLevel &&
-      normalizedHeight < shorelineThreshold
-    ) {
-      const shoreFactor =
-        (1.0 -
-          (normalizedHeight - waterLevel) / (shorelineThreshold - waterLevel)) *
-        0.6;
-      r = r + (SHORELINE_COLOR.r - r) * shoreFactor;
-      g = g + (SHORELINE_COLOR.g - g) * shoreFactor;
-      b = b + (SHORELINE_COLOR.b - b) * shoreFactor;
-    }
-
-    // Store color
-    colors[i * 3] = r;
-    colors[i * 3 + 1] = g;
-    colors[i * 3 + 2] = b;
-
-    // Store biome ID and per-biome weights for shader
-    biomeIds[i] = biomeNameToId[query.biome] ?? 0;
-    forestWeights[i] = query.biomeForestWeight ?? 0;
-    canyonWeights[i] = query.biomeCanyonWeight ?? 0;
-
-    // Road influence for terrain shader — the game shader reads this attribute
-    // to render road coloring directly on the terrain surface.
-    roadInfluences[i] = calculateRoadInfluenceAtPoint(worldX, worldZ, roads);
-
-    // Mine influence for terrain shader — rocky floor color overlay
-    const mineResult = calculateMineInfluenceAtPoint(worldX, worldZ, mines);
-    mineInfluences[i] = mineResult.influence;
-    mineBiomeIds[i] = mineResult.biomeIndex;
-  }
-
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
-  geometry.setAttribute(
-    "biomeForestWeight",
-    new THREE.BufferAttribute(forestWeights, 1),
-  );
-  geometry.setAttribute(
-    "biomeCanyonWeight",
-    new THREE.BufferAttribute(canyonWeights, 1),
-  );
-  geometry.setAttribute(
-    "roadInfluence",
-    new THREE.BufferAttribute(roadInfluences, 1),
-  );
-  geometry.setAttribute(
-    "mineInfluence",
-    new THREE.BufferAttribute(mineInfluences, 1),
-  );
-  geometry.setAttribute(
-    "mineBiomeId",
-    new THREE.BufferAttribute(mineBiomeIds, 1),
-  );
-  geometry.computeVertexNormals();
-  positions.needsUpdate = true;
-
-  return { geometry, hasWater };
-}
+// Minimap extracted to ./Minimap.tsx
+// Terrain helper functions extracted to ./terrainHelpers.ts
 
 // ============== MAIN COMPONENT ==============
 
@@ -1415,11 +466,37 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   dangerSources,
   onTownsGenerated,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Camera controller — handles fly mode, orbit controls, all input handlers
+  const cam = useCameraControls({
+    worldSize: config.terrain.worldSize,
+    tileSize: config.terrain.tileSize,
+    onFlyModeChange,
+    onMoveSpeedChange,
+    onViewportContextMenu,
+  });
+  const {
+    cameraRef,
+    cameraStateRef,
+    orbitControlsRef,
+    containerRef,
+    keysRef,
+    rmbFlyActiveRef,
+    rmbDidFlyRef,
+    pendingOrbitCreateRef,
+    updateCamera,
+    handleMouseMove,
+    handleKeyDown,
+    handleKeyUp,
+    handleMouseDown,
+    handleMouseUp,
+    handleWheel,
+    handleContextMenu,
+    handlePointerLockChange,
+    initOrbitControls,
+  } = cam;
+
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const orbitControlsRef = useRef<OrbitControls | null>(null);
   const viewHelperRef = useRef<ViewHelper | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const viewModeRef = useRef<ViewMode>("lit");
@@ -1473,33 +550,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   >([]);
   const tileQueueSetRef = useRef<Set<string>>(new Set());
 
-  // Camera state for fly controls
-  const cameraStateRef = useRef<CameraState>({
-    position: new THREE.Vector3(0, 200, 0),
-    velocity: new THREE.Vector3(),
-    euler: new THREE.Euler(0, 0, 0, "YXZ"),
-    moveSpeed: 200,
-    lookSpeed: 0.002,
-  });
+  // GPU resource lifecycle manager — handles staged object addition and
+  // deferred GPU disposal to prevent Metal WebGPU device loss.
+  // See SceneResourceManager.ts for invariants and documentation.
+  const resourceManager = useRef(new SceneResourceManager()).current;
 
-  // Input state
-  const keysRef = useRef<Set<string>>(new Set());
-  const isPointerLockedRef = useRef(false);
-  // RMB-hold fly mode (UE5-style: hold = fly, quick click = context menu)
-  const isRmbHeldRef = useRef(false);
-  const rmbFlyActiveRef = useRef(false);
-  /** Start position of RMB press — used for drag threshold */
-  const rmbStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  /** Timer ID for hold-to-fly delay */
-  const rmbHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** True if fly mode was activated during this RMB session (for context menu suppression) */
-  const rmbDidFlyRef = useRef(false);
-  /** Skip the first N mouse-move events after entering fly mode — macOS pointer lock
-   *  produces a bogus large movementY on the first event, snapping the camera down. */
-  const flySkipMovesRef = useRef(0);
-  /** Deferred orbit controls creation — wait N frames after fly-exit for all
-   *  pointer-lock cursor-jump events to settle before creating OrbitControls. */
-  const pendingOrbitCreateRef = useRef(0);
+  // Camera state refs are now managed by useCameraControls hook
 
   // Performance: track whether we're in World Studio mode via ref
   // (avoids adding hideBuiltinOverlays to callback dep arrays)
@@ -1793,7 +849,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     ],
   );
 
-  // Unload a tile
+  // Unload a tile — remove from scene and queue geometry for deferred disposal.
+  // Tile geometries share the terrain material (terrainMaterialRef) so we must
+  // NOT dispose the material — only the per-tile geometry buffers.
   const unloadTile = useCallback((key: string) => {
     const tileData = tilesRef.current.get(key);
     if (!tileData) return;
@@ -1801,16 +859,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     const terrainContainer = terrainContainerRef.current;
     const waterContainer = waterContainerRef.current;
 
-    // Remove terrain mesh
+    // Remove terrain mesh from scene — defer GPU disposal to prevent
+    // Metal device loss from bulk geometry.dispose() calls (e.g. when
+    // refreshTownMarkers unloads ALL tiles for terrain flattening).
     if (terrainContainer) {
       terrainContainer.remove(tileData.mesh);
     }
-    tileData.mesh.geometry.dispose();
+    resourceManager.queueDisposal(tileData.mesh, true);
 
     // Remove water mesh
     if (tileData.water && waterContainer) {
       waterContainer.remove(tileData.water);
-      tileData.water.geometry.dispose();
+      resourceManager.queueDisposal(tileData.water, true);
     }
 
     // Notify heatmap manager
@@ -1885,6 +945,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
     }
 
+    // When the scene staging queue is draining (buildings/vegetation being added),
+    // reduce tile generation budget but DON'T pause entirely. Low-res tiles are
+    // tiny (8×8 = 64 vertices) — a few per frame combined with staging is fine.
+    // Full-res tiles (32×32 = 1024 vertices) are paused during staging.
+    const hasStagedWork = resourceManager.hasStagedWork;
+    const maxFullThisFrame = hasStagedWork ? 0 : MAX_TILES_PER_FRAME;
+    const maxLowThisFrame = hasStagedWork ? 4 : MAX_LOW_RES_TILES_PER_FRAME;
+
     // Process tile queue with separate budgets for full-res and low-res
     let fullResGen = 0;
     let lowResGen = 0;
@@ -1893,11 +961,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     for (const entry of tileQueueRef.current) {
       const isFullRes = entry.resolution > TILE_LOD_LOW_RESOLUTION;
 
-      if (isFullRes && fullResGen >= MAX_TILES_PER_FRAME) {
+      if (isFullRes && fullResGen >= maxFullThisFrame) {
         remaining.push(entry);
         continue;
       }
-      if (!isFullRes && lowResGen >= MAX_LOW_RES_TILES_PER_FRAME) {
+      if (!isFullRes && lowResGen >= maxLowThisFrame) {
         remaining.push(entry);
         continue;
       }
@@ -1940,246 +1008,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     unloadTile,
     tileResolution,
   ]);
-
-  // Create a fresh OrbitControls synced to the current camera position.
-  // Called from the animation loop AFTER pointer-lock events have settled.
-  //
-  // IMPORTANT: OrbitControls constructor internally calls this.update() with
-  // target=(0,0,0), which calls camera.lookAt(0,0,0) and CORRUPTS the camera
-  // rotation. We save camera state before construction and restore it after.
-  const createOrbitControls = useCallback(() => {
-    const cam = cameraRef.current;
-    const container = containerRef.current;
-    if (!cam || !container) return;
-
-    // Dispose any existing controls (safety — should already be null)
-    if (orbitControlsRef.current) {
-      orbitControlsRef.current.dispose();
-    }
-
-    // --- Save camera state BEFORE OrbitControls constructor corrupts it ---
-    const savedPos = cameraStateRef.current.position.clone();
-    const savedEuler = cameraStateRef.current.euler.clone();
-    const savedQuat = new THREE.Quaternion().setFromEuler(savedEuler);
-
-    // Constructor calls update() → lookAt(0,0,0) → corrupts camera rotation
-    const controls = new OrbitControls(cam, container);
-
-    // --- Restore camera state that constructor corrupted ---
-    cam.position.copy(savedPos);
-    cam.quaternion.copy(savedQuat);
-
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.screenSpacePanning = true;
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: -1 as THREE.MOUSE, // RMB handled manually for fly mode
-    };
-
-    // Orbit target = 200 units in front of where camera was looking
-    const dir = new THREE.Vector3(0, 0, -1).applyEuler(savedEuler);
-    controls.target.copy(savedPos).add(dir.multiplyScalar(200));
-
-    // Compute safe maxPolarAngle that accommodates current camera angle.
-    // Without this, update() would clamp phi and snap the camera upward.
-    const offset = new THREE.Vector3().subVectors(savedPos, controls.target);
-    const spherical = new THREE.Spherical().setFromVector3(offset);
-    const currentPhi = spherical.phi;
-    controls.maxPolarAngle = Math.max(Math.PI / 2 - 0.05, currentPhi + 0.1);
-
-    // No distance constraints yet — let first update() sync internal state
-    controls.update();
-
-    // Force-restore camera one final time as safety net against update() drift
-    cam.position.copy(savedPos);
-    cam.quaternion.copy(savedQuat);
-
-    // Now apply constraints for future user interactions
-    controls.minDistance = 20;
-    controls.maxDistance = 3000;
-
-    orbitControlsRef.current = controls;
-  }, []);
-
-  // Handle camera updates — fly mode (pointer lock) or orbit controls
-  const updateCamera = useCallback(
-    (deltaTime: number) => {
-      const camera = cameraRef.current;
-      const state = cameraStateRef.current;
-      const keys = keysRef.current;
-      const controls = orbitControlsRef.current;
-
-      if (!camera) return;
-
-      if (rmbFlyActiveRef.current) {
-        // Fly mode: WASD + Q/E movement (UE5-style)
-        const forward = new THREE.Vector3(0, 0, -1).applyEuler(state.euler);
-        const right = new THREE.Vector3(1, 0, 0).applyEuler(state.euler);
-        const up = new THREE.Vector3(0, 1, 0);
-
-        const targetVelocity = new THREE.Vector3();
-
-        if (keys.has("KeyW") || keys.has("ArrowUp")) {
-          targetVelocity.add(forward);
-        }
-        if (keys.has("KeyS") || keys.has("ArrowDown")) {
-          targetVelocity.sub(forward);
-        }
-        if (keys.has("KeyA") || keys.has("ArrowLeft")) {
-          targetVelocity.sub(right);
-        }
-        if (keys.has("KeyD") || keys.has("ArrowRight")) {
-          targetVelocity.add(right);
-        }
-        if (keys.has("Space") || keys.has("KeyE")) {
-          targetVelocity.add(up);
-        }
-        if (
-          keys.has("ShiftLeft") ||
-          keys.has("ShiftRight") ||
-          keys.has("KeyQ")
-        ) {
-          targetVelocity.sub(up);
-        }
-
-        if (targetVelocity.length() > 0) {
-          targetVelocity.normalize().multiplyScalar(state.moveSpeed);
-        }
-
-        state.velocity.lerp(targetVelocity, 1 - Math.exp(-10 * deltaTime));
-        state.position.add(state.velocity.clone().multiplyScalar(deltaTime));
-
-        // Clamp to world bounds
-        const worldSizeMeters = worldSize * tileSize;
-        const margin = tileSize * 2;
-        state.position.x = Math.max(
-          -margin,
-          Math.min(worldSizeMeters + margin, state.position.x),
-        );
-        state.position.z = Math.max(
-          -margin,
-          Math.min(worldSizeMeters + margin, state.position.z),
-        );
-        state.position.y = Math.max(10, Math.min(2000, state.position.y));
-
-        camera.position.copy(state.position);
-        camera.quaternion.setFromEuler(state.euler);
-      } else if (pendingOrbitCreateRef.current > 0) {
-        // Transition: camera holds perfectly still while pointer-lock
-        // cursor-jump events settle. After enough frames, create OrbitControls.
-        pendingOrbitCreateRef.current--;
-        if (pendingOrbitCreateRef.current === 0) {
-          createOrbitControls();
-        }
-      } else if (controls && controls.enabled) {
-        // Orbit mode: OrbitControls drives the camera, sync state for tile loading.
-        controls.update();
-        state.position.copy(camera.position);
-        state.euler.setFromQuaternion(camera.quaternion, "YXZ");
-      }
-    },
-    [worldSize, tileSize, createOrbitControls],
-  );
-
-  // Shared fly-mode activation (called by hold timer OR drag threshold)
-  const enterFlyMode = useCallback(() => {
-    if (rmbFlyActiveRef.current) return;
-    rmbFlyActiveRef.current = true;
-    rmbDidFlyRef.current = true;
-    // Skip first 2 mouse-move events — macOS pointer lock fires bogus movementY
-    flySkipMovesRef.current = 2;
-
-    // Sync euler from current camera orientation
-    const cam = cameraRef.current;
-    if (cam) {
-      cameraStateRef.current.euler.setFromQuaternion(cam.quaternion, "YXZ");
-      cameraStateRef.current.position.copy(cam.position);
-    }
-
-    // Destroy orbit controls entirely — when fly mode exits, a fresh instance
-    // is created. This eliminates all stale internal state (damping inertia,
-    // spherical deltas, pan offsets, event listener state).
-    const controls = orbitControlsRef.current;
-    if (controls) {
-      controls.dispose();
-      orbitControlsRef.current = null;
-    }
-
-    // Request pointer lock (transient activation from recent mousedown is valid ~5s)
-    containerRef.current?.requestPointerLock();
-
-    onFlyModeChange?.(true);
-  }, [onFlyModeChange]);
-
-  // Handle mouse movement for camera look + RMB drag threshold
-  const handleMouseMove = useCallback(
-    (event: MouseEvent) => {
-      // Drag threshold to enter fly mode immediately (before hold timer fires)
-      if (isRmbHeldRef.current && !rmbFlyActiveRef.current) {
-        const dx = event.clientX - rmbStartPosRef.current.x;
-        const dy = event.clientY - rmbStartPosRef.current.y;
-        if (dx * dx + dy * dy > 100) {
-          // Cancel hold timer (drag activated first)
-          if (rmbHoldTimerRef.current) {
-            clearTimeout(rmbHoldTimerRef.current);
-            rmbHoldTimerRef.current = null;
-          }
-          enterFlyMode();
-        }
-        return;
-      }
-
-      if (!rmbFlyActiveRef.current) return;
-
-      // Skip initial events after entering fly mode — macOS pointer lock
-      // produces a bogus large movementY that snaps the camera downward
-      if (flySkipMovesRef.current > 0) {
-        flySkipMovesRef.current--;
-        return;
-      }
-
-      const state = cameraStateRef.current;
-      const movementX = event.movementX || 0;
-      const movementY = event.movementY || 0;
-
-      state.euler.y -= movementX * state.lookSpeed;
-      state.euler.x -= movementY * state.lookSpeed;
-
-      // Clamp vertical rotation
-      state.euler.x = Math.max(
-        -Math.PI / 2,
-        Math.min(Math.PI / 2, state.euler.x),
-      );
-    },
-    [enterFlyMode],
-  );
-
-  // Handle keyboard input
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      keysRef.current.add(event.code);
-
-      // [ / ] keys adjust fly speed (trackpad-friendly alternative to scroll wheel)
-      if (rmbFlyActiveRef.current) {
-        if (event.code === "BracketLeft" || event.code === "BracketRight") {
-          const factor = event.code === "BracketLeft" ? 0.8 : 1.25;
-          const newSpeed = Math.max(
-            20,
-            Math.min(2000, cameraStateRef.current.moveSpeed * factor),
-          );
-          cameraStateRef.current.moveSpeed = newSpeed;
-          onMoveSpeedChange?.(newSpeed);
-        }
-      }
-    },
-    [onMoveSpeedChange],
-  );
-
-  const handleKeyUp = useCallback((event: KeyboardEvent) => {
-    keysRef.current.delete(event.code);
-  }, []);
 
   // Handle viewport click for selection
   const handleClick = useCallback(
@@ -2449,112 +1277,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     [onSelect, worldSize, tileSize, waterThreshold],
   );
 
-  // Handle RMB mousedown — start hold timer + drag tracking for fly mode
-  // UE5 behavior: quick click = context menu, hold (~150ms) or drag = fly mode
-  const handleMouseDown = useCallback(
-    (event: MouseEvent) => {
-      if (event.button === 2) {
-        isRmbHeldRef.current = true;
-        rmbDidFlyRef.current = false;
-        rmbStartPosRef.current = { x: event.clientX, y: event.clientY };
-
-        // Start hold timer — activates fly mode after 300ms even without mouse movement.
-        // 300ms is long enough that a quick trackpad two-finger tap registers as a
-        // right-click (context menu) rather than accidentally entering fly mode.
-        rmbHoldTimerRef.current = setTimeout(() => {
-          rmbHoldTimerRef.current = null;
-          if (isRmbHeldRef.current) {
-            enterFlyMode();
-          }
-        }, 300);
-      }
-    },
-    [enterFlyMode],
-  );
-
-  // Handle RMB mouseup — exit fly mode or trigger context menu
-  const handleMouseUp = useCallback(
-    (event: MouseEvent) => {
-      if (event.button === 2 && isRmbHeldRef.current) {
-        // Cancel hold timer if it hasn't fired yet (quick click)
-        if (rmbHoldTimerRef.current) {
-          clearTimeout(rmbHoldTimerRef.current);
-          rmbHoldTimerRef.current = null;
-        }
-
-        const wasFlying = rmbFlyActiveRef.current;
-        isRmbHeldRef.current = false;
-        rmbFlyActiveRef.current = false;
-
-        // Zero out fly velocity so it doesn't bleed into orbit mode
-        cameraStateRef.current.velocity.set(0, 0, 0);
-
-        // Exit pointer lock if active
-        if (document.pointerLockElement) {
-          document.exitPointerLock();
-        }
-
-        if (wasFlying) {
-          // Don't create OrbitControls now — pointer lock exit is async and
-          // the browser will fire cursor-jump mousemove events. Defer creation
-          // by 5 frames in the animation loop so all events settle first.
-          // Camera holds perfectly still during those frames.
-          pendingOrbitCreateRef.current = 5;
-
-          onFlyModeChange?.(false);
-        } else {
-          // Quick click (no fly) — trigger custom context menu
-          onViewportContextMenu?.(event.clientX, event.clientY);
-        }
-      }
-    },
-    [onFlyModeChange, onViewportContextMenu],
-  );
-
-  // Handle scroll wheel — speed adjustment during fly, zoom in orbit
-  const handleWheel = useCallback(
-    (event: WheelEvent) => {
-      if (rmbFlyActiveRef.current) {
-        // During fly: adjust moveSpeed (persists across sessions)
-        event.preventDefault();
-        const factor = event.deltaY > 0 ? 0.8 : 1.25; // 20% steps
-        const newSpeed = Math.max(
-          20,
-          Math.min(2000, cameraStateRef.current.moveSpeed * factor),
-        );
-        cameraStateRef.current.moveSpeed = newSpeed;
-        onMoveSpeedChange?.(newSpeed);
-      }
-      // In orbit mode: OrbitControls handles zoom automatically
-    },
-    [onMoveSpeedChange],
-  );
-
-  // Always suppress native + React contextmenu from the viewport.
-  // On macOS, contextmenu fires on mousedown (before fly mode can activate).
-  // Instead, quick-click context menu is triggered manually from handleMouseUp.
-  const handleContextMenu = useCallback((event: MouseEvent) => {
-    if (!containerRef.current?.contains(event.target as Node)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }, []);
-
-  const handlePointerLockChange = useCallback(() => {
-    isPointerLockedRef.current =
-      document.pointerLockElement === containerRef.current;
-
-    // Handle unexpected pointer lock exit (e.g., user pressed Esc while RMB held)
-    if (!isPointerLockedRef.current && rmbFlyActiveRef.current) {
-      isRmbHeldRef.current = false;
-      rmbFlyActiveRef.current = false;
-      cameraStateRef.current.velocity.set(0, 0, 0);
-
-      // Defer OrbitControls creation (same as handleMouseUp path)
-      pendingOrbitCreateRef.current = 5;
-      onFlyModeChange?.(false);
-    }
-  }, [onFlyModeChange]);
-
   // Initialize Three.js scene with WebGPU
   useEffect(() => {
     const container = containerRef.current;
@@ -2582,23 +1304,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     cameraRef.current = camera;
 
     // Orbit controls — immediate mouse interaction (rotate, pan, zoom)
-    const controls = new OrbitControls(camera, container);
-    controls.target.set(worldCenter, 0, worldCenter);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.screenSpacePanning = true;
-    controls.minDistance = 20;
-    controls.maxDistance = 3000;
-    controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: -1 as THREE.MOUSE, // RMB handled manually for fly mode
-    };
-    controls.update();
-    orbitControlsRef.current = controls;
-    // Sync initial euler from orbit position
-    cameraStateRef.current.euler.setFromQuaternion(camera.quaternion, "YXZ");
+    const orbitTarget = new THREE.Vector3(worldCenter, 0, worldCenter);
+    initOrbitControls(camera, container, orbitTarget);
 
     // Containers for terrain, water, and town markers
     const terrainContainer = new THREE.Group();
@@ -2965,6 +1672,26 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             : generator.getHeightAt(wx, wz);
 
         // ---- Render town markers, buildings, landmarks, internal roads ----
+        // Shared materials — reuse across all towns to minimize GPU pipeline count
+        const initBuildingGen = new BuildingGenerator();
+        const initSimpleMat = new TownStdMat();
+        initSimpleMat.color = new THREE.Color(0xd4a373);
+        initSimpleMat.roughness = 0.9;
+        const initFarMat = new TownBasicMat();
+        initFarMat.color = new THREE.Color(0xc9a577);
+        const initDetailFallbackMat = new TownStdMat();
+        initDetailFallbackMat.color = new THREE.Color(0xd4a373);
+        initDetailFallbackMat.roughness = 0.7;
+        initDetailFallbackMat.metalness = 0.1;
+        const initPillarMat = new TownBasicMat();
+        initPillarMat.color = new THREE.Color(0xffffff);
+        const initRoadLineMat = new TownLineMat();
+        initRoadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
+        initRoadLineMat.linewidth = 2;
+        const initConeMats = new Map<number, MeshBasicNodeMaterial>();
+        const initRingMats = new Map<number, MeshBasicNodeMaterial>();
+        const initLandmarkMats = new Map<number, MeshStandardNodeMaterial>();
+
         for (const town of layout.towns) {
           const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
           const markerX = town.position.x + worldCenterOffset;
@@ -2981,46 +1708,59 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             townName: town.name,
           };
 
-          // Cone marker pointing down
+          // Cone marker pointing down — shared material per town-size color
           const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
-          const coneMaterial = new MeshBasicNodeMaterial();
-          coneMaterial.color = new THREE.Color(color);
-          const marker = new THREE.Mesh(coneGeometry, coneMaterial);
+          if (!initConeMats.has(color)) {
+            const mat = new MeshBasicNodeMaterial();
+            mat.color = new THREE.Color(color);
+            initConeMats.set(color, mat);
+          }
+          const marker = new THREE.Mesh(coneGeometry, initConeMats.get(color)!);
           marker.position.set(markerX, markerY + 60, markerZ);
           marker.rotation.x = Math.PI;
           marker.userData = townUserData;
-          townMarkers.add(marker);
-          selectableObjectsRef.current.push(marker);
+          resourceManager.stage({
+            object: marker,
+            parent: townMarkers,
+            onAdd: () => selectableObjectsRef.current.push(marker),
+          });
 
-          // Safe zone ring
+          // Safe zone ring — shared material per town-size color
           const ringGeometry = new THREE.RingGeometry(
             town.safeZoneRadius - 5,
             town.safeZoneRadius,
             48,
           );
-          const ringMaterial = new MeshBasicNodeMaterial();
-          ringMaterial.color = new THREE.Color(color);
-          ringMaterial.side = THREE.DoubleSide;
-          ringMaterial.transparent = true;
-          ringMaterial.opacity = 0.4;
-          const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+          if (!initRingMats.has(color)) {
+            const mat = new MeshBasicNodeMaterial();
+            mat.color = new THREE.Color(color);
+            mat.side = THREE.DoubleSide;
+            mat.transparent = true;
+            mat.opacity = 0.4;
+            initRingMats.set(color, mat);
+          }
+          const ring = new THREE.Mesh(ringGeometry, initRingMats.get(color)!);
           ring.rotation.x = -Math.PI / 2;
           ring.position.set(markerX, markerY + 2, markerZ);
           ring.userData = townUserData;
-          townMarkers.add(ring);
-          selectableObjectsRef.current.push(ring);
+          resourceManager.stage({
+            object: ring,
+            parent: townMarkers,
+            onAdd: () => selectableObjectsRef.current.push(ring),
+          });
 
-          // Town center pillar
+          // Town center pillar — shared material
           const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
-          const pillarMaterial = new TownBasicMat();
-          pillarMaterial.color = new THREE.Color(0xffffff);
-          const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+          const pillar = new THREE.Mesh(pillarGeometry, initPillarMat);
           pillar.position.set(markerX, markerY + 15, markerZ);
           pillar.userData = townUserData;
-          townMarkers.add(pillar);
-          selectableObjectsRef.current.push(pillar);
+          resourceManager.stage({
+            object: pillar,
+            parent: townMarkers,
+            onAdd: () => selectableObjectsRef.current.push(pillar),
+          });
 
-          // Internal roads — use flattened centerHeight for Y
+          // Internal roads — shared material
           if (town.internalRoads && town.internalRoads.length > 0) {
             for (const road of town.internalRoads) {
               const startX = road.start.x + worldCenterOffset;
@@ -3034,12 +1774,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 new THREE.Vector3(startX, startY, startZ),
                 new THREE.Vector3(endX, endY, endZ),
               ]);
-              const roadLineMat = new TownLineMat();
-              roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
-              roadLineMat.linewidth = 2;
-              const roadLine = new THREE.Line(roadGeometry, roadLineMat);
+              const roadLine = new THREE.Line(roadGeometry, initRoadLineMat);
               roadLine.userData = { townId: town.id };
-              townMarkers.add(roadLine);
+              resourceManager.stage({
+                object: roadLine,
+                parent: townMarkers,
+              });
             }
           }
 
@@ -3055,12 +1795,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             const buildingLOD = new THREE.LOD();
             buildingLOD.position.set(bx, by, bz);
             buildingLOD.rotation.y = building.rotation || 0;
-            lodObjectsRef.current.push(buildingLOD);
 
-            // LOD 0: Procedural building
+            // LOD 0: Procedural building — shared BuildingGenerator reuses its uberMaterial
             let fullDetailMesh: THREE.Object3D | null = null;
-            const buildingGen = new BuildingGenerator();
-            const generatedBuilding = buildingGen.generate(
+            const generatedBuilding = initBuildingGen.generate(
               building.type || "house",
               {
                 includeRoof: true,
@@ -3092,31 +1830,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 buildingHeight,
                 buildingDepth,
               );
-              const detailMaterial = new TownStdMat();
-              detailMaterial.color = new THREE.Color(0xd4a373);
-              detailMaterial.roughness = 0.7;
-              detailMaterial.metalness = 0.1;
-              fullDetailMesh = new THREE.Mesh(detailGeometry, detailMaterial);
+              fullDetailMesh = new THREE.Mesh(
+                detailGeometry,
+                initDetailFallbackMat,
+              );
               fullDetailMesh.position.y = buildingHeight / 2;
               fullDetailMesh.castShadow = true;
               fullDetailMesh.receiveShadow = true;
             }
 
-            // LOD 1: Simple box
+            // LOD 1: Simple box — shared material
             const simpleGeometry = new THREE.BoxGeometry(
               buildingWidth,
               buildingHeight,
               buildingDepth,
             );
-            const simpleMaterial = new TownStdMat();
-            simpleMaterial.color = new THREE.Color(0xd4a373);
-            simpleMaterial.roughness = 0.9;
-            const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
+            const simpleMesh = new THREE.Mesh(simpleGeometry, initSimpleMat);
             simpleMesh.position.y = buildingHeight / 2;
             simpleMesh.castShadow = false;
             simpleMesh.receiveShadow = true;
 
-            // LOD 2: Far box
+            // LOD 2: Far box — shared material
             const farGeometry = new THREE.BoxGeometry(
               buildingWidth,
               buildingHeight,
@@ -3125,9 +1859,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               1,
               1,
             );
-            const farMaterial = new TownBasicMat();
-            farMaterial.color = new THREE.Color(0xc9a577);
-            const farMesh = new THREE.Mesh(farGeometry, farMaterial);
+            const farMesh = new THREE.Mesh(farGeometry, initFarMat);
             farMesh.position.y = buildingHeight / 2;
 
             const buildingUserData = {
@@ -3149,8 +1881,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
             buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
             buildingLOD.userData = buildingUserData;
-            townMarkers.add(buildingLOD);
-            selectableObjectsRef.current.push(buildingLOD);
+            resourceManager.stage({
+              object: buildingLOD,
+              parent: townMarkers,
+              onAdd: () => {
+                lodObjectsRef.current.push(buildingLOD);
+                selectableObjectsRef.current.push(buildingLOD);
+              },
+            });
           }
 
           // Landmarks — use flattened centerHeight for Y
@@ -3207,15 +1945,24 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 height,
                 landmark.size.depth,
               );
-              const landmarkMat = new TownStdMat();
-              landmarkMat.color = new THREE.Color(color2);
-              landmarkMat.roughness = 0.7;
-              const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
+              if (!initLandmarkMats.has(color2)) {
+                const mat = new TownStdMat();
+                mat.color = new THREE.Color(color2);
+                mat.roughness = 0.7;
+                initLandmarkMats.set(color2, mat);
+              }
+              const landmarkMesh = new THREE.Mesh(
+                landmarkGeo,
+                initLandmarkMats.get(color2)!,
+              );
               landmarkMesh.position.set(lx, ly + height / 2, lz);
               landmarkMesh.rotation.y = landmark.rotation;
               landmarkMesh.castShadow = true;
               landmarkMesh.receiveShadow = true;
-              townMarkers.add(landmarkMesh);
+              resourceManager.stage({
+                object: landmarkMesh,
+                parent: townMarkers,
+              });
             }
           }
         }
@@ -3322,6 +2069,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Clear selectable objects array
       selectableObjectsRef.current = [];
 
+      // Shared materials for standalone town rendering
+      const stBuildingGen = new BuildingGenerator();
+      const stSimpleMat = new TownStdMat();
+      stSimpleMat.color = new THREE.Color(0xd4a373);
+      stSimpleMat.roughness = 0.9;
+      const stFarMat = new TownBasicMat();
+      stFarMat.color = new THREE.Color(0xc9a577);
+      const stDetailFallbackMat = new TownStdMat();
+      stDetailFallbackMat.color = new THREE.Color(0xd4a373);
+      stDetailFallbackMat.roughness = 0.7;
+      stDetailFallbackMat.metalness = 0.1;
+      const stPillarMat = new TownBasicMat();
+      stPillarMat.color = new THREE.Color(0xffffff);
+      const stRoadLineMat = new TownLineMat();
+      stRoadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
+      stRoadLineMat.linewidth = 2;
+      const stConeMats = new Map<number, MeshBasicNodeMaterial>();
+      const stRingMats = new Map<number, MeshBasicNodeMaterial>();
+
       // Create town markers and internal roads
       for (const town of townResult.towns) {
         const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
@@ -3339,46 +2105,59 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           townName: town.name,
         };
 
-        // Cone marker pointing down at town location (main selectable element)
+        // Cone marker — shared material per town-size color
         const coneGeometry = new THREE.ConeGeometry(20, 50, 8);
-        const coneMaterial = new MeshBasicNodeMaterial();
-        coneMaterial.color = new THREE.Color(color);
-        const marker = new THREE.Mesh(coneGeometry, coneMaterial);
+        if (!stConeMats.has(color)) {
+          const mat = new MeshBasicNodeMaterial();
+          mat.color = new THREE.Color(color);
+          stConeMats.set(color, mat);
+        }
+        const marker = new THREE.Mesh(coneGeometry, stConeMats.get(color)!);
         marker.position.set(markerX, markerY + 60, markerZ);
         marker.rotation.x = Math.PI; // Point downward
         marker.userData = townUserData;
-        townMarkers.add(marker);
-        selectableObjectsRef.current.push(marker);
+        resourceManager.stage({
+          object: marker,
+          parent: townMarkers,
+          onAdd: () => selectableObjectsRef.current.push(marker),
+        });
 
-        // Safe zone ring around town (also selectable as town)
+        // Safe zone ring — shared material per town-size color
         const ringGeometry = new THREE.RingGeometry(
           town.safeZoneRadius - 5,
           town.safeZoneRadius,
           48,
         );
-        const ringMaterial = new MeshBasicNodeMaterial();
-        ringMaterial.color = new THREE.Color(color);
-        ringMaterial.side = THREE.DoubleSide;
-        ringMaterial.transparent = true;
-        ringMaterial.opacity = 0.4;
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        if (!stRingMats.has(color)) {
+          const mat = new MeshBasicNodeMaterial();
+          mat.color = new THREE.Color(color);
+          mat.side = THREE.DoubleSide;
+          mat.transparent = true;
+          mat.opacity = 0.4;
+          stRingMats.set(color, mat);
+        }
+        const ring = new THREE.Mesh(ringGeometry, stRingMats.get(color)!);
         ring.rotation.x = -Math.PI / 2;
         ring.position.set(markerX, markerY + 2, markerZ);
         ring.userData = townUserData;
-        townMarkers.add(ring);
-        selectableObjectsRef.current.push(ring);
+        resourceManager.stage({
+          object: ring,
+          parent: townMarkers,
+          onAdd: () => selectableObjectsRef.current.push(ring),
+        });
 
-        // Town center marker (small pillar) - also selectable
+        // Town center pillar — shared material
         const pillarGeometry = new THREE.CylinderGeometry(3, 3, 30, 8);
-        const pillarMaterial = new TownBasicMat();
-        pillarMaterial.color = new THREE.Color(0xffffff);
-        const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial);
+        const pillar = new THREE.Mesh(pillarGeometry, stPillarMat);
         pillar.position.set(markerX, markerY + 15, markerZ);
         pillar.userData = townUserData;
-        townMarkers.add(pillar);
-        selectableObjectsRef.current.push(pillar);
+        resourceManager.stage({
+          object: pillar,
+          parent: townMarkers,
+          onAdd: () => selectableObjectsRef.current.push(pillar),
+        });
 
-        // Draw internal roads if available
+        // Draw internal roads — shared material
         if (town.internalRoads && town.internalRoads.length > 0) {
           for (const road of town.internalRoads) {
             const roadPoints: THREE.Vector3[] = [];
@@ -3398,12 +2177,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             const roadGeometry = new THREE.BufferGeometry().setFromPoints(
               roadPoints,
             );
-            const roadLineMat = new TownLineMat();
-            roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
-            roadLineMat.linewidth = 2;
-            const roadLine = new THREE.Line(roadGeometry, roadLineMat);
+            const roadLine = new THREE.Line(roadGeometry, stRoadLineMat);
             roadLine.userData = { townId: town.id };
-            townMarkers.add(roadLine);
+            resourceManager.stage({
+              object: roadLine,
+              parent: townMarkers,
+            });
           }
         }
 
@@ -3422,12 +2201,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const buildingLOD = new THREE.LOD();
           buildingLOD.position.set(bx, by, bz);
           buildingLOD.rotation.y = building.rotation || 0;
-          lodObjectsRef.current.push(buildingLOD);
 
-          // LOD 0: Full detail - try to generate procedural building
+          // LOD 0: Full detail — shared BuildingGenerator reuses its uberMaterial
           let fullDetailMesh: THREE.Object3D | null = null;
-          const buildingGen = new BuildingGenerator();
-          const generatedBuilding = buildingGen.generate(
+          const generatedBuilding = stBuildingGen.generate(
             building.type || "house",
             {
               includeRoof: true,
@@ -3527,8 +2304,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           // Also set on LOD parent for consistency
           buildingLOD.userData = buildingUserData;
 
-          townMarkers.add(buildingLOD);
-          selectableObjectsRef.current.push(buildingLOD);
+          resourceManager.stage({
+            object: buildingLOD,
+            parent: townMarkers,
+            onAdd: () => {
+              lodObjectsRef.current.push(buildingLOD);
+              selectableObjectsRef.current.push(buildingLOD);
+            },
+          });
         }
 
         // Render town landmarks (fences, lampposts, wells, signposts, etc.)
@@ -3595,7 +2378,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             landmarkMesh.rotation.y = landmark.rotation;
             landmarkMesh.castShadow = true;
             landmarkMesh.receiveShadow = true;
-            townMarkers.add(landmarkMesh);
+            resourceManager.stage({
+              object: landmarkMesh,
+              parent: townMarkers,
+            });
           }
         }
       }
@@ -3653,6 +2439,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       if (existingChildren.length > 0) {
         for (const child of existingChildren) {
           vegetationContainer.remove(child);
+          resourceManager.queueDisposal(child, true);
         }
         vegetationSpeciesMapRef.current.clear();
       }
@@ -3744,7 +2531,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       );
 
       // ---- Set up InstancedMesh per species for GLB models ----
-      const maxPerSpecies = 20000;
+      // Count trees per species first so we allocate exact-size GPU buffers
+      const initSpeciesCounts = new Map<string, number>();
+      for (const tree of initTrees) {
+        const speciesId = `tree_${tree.s}`;
+        initSpeciesCounts.set(
+          speciesId,
+          (initSpeciesCounts.get(speciesId) || 0) + 1,
+        );
+      }
+
       const speciesIds = getAllTreeSpeciesIds();
       const speciesInstanceData = new Map<
         string,
@@ -3756,6 +2552,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       >();
 
       for (const id of speciesIds) {
+        const treeCount = initSpeciesCounts.get(id) || 0;
+        if (treeCount === 0) continue; // Skip species with no trees
         const data = getTreeSpeciesInstance(id);
         if (!data || data.parts.length === 0) continue;
 
@@ -3763,7 +2561,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const im = new THREE.InstancedMesh(
             part.geometry,
             part.material,
-            maxPerSpecies,
+            treeCount,
           );
           im.castShadow = true;
           im.receiveShadow = true;
@@ -3790,7 +2588,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       for (const tree of initTrees) {
         const speciesId = `tree_${tree.s}`;
         const speciesData = speciesInstanceData.get(speciesId);
-        if (!speciesData || speciesData.count >= maxPerSpecies) continue;
+        if (!speciesData) continue;
 
         // Convert centered world coords → 0-based scene coords
         const sceneX = tree.x + worldCenterOffset;
@@ -3810,15 +2608,17 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         totalTreeCount++;
       }
 
-      // Finalize instance counts and add to scene
+      // Finalize instance counts and stage for gradual scene addition
       vegetationSpeciesMapRef.current.clear();
       for (const [speciesId, data] of speciesInstanceData) {
         for (const im of data.meshes) {
           im.count = data.count;
           im.instanceMatrix.needsUpdate = true;
-          vegetationContainer.add(im);
-          // Register for vegetation instance selection
-          vegetationSpeciesMapRef.current.set(im, speciesId);
+          resourceManager.stage({
+            object: im,
+            parent: vegetationContainer,
+            onAdd: () => vegetationSpeciesMapRef.current.set(im, speciesId),
+          });
         }
       }
 
@@ -3956,6 +2756,29 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
+
+      // Monitor GPU device loss — logs the actual reason from Metal/WebGPU
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const backend = (renderer as any).backend;
+      if (backend?.device?.lost) {
+        backend.device.lost.then(
+          (info: { reason: string; message: string }) => {
+            const stats = getGpuLifecycleStats();
+            console.error(
+              `[GPU-DEBUG] DEVICE LOST reason="${info.reason}" message="${info.message}"`,
+            );
+            console.error(
+              `[GPU-DEBUG] DEVICE LOST state: ` +
+                `tiles=${tilesRef.current.size} ` +
+                `staging=${resourceManager.pendingStaged} disposing=${resourceManager.pendingDisposal} ` +
+                `deferredDisposals=${stats.pendingDisposals} deferredAdditions=${stats.pendingAdditions} ` +
+                `totalDisposed=${stats.totalDisposed} totalAdded=${stats.totalAdded} ` +
+                `sceneChildren=${scene.children.length} ` +
+                `markers=${resourceManager.areMarkersHidden ? "hidden" : "visible"}`,
+            );
+          },
+        );
+      }
 
       // Create ViewHelper orientation cube (bottom-right corner)
       // Skip in World Studio — it provides its own viewport controls
@@ -4185,16 +3008,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const vegContainer = vegetationContainerRef.current;
           if (!vegContainer) return;
 
-          // Dispose existing vegetation InstancedMeshes (keep GLB model cache)
+          // Flush any pending staged vegetation from a previous call
+          resourceManager.flushStagedForParent(vegContainer);
+
+          // Remove existing vegetation InstancedMeshes from scene — queue deferred GPU disposal.
+          // GPU resources are NOT disposed synchronously to prevent Metal device loss.
+          // geometryOnly: true because veg InstancedMeshes share geometry/material from species cache.
           const toRemove = [...vegContainer.children];
           for (const child of toRemove) {
             vegContainer.remove(child);
-            if (
-              child instanceof THREE.InstancedMesh ||
-              child instanceof THREE.Mesh
-            ) {
-              // Don't dispose geometry/material — they're shared from the species cache
-            }
+            resourceManager.queueDisposal(child, true);
           }
           vegetationSpeciesMapRef.current.clear();
 
@@ -4320,8 +3143,17 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }));
           vegetationTreesRef.current = trees;
 
-          // Rebuild InstancedMeshes per species
-          const maxPerSpecies = 20000;
+          // Count trees per species first so we allocate exact-size GPU buffers
+          const speciesCounts = new Map<string, number>();
+          for (const tree of trees) {
+            const speciesId = `tree_${tree.s}`;
+            speciesCounts.set(
+              speciesId,
+              (speciesCounts.get(speciesId) || 0) + 1,
+            );
+          }
+
+          // Rebuild InstancedMeshes per species (only for species with trees)
           const speciesIds = getAllTreeSpeciesIds();
           const speciesInstanceData = new Map<
             string,
@@ -4333,13 +3165,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           >();
 
           for (const id of speciesIds) {
+            const treeCount = speciesCounts.get(id) || 0;
+            if (treeCount === 0) continue; // Skip species with no trees
             const data = getTreeSpeciesInstance(id);
             if (!data || data.parts.length === 0) continue;
             const meshes = data.parts.map((part) => {
               const im = new THREE.InstancedMesh(
                 part.geometry,
                 part.material,
-                maxPerSpecies,
+                treeCount,
               );
               im.castShadow = true;
               im.receiveShadow = true;
@@ -4363,7 +3197,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           for (const tree of trees) {
             const speciesId = `tree_${tree.s}`;
             const sd = speciesInstanceData.get(speciesId);
-            if (!sd || sd.count >= maxPerSpecies) continue;
+            if (!sd) continue;
 
             p.set(tree.x + offset, tree.y, tree.z + offset);
             const fs = sd.manifestScale * tree.sc;
@@ -4378,13 +3212,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             totalTreeCount++;
           }
 
-          // Finalize and add to scene
+          // Finalize and stage for gradual scene addition (prevents GPU device loss)
           for (const [speciesId, data] of speciesInstanceData) {
             for (const im of data.meshes) {
               im.count = data.count;
               im.instanceMatrix.needsUpdate = true;
-              vegContainer.add(im);
-              vegetationSpeciesMapRef.current.set(im, speciesId);
+              resourceManager.stage({
+                object: im,
+                parent: vegContainer,
+                onAdd: () => vegetationSpeciesMapRef.current.set(im, speciesId),
+              });
             }
           }
 
@@ -4464,7 +3301,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 ? gen.getHeightAt(wx, wz)
                 : 0;
 
-          // Clear existing town meshes + remove from selectables & LOD tracking
+          // Flush any pending staged objects from a previous call
+          resourceManager.flushStagedForParent(townGroup);
+
+          // Clear existing town meshes — remove from scene + queue deferred GPU disposal.
+          // GPU resources are NOT disposed synchronously because bulk disposal on Metal
+          // invalidates the WebGPU pipeline cache and causes device destruction.
           while (townGroup.children.length > 0) {
             const child = townGroup.children[0];
             townGroup.remove(child);
@@ -4475,7 +3317,34 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               const lodIdx = lodObjectsRef.current.indexOf(child);
               if (lodIdx >= 0) lodObjectsRef.current.splice(lodIdx, 1);
             }
+            // Queue for deferred disposal — processed in small batches after render
+            resourceManager.queueDisposal(child);
           }
+
+          // Shared materials — reuse across all towns to minimize GPU pipeline count.
+          // Each unique material instance requires its own GPU pipeline/uniform buffer.
+          // Without sharing, 4 towns × 20 buildings × 6+ materials = 500+ GPU pipelines
+          // which exhausts Metal's staging buffer pool on macOS.
+          const sharedBuildingGen = new BuildingGenerator();
+          const sharedSimpleMat = new TownStdMat();
+          sharedSimpleMat.color = new THREE.Color(0xd4a373);
+          sharedSimpleMat.roughness = 0.9;
+          const sharedFarMat = new TownBasicMat();
+          sharedFarMat.color = new THREE.Color(0xc9a577);
+          const sharedDetailFallbackMat = new TownStdMat();
+          sharedDetailFallbackMat.color = new THREE.Color(0xd4a373);
+          sharedDetailFallbackMat.roughness = 0.7;
+          sharedDetailFallbackMat.metalness = 0.1;
+          const sharedPillarMat = new TownBasicMat();
+          sharedPillarMat.color = new THREE.Color(0xffffff);
+          const sharedRoadLineMat = new TownLineMat();
+          sharedRoadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
+          sharedRoadLineMat.linewidth = 2;
+          // Cache cone/ring materials per town-size color
+          const coneMaterialCache = new Map<number, MeshBasicNodeMaterial>();
+          const ringMaterialCache = new Map<number, MeshBasicNodeMaterial>();
+          // Cache landmark materials per color
+          const landmarkMatCache = new Map<number, MeshStandardNodeMaterial>();
 
           // Render each town with full detail (mirrors initial layout.towns rendering)
           for (const town of newTowns) {
@@ -4494,46 +3363,59 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               townName: town.name,
             };
 
-            // Cone marker pointing down
+            // Cone marker pointing down — shared material per town-size color
             const coneGeo = new THREE.ConeGeometry(20, 50, 8);
-            const coneMat = new MeshBasicNodeMaterial();
-            coneMat.color = new THREE.Color(color);
-            const cone = new THREE.Mesh(coneGeo, coneMat);
+            if (!coneMaterialCache.has(color)) {
+              const mat = new MeshBasicNodeMaterial();
+              mat.color = new THREE.Color(color);
+              coneMaterialCache.set(color, mat);
+            }
+            const cone = new THREE.Mesh(coneGeo, coneMaterialCache.get(color)!);
             cone.position.set(mx, my + 60, mz);
             cone.rotation.x = Math.PI;
             cone.userData = townUserData;
-            townGroup.add(cone);
-            selectableObjectsRef.current.push(cone);
+            resourceManager.stage({
+              object: cone,
+              parent: townGroup,
+              onAdd: () => selectableObjectsRef.current.push(cone),
+            });
 
-            // Safe zone ring
+            // Safe zone ring — shared material per town-size color
             const ringGeo = new THREE.RingGeometry(
               town.safeZoneRadius - 5,
               town.safeZoneRadius,
               48,
             );
-            const ringMat = new MeshBasicNodeMaterial();
-            ringMat.color = new THREE.Color(color);
-            ringMat.side = THREE.DoubleSide;
-            ringMat.transparent = true;
-            ringMat.opacity = 0.4;
-            const ring = new THREE.Mesh(ringGeo, ringMat);
+            if (!ringMaterialCache.has(color)) {
+              const mat = new MeshBasicNodeMaterial();
+              mat.color = new THREE.Color(color);
+              mat.side = THREE.DoubleSide;
+              mat.transparent = true;
+              mat.opacity = 0.4;
+              ringMaterialCache.set(color, mat);
+            }
+            const ring = new THREE.Mesh(ringGeo, ringMaterialCache.get(color)!);
             ring.rotation.x = -Math.PI / 2;
             ring.position.set(mx, my + 2, mz);
             ring.userData = townUserData;
-            townGroup.add(ring);
-            selectableObjectsRef.current.push(ring);
+            resourceManager.stage({
+              object: ring,
+              parent: townGroup,
+              onAdd: () => selectableObjectsRef.current.push(ring),
+            });
 
-            // Center pillar
+            // Center pillar — shared material
             const pillarGeo = new THREE.CylinderGeometry(3, 3, 30, 8);
-            const pillarMat = new TownBasicMat();
-            pillarMat.color = new THREE.Color(0xffffff);
-            const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+            const pillar = new THREE.Mesh(pillarGeo, sharedPillarMat);
             pillar.position.set(mx, my + 15, mz);
             pillar.userData = townUserData;
-            townGroup.add(pillar);
-            selectableObjectsRef.current.push(pillar);
+            resourceManager.stage({
+              object: pillar,
+              parent: townGroup,
+              onAdd: () => selectableObjectsRef.current.push(pillar),
+            });
 
-            // Internal roads — use flattened centerHeight for Y
+            // Internal roads — shared material
             if (town.internalRoads && town.internalRoads.length > 0) {
               for (const road of town.internalRoads) {
                 const startX = road.start.x + offset;
@@ -4547,12 +3429,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                   new THREE.Vector3(startX, startY, startZ),
                   new THREE.Vector3(endX, endY, endZ),
                 ]);
-                const roadLineMat = new TownLineMat();
-                roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
-                roadLineMat.linewidth = 2;
-                const roadLine = new THREE.Line(roadGeo, roadLineMat);
+                const roadLine = new THREE.Line(roadGeo, sharedRoadLineMat);
                 roadLine.userData = { townId: town.id };
-                townGroup.add(roadLine);
+                resourceManager.stage({
+                  object: roadLine,
+                  parent: townGroup,
+                });
               }
             }
 
@@ -4569,12 +3451,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               const buildingLOD = new THREE.LOD();
               buildingLOD.position.set(bx, by, bz);
               buildingLOD.rotation.y = building.rotation || 0;
-              lodObjectsRef.current.push(buildingLOD);
 
-              // LOD 0: Procedural building
+              // LOD 0: Procedural building — shared BuildingGenerator reuses its uberMaterial
               let fullDetailMesh: THREE.Object3D | null = null;
-              const buildingGen = new BuildingGenerator();
-              const generatedBuilding = buildingGen.generate(
+              const generatedBuilding = sharedBuildingGen.generate(
                 building.type || "house",
                 { includeRoof: true, seed: `${town.id}-${building.id}` },
               );
@@ -4603,31 +3483,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                   buildingHeight,
                   buildingDepth,
                 );
-                const detailMat = new TownStdMat();
-                detailMat.color = new THREE.Color(0xd4a373);
-                detailMat.roughness = 0.7;
-                detailMat.metalness = 0.1;
-                fullDetailMesh = new THREE.Mesh(detailGeo, detailMat);
+                fullDetailMesh = new THREE.Mesh(
+                  detailGeo,
+                  sharedDetailFallbackMat,
+                );
                 fullDetailMesh.position.y = buildingHeight / 2;
                 fullDetailMesh.castShadow = true;
                 fullDetailMesh.receiveShadow = true;
               }
 
-              // LOD 1: Simple box
+              // LOD 1: Simple box — shared material
               const simpleGeo = new THREE.BoxGeometry(
                 buildingWidth,
                 buildingHeight,
                 buildingDepth,
               );
-              const simpleMat = new TownStdMat();
-              simpleMat.color = new THREE.Color(0xd4a373);
-              simpleMat.roughness = 0.9;
-              const simpleMesh = new THREE.Mesh(simpleGeo, simpleMat);
+              const simpleMesh = new THREE.Mesh(simpleGeo, sharedSimpleMat);
               simpleMesh.position.y = buildingHeight / 2;
               simpleMesh.castShadow = false;
               simpleMesh.receiveShadow = true;
 
-              // LOD 2: Far box
+              // LOD 2: Far box — shared material
               const farGeo = new THREE.BoxGeometry(
                 buildingWidth,
                 buildingHeight,
@@ -4636,8 +3512,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 1,
                 1,
               );
-              const farMat = new TownBasicMat();
-              farMat.color = new THREE.Color(0xc9a577);
+              const farMat = sharedFarMat;
               const farMesh = new THREE.Mesh(farGeo, farMat);
               farMesh.position.y = buildingHeight / 2;
 
@@ -4660,8 +3535,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
               buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
               buildingLOD.userData = buildingUserData;
-              townGroup.add(buildingLOD);
-              selectableObjectsRef.current.push(buildingLOD);
+              resourceManager.stage({
+                object: buildingLOD,
+                parent: townGroup,
+                onAdd: () => {
+                  lodObjectsRef.current.push(buildingLOD);
+                  selectableObjectsRef.current.push(buildingLOD);
+                },
+              });
             }
 
             // Landmarks — use flattened centerHeight for Y
@@ -4718,16 +3599,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                   height,
                   landmark.size.depth,
                 );
-                const landmarkMat = new TownStdMat();
-                landmarkMat.color = new THREE.Color(landmarkColor);
-                landmarkMat.roughness = 0.7;
-                const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
+                if (!landmarkMatCache.has(landmarkColor)) {
+                  const mat = new TownStdMat();
+                  mat.color = new THREE.Color(landmarkColor);
+                  mat.roughness = 0.7;
+                  landmarkMatCache.set(landmarkColor, mat);
+                }
+                const landmarkMesh = new THREE.Mesh(
+                  landmarkGeo,
+                  landmarkMatCache.get(landmarkColor)!,
+                );
                 landmarkMesh.position.set(lx, ly + height / 2, lz);
                 landmarkMesh.rotation.y = landmark.rotation;
                 landmarkMesh.castShadow = true;
                 landmarkMesh.receiveShadow = true;
                 landmarkMesh.userData = { townId: town.id };
-                townGroup.add(landmarkMesh);
+                resourceManager.stage({
+                  object: landmarkMesh,
+                  parent: townGroup,
+                });
               }
             }
           }
@@ -4860,6 +3750,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       let lastRotationUpdate = 0;
       // Pre-allocated vector for label world position query (avoids GC)
       const _labelWorldPos = new THREE.Vector3();
+      // GPU diagnostic: log scene stats every N frames to correlate with device loss
+      let _gpuDiagFrame = 0;
 
       const animate = () => {
         if (!mounted) return;
@@ -4872,6 +3764,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
         updateCamera(deltaTime);
         updateTiles();
+
+        // GPU resource staging — see SceneResourceManager for invariants.
+        // Must run BEFORE LOD updates so newly added LOD objects get their
+        // visibility set correctly (without update(), all 3 levels render).
+        resourceManager.processStaging(entitySyncRef.current);
+
+        // Hide entity markers when zoomed far out — invisible at that distance
+        // but still thousands of draw calls. Only override when RM isn't managing
+        // visibility (RM hides during staging; we hide based on altitude).
+        if (entitySyncRef.current && !resourceManager.areMarkersHidden) {
+          entitySyncRef.current.visible =
+            camera.position.y < MARKER_HIDE_ALTITUDE;
+        }
 
         // Update LOD objects based on camera position
         for (const lod of lodObjectsRef.current) {
@@ -4934,13 +3839,47 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        renderer.render(scene, camera);
+        // GPU diagnostic — periodic logging only
+        _gpuDiagFrame++;
+
+        try {
+          renderer.render(scene, camera);
+        } catch (err) {
+          // GPU device lost — stop the animation loop to prevent error cascade
+          const crashStats = getGpuLifecycleStats();
+          console.error(
+            `[GPU-DEBUG] RENDER CRASH: deferDispose=${crashStats.pendingDisposals} deferAdd=${crashStats.pendingAdditions} ` +
+              `rmStaging=${resourceManager.pendingStaged} rmDisposing=${resourceManager.pendingDisposal} ` +
+              `scene=${scene.children.length}`,
+          );
+          console.error(
+            "[TileBasedTerrain] GPU device lost, stopping render loop:",
+            err,
+          );
+          mounted = false;
+          return;
+        }
 
         // Render ViewHelper orientation cube overlay
         // ViewHelper types expect WebGLRenderer but work with WebGPURenderer at runtime
         if (viewHelperRef.current) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           viewHelperRef.current.render(renderer as any);
+        }
+
+        // GPU resource disposal — runs AFTER rendering, only when staging is done.
+        // See SceneResourceManager for phase separation invariant.
+        resourceManager.processDisposal();
+
+        // Process deferred GPU operations (overlay hooks) ONLY when
+        // SceneResourceManager has no pending work. This prevents both
+        // systems from creating GPU buffers in the same frame, which
+        // exhausts Metal's staging buffer pool and kills the device.
+        if (
+          !resourceManager.hasStagedWork &&
+          resourceManager.pendingDisposal === 0
+        ) {
+          processDeferredFrame();
         }
       };
       animate();
@@ -4989,6 +3928,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       document.removeEventListener("contextmenu", handleContextMenu, true);
 
       cancelAnimationFrame(currentAnimationId.current);
+
+      // Flush staging + disposal queues — on unmount we can dispose everything
+      // synchronously since the renderer is being torn down anyway.
+      resourceManager.flush();
 
       // Dispose all tiles
       for (const [key] of currentTiles) {

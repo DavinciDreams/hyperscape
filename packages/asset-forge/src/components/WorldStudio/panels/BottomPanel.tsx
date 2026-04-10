@@ -496,7 +496,7 @@ function HistoryTab() {
 
 // ============== BOTTOM PANEL ==============
 
-export function BottomPanel() {
+export const BottomPanel = React.memo(function BottomPanel() {
   const [expanded, setExpanded] = useState(() =>
     loadBoolean(STORAGE_KEY_EXPANDED, false),
   );
@@ -678,4 +678,4 @@ export function BottomPanel() {
       )}
     </div>
   );
-}
+});

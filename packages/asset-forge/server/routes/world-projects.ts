@@ -105,9 +105,16 @@ export const createWorldProjectRoutes = (
               return { error: "Not a member of this team" };
             }
 
+            const parsedLimit = limit
+              ? Math.min(Math.max(parseInt(limit) || 50, 1), 100)
+              : 50;
+            const parsedOffset = offset
+              ? Math.max(parseInt(offset) || 0, 0)
+              : 0;
+
             const projects = await worldProjectService.list(teamId, gameId, {
-              limit: limit ? parseInt(limit) : undefined,
-              offset: offset ? parseInt(offset) : undefined,
+              limit: parsedLimit,
+              offset: parsedOffset,
             });
 
             return projects.map(formatProjectResponse);
@@ -431,7 +438,9 @@ export const createWorldProjectRoutes = (
           },
           {
             params: t.Object({ projectId: t.String() }),
-            body: t.Object({ manifestSnapshot: t.Any() }),
+            body: t.Object({
+              manifestSnapshot: t.Record(t.String(), t.Unknown()),
+            }),
             response: {
               200: WS.WorldProjectResponse,
               403: Models.ErrorResponse,

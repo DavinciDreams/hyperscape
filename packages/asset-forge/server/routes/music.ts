@@ -86,7 +86,7 @@ export const musicRoutes = new Elysia({
           body: Models.GenerateMusicRequest,
           response: t.Object({
             audio: t.String(),
-            metadata: t.Any(),
+            metadata: t.Unknown(),
             format: t.String(),
           }),
           detail: {
@@ -116,7 +116,7 @@ export const musicRoutes = new Elysia({
         },
         {
           body: Models.CreateCompositionPlanRequest,
-          response: t.Any(),
+          response: t.Unknown(),
           detail: {
             tags: ["Music Generation"],
             summary: "Create composition plan",

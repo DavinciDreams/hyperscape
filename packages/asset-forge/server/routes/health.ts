@@ -28,11 +28,16 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" })
       },
     },
   )
-  .get("/health/auth-debug", ({ request }) => {
+  .get("/health/auth-debug", ({ request, set }) => {
+    // Restrict to development only — exposes config details
+    if (process.env.NODE_ENV === "production") {
+      set.status = 404;
+      return { error: "Endpoint not found" };
+    }
+
     const authHeader = request.headers.get("authorization");
     const hasBearer = authHeader?.startsWith("Bearer ") ?? false;
     const tokenLength = hasBearer ? authHeader!.slice(7).length : 0;
-    const tokenPrefix = hasBearer ? authHeader!.slice(7, 27) + "..." : null;
 
     return {
       database: {
@@ -44,23 +49,14 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" })
           process.env.PRIVY_APP_ID || process.env.PUBLIC_PRIVY_APP_ID
         ),
         hasSecret: !!process.env.PRIVY_APP_SECRET,
-        appIdPrefix:
-          (
-            process.env.PRIVY_APP_ID ||
-            process.env.PUBLIC_PRIVY_APP_ID ||
-            ""
-          ).slice(0, 8) + "...",
       },
       request: {
         hasAuthHeader: !!authHeader,
         hasBearerToken: hasBearer,
         tokenLength,
-        tokenPrefix,
       },
       env: {
-        grantDevAdmin: process.env.GRANT_DEV_ADMIN,
         nodeEnv: process.env.NODE_ENV,
-        useLocalPostgres: process.env.USE_LOCAL_POSTGRES,
         hasDatabaseUrl: !!process.env.DATABASE_URL,
       },
     };

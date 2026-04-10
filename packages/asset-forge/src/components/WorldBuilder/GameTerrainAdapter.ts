@@ -12,8 +12,8 @@ import {
   MAX_HEIGHT,
   WATER_LEVEL_NORMALIZED,
   SHORELINE_CONFIG,
-  LANDSCAPE_FEATURES,
   BIOME_CONFIG,
+  BIOME_CONFIGS,
   ISLAND_RADIUS,
   ISLAND_FALLOFF,
   ISLAND_DEEP_OCEAN_BUFFER,
@@ -22,7 +22,7 @@ import {
   COAST_LARGE,
   COAST_MEDIUM,
   COAST_SMALL,
-  type TerrainNoiseAdapter,
+  type BiomeNoiseSet,
 } from "@hyperscape/shared/world";
 import { BiomeSystem } from "@hyperscape/procgen/terrain";
 import type { BiomeDefinition, BiomeConfig } from "@hyperscape/procgen/terrain";
@@ -108,6 +108,18 @@ export interface GameTerrainQuery {
  */
 export function createGameTerrainQuerier(seed: number = GAME_SEED) {
   const noise = new NoiseGenerator(seed);
+
+  // Build per-biome noise sets (mirrors TerrainSystem.ensureNoiseInitialized)
+  const biomeNoiseSets: Record<string, BiomeNoiseSet> = {};
+  for (const [key, cfg] of Object.entries(BIOME_CONFIGS)) {
+    const base = seed + cfg.seedOffset;
+    biomeNoiseSets[key] = {
+      main: new NoiseGenerator(base),
+      variation: new NoiseGenerator(base + 4),
+      erosion: new NoiseGenerator(base + 1),
+    };
+  }
+
   const biomeTypes = ["tundra", "forest", "canyon"];
   const explicitCenters = BiomeSystem.computePolygonCenters(
     biomeTypes,
@@ -208,23 +220,9 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
     return { r, g, b };
   }
 
-  // Adapt NoiseGenerator to the TerrainNoiseAdapter interface
-  const noiseAdapter: TerrainNoiseAdapter = {
-    fractal2D: (
-      x: number,
-      z: number,
-      octaves: number,
-      persistence: number,
-      lacunarity: number,
-    ) => noise.fractal2D(x, z, octaves, persistence, lacunarity),
-    ridgeNoise2D: (x: number, z: number) => noise.ridgeNoise2D(x, z),
-    erosionNoise2D: (x: number, z: number, iterations: number) =>
-      noise.erosionNoise2D(x, z, iterations),
-    simplex2D: (x: number, z: number) => noise.simplex2D(x, z),
-  };
-
   /**
-   * Compute base height using shared algorithm, then apply shoreline adjustment.
+   * Compute base height using shared algorithm.
+   * Uses the new per-biome independent noise system (same as TerrainSystem).
    */
   function computeHeight(
     worldX: number,
@@ -234,10 +232,9 @@ export function createGameTerrainQuerier(seed: number = GAME_SEED) {
     return computeBaseHeight(
       worldX,
       worldZ,
-      noiseAdapter,
+      noise,
+      biomeNoiseSets,
       biomeWeights,
-      LANDSCAPE_FEATURES,
-      GAME_MAX_HEIGHT,
     );
   }
 

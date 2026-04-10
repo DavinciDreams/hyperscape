@@ -154,7 +154,7 @@ export const voiceGenerationRoutes = new Elysia({
         },
         {
           response: t.Object({
-            models: t.Array(t.Any()),
+            models: t.Array(t.Unknown()),
             count: t.Number(),
           }),
           detail: {

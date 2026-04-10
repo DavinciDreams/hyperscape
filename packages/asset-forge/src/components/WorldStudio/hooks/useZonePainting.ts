@@ -30,6 +30,11 @@ import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type { PlacedRegion } from "../types";
 import { tileKey, parseTileKey, ZONE_TILE_SIZE } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
+import {
+  queueDisposal,
+  stageAddition,
+  cancelStagedAdditions,
+} from "../utils/deferredGpuDisposal";
 
 // ============== CONSTANTS ==============
 
@@ -41,15 +46,6 @@ const TILE_SEGMENTS = 1; // 1m tiles only need 4 corner verts
 const VERTS_PER_TILE = (TILE_SEGMENTS + 1) * (TILE_SEGMENTS + 1); // 25
 const TRIS_PER_TILE = TILE_SEGMENTS * TILE_SEGMENTS * 2; // 32
 const INDICES_PER_TILE = TRIS_PER_TILE * 3; // 96
-
-/** Safely dispose a material — WebGPU NodeManager may crash if the material was never rendered */
-function safeDispose(resource: { dispose(): void }): void {
-  try {
-    resource.dispose();
-  } catch {
-    // WebGPU NodeManager.delete throws when usedTimes is undefined on unrendered materials
-  }
-}
 
 const REGION_COLORS = [
   0xff8800, 0x00ccff, 0x88ff00, 0xff44aa, 0xaa44ff, 0xffcc00, 0x00ff88,
@@ -247,10 +243,10 @@ interface RegionOverlayEntry {
 }
 
 function disposeOverlayEntry(entry: RegionOverlayEntry): void {
-  safeDispose(entry.geometry);
-  safeDispose(entry.material);
-  if (entry.label.material.map) safeDispose(entry.label.material.map);
-  safeDispose(entry.label.material);
+  queueDisposal(entry.geometry);
+  queueDisposal(entry.material);
+  if (entry.label.material.map) queueDisposal(entry.label.material.map);
+  queueDisposal(entry.label.material);
 }
 
 function buildRegionMesh(
@@ -564,8 +560,9 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
     const refs = sceneRefsRef.current;
     if (!refs) return;
 
-    // Tear down
+    // Tear down — cancel pending staged additions first
     if (overlayGroupRef.current) {
+      cancelStagedAdditions(overlayGroupRef.current);
       refs.scene.remove(overlayGroupRef.current);
       for (const entry of overlayEntriesRef.current.values()) {
         disposeOverlayEntry(entry);
@@ -577,9 +574,13 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
     const currentRegions = regionsRef.current;
     if (currentRegions.length === 0) return;
 
+    // Add empty group to scene — children will be staged in batches
     const group = new THREE.Group();
     group.name = "zone-tile-overlay";
     group.renderOrder = 997;
+    group.visible = zoneOverlayVisibleRef.current;
+    refs.scene.add(group);
+    overlayGroupRef.current = group;
 
     const selId = selection?.type === "region" ? selection.id : null;
     const heightFn = refs.getTerrainHeight ?? null;
@@ -605,14 +606,12 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
         sceneOffset,
         refs.worldCenterOffset,
       );
-      group.add(entry.mesh);
-      group.add(entry.label);
       overlayEntriesRef.current.set(region.id, entry);
-    }
 
-    group.visible = zoneOverlayVisibleRef.current;
-    refs.scene.add(group);
-    overlayGroupRef.current = group;
+      // Stage children — GPU buffers created gradually across frames
+      stageAddition(entry.mesh, group);
+      stageAddition(entry.label, group);
+    }
   }, [selection, ts]);
 
   // Toggle overlay visibility without rebuilding geometry
@@ -735,11 +734,11 @@ export function useZonePainting({ sceneRefs }: ZonePaintingOptions) {
 
     return () => {
       sceneRefs.scene.remove(cursorMesh);
-      safeDispose(cursorGeo);
-      safeDispose(cursorMat);
+      queueDisposal(cursorGeo);
+      queueDisposal(cursorMat);
       sceneRefs.scene.remove(outline);
-      safeDispose(outlineGeo);
-      safeDispose(outlineMat);
+      queueDisposal(outlineGeo);
+      queueDisposal(outlineMat);
       cursorMeshRef.current = null;
       cursorGeoRef.current = null;
       cursorOutlineRef.current = null;

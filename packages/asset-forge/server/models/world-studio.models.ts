@@ -102,19 +102,49 @@ export const TeamInviteResponse = t.Object({
   acceptedAt: t.Nullable(t.String()),
 });
 
+// ==================== World Data Schemas ====================
+
+/**
+ * WorldData is a deeply-nested JSON object representing the entire world state.
+ * We validate the top-level structure while allowing flexible nested content.
+ * This prevents completely unstructured payloads while staying compatible with
+ * the evolving client-side WorldBuilderContext shape.
+ */
+const WorldDataSchema = t.Object(
+  {
+    mode: t.Optional(t.String()),
+    creation: t.Optional(t.Record(t.String(), t.Unknown())),
+    editing: t.Optional(t.Record(t.String(), t.Unknown())),
+    viewport: t.Optional(t.Record(t.String(), t.Unknown())),
+    history: t.Optional(t.Record(t.String(), t.Unknown())),
+  },
+  { additionalProperties: true },
+);
+
+/** Manifest snapshot — structured export of game-ready data */
+const ManifestSnapshotSchema = t.Nullable(
+  t.Object(
+    {
+      version: t.Optional(t.Number()),
+      exportedAt: t.Optional(t.String()),
+    },
+    { additionalProperties: true },
+  ),
+);
+
 // ==================== World Project Models ====================
 
 export const CreateWorldProjectBody = t.Object({
   name: t.String({ minLength: 1, maxLength: 200 }),
   description: t.Optional(t.String({ maxLength: 2000 })),
   gameId: t.String({ format: "uuid" }),
-  worldData: t.Any(), // Full WorldBuilderContext serialized state
+  worldData: WorldDataSchema,
 });
 
 export const UpdateWorldProjectBody = t.Object({
   name: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
   description: t.Optional(t.String({ maxLength: 2000 })),
-  worldData: t.Optional(t.Any()),
+  worldData: t.Optional(WorldDataSchema),
 });
 
 export const WorldProjectResponse = t.Object({
@@ -134,8 +164,8 @@ export const WorldProjectResponse = t.Object({
 export const WorldProjectDetailResponse = t.Composite([
   WorldProjectResponse,
   t.Object({
-    worldData: t.Any(),
-    manifestSnapshot: t.Nullable(t.Any()),
+    worldData: WorldDataSchema,
+    manifestSnapshot: ManifestSnapshotSchema,
   }),
 ]);
 

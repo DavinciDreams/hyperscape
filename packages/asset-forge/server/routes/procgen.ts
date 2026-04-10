@@ -382,15 +382,23 @@ export const createProcgenRoutes = (presetService: ProcgenPresetService) => {
               version: t.Optional(t.Number()),
               presets: t.Optional(
                 t.Object({
-                  trees: t.Optional(t.Array(t.Any())),
-                  rocks: t.Optional(t.Array(t.Any())),
-                  plants: t.Optional(t.Array(t.Any())),
-                  buildings: t.Optional(t.Array(t.Any())),
-                  terrain: t.Optional(t.Array(t.Any())),
-                  roads: t.Optional(t.Array(t.Any())),
+                  trees: t.Optional(t.Array(t.Record(t.String(), t.Unknown()))),
+                  rocks: t.Optional(t.Array(t.Record(t.String(), t.Unknown()))),
+                  plants: t.Optional(
+                    t.Array(t.Record(t.String(), t.Unknown())),
+                  ),
+                  buildings: t.Optional(
+                    t.Array(t.Record(t.String(), t.Unknown())),
+                  ),
+                  terrain: t.Optional(
+                    t.Array(t.Record(t.String(), t.Unknown())),
+                  ),
+                  roads: t.Optional(t.Array(t.Record(t.String(), t.Unknown()))),
                 }),
               ),
-              generatedAssets: t.Optional(t.Array(t.Any())),
+              generatedAssets: t.Optional(
+                t.Array(t.Record(t.String(), t.Unknown())),
+              ),
             }),
             merge: t.Optional(t.Boolean()),
           }),

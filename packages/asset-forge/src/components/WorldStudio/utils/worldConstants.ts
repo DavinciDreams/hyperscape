@@ -15,7 +15,7 @@ export const MIN_RESOURCE_SPACING = 8;
 export const MIN_STATION_SPACING = 20;
 
 /** Base mob density per m² before tier multiplier */
-export const BASE_MOB_DENSITY = 0.0004;
+export const BASE_MOB_DENSITY = 0.0002;
 
 /** Base resource density per m² before tier multiplier */
 export const BASE_RESOURCE_DENSITY = 0.0004;

@@ -202,7 +202,7 @@ const CATEGORIES: CategoryConfig[] = [
   },
 ];
 
-export function EntityPalette() {
+export const EntityPalette = React.memo(function EntityPalette() {
   const { state, actions } = useWorldStudio();
   const { manifests, tools } = state;
   const activePlacement = tools.activePlacement;
@@ -726,7 +726,7 @@ export function EntityPalette() {
       </div>
     </div>
   );
-}
+});
 
 /** Header for the palette panel */
 function PaletteHeader({

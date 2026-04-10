@@ -573,7 +573,7 @@ function matchesTypeFilter(
 
 // ============== MAIN COMPONENT ==============
 
-export function ContentBrowser() {
+export const ContentBrowser = React.memo(function ContentBrowser() {
   const { state, actions } = useWorldStudio();
   const manifests = state.manifests;
 
@@ -879,7 +879,7 @@ export function ContentBrowser() {
       </div>
     </div>
   );
-}
+});
 
 // ============== HEADER ==============
 

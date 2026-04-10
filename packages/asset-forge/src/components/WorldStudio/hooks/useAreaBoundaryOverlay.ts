@@ -19,6 +19,11 @@ import { useEffect, useRef } from "react";
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import { useWorldStudio } from "../WorldStudioContext";
 import type { PlacedDangerSource, WildernessBoundary } from "../types";
+import {
+  deferredDisposeGroup,
+  stageAddition,
+  cancelStagedAdditions,
+} from "../utils/deferredGpuDisposal";
 
 // ============== CONSTANTS ==============
 
@@ -489,26 +494,6 @@ function buildWildernessBoundaryOverlay(
   group.add(label);
 }
 
-// ============== DISPOSAL ==============
-
-function disposeGroup(group: THREE.Group): void {
-  group.traverse((child) => {
-    if (child instanceof THREE.Line || child instanceof THREE.Mesh) {
-      child.geometry.dispose();
-      if (Array.isArray(child.material)) {
-        child.material.forEach((m) => m.dispose());
-      } else {
-        child.material.dispose();
-      }
-    }
-    if (child instanceof THREE.Sprite) {
-      child.material.map?.dispose();
-      child.material.dispose();
-    }
-  });
-  group.clear();
-}
-
 // ============== HOOK ==============
 
 export function useAreaBoundaryOverlay(
@@ -540,47 +525,59 @@ export function useAreaBoundaryOverlay(
   useEffect(() => {
     if (!sceneRefs) return;
 
-    // Tear down previous group
+    // Tear down previous group — cancel any pending staged additions first
     if (overlayGroup.current) {
+      cancelStagedAdditions(overlayGroup.current);
       sceneRefs.scene.remove(overlayGroup.current);
-      disposeGroup(overlayGroup.current);
+      deferredDisposeGroup(overlayGroup.current);
       overlayGroup.current = null;
     }
 
     // Nothing to render if no overlay is active or no world data
     if (!anyOverlayActive || !world) return;
 
-    const group = new THREE.Group();
-    group.name = "area-boundary-overlay";
-    group.renderOrder = 998;
+    // Build all children into a temporary group, then stage them into the
+    // real group in batches — prevents bulk GPU buffer creation in one frame.
+    const tmpGroup = new THREE.Group();
 
     // Difficulty zones
     if (difficultyOverlay && difficultyZones && difficultyZones.length > 0) {
-      buildDifficultyOverlay(group, difficultyZones);
+      buildDifficultyOverlay(tmpGroup, difficultyZones);
     }
 
     // Town boundaries (always shown when any overlay is active)
     if (towns && towns.length > 0) {
-      buildTownBoundaryOverlay(group, towns, buildings ?? [], townOverrides);
+      buildTownBoundaryOverlay(tmpGroup, towns, buildings ?? [], townOverrides);
     }
 
     // Danger sources (shown when difficulty overlay is active)
     if (difficultyOverlay && dangerSources.length > 0) {
-      buildDangerSourceOverlay(group, dangerSources);
+      buildDangerSourceOverlay(tmpGroup, dangerSources);
     }
 
     // Wilderness boundary (shown when difficulty overlay is active)
     if (difficultyOverlay && wildernessBoundary) {
-      buildWildernessBoundaryOverlay(group, wildernessBoundary);
+      buildWildernessBoundaryOverlay(tmpGroup, wildernessBoundary);
     }
 
     // Biome regions
     if (biomeOverlay && biomes && biomes.length > 0) {
-      buildBiomeOverlay(group, biomes);
+      buildBiomeOverlay(tmpGroup, biomes);
     }
 
+    // Add empty group to scene, then stage children in batches
+    const group = new THREE.Group();
+    group.name = "area-boundary-overlay";
+    group.renderOrder = 998;
     sceneRefs.scene.add(group);
     overlayGroup.current = group;
+
+    // Collect children from tmpGroup and stage them
+    const children = [...tmpGroup.children];
+    tmpGroup.clear(); // detach from tmpGroup (no GPU cost)
+    for (const child of children) {
+      stageAddition(child, group);
+    }
   }, [
     sceneRefs,
     anyOverlayActive,
@@ -603,7 +600,7 @@ export function useAreaBoundaryOverlay(
       const group = overlayGroup.current;
       if (refs && group) {
         refs.scene.remove(group);
-        disposeGroup(group);
+        deferredDisposeGroup(group);
       }
     };
   }, []);

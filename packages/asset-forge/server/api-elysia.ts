@@ -32,6 +32,7 @@ import { PlacementService } from "./services/PlacementService";
 // Middleware
 import { errorHandler } from "./middleware/errorHandler";
 import { loggingMiddleware } from "./middleware/logging";
+import { securityHeaders } from "./middleware/securityHeaders";
 
 // Routes
 import { healthRoutes } from "./routes/health";
@@ -299,6 +300,18 @@ const app = new Elysia()
   // Middleware
   .use(errorHandler)
   .use(loggingMiddleware)
+  .use(securityHeaders)
+
+  // Global body size limit (10 MB for JSON payloads)
+  .onParse({ as: "global" }, async ({ request, contentType }) => {
+    if (contentType === "application/json" || contentType === "text/plain") {
+      const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+      const contentLength = request.headers.get("content-length");
+      if (contentLength && parseInt(contentLength, 10) > MAX_BODY_BYTES) {
+        throw new Error("Request body too large (max 10 MB)");
+      }
+    }
+  })
 
   // Static file serving - generated assets
   .use(
