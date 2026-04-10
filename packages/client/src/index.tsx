@@ -84,19 +84,19 @@ const EmbeddedGameClient = React.lazy(() =>
     default: m.EmbeddedGameClient,
   })),
 );
+const EmbeddedAgentControlScreen = React.lazy(() =>
+  import("./screens/EmbeddedAgentControlScreen").then((m) => ({
+    default: m.EmbeddedAgentControlScreen,
+  })),
+);
 import { isEmbeddedMode } from "./types/embeddedConfig";
 import { GAME_API_URL, GAME_WS_URL, refreshApiConfig } from "./lib/api-config";
+import { validateURLParams } from "./utils/InputValidator";
 import {
-  validateURLParams,
-  type URLParamValidation,
-} from "./utils/InputValidator";
-
-import type {
-  EmbeddedViewportConfig,
-  ViewportMode,
-  GraphicsQuality,
-  HideableUIElement,
-} from "./types/embeddedConfig";
+  buildEmbeddedConfig,
+  embeddedParamSchema,
+  getEmbeddedSurface,
+} from "./lib/embedded-entry";
 
 // Buffer polyfill for Privy (required for crypto operations in browser)
 // Must be imported and assigned BEFORE any other imports that might use it
@@ -198,25 +198,6 @@ try {
 const urlParams = new URLSearchParams(window.location.search);
 const isEmbedded = urlParams.get("embedded") === "true";
 
-// URL parameter validation schema for embedded mode
-// SECURITY: authToken is NOT accepted via URL parameters
-// Tokens in URLs are exposed in browser history, referrer headers, and server logs
-const embeddedParamSchema: URLParamValidation[] = [
-  { name: "embedded", type: "boolean" },
-  { name: "mode", type: "enum", enumValues: ["spectator", "free"] as const },
-  {
-    name: "quality",
-    type: "enum",
-    enumValues: ["potato", "low", "medium", "high", "ultra"] as const,
-  },
-  { name: "agentId", type: "id", maxLength: 64 },
-  { name: "characterId", type: "id", maxLength: 64 },
-  { name: "followEntity", type: "id", maxLength: 64 },
-  { name: "wsUrl", type: "url" },
-  { name: "hiddenUI", type: "string", maxLength: 128 },
-  { name: "privyUserId", type: "id", maxLength: 64 },
-];
-
 if (isEmbedded) {
   window.__HYPERSCAPE_EMBEDDED__ = true;
 
@@ -230,48 +211,7 @@ if (isEmbedded) {
     );
   }
 
-  // Construct config from validated params
-  const params = validation.params;
-  const modeParam = params.mode as string | undefined;
-  const qualityParam = params.quality as string | undefined;
-  const mode: ViewportMode = (
-    modeParam === "spectator" || modeParam === "free" ? modeParam : "spectator"
-  ) as ViewportMode;
-  const defaultQuality: GraphicsQuality =
-    mode === "spectator" ? "low" : "medium";
-
-  // Parse hiddenUI as comma-separated list
-  const hiddenUIRaw = params.hiddenUI as string | undefined;
-  const validHiddenUI: HideableUIElement[] = [];
-  if (hiddenUIRaw) {
-    const validElements = ["chat", "inventory", "minimap", "hotbar", "stats"];
-    hiddenUIRaw.split(",").forEach((el) => {
-      if (validElements.includes(el)) {
-        validHiddenUI.push(el as HideableUIElement);
-      }
-    });
-  }
-
-  const config: EmbeddedViewportConfig = {
-    agentId: (params.agentId as string) || "",
-    // SECURITY: authToken is NOT read from URL parameters
-    // It will be set via postMessage from parent window or from session storage
-    authToken: "", // Will be populated via secure postMessage
-    characterId: (params.characterId as string) || undefined,
-    wsUrl: (params.wsUrl as string) || GAME_WS_URL,
-    mode,
-    followEntity: (params.followEntity as string) || undefined,
-    hiddenUI: validHiddenUI.length > 0 ? validHiddenUI : undefined,
-    quality: (qualityParam === "potato" ||
-    qualityParam === "low" ||
-    qualityParam === "medium" ||
-    qualityParam === "high" ||
-    qualityParam === "ultra"
-      ? qualityParam
-      : defaultQuality) as GraphicsQuality,
-    sessionToken: "",
-    privyUserId: (params.privyUserId as string) || undefined,
-  };
+  const config = buildEmbeddedConfig(validation.params, { wsUrl: GAME_WS_URL });
 
   window.__HYPERSCAPE_CONFIG__ = config;
 
@@ -857,12 +797,17 @@ async function mountApp() {
 
   // Check if running in embedded viewport mode
   if (isEmbeddedMode()) {
+    const embeddedSurface = getEmbeddedSurface(window.__HYPERSCAPE_CONFIG__);
+    const EmbeddedEntryComponent =
+      embeddedSurface === "agent-control"
+        ? EmbeddedAgentControlScreen
+        : EmbeddedGameClient;
     // Render embedded game client directly (no auth screens)
     root.render(
       <ErrorBoundary>
         <MaintenanceBanner />
         <React.Suspense fallback={<ScreenLoadingFallback />}>
-          <EmbeddedGameClient />
+          <EmbeddedEntryComponent />
         </React.Suspense>
       </ErrorBoundary>,
     );

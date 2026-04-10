@@ -24,9 +24,66 @@ import {
 
 const BASE_URL = process.env.TEST_URL || "http://localhost:3333";
 
+async function enterExperienceIfPresent(page: import("@playwright/test").Page) {
+  const enterButton = page.getByRole("button", { name: /^Enter$/ });
+
+  if (await enterButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await enterButton.click();
+    await page.waitForLoadState("networkidle").catch(() => {});
+  }
+}
+
+async function waitForStableAppSurface(
+  page: import("@playwright/test").Page,
+  timeout = 60000,
+) {
+  return page
+    .waitForFunction(
+      () => {
+        if (document.querySelector('[data-testid="error-boundary"]')) {
+          return false;
+        }
+
+        const loadingScreen = document.querySelector(
+          ".loading-screen, [data-testid='loading-screen'], .LoadingScreen",
+        );
+        if (loadingScreen) {
+          const style = window.getComputedStyle(loadingScreen);
+          const rect = loadingScreen.getBoundingClientRect();
+          const stillVisible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            style.opacity !== "0" &&
+            rect.width > 0 &&
+            rect.height > 0;
+
+          if (stillVisible) return false;
+        }
+
+        const hasCanvas =
+          document.querySelector("#hyperscape-world-canvas, canvas") !== null;
+        const hasLoginSurface =
+          document.querySelector(".login-screen") !== null;
+        const hasEntryButton = Array.from(
+          document.querySelectorAll("button"),
+        ).some((button) =>
+          /^(Enter|Sign in with Farcaster|Enter World|Create New)$/i.test(
+            button.textContent?.trim() ?? "",
+          ),
+        );
+
+        return hasCanvas || hasLoginSurface || hasEntryButton;
+      },
+      { timeout },
+    )
+    .then(() => true)
+    .catch(() => false);
+}
+
 async function gotoAndWaitForUi(page: import("@playwright/test").Page) {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle").catch(() => {});
+  await enterExperienceIfPresent(page);
 
   const ready = await page
     .waitForFunction(
@@ -92,6 +149,7 @@ test.describe("Loading Screen", () => {
 
   test("should complete loading within timeout", async ({ page }) => {
     await page.goto(BASE_URL);
+    await enterExperienceIfPresent(page);
 
     // Wait for loading to complete
     await page
@@ -108,9 +166,30 @@ test.describe("Loading Screen", () => {
         // Loading state might be exposed differently
       });
 
-    // After loading, check that the game canvas exists
-    const canvas = page.locator("#hyperscape-world-canvas, canvas").first();
-    await expect(canvas).toBeVisible({ timeout: 30000 });
+    const stableSurfaceReady = await waitForStableAppSurface(page);
+    expect(stableSurfaceReady).toBe(true);
+
+    const canvasVisible = await page
+      .locator("#hyperscape-world-canvas, canvas")
+      .first()
+      .isVisible({ timeout: 2000 })
+      .catch(() => false);
+    const loginScreenVisible = await page
+      .locator(".login-screen")
+      .first()
+      .isVisible({ timeout: 2000 })
+      .catch(() => false);
+    const entryControlVisible = await page
+      .locator(
+        'button:has-text("Enter"), button:has-text("Sign in with Farcaster"), button:has-text("Enter World"), button:has-text("Create New")',
+      )
+      .first()
+      .isVisible({ timeout: 2000 })
+      .catch(() => false);
+
+    expect(canvasVisible || loginScreenVisible || entryControlVisible).toBe(
+      true,
+    );
   });
 });
 

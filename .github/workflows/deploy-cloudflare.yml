@@ -46,9 +46,9 @@ env:
 
 jobs:
   deploy-assets:
-    name: Deploy Assets to R2 (${{ github.ref_name == 'staging' && 'staging' || 'production' }})
+    name: Deploy Assets to R2 (${{ (github.ref_name == 'staging' || inputs.environment == 'staging') && 'staging' || 'production' }})
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'staging' && 'staging' || 'production' }}
+    environment: ${{ (github.ref_name == 'staging' || inputs.environment == 'staging') && 'staging' || 'production' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

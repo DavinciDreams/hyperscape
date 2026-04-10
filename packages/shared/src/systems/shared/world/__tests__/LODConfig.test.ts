@@ -42,7 +42,9 @@ describe("LODConfig path resolution", () => {
 
   it("treats empty explicit paths as disabled", () => {
     expect(resolveLOD1ModelPath("asset://models/example.glb", "")).toBeNull();
-    expect(resolveLOD2ModelPath("asset://models/example.glb", "   ")).toBeNull();
+    expect(
+      resolveLOD2ModelPath("asset://models/example.glb", "   "),
+    ).toBeNull();
   });
 
   it("prefers explicit lod paths when present", () => {
