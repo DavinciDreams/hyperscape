@@ -2446,9 +2446,12 @@ export class StreamingDuelScheduler {
     const { users, characters } = await import("../../database/schema.js");
     const { eq } = await import("drizzle-orm");
 
-    const existing = await db.query.characters.findFirst({
-      where: (chars, ops) => ops.eq(chars.id, characterId),
-    });
+    const existingRows = await db
+      .select({ id: characters.id })
+      .from(characters)
+      .where(eq(characters.id, characterId))
+      .limit(1);
+    const existing = existingRows[0];
     if (existing) {
       return;
     }

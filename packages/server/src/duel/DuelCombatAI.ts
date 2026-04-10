@@ -25,7 +25,7 @@ export interface DuelCombatConfig {
   defensiveThresholdPct: number;
   maxTicksWithoutAttack: number;
   useLlmTactics: boolean;
-  combatRole: "melee" | "ranged" | "mage";
+  combatRole: "melee" | "ranged" | "mage" | "prayer";
   /** When true (duel rule), skip all food use */
   noFood?: boolean;
   /** Clamp movement targets to arena floor (world XZ) */
