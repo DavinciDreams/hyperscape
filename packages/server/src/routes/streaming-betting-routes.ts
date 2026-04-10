@@ -51,12 +51,20 @@ import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
 import { readLocalHlsManifestSnapshot } from "../streaming/stream-status-artifacts.js";
 import {
   loadPersistedStreamingAuthorityState,
+  persistCloudflareLifecyclePollState,
+  persistCloudflarePlaybackProbeState,
+  persistCloudflareReconciliationState,
   persistCanonicalProviderState,
   persistCloudflareLifecycleState,
   persistCloudflareWebhookState,
+  reconcileCloudflareAuthority,
   summarizeCloudflareLiveWebhook,
   verifyCloudflareWebhookSecret,
   type PersistedCanonicalProviderState,
+  type PersistedCloudflareLifecyclePollState,
+  type PersistedCloudflarePlaybackProbeState,
+  type PersistedCloudflareReconciliationState,
+  type PersistedStreamingAuthorityState,
 } from "../streaming/cloudflare-authority.js";
 
 // Re-exports so existing consumers (streaming.ts, tests) don't need import changes.
@@ -109,6 +117,11 @@ type CanonicalCandidateState = {
   ready: boolean;
 };
 
+type CurrentChannelSnapshot = {
+  channel: StreamChannelState;
+  canonicalAuthority: PersistedCloudflareReconciliationState | null;
+};
+
 type CanonicalProviderSelectionState = {
   activeProvider: StreamCanonicalProvider | null;
   primaryHealthySince: number | null;
@@ -131,6 +144,10 @@ function formatSseEvent(event: string, data: string, id?: number): string {
   const normalizedData = data.replace(/\n/g, "\ndata: ");
   const idLine = typeof id === "number" ? `id: ${id}\n` : "";
   return `${idLine}event: ${event}\ndata: ${normalizedData}\n\n`;
+}
+
+function automaticFailoverEnabled(): boolean {
+  return process.env.STREAM_ENABLE_AUTOMATIC_FAILOVER === "true";
 }
 
 export function normalizeInternalAllowedOrigin(
@@ -298,7 +315,11 @@ export function registerStreamingBettingRoutes(
   };
   let canonicalProviderSelectionHydrated = false;
   let canonicalProviderSelectionHydration: Promise<void> | null = null;
+  let persistedAuthorityStateCache: PersistedStreamingAuthorityState | null = null;
   let lastPersistedCanonicalProviderStateJson: string | null = null;
+  let lastPersistedCloudflareLifecyclePollJson: string | null = null;
+  let lastPersistedCloudflarePlaybackProbeJson: string | null = null;
+  let lastPersistedCloudflareReconciliationJson: string | null = null;
   if (internalAllowedOrigin && !allowedOrigin) {
     fastify.log.warn(
       {
@@ -418,6 +439,7 @@ export function registerStreamingBettingRoutes(
       primaryHealthySince: canonicalProviderSelectionState.primaryHealthySince,
       updatedAt: Date.now(),
     };
+    getPersistedAuthorityState().canonicalProviderState = state;
     void persistCanonicalProviderState(getStorageDb(), state).catch(() => {
       lastPersistedCanonicalProviderStateJson = null;
     });
@@ -436,6 +458,7 @@ export function registerStreamingBettingRoutes(
         const persisted = await loadPersistedStreamingAuthorityState(
           getStorageDb(),
         );
+        persistedAuthorityStateCache = persisted;
         const state = persisted.canonicalProviderState;
         if (state) {
           canonicalProviderSelectionState.activeProvider =
@@ -454,6 +477,17 @@ export function registerStreamingBettingRoutes(
               canonicalProviderSelectionState.primaryHealthySince,
           });
         }
+        lastPersistedCloudflareLifecyclePollJson = persisted.cloudflareLifecyclePoll
+          ? JSON.stringify(persisted.cloudflareLifecyclePoll)
+          : null;
+        lastPersistedCloudflarePlaybackProbeJson =
+          persisted.cloudflarePlaybackProbe
+            ? JSON.stringify(persisted.cloudflarePlaybackProbe)
+            : null;
+        lastPersistedCloudflareReconciliationJson =
+          persisted.cloudflareReconciliation
+            ? JSON.stringify(persisted.cloudflareReconciliation)
+            : null;
       } catch {
         // Best-effort durability only.
       } finally {
@@ -465,6 +499,69 @@ export function registerStreamingBettingRoutes(
   };
 
   void ensureCanonicalProviderSelectionHydrated();
+
+  const getPersistedAuthorityState = (): PersistedStreamingAuthorityState => {
+    if (persistedAuthorityStateCache) {
+      return persistedAuthorityStateCache;
+    }
+    persistedAuthorityStateCache = {
+      canonicalProviderState: null,
+      cloudflareLifecycle: null,
+      cloudflareLastWebhook: null,
+      cloudflareLifecyclePoll: null,
+      cloudflarePlaybackProbe: null,
+      cloudflareReconciliation: null,
+    };
+    return persistedAuthorityStateCache;
+  };
+
+  const persistCloudflareLifecyclePollSnapshot = (
+    state: PersistedCloudflareLifecyclePollState | null,
+  ): void => {
+    if (!state) {
+      return;
+    }
+    const comparisonPayload = JSON.stringify(state);
+    if (comparisonPayload === lastPersistedCloudflareLifecyclePollJson) {
+      return;
+    }
+    lastPersistedCloudflareLifecyclePollJson = comparisonPayload;
+    getPersistedAuthorityState().cloudflareLifecyclePoll = state;
+    void persistCloudflareLifecyclePollState(getStorageDb(), state).catch(() => {
+      lastPersistedCloudflareLifecyclePollJson = null;
+    });
+  };
+
+  const persistCloudflarePlaybackProbeSnapshot = (
+    state: PersistedCloudflarePlaybackProbeState | null,
+  ): void => {
+    if (!state) {
+      return;
+    }
+    const comparisonPayload = JSON.stringify(state);
+    if (comparisonPayload === lastPersistedCloudflarePlaybackProbeJson) {
+      return;
+    }
+    lastPersistedCloudflarePlaybackProbeJson = comparisonPayload;
+    getPersistedAuthorityState().cloudflarePlaybackProbe = state;
+    void persistCloudflarePlaybackProbeState(getStorageDb(), state).catch(() => {
+      lastPersistedCloudflarePlaybackProbeJson = null;
+    });
+  };
+
+  const persistCloudflareReconciliationSnapshot = (
+    state: PersistedCloudflareReconciliationState,
+  ): void => {
+    const comparisonPayload = JSON.stringify(state);
+    if (comparisonPayload === lastPersistedCloudflareReconciliationJson) {
+      return;
+    }
+    lastPersistedCloudflareReconciliationJson = comparisonPayload;
+    getPersistedAuthorityState().cloudflareReconciliation = state;
+    void persistCloudflareReconciliationState(getStorageDb(), state).catch(() => {
+      lastPersistedCloudflareReconciliationJson = null;
+    });
+  };
 
   const persistBettingSourceEpoch = async (epoch: number): Promise<void> => {
     const db = getDatabaseSystem()?.getDb?.();
@@ -937,6 +1034,123 @@ export function registerStreamingBettingRoutes(
     };
   };
 
+  const buildCloudflareLifecyclePollSnapshot = (params: {
+    nowMs: number;
+    externalSnapshot: ExternalRtmpStatusSnapshot | null;
+    destination: ExternalRtmpDestination | null;
+    playbackUrl: string | null;
+  }): PersistedCloudflareLifecyclePollState | null => {
+    const persistedAuthority = getPersistedAuthorityState();
+    const snapshotUpdatedAt = params.externalSnapshot
+      ? resolveSnapshotUpdatedAt(params.externalSnapshot.updatedAt, params.nowMs)
+      : null;
+    const probeSnapshot = externalPlaybackProbePoller?.getSnapshot() ?? null;
+    const providerLive =
+      params.externalSnapshot != null &&
+      snapshotUpdatedAt != null &&
+      isSnapshotFresh(snapshotUpdatedAt, params.nowMs) &&
+      params.externalSnapshot.active === true &&
+      params.externalSnapshot.ffmpegRunning === true &&
+      params.externalSnapshot.stats?.healthy !== false &&
+      (params.destination?.connected === true || probeSnapshot?.ready === true);
+    const status: PersistedCloudflareLifecyclePollState["status"] =
+      providerLive
+        ? "connected"
+        : params.destination?.connected === false
+          ? "disconnected"
+          : params.externalSnapshot?.stats?.healthy === false ||
+              (typeof params.destination?.error === "string" &&
+                params.destination.error.trim().length > 0)
+            ? "errored"
+            : "unknown";
+    const receivedAt = snapshotUpdatedAt ?? params.nowMs;
+    const liveInputId =
+      cloudflareLiveInputId ??
+      persistedAuthority.cloudflareLifecycle?.liveInputId ??
+      persistedAuthority.cloudflareLastWebhook?.liveInputId ??
+      null;
+    const videoUid =
+      persistedAuthority.cloudflareLifecycle?.videoId ??
+      persistedAuthority.cloudflareLastWebhook?.videoId ??
+      null;
+
+    if (!liveInputId && !params.playbackUrl) {
+      return null;
+    }
+
+    return {
+      liveInputId,
+      videoUid,
+      status,
+      providerLive,
+      statusSummary:
+        status === "connected"
+          ? "connected"
+          : typeof params.destination?.error === "string" &&
+              params.destination.error.trim().length > 0
+            ? params.destination.error.trim()
+            : params.externalSnapshot == null
+              ? "delivery_status_unavailable"
+              : !isSnapshotFresh(receivedAt, params.nowMs)
+                ? "delivery_status_stale"
+                : status,
+      playbackUrl: params.playbackUrl,
+      occurredAt: receivedAt,
+      receivedAt,
+    };
+  };
+
+  const currentCanonicalAuthoritySnapshot = (params: {
+    nowMs: number;
+    sourceRuntime: StreamSourceRuntime;
+    externalSnapshot: ExternalRtmpStatusSnapshot | null;
+    destination: ExternalRtmpDestination | null;
+    playbackUrl: string | null;
+  }): PersistedCloudflareReconciliationState | null => {
+    const lifecyclePollSnapshot = buildCloudflareLifecyclePollSnapshot(params);
+    const probeSnapshot = externalPlaybackProbePoller?.getSnapshot() ?? null;
+    const playbackProbeSnapshot: PersistedCloudflarePlaybackProbeState | null =
+      probeSnapshot
+        ? {
+            playbackUrl: probeSnapshot.playbackUrl,
+            ready: probeSnapshot.ready,
+            manifestStatus: probeSnapshot.manifestStatus,
+            statusCode: probeSnapshot.statusCode,
+            lastError: probeSnapshot.lastError,
+            updatedAt: probeSnapshot.updatedAt,
+          }
+        : null;
+
+    persistCloudflareLifecyclePollSnapshot(lifecyclePollSnapshot);
+    persistCloudflarePlaybackProbeSnapshot(playbackProbeSnapshot);
+
+    const persistedAuthority = getPersistedAuthorityState();
+    if (
+      lifecyclePollSnapshot == null &&
+      playbackProbeSnapshot == null &&
+      persistedAuthority.cloudflareLifecycle == null &&
+      persistedAuthority.cloudflareLifecyclePoll == null &&
+      persistedAuthority.cloudflarePlaybackProbe == null
+    ) {
+      return null;
+    }
+
+    const reconciliation = reconcileCloudflareAuthority({
+      sourceRuntimeReady: params.sourceRuntime.ready === true,
+      lifecycle: persistedAuthority.cloudflareLifecycle,
+      lifecyclePoll:
+        lifecyclePollSnapshot ?? persistedAuthority.cloudflareLifecyclePoll,
+      playbackProbe:
+        playbackProbeSnapshot ?? persistedAuthority.cloudflarePlaybackProbe,
+      previous: persistedAuthority.cloudflareReconciliation,
+      nowMs: params.nowMs,
+      freshnessMs: externalStatusMaxAgeMs,
+      playbackUrl: params.playbackUrl,
+    });
+    persistCloudflareReconciliationSnapshot(reconciliation);
+    return reconciliation;
+  };
+
   const selectCanonicalCandidate = (params: {
     nowMs: number;
     candidates: CanonicalCandidateState[];
@@ -962,6 +1176,32 @@ export function registerStreamingBettingRoutes(
       priority
         .map((provider) => candidatesByProvider.get(provider) ?? null)
         .find((candidate) => candidate?.ready === true) ?? null;
+
+    if (!automaticFailoverEnabled()) {
+      const cloudflareCandidate =
+        candidatesByProvider.get("cloudflare_stream") ?? null;
+      const nextCanonical =
+        cloudflareCandidate ?? primaryCandidate ?? params.candidates[0];
+      canonicalProviderSelectionState.activeProvider = nextCanonical.provider;
+      canonicalProviderSelectionState.primaryHealthySince =
+        nextCanonical.provider === primaryProvider && nextCanonical.ready === true
+          ? params.nowMs
+          : null;
+      persistCanonicalProviderSelection();
+
+      const fallback =
+        priority
+          .map((provider) => candidatesByProvider.get(provider) ?? null)
+          .find(
+            (candidate) =>
+              candidate && candidate.provider !== nextCanonical.provider,
+          ) ?? null;
+
+      return {
+        canonical: nextCanonical,
+        fallback,
+      };
+    }
 
     let nextCanonical =
       activeCandidate ??
@@ -1110,10 +1350,12 @@ export function registerStreamingBettingRoutes(
     cycle: StreamingDuelCycle | null,
     nowMs?: number,
     sourceRuntime?: StreamSourceRuntime,
-  ): StreamChannelState => {
+  ): CurrentChannelSnapshot => {
     const updatedAt = nowMs ?? Date.now();
     const resolvedSourceRuntime =
       sourceRuntime ?? currentSourceRuntimeSnapshot(cycle, updatedAt);
+    const externalSnapshot = externalStatusPoller?.getSnapshot() ?? null;
+    const externalDestination = findCanonicalExternalDestination(externalSnapshot);
     const candidatePool: CanonicalCandidateState[] = [
       buildSelfHostedCandidate({
         role: "canonical",
@@ -1133,6 +1375,18 @@ export function registerStreamingBettingRoutes(
       nowMs: updatedAt,
       candidates: candidatePool,
     });
+    const canonicalAuthority =
+      canonical.provider === "cloudflare_stream"
+        ? currentCanonicalAuthoritySnapshot({
+            nowMs: updatedAt,
+            sourceRuntime: resolvedSourceRuntime,
+            externalSnapshot,
+            destination: externalDestination,
+            playbackUrl:
+              externalCandidate?.destination.playbackUrl ??
+              configuredExternalPlaybackUrl,
+          })
+        : null;
     const canonicalDestination = canonical.destination;
     const fallbackDestination =
       fallback == null
@@ -1159,21 +1413,33 @@ export function registerStreamingBettingRoutes(
       nowMs: updatedAt,
       canonicalDestinationId: canonicalDestination.id,
     });
+    const publicReadiness =
+      canonicalAuthority == null
+        ? canonical.publicReadiness
+        : {
+            ready: canonicalAuthority.decision === "ready",
+            reason: canonicalAuthority.reason,
+            updatedAt: canonicalAuthority.updatedAt,
+          };
+
     return {
-      id: "hyperscapes-broadcast-channel",
-      mode: "always_on",
-      presentationDelayMs: configuredPresentationDelayMs,
-      activeDuelId: cycle?.duelId ?? null,
-      activeDuelKey: cycle?.duelKeyHex ?? null,
-      canonicalDestinationId: canonicalDestination.id,
-      fallbackDestinationId: fallbackDestination?.id ?? null,
-      publicPlaybackUrl: canonicalDestination.playbackUrl,
-      publicReadiness: canonical.publicReadiness,
-      destinations: [
-        canonicalDestination,
-        ...(fallbackDestination ? [fallbackDestination] : []),
-        ...mirrors,
-      ],
+      channel: {
+        id: "hyperscapes-broadcast-channel",
+        mode: "always_on",
+        presentationDelayMs: configuredPresentationDelayMs,
+        activeDuelId: cycle?.duelId ?? null,
+        activeDuelKey: cycle?.duelKeyHex ?? null,
+        canonicalDestinationId: canonicalDestination.id,
+        fallbackDestinationId: fallbackDestination?.id ?? null,
+        publicPlaybackUrl: canonicalDestination.playbackUrl,
+        publicReadiness,
+        destinations: [
+          canonicalDestination,
+          ...(fallbackDestination ? [fallbackDestination] : []),
+          ...mirrors,
+        ],
+      },
+      canonicalAuthority,
     };
   };
 
@@ -1190,14 +1456,19 @@ export function registerStreamingBettingRoutes(
       emittedAt,
       rendererHealth,
     );
-    const channel = currentChannelSnapshot(cycle, emittedAt, sourceRuntime);
+    const channelSnapshot = currentChannelSnapshot(
+      cycle,
+      emittedAt,
+      sourceRuntime,
+    );
     const payload = buildBettingFeedPayload({
       sourceEpoch: bettingSourceEpoch,
       seq: nextSeq,
       emittedAt,
       cycle,
       rendererHealth,
-      channel,
+      channel: channelSnapshot.channel,
+      canonicalAuthority: channelSnapshot.canonicalAuthority,
       sourceRuntime,
       rendererMetrics: currentRendererMetricsSnapshot(),
     });
@@ -1322,7 +1593,11 @@ export function registerStreamingBettingRoutes(
       emittedAt: fallbackEmittedAt,
       cycle: null,
       rendererHealth: fallbackRendererHealth,
-      channel: currentChannelSnapshot(null, fallbackEmittedAt, fallbackSourceRuntime),
+      ...currentChannelSnapshot(
+        null,
+        fallbackEmittedAt,
+        fallbackSourceRuntime,
+      ),
       sourceRuntime: fallbackSourceRuntime,
       rendererMetrics: currentRendererMetricsSnapshot(),
     });
@@ -1540,6 +1815,9 @@ export function registerStreamingBettingRoutes(
     }
 
     try {
+      const authorityState = getPersistedAuthorityState();
+      authorityState.cloudflareLastWebhook = summary.webhook;
+      authorityState.cloudflareLifecycle = summary.lifecycle;
       await Promise.all([
         persistCloudflareWebhookState(getStorageDb(), summary.webhook),
         persistCloudflareLifecycleState(getStorageDb(), summary.lifecycle),

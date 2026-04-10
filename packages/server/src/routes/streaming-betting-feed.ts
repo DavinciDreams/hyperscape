@@ -5,6 +5,7 @@ import type {
 import type {
   StreamChannelState,
   StreamDestinationState,
+  StreamManifestStatus,
   StreamPublicReadiness,
 } from "../streaming/delivery-config.js";
 import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
@@ -70,6 +71,21 @@ export type BettingFeedPublicReadiness = StreamPublicReadiness;
 export type BettingFeedChannel = StreamChannelState;
 export type BettingFeedSourceRuntime = StreamSourceRuntime;
 
+export type BettingFeedCanonicalAuthority = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: StreamManifestStatus | null;
+};
+
 export type BettingFeedBroadcastTimeline = {
   phase: StreamingPhase | null;
   betOpenTime: number | null;
@@ -106,6 +122,7 @@ export type BettingFeedPayload = {
   publicReadiness: BettingFeedPublicReadiness | null;
   canonicalDestination: BettingFeedDestinationState | null;
   fallbackDestination: BettingFeedDestinationState | null;
+  canonicalAuthority: BettingFeedCanonicalAuthority | null;
   sourceRuntime: BettingFeedSourceRuntime | null;
   rendererMetrics: BettingFeedRendererMetrics | null;
   captureFps: number | null;
@@ -290,6 +307,7 @@ export function buildBettingFeedPayload(params: {
   rendererHealth?: BettingFeedRendererHealth | null;
   deliveryHealth?: BettingFeedDeliveryHealth | null;
   channel?: BettingFeedChannel | null;
+  canonicalAuthority?: BettingFeedCanonicalAuthority | null;
   sourceRuntime?: BettingFeedSourceRuntime | null;
   rendererMetrics?: BettingFeedRendererMetrics | null;
   delivery?: BettingFeedDelivery | null;
@@ -371,6 +389,7 @@ export function buildBettingFeedPayload(params: {
     publicReadiness: channel?.publicReadiness ?? null,
     canonicalDestination,
     fallbackDestination,
+    canonicalAuthority: params.canonicalAuthority ?? null,
     sourceRuntime: params.sourceRuntime ?? null,
     rendererMetrics,
     captureFps: rendererMetrics?.captureFps ?? null,
@@ -445,6 +464,12 @@ export function buildBettingFeedDedupKey(payload: BettingFeedPayload): string {
     fallbackDestination: payload.fallbackDestination
       ? {
           ...payload.fallbackDestination,
+          updatedAt: 0,
+        }
+      : null,
+    canonicalAuthority: payload.canonicalAuthority
+      ? {
+          ...payload.canonicalAuthority,
           updatedAt: 0,
         }
       : null,

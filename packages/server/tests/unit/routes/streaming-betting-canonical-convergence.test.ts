@@ -311,6 +311,7 @@ describe("streaming-betting canonical convergence", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("STREAM_ENABLE_AUTOMATIC_FAILOVER", "true");
     stubEnv("STREAM_CANONICAL_PROVIDER_PRIORITY", "self_hls,cloudflare_stream");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
@@ -411,10 +412,114 @@ describe("streaming-betting canonical convergence", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("keeps Cloudflare canonical by default even when provider priority prefers self-hls", async () => {
+    stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+    stubEnv("STREAM_DELIVERY_MODE", "external_hls");
+    stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("STREAM_CANONICAL_PROVIDER_PRIORITY", "self_hls,cloudflare_stream");
+    stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
+    stubEnv(
+      "STREAM_PLAYBACK_LLHLS_URL",
+      "https://customer.example/live.m3u8?protocol=llhls",
+    );
+    stubEnv("STREAM_INGEST_RTMPS_URL", "srt://live.cloudflare.example/input");
+
+    const now = Date.now();
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "streaming-betting-default-cloudflare-"),
+    );
+    const externalStatusFile = path.join(tempDir, "rtmp-status.json");
+    fs.writeFileSync(
+      externalStatusFile,
+      JSON.stringify({
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        destinations: [
+          {
+            id: "canonical-cloudflare",
+            role: "canonical",
+            provider: "cloudflare_stream",
+            name: "Cloudflare Stream",
+            transport: "srt",
+            playbackUrl: "https://customer.example/live.m3u8",
+            connected: true,
+            startedAt: now - 500,
+          },
+        ],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: now,
+        hlsManifest: {
+          updatedAt: now,
+          mediaSequence: 321,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: now,
+        },
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "cdp",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle: null,
+          lastFrameAt: now,
+          lastRenderTickAt: now,
+          lastVisualChangeAt: now,
+          lastRecoveryAt: now - 1000,
+          recoveryCount: 0,
+          workerHeartbeatAt: now,
+        },
+      }),
+    );
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("", { status: 200 }));
+
+    const options = createRouteOptions({
+      externalStatusFile,
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const response = await options.fastify.inject({
+      method: "GET",
+      url: "/api/internal/bet-sync/state",
+      headers: {
+        authorization: "Bearer bet-secret",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json();
+    expect(payload.channel.canonicalDestinationId).toBe("canonical-cloudflare");
+    expect(payload.canonicalDestination).toMatchObject({
+      provider: "cloudflare_stream",
+      playbackReady: true,
+    });
+    expect(payload.fallbackDestination).toMatchObject({
+      provider: "self_hls",
+      playbackReady: true,
+    });
+
+    routes.close();
+    await options.fastify.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("fails back to the primary provider only after the soak window", async () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("STREAM_ENABLE_AUTOMATIC_FAILOVER", "true");
     stubEnv("STREAM_CANONICAL_PROVIDER_PRIORITY", "cloudflare_stream,self_hls");
     stubEnv("STREAM_FAILBACK_SOAK_MS", "150");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");

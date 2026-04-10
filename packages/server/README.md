@@ -12,10 +12,11 @@ integrated ownership.
 - The GPU host runs the dedicated source worker service for browser capture
   and FFmpeg encode.
 - Railway runs this server package and publishes the canonical stream session.
-- Viewer delivery is selected by authority-layer provider priority.
-- Self-hosted HLS is the current canonical rail for personal staging.
-- Cloudflare Stream remains configured as a warm fallback and investigation
-  provider.
+- Cloudflare Stream is the canonical bettor playback rail on `enoomian/staging`.
+- Self-hosted HLS remains available for operator smoke, debug, and explicit
+  failover only.
+- Automatic provider failover is disabled by default; bettors should not
+  auto-cycle between playback providers.
 
 This server is not the renderer of record.
 The split topology is the default operating model.
@@ -34,6 +35,7 @@ Provider-neutral delivery envs:
 - `STREAM_DELIVERY_MODE=self_hls|external_hls`
 - `STREAM_DELIVERY_PROVIDER`
 - `STREAM_CANONICAL_PROVIDER_PRIORITY`
+- `STREAM_ENABLE_AUTOMATIC_FAILOVER`
 - `STREAM_FAILBACK_SOAK_MS`
 - `STREAM_INGEST_RTMPS_URL`
 - `STREAM_INGEST_STREAM_KEY`
@@ -47,9 +49,11 @@ Provider-neutral delivery envs:
 
 Selection order for playback:
 
-1. the active canonical destination selected from provider priority and health
-2. `STREAM_PLAYBACK_LLHLS_URL` or `STREAM_PLAYBACK_HLS_URL` for that provider
-3. local `/live/stream.m3u8` when self-hosted HLS is canonical
+1. the canonical Cloudflare playback URL selected by persisted authority
+   reconciliation
+2. regular HLS derived from that same playback object when LL-HLS falls back
+   in the player
+3. self-hosted HLS only when an explicit operator/debug path enables failover
 
 `hls-cdn-sync.ts` is fallback/object-store sync only.
 
@@ -69,6 +73,12 @@ Personal staging expects:
 The canonical capture status now includes additive fields that Hyperbet and
 operator surfaces consume:
 
+- `canonicalAuthority`
+  - `providerLive`
+  - `playbackProbeReady`
+  - `decision`
+  - `reason`
+  - `revision`
 - `sourceRuntime`
 - `rendererHealth`
 - `metrics`
@@ -88,6 +98,16 @@ operator surfaces consume:
   - `canonicalDestination`
   - `fallbackDestination`
 
+`publicReadiness` is the final server-side delivery gate for bettor playback.
+It should be read as:
+
+1. `sourceRuntime.ready`
+2. persisted Cloudflare lifecycle / lifecycle-poll evidence
+3. canonical playback probe health
+
+It is not the same thing as player live-edge sync. Hyperbet derives bettor
+"live synced" UX from player telemetry on top of this server gate.
+
 Phase-aware degradation can emit:
 
 - `render_tick_stale`
@@ -96,6 +116,27 @@ Phase-aware degradation can emit:
 - `encoder_fps_low`
 - `manifest_stale`
 - `asset_origin_incomplete`
+
+## Cloudflare Authority Reconciliation
+
+Cloudflare authority truth is persisted under these storage keys:
+
+- `streaming:cloudflare:lifecycle`
+- `streaming:cloudflare:last-webhook`
+- `streaming:cloudflare:last-lifecycle-poll`
+- `streaming:cloudflare:last-playback-probe`
+- `streaming:cloudflare:reconciliation`
+
+The reconciliation decision is the operator-debug source of truth. Decision
+ordering is:
+
+1. `source_unready`
+2. `provider_not_live`
+3. `probe_unready`
+4. `authority_stale`
+
+When `STREAM_ENABLE_AUTOMATIC_FAILOVER=false`, fallback destinations may still
+be emitted for compatibility, but they are not the normal bettor rail.
 
 ## Endpoints
 

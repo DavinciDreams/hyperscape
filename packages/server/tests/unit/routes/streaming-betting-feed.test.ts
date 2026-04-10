@@ -197,6 +197,20 @@ describe("streaming-betting-feed", () => {
         recoveryCount: 1,
         workerHeartbeatAt: 123_502,
       },
+      canonicalAuthority: {
+        providerLive: false,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "provider_not_live",
+        revision: 4,
+        updatedAt: 123_503,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "disconnected",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 204,
+        playbackManifestStatus: "missing",
+      },
       cycle: createCycle({
         phase: "FIGHTING",
         phaseVersion: 9,
@@ -276,6 +290,20 @@ describe("streaming-betting-feed", () => {
         recoveryCount: 1,
         workerHeartbeatAt: 123_502,
       },
+      canonicalAuthority: {
+        providerLive: false,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "provider_not_live",
+        revision: 4,
+        updatedAt: 123_503,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "disconnected",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 204,
+        playbackManifestStatus: "missing",
+      },
       captureFps: 29,
       encodeFps: 28,
       droppedFrames: 1,
@@ -299,6 +327,13 @@ describe("streaming-betting-feed", () => {
     expect(payload.channel?.canonicalDestinationId).toBe("canonical-cloudflare");
     expect(payload.delivery?.llhlsUrl).toContain("protocol=llhls");
     expect(payload.deliveryHealth?.degradedReason).toBe("delivery_disconnected");
+    expect(payload.canonicalAuthority).toMatchObject({
+      decision: "blocked",
+      reason: "provider_not_live",
+      revision: 4,
+      providerLive: false,
+      playbackProbeReady: false,
+    });
   });
 
   it("projects a bettor-facing timeline against the active canonical delay", () => {
@@ -490,10 +525,55 @@ describe("streaming-betting-feed", () => {
             workerHeartbeatAt: 888_883,
           }
         : null,
+      canonicalAuthority: basePayload.canonicalAuthority
+        ? {
+            ...basePayload.canonicalAuthority,
+            updatedAt: 666_666,
+          }
+        : null,
     };
 
     expect(buildBettingFeedDedupKey(basePayload)).toBe(
       buildBettingFeedDedupKey(laterPayload),
+    );
+  });
+
+  it("changes the dedup key when canonical authority semantics change", () => {
+    const basePayload = buildBettingFeedPayload({
+      sourceEpoch: 42,
+      seq: 7,
+      emittedAt: 123_456,
+      cycle: createCycle(),
+      channel: createChannel(),
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 7,
+        updatedAt: 123_500,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "connected",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 200,
+        playbackManifestStatus: "ok",
+      },
+    });
+    const changedPayload = {
+      ...basePayload,
+      canonicalAuthority: basePayload.canonicalAuthority
+        ? {
+            ...basePayload.canonicalAuthority,
+            decision: "blocked" as const,
+            reason: "probe_unready",
+            revision: 8,
+          }
+        : null,
+    };
+
+    expect(buildBettingFeedDedupKey(basePayload)).not.toBe(
+      buildBettingFeedDedupKey(changedPayload),
     );
   });
 

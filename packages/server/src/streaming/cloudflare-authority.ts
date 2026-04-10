@@ -3,7 +3,10 @@ import { eq } from "drizzle-orm";
 import type { IncomingHttpHeaders } from "node:http";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { storage } from "../database/schema.js";
-import type { StreamCanonicalProvider } from "./delivery-config.js";
+import type {
+  StreamCanonicalProvider,
+  StreamManifestStatus,
+} from "./delivery-config.js";
 
 type StorageDb = ReturnType<DatabaseSystem["getDb"]>;
 
@@ -13,6 +16,12 @@ export const CLOUDFLARE_LIFECYCLE_STORAGE_KEY =
   "streaming:cloudflare:lifecycle";
 export const CLOUDFLARE_LAST_WEBHOOK_STORAGE_KEY =
   "streaming:cloudflare:last-webhook";
+export const CLOUDFLARE_LAST_LIFECYCLE_POLL_STORAGE_KEY =
+  "streaming:cloudflare:last-lifecycle-poll";
+export const CLOUDFLARE_LAST_PLAYBACK_PROBE_STORAGE_KEY =
+  "streaming:cloudflare:last-playback-probe";
+export const CLOUDFLARE_RECONCILIATION_STORAGE_KEY =
+  "streaming:cloudflare:reconciliation";
 
 export type PersistedCanonicalProviderState = {
   activeProvider: StreamCanonicalProvider | null;
@@ -41,10 +50,53 @@ export type PersistedCloudflareWebhookState = {
   receivedAt: number;
 };
 
+export type PersistedCloudflareLifecyclePollState = {
+  liveInputId: string | null;
+  videoUid: string | null;
+  status: "connected" | "disconnected" | "errored" | "unknown";
+  providerLive: boolean;
+  statusSummary: string | null;
+  playbackUrl: string | null;
+  occurredAt: number | null;
+  receivedAt: number;
+};
+
+export type PersistedCloudflarePlaybackProbeState = {
+  playbackUrl: string | null;
+  ready: boolean;
+  manifestStatus: StreamManifestStatus;
+  statusCode: number | null;
+  lastError: string | null;
+  updatedAt: number;
+};
+
+export type PersistedCloudflareReconciliationState = {
+  revision: number;
+  decision: "ready" | "blocked";
+  reason:
+    | "source_unready"
+    | "provider_not_live"
+    | "probe_unready"
+    | "authority_stale"
+    | null;
+  updatedAt: number;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  providerLive: boolean;
+  playbackUrl: string | null;
+  playbackProbeReady: boolean;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: StreamManifestStatus;
+};
+
 export type PersistedStreamingAuthorityState = {
   canonicalProviderState: PersistedCanonicalProviderState | null;
   cloudflareLifecycle: PersistedCloudflareLifecycleState | null;
   cloudflareLastWebhook: PersistedCloudflareWebhookState | null;
+  cloudflareLifecyclePoll: PersistedCloudflareLifecyclePollState | null;
+  cloudflarePlaybackProbe: PersistedCloudflarePlaybackProbeState | null;
+  cloudflareReconciliation: PersistedCloudflareReconciliationState | null;
 };
 
 export type SummarizedCloudflareLiveWebhook = {
@@ -170,6 +222,77 @@ function deriveLifecycleStatus(eventType: string | null) {
   return "unknown" as const;
 }
 
+function isFreshTimestamp(
+  updatedAt: number | null | undefined,
+  nowMs: number,
+  freshnessMs: number,
+): boolean {
+  return (
+    typeof updatedAt === "number" &&
+    Number.isFinite(updatedAt) &&
+    Math.max(0, nowMs - updatedAt) <= freshnessMs
+  );
+}
+
+function buildReconciliationComparable(
+  state: Omit<PersistedCloudflareReconciliationState, "revision" | "updatedAt">,
+): string {
+  return JSON.stringify(state);
+}
+
+type CloudflareProviderEvidence = {
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  providerLive: boolean;
+  updatedAt: number;
+};
+
+function resolveCloudflareProviderEvidence(params: {
+  lifecycle: PersistedCloudflareLifecycleState | null;
+  lifecyclePoll: PersistedCloudflareLifecyclePollState | null;
+  nowMs: number;
+  freshnessMs: number;
+}): CloudflareProviderEvidence | null {
+  const candidates: CloudflareProviderEvidence[] = [];
+
+  if (
+    params.lifecycle &&
+    isFreshTimestamp(params.lifecycle.receivedAt, params.nowMs, params.freshnessMs)
+  ) {
+    candidates.push({
+      liveInputId: params.lifecycle.liveInputId,
+      videoUid: params.lifecycle.videoId,
+      lifecycleStatus: params.lifecycle.status,
+      providerLive: params.lifecycle.status === "connected",
+      updatedAt: params.lifecycle.receivedAt,
+    });
+  }
+
+  if (
+    params.lifecyclePoll &&
+    isFreshTimestamp(
+      params.lifecyclePoll.receivedAt,
+      params.nowMs,
+      params.freshnessMs,
+    )
+  ) {
+    candidates.push({
+      liveInputId: params.lifecyclePoll.liveInputId,
+      videoUid: params.lifecyclePoll.videoUid,
+      lifecycleStatus: params.lifecyclePoll.status,
+      providerLive: params.lifecyclePoll.providerLive,
+      updatedAt: params.lifecyclePoll.receivedAt,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates.sort((left, right) => right.updatedAt - left.updatedAt)[0]!;
+}
+
 export function verifyCloudflareWebhookSecret(
   headers: IncomingHttpHeaders | Record<string, unknown>,
   secret: string | null | undefined,
@@ -260,6 +383,87 @@ export function summarizeCloudflareLiveWebhook(params: {
   };
 }
 
+export function reconcileCloudflareAuthority(params: {
+  sourceRuntimeReady: boolean;
+  lifecycle: PersistedCloudflareLifecycleState | null;
+  lifecyclePoll: PersistedCloudflareLifecyclePollState | null;
+  playbackProbe: PersistedCloudflarePlaybackProbeState | null;
+  previous: PersistedCloudflareReconciliationState | null;
+  nowMs?: number;
+  freshnessMs: number;
+  playbackUrl?: string | null;
+}): PersistedCloudflareReconciliationState {
+  const nowMs = params.nowMs ?? Date.now();
+  const providerEvidence = resolveCloudflareProviderEvidence({
+    lifecycle: params.lifecycle,
+    lifecyclePoll: params.lifecyclePoll,
+    nowMs,
+    freshnessMs: params.freshnessMs,
+  });
+  const playbackProbeFresh =
+    params.playbackProbe &&
+    isFreshTimestamp(params.playbackProbe.updatedAt, nowMs, params.freshnessMs)
+      ? params.playbackProbe
+      : null;
+  const providerLive = providerEvidence?.providerLive === true;
+  const playbackProbeReady = playbackProbeFresh?.ready === true;
+
+  let reason: PersistedCloudflareReconciliationState["reason"] = null;
+  if (!params.sourceRuntimeReady) {
+    reason = "source_unready";
+  } else if (providerEvidence && !providerLive) {
+    reason = "provider_not_live";
+  } else if (providerEvidence && providerLive && playbackProbeFresh && !playbackProbeReady) {
+    reason = "probe_unready";
+  } else if (!providerEvidence || !playbackProbeFresh) {
+    reason = "authority_stale";
+  }
+
+  const comparableState = {
+    decision: reason == null ? "ready" : "blocked",
+    reason,
+    liveInputId: providerEvidence?.liveInputId ?? params.lifecycle?.liveInputId ?? null,
+    videoUid: providerEvidence?.videoUid ?? params.lifecycle?.videoId ?? null,
+    lifecycleStatus: providerEvidence?.lifecycleStatus ?? null,
+    providerLive,
+    playbackUrl:
+      playbackProbeFresh?.playbackUrl ??
+      params.playbackUrl?.trim() ??
+      params.playbackProbe?.playbackUrl ??
+      null,
+    playbackProbeReady,
+    playbackProbeStatusCode: playbackProbeFresh?.statusCode ?? null,
+    playbackManifestStatus:
+      playbackProbeFresh?.manifestStatus ?? ("unknown" satisfies StreamManifestStatus),
+  } satisfies Omit<PersistedCloudflareReconciliationState, "revision" | "updatedAt">;
+
+  const previousComparable =
+    params.previous == null
+      ? null
+      : buildReconciliationComparable({
+          decision: params.previous.decision,
+          reason: params.previous.reason,
+          liveInputId: params.previous.liveInputId,
+          videoUid: params.previous.videoUid,
+          lifecycleStatus: params.previous.lifecycleStatus,
+          providerLive: params.previous.providerLive,
+          playbackUrl: params.previous.playbackUrl,
+          playbackProbeReady: params.previous.playbackProbeReady,
+          playbackProbeStatusCode: params.previous.playbackProbeStatusCode,
+          playbackManifestStatus: params.previous.playbackManifestStatus,
+        });
+  const nextComparable = buildReconciliationComparable(comparableState);
+
+  return {
+    revision:
+      previousComparable === nextComparable
+        ? params.previous?.revision ?? 1
+        : (params.previous?.revision ?? 0) + 1,
+    updatedAt: nowMs,
+    ...comparableState,
+  };
+}
+
 export async function loadPersistedStreamingAuthorityState(
   db: StorageDb | null | undefined,
 ): Promise<PersistedStreamingAuthorityState> {
@@ -276,6 +480,21 @@ export async function loadPersistedStreamingAuthorityState(
       db,
       CLOUDFLARE_LAST_WEBHOOK_STORAGE_KEY,
     ),
+    cloudflareLifecyclePoll:
+      await readStoredJson<PersistedCloudflareLifecyclePollState>(
+        db,
+        CLOUDFLARE_LAST_LIFECYCLE_POLL_STORAGE_KEY,
+      ),
+    cloudflarePlaybackProbe:
+      await readStoredJson<PersistedCloudflarePlaybackProbeState>(
+        db,
+        CLOUDFLARE_LAST_PLAYBACK_PROBE_STORAGE_KEY,
+      ),
+    cloudflareReconciliation:
+      await readStoredJson<PersistedCloudflareReconciliationState>(
+        db,
+        CLOUDFLARE_RECONCILIATION_STORAGE_KEY,
+      ),
   };
 }
 
@@ -298,4 +517,25 @@ export async function persistCloudflareWebhookState(
   state: PersistedCloudflareWebhookState,
 ): Promise<void> {
   await writeStoredJson(db, CLOUDFLARE_LAST_WEBHOOK_STORAGE_KEY, state);
+}
+
+export async function persistCloudflareLifecyclePollState(
+  db: StorageDb | null | undefined,
+  state: PersistedCloudflareLifecyclePollState,
+): Promise<void> {
+  await writeStoredJson(db, CLOUDFLARE_LAST_LIFECYCLE_POLL_STORAGE_KEY, state);
+}
+
+export async function persistCloudflarePlaybackProbeState(
+  db: StorageDb | null | undefined,
+  state: PersistedCloudflarePlaybackProbeState,
+): Promise<void> {
+  await writeStoredJson(db, CLOUDFLARE_LAST_PLAYBACK_PROBE_STORAGE_KEY, state);
+}
+
+export async function persistCloudflareReconciliationState(
+  db: StorageDb | null | undefined,
+  state: PersistedCloudflareReconciliationState,
+): Promise<void> {
+  await writeStoredJson(db, CLOUDFLARE_RECONCILIATION_STORAGE_KEY, state);
 }
