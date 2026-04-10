@@ -1623,7 +1623,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         quantity,
       });
       return added;
-    } else {
     }
 
     // Fallback: emit event (may not be handled)
