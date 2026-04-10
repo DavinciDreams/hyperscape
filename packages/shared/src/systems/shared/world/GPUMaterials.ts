@@ -1053,11 +1053,12 @@ export function createTreeDissolveMaterial(
   const HL_BRIGHTEN = 0.08;
   const HL_RIM_POWER = 2.5;
   const HL_RIM_STRENGTH = 0.4;
-  const TOON_BRIGHT_EDGE = 0.7;
-  const TOON_MID_EDGE = 0.35;
-  const TOON_SHADOW_EDGE = 0.0;
-  const TOON_RIM_THRESHOLD = 0.3;
-  const TOON_RIM_BRIGHT = 1.3;
+  const DIFFUSE_RAMP_MIN = -0.15;
+  const DIFFUSE_RAMP_MAX = 0.6;
+  const TERMINATOR_BAND_STRENGTH = 0.3;
+  const RIM_EDGE_INNER = 0.15;
+  const RIM_EDGE_OUTER = 0.4;
+  const RIM_BRIGHT = 1.3;
   const NIGHT_MIN_BRIGHTNESS = NIGHT.BRIGHTNESS;
   /** Leaf back-scatter translucency (disabled = no extra warm glow when backlit). */
   const ENABLE_TREE_SSS = true;
@@ -1105,7 +1106,7 @@ export function createTreeDissolveMaterial(
   );
   material.fog = false;
 
-  // --- Output: toon lighting (bypass PBR, compute Lambert from scratch) ---
+  // --- Output: custom lighting (bypass PBR, compute diffuse ramp from scratch) ---
   const albedoMap = material.map;
   const matColor = vec3(material.color.r, material.color.g, material.color.b);
 
@@ -1125,7 +1126,7 @@ export function createTreeDissolveMaterial(
       : vec3(0, 1, 0);
     const aoRaw = vtxColor.y;
 
-    // ---- AO (used later as a single post-toon multiplier) ----
+    // ---- AO (post-diffuse multiplier) ----
     const aoFactor = pow(aoRaw, float(AO_POWER));
 
     // ---- Snow ----
@@ -1156,24 +1157,34 @@ export function createTreeDissolveMaterial(
     // ---- Sun shade on albedo ----
     baseAlbedo = applySunShade(baseAlbedo, uDayIntensity, vec3(uShadeColor));
 
-    // ---- 4-band Ghibli toon lighting (warm highlights -> cool shadows) ----
+    // ---- Smooth diffuse ramp (warm highlights -> cool shadows) ----
     const leafMask = vtxColor.x;
     const L = normalize(vec3(uSunDir));
     const N = normalize(normalWorldGeometry);
     const NdotL = dot(N, L);
 
-    const band0Color = mul(baseAlbedo, vec3(1.35, 1.08, 0.82));
-    const band1Color = baseAlbedo;
-    const band2Color = mul(baseAlbedo, vec3(0.65, 0.78, 0.82));
-    const band3Color = mul(baseAlbedo, vec3(0.38, 0.52, 0.68));
+    // Smooth 0..1 ramp across the terminator — no hard bands
+    const diffuseRamp = smoothstep(
+      float(DIFFUSE_RAMP_MIN),
+      float(DIFFUSE_RAMP_MAX),
+      NdotL,
+    );
 
-    const s0 = step(float(TOON_BRIGHT_EDGE), NdotL);
-    const s1 = step(float(TOON_MID_EDGE), NdotL);
-    const s2 = step(float(TOON_SHADOW_EDGE), NdotL);
+    // Warm highlight -> cool deep shadow
+    const litColor = mul(baseAlbedo, vec3(1.28, 1.06, 0.88));
+    const shadowColor = mul(baseAlbedo, vec3(0.42, 0.54, 0.72));
+    let rampColor: any = mix(shadowColor, litColor, diffuseRamp);
 
-    const toonStep0 = mix(band3Color, band2Color, s2);
-    const toonStep1 = mix(toonStep0, band1Color, s1);
-    const toonColor = mix(toonStep1, band0Color, s0);
+    // Narrow warm-tinted band at the shadow terminator
+    const terminatorA = smoothstep(float(-0.2), float(0.25), NdotL);
+    const terminatorB = smoothstep(float(0.08), float(0.45), NdotL);
+    const terminatorBand = sub(terminatorA, terminatorB);
+    const terminatorTint = mul(baseAlbedo, vec3(1.12, 0.72, 0.54));
+    rampColor = mix(
+      rampColor,
+      terminatorTint,
+      mul(terminatorBand, float(TERMINATOR_BAND_STRENGTH)),
+    );
 
     const nightDim = mix(
       float(NIGHT_MIN_BRIGHTNESS),
@@ -1181,9 +1192,9 @@ export function createTreeDissolveMaterial(
       uDayIntensity,
     );
     const aoMul = mix(float(AO_DARK), float(1.0), aoFactor);
-    let result: any = mul(mul(toonColor, nightDim), aoMul);
+    let result: any = mul(mul(rampColor, nightDim), aoMul);
 
-    // ---- View vector (toon rim); optional leaf SSS when ENABLE_TREE_SSS ----
+    // ---- View vector (rim); optional leaf SSS when ENABLE_TREE_SSS ----
     const V = normalize(sub(cameraPosition, positionWorld));
 
     if (ENABLE_TREE_SSS) {
@@ -1197,10 +1208,13 @@ export function createTreeDissolveMaterial(
     }
 
     const EDotN = clamp(dot(V, N), float(0.0), float(1.0));
-    const rimMask = sub(float(1.0), step(float(TOON_RIM_THRESHOLD), EDotN));
+    const rimMask = sub(
+      float(1.0),
+      smoothstep(float(RIM_EDGE_INNER), float(RIM_EDGE_OUTER), EDotN),
+    );
     const rimBright = mix(
       float(1.0),
-      float(TOON_RIM_BRIGHT),
+      float(RIM_BRIGHT),
       mul(mul(rimMask, dayFactor), leafMask),
     );
     result = mul(result, rimBright);
