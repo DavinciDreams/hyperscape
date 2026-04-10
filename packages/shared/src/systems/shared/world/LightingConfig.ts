@@ -16,7 +16,7 @@
 
 export const DAY_CYCLE = {
   /** Full day cycle duration in seconds */
-  DURATION_SEC: 80,
+  DURATION_SEC: 240,
 
   /** dayPhase thresholds — 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset */
   DAWN_START: 0.22,
