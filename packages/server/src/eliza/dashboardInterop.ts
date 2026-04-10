@@ -7,6 +7,7 @@ import type {
 import type { EmbeddedHyperscapeService } from "./EmbeddedHyperscapeService.js";
 import { ServerNetwork } from "../systems/ServerNetwork/index.js";
 import { agentThoughts as agentThoughtsTable } from "../database/schema.js";
+import type { Database } from "../database/client.js";
 
 type DashboardThought = {
   id?: string;
@@ -31,12 +32,10 @@ const THOUGHT_FLUSH_INTERVAL_MS = 10_000;
 let thoughtFlushTimer: ReturnType<typeof setInterval> | null = null;
 
 // DB handle — set once via setThoughtDb() from server startup
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _thoughtDb: any = null;
+let _thoughtDb: Database | null = null;
 
 /** Set the Drizzle DB instance for thought persistence. Call once at startup. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function setThoughtDb(db: any): void {
+export function setThoughtDb(db: Database): void {
   _thoughtDb = db;
 }
 

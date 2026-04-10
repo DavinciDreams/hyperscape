@@ -2784,11 +2784,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     return this.playerEntityId;
   }
 
-  /** Expose the world instance for global entity queries (e.g. findGlobalMobTarget). */
-  getWorld(): World {
-    return this.world;
-  }
-
   onGameEvent(event: string, handler: EventHandler): void {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, []);

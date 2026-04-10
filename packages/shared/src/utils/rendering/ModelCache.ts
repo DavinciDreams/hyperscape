@@ -402,7 +402,7 @@ export class ModelCache {
             out[i * iba.itemSize + j] = iba.getComponent(i, j);
           }
         }
-        return out.buffer;
+        return out.buffer as ArrayBuffer;
       }
       return sliceView(
         (attr as THREE.BufferAttribute).array as ArrayLike<number> & {
