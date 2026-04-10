@@ -1043,7 +1043,7 @@ export function createTreeDissolveMaterial(
 
   // --- Tuning ---
   const AO_POWER = 1.8;
-  const AO_DARK = 0.2;
+  const AO_DARK = 0.4;
   const SNOW_COLOR: [number, number, number] = [0.92, 0.95, 0.98];
   const SNOW_AO_TINT: [number, number, number] = [0.55, 0.6, 0.72];
   const SNOW_THRESHOLD = 0.15;
