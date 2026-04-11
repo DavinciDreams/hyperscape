@@ -52,7 +52,18 @@ function mapRendererDegradedReasonToSourceReason(
     normalized === "loading_overlay_active" ||
     normalized === "canvas_missing" ||
     normalized === "initialization_failed" ||
-    normalized === "asset_origin_incomplete"
+    normalized === "asset_origin_incomplete" ||
+    normalized === "socket_disconnected" ||
+    normalized === "stream_state_missing" ||
+    normalized === "waiting_for_duel_data" ||
+    normalized === "world_not_ready" ||
+    normalized === "terrain_not_ready" ||
+    normalized === "camera_target_unresolved" ||
+    normalized === "avatar_not_ready" ||
+    normalized === "initializing" ||
+    normalized === "agents_missing" ||
+    normalized === "invalid_agent_hp" ||
+    normalized === "arena_positions_invalid"
   ) {
     return "page_not_ready";
   }
@@ -76,7 +87,8 @@ function resolveFallbackSourceReason(params: {
   nowMs: number;
   externalStatusMaxAgeMs: number;
 }): StreamSourceDegradedReason | null {
-  const { rendererHealth, externalSnapshot, localHlsManifest, captureStats } = params;
+  const { rendererHealth, externalSnapshot, localHlsManifest, captureStats } =
+    params;
   const rendererReason = mapRendererDegradedReasonToSourceReason(
     rendererHealth?.degradedReason,
   );
@@ -98,8 +110,7 @@ function resolveFallbackSourceReason(params: {
     return "capture_stalled";
   }
 
-  const probeOnly =
-    externalSnapshot?.ingest?.probeOnly === true;
+  const probeOnly = externalSnapshot?.ingest?.probeOnly === true;
   const manifestUpdatedAt =
     asFiniteNumber(externalSnapshot?.hlsManifest?.updatedAt) ??
     asFiniteNumber(localHlsManifest?.updatedAt);

@@ -45,6 +45,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page, type CDPSession } from "playwright";
@@ -145,9 +146,8 @@ const GAME_URL_CANDIDATES = Array.from(
       .map(normalizeCaptureGameUrl),
   ),
 );
-const ALLOWED_CAPTURE_ORIGINS = resolveAllowedCaptureOrigins(
-  GAME_URL_CANDIDATES,
-);
+const ALLOWED_CAPTURE_ORIGINS =
+  resolveAllowedCaptureOrigins(GAME_URL_CANDIDATES);
 
 const BRIDGE_PORT = parseInt(process.env.RTMP_BRIDGE_PORT || "8765", 10);
 const BRIDGE_URL = `ws://localhost:${BRIDGE_PORT}`;
@@ -257,6 +257,13 @@ const SOURCE_CAPTURE_STALL_MS = Math.max(
   5_000,
   Number.parseInt(process.env.STREAM_SOURCE_CAPTURE_STALL_MS || "10_000", 10) ||
     10_000,
+);
+const SOURCE_VISUAL_CHANGE_STALE_MS = Math.max(
+  5_000,
+  Number.parseInt(
+    process.env.STREAM_SOURCE_VISUAL_CHANGE_STALE_MS || "10_000",
+    10,
+  ) || 10_000,
 );
 const SOURCE_DEGRADED_RESTART_POLLS = Math.max(
   2,
@@ -391,6 +398,13 @@ type RendererHealthSnapshot = CaptureRendererHealthSnapshot & {
   phase: string | null;
 };
 
+type RendererCanvasRectSnapshot = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | null;
+
 let latestRendererHealth: RendererHealthSnapshot = {
   ready: false,
   degradedReason: "capture_not_initialized",
@@ -490,7 +504,8 @@ function buildCaptureDiagnosticsSnapshot(
     ? { ...diagnostics.lastFatalWriteError }
     : null;
   const latestFrameAt =
-    typeof lastCaptureFrameAt === "number" && Number.isFinite(lastCaptureFrameAt)
+    typeof lastCaptureFrameAt === "number" &&
+    Number.isFinite(lastCaptureFrameAt)
       ? lastCaptureFrameAt
       : null;
 
@@ -501,8 +516,7 @@ function buildCaptureDiagnosticsSnapshot(
       cdpTimestamp: sample.cdpTimestamp,
     })),
     recentFrameCadenceMs: [...diagnostics.recentFrameCadenceMs],
-    nonMonotonicCdpTimestampCount:
-      diagnostics.nonMonotonicCdpTimestampCount,
+    nonMonotonicCdpTimestampCount: diagnostics.nonMonotonicCdpTimestampCount,
     backpressureTransitions: diagnostics.backpressureTransitions.map(
       (transition) => ({
         at: transition.at,
@@ -519,16 +533,16 @@ function buildCaptureDiagnosticsSnapshot(
         : latestFrameAt == null
           ? true
           : lastFatalWriteError.at - latestFrameAt >=
-              FATAL_WRITE_PAGE_STALL_THRESHOLD_MS,
+            FATAL_WRITE_PAGE_STALL_THRESHOLD_MS,
     lastFrameAgeMs:
       latestFrameAt == null ? null : Math.max(0, Date.now() - latestFrameAt),
     captureSessionGeneration:
       latestBrowserCaptureStatus?.captureSessionGeneration ?? null,
-  browserCapture: {
-    recording:
-      typeof latestBrowserCaptureStatus?.recording === "boolean"
-        ? latestBrowserCaptureStatus.recording
-        : null,
+    browserCapture: {
+      recording:
+        typeof latestBrowserCaptureStatus?.recording === "boolean"
+          ? latestBrowserCaptureStatus.recording
+          : null,
       wsConnected:
         typeof latestBrowserCaptureStatus?.wsConnected === "boolean"
           ? latestBrowserCaptureStatus.wsConnected
@@ -538,26 +552,26 @@ function buildCaptureDiagnosticsSnapshot(
         Number.isFinite(latestBrowserCaptureStatus.chunkCount)
           ? latestBrowserCaptureStatus.chunkCount
           : null,
-    bytesSent:
-      typeof latestBrowserCaptureStatus?.bytesSent === "number" &&
-      Number.isFinite(latestBrowserCaptureStatus.bytesSent)
-        ? latestBrowserCaptureStatus.bytesSent
-        : null,
-    lastChunkAt:
-      typeof latestBrowserCaptureStatus?.lastChunkAt === "number" &&
-      Number.isFinite(latestBrowserCaptureStatus.lastChunkAt)
-        ? latestBrowserCaptureStatus.lastChunkAt
-        : null,
-    lastChunkAgeMs:
-      typeof latestBrowserCaptureStatus?.lastChunkAgeMs === "number" &&
-      Number.isFinite(latestBrowserCaptureStatus.lastChunkAgeMs)
-        ? latestBrowserCaptureStatus.lastChunkAgeMs
-        : null,
-    lastChunkMs:
-      typeof latestBrowserCaptureStatus?.lastChunkMs === "number" &&
-      Number.isFinite(latestBrowserCaptureStatus.lastChunkMs)
-        ? latestBrowserCaptureStatus.lastChunkMs
-        : null,
+      bytesSent:
+        typeof latestBrowserCaptureStatus?.bytesSent === "number" &&
+        Number.isFinite(latestBrowserCaptureStatus.bytesSent)
+          ? latestBrowserCaptureStatus.bytesSent
+          : null,
+      lastChunkAt:
+        typeof latestBrowserCaptureStatus?.lastChunkAt === "number" &&
+        Number.isFinite(latestBrowserCaptureStatus.lastChunkAt)
+          ? latestBrowserCaptureStatus.lastChunkAt
+          : null,
+      lastChunkAgeMs:
+        typeof latestBrowserCaptureStatus?.lastChunkAgeMs === "number" &&
+        Number.isFinite(latestBrowserCaptureStatus.lastChunkAgeMs)
+          ? latestBrowserCaptureStatus.lastChunkAgeMs
+          : null,
+      lastChunkMs:
+        typeof latestBrowserCaptureStatus?.lastChunkMs === "number" &&
+        Number.isFinite(latestBrowserCaptureStatus.lastChunkMs)
+          ? latestBrowserCaptureStatus.lastChunkMs
+          : null,
     },
   };
 }
@@ -569,7 +583,7 @@ function buildRendererSmokeSnapshot(
   const ingest = resolveStreamIngestSettings(process.env);
   pruneFpsSamples(nowMs);
   return {
-    currentSceneUrl: latestSceneUrl ?? selectedGameUrl,
+    currentSceneUrl: resolveStatusSceneUrl(),
     activeBundle: latestActiveBundle,
     deliveryMode: delivery.mode,
     captureFpsP50: percentileFromSamples(captureFpsSamples, 0.5),
@@ -604,11 +618,102 @@ function mapRendererReasonToSourceDegradedReason(
     normalized === "canvas_missing" ||
     normalized === "initialization_failed" ||
     normalized === "asset_origin_incomplete" ||
+    normalized === "socket_disconnected" ||
+    normalized === "stream_state_missing" ||
+    normalized === "waiting_for_duel_data" ||
+    normalized === "world_not_ready" ||
+    normalized === "terrain_not_ready" ||
+    normalized === "camera_target_unresolved" ||
+    normalized === "avatar_not_ready" ||
+    normalized === "initializing" ||
+    normalized === "agents_missing" ||
+    normalized === "invalid_agent_hp" ||
+    normalized === "arena_positions_invalid" ||
     normalized.startsWith("probe_failed:")
   ) {
     return "page_not_ready";
   }
+  if (
+    normalized === "render_tick_stale" ||
+    normalized === "visual_change_stale" ||
+    normalized === "capture_fps_low"
+  ) {
+    return "capture_stalled";
+  }
   return null;
+}
+
+function rendererPhaseNeedsVisualChange(
+  phase: string | null | undefined,
+): boolean {
+  const normalized = (phase ?? "").trim().toUpperCase();
+  return (
+    normalized === "COUNTDOWN" ||
+    normalized === "FIGHTING" ||
+    normalized === "RESOLUTION"
+  );
+}
+
+function sourceVisualChangeIsStale(nowMs: number): boolean {
+  if (!rendererPhaseNeedsVisualChange(latestRendererHealth.phase)) {
+    return false;
+  }
+
+  const latestVisualChangeAgeMs =
+    latestVisualChangeAt == null
+      ? null
+      : Math.max(0, nowMs - latestVisualChangeAt);
+  return (
+    latestVisualChangeAgeMs == null ||
+    latestVisualChangeAgeMs > SOURCE_VISUAL_CHANGE_STALE_MS
+  );
+}
+
+function resolveStatusSceneUrl(): string | null {
+  const sceneUrl = latestSceneUrl ?? selectedGameUrl;
+  return sceneUrl ? redactStreamingSecretsFromUrl(sceneUrl) : null;
+}
+
+function hashVisualSample(buffer: Uint8Array): string {
+  return createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+}
+
+function resolveVisualSampleClip(
+  canvasRect: RendererCanvasRectSnapshot | unknown,
+  viewport: { width: number; height: number } | null,
+): { x: number; y: number; width: number; height: number } | null {
+  if (!viewport || !canvasRect || typeof canvasRect !== "object") {
+    return null;
+  }
+  const rect = canvasRect as Partial<NonNullable<RendererCanvasRectSnapshot>>;
+  const x = Number(rect.x);
+  const y = Number(rect.y);
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 96 ||
+    height < 96
+  ) {
+    return null;
+  }
+
+  const sampleX = Math.max(0, x + width * 0.15);
+  const sampleY = Math.max(0, y + height * 0.2);
+  const sampleWidth = Math.min(width * 0.7, viewport.width - sampleX);
+  const sampleHeight = Math.min(height * 0.6, viewport.height - sampleY);
+  if (sampleWidth < 64 || sampleHeight < 64) {
+    return null;
+  }
+  return {
+    x: sampleX,
+    y: sampleY,
+    width: sampleWidth,
+    height: sampleHeight,
+  };
 }
 
 function resolveSourceRuntimeSnapshot(
@@ -628,6 +733,7 @@ function resolveSourceRuntimeSnapshot(
   const rendererReason = mapRendererReasonToSourceDegradedReason(
     latestRendererHealth.degradedReason,
   );
+  const visualChangeStale = sourceVisualChangeIsStale(nowMs);
 
   let degradedReason: StreamSourceDegradedReason | null = null;
   if (captureNavigationAbortInFlight) {
@@ -636,11 +742,14 @@ function resolveSourceRuntimeSnapshot(
     degradedReason = "browser_missing";
   } else if (rendererReason) {
     degradedReason = rendererReason;
+  } else if (visualChangeStale) {
+    degradedReason = "capture_stalled";
   } else if (bridgeStatus.ffmpegRunning !== true) {
     degradedReason = "encoder_stalled";
   } else if (
     captureMode === "cdp" &&
-    (lastCaptureFrameAt == null || nowMs - lastCaptureFrameAt > SOURCE_CAPTURE_STALL_MS)
+    (lastCaptureFrameAt == null ||
+      nowMs - lastCaptureFrameAt > SOURCE_CAPTURE_STALL_MS)
   ) {
     degradedReason = "capture_stalled";
   } else if (
@@ -671,7 +780,7 @@ function resolveSourceRuntimeSnapshot(
     statusSource: "external_worker",
     captureMode,
     degradedReason,
-    currentSceneUrl: latestSceneUrl ?? selectedGameUrl,
+    currentSceneUrl: resolveStatusSceneUrl(),
     activeBundle: latestActiveBundle,
     lastFrameAt,
     lastRenderTickAt: latestRenderTickAt,
@@ -920,27 +1029,45 @@ async function probeRendererHealth(
       document.querySelector("#hyperscape-world-canvas") ??
       document.querySelector("#game-canvas canvas") ??
       document.querySelector("[data-component='viewport'] canvas");
-    const canvasCandidates = Array.from(document.querySelectorAll("canvas")).filter(
+    const canvasCandidates = Array.from(
+      document.querySelectorAll("canvas"),
+    ).filter(
       (candidate): candidate is HTMLCanvasElement =>
         candidate instanceof HTMLCanvasElement,
     );
-    const largestCanvas = canvasCandidates
-      .slice()
-      .sort((left, right) => {
-        const leftRect = left.getBoundingClientRect();
-        const rightRect = right.getBoundingClientRect();
-        const leftArea =
-          Math.max(leftRect.width, left.width) *
-          Math.max(leftRect.height, left.height);
-        const rightArea =
-          Math.max(rightRect.width, right.width) *
-          Math.max(rightRect.height, right.height);
-        return rightArea - leftArea;
-      })[0];
+    const largestCanvas = canvasCandidates.slice().sort((left, right) => {
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      const leftArea =
+        Math.max(leftRect.width, left.width) *
+        Math.max(leftRect.height, left.height);
+      const rightArea =
+        Math.max(rightRect.width, right.width) *
+        Math.max(rightRect.height, right.height);
+      return rightArea - leftArea;
+    })[0];
     const canvas =
       preferredCanvas instanceof HTMLCanvasElement
         ? preferredCanvas
-        : largestCanvas ?? null;
+        : (largestCanvas ?? null);
+    const canvasRect =
+      canvas instanceof HTMLCanvasElement
+        ? (() => {
+            const rect = canvas.getBoundingClientRect();
+            const x = Number(rect.x);
+            const y = Number(rect.y);
+            const width = Number(rect.width);
+            const height = Number(rect.height);
+            return Number.isFinite(x) &&
+              Number.isFinite(y) &&
+              Number.isFinite(width) &&
+              Number.isFinite(height) &&
+              width > 0 &&
+              height > 0
+              ? { x, y, width, height }
+              : null;
+          })()
+        : null;
     if (canvas instanceof HTMLCanvasElement) {
       const sampleCanvas = document.createElement("canvas");
       sampleCanvas.width = 32;
@@ -986,10 +1113,35 @@ async function probeRendererHealth(
       hasCriticalErrorUi,
       heartbeat,
       frameHash,
+      canvasRect,
       currentSceneUrl: window.location.href,
       activeBundle,
     };
   });
+
+  let visualSampleHash =
+    typeof probe.frameHash === "string" && probe.frameHash.length > 0
+      ? `canvas:${probe.frameHash}`
+      : null;
+  try {
+    const clip = resolveVisualSampleClip(
+      probe.canvasRect as RendererCanvasRectSnapshot | unknown,
+      pageRef.viewportSize(),
+    );
+    if (clip) {
+      const screenshot = await pageRef.screenshot({
+        type: "jpeg",
+        quality: 30,
+        fullPage: false,
+        scale: "css",
+        clip,
+      });
+      visualSampleHash = `screenshot:${hashVisualSample(screenshot)}`;
+    }
+  } catch {
+    // Fall back to the in-page canvas sample. Some capture sessions briefly
+    // reject screenshots while Chromium is navigating or restarting.
+  }
 
   const heartbeat =
     probe.heartbeat && typeof probe.heartbeat === "object"
@@ -1002,16 +1154,17 @@ async function probeRendererHealth(
     latestDuelStateTickAt = heartbeat.latestDuelStateTickAt;
   }
   latestSceneUrl =
-    typeof probe.currentSceneUrl === "string" && probe.currentSceneUrl.length > 0
+    typeof probe.currentSceneUrl === "string" &&
+    probe.currentSceneUrl.length > 0
       ? probe.currentSceneUrl
       : selectedGameUrl;
   latestActiveBundle =
     typeof probe.activeBundle === "string" && probe.activeBundle.length > 0
       ? probe.activeBundle
       : null;
-  if (typeof probe.frameHash === "string" && probe.frameHash.length > 0) {
-    if (probe.frameHash !== lastVisualSampleHash) {
-      lastVisualSampleHash = probe.frameHash;
+  if (visualSampleHash) {
+    if (visualSampleHash !== lastVisualSampleHash) {
+      lastVisualSampleHash = visualSampleHash;
       latestVisualChangeAt = probedAt;
     } else if (latestVisualChangeAt === null) {
       latestVisualChangeAt = probedAt;
@@ -1098,7 +1251,9 @@ function assertAllowedCaptureNavigation(rawUrl: string): void {
   );
 }
 
-async function abortCaptureForUnexpectedNavigation(rawUrl: string): Promise<void> {
+async function abortCaptureForUnexpectedNavigation(
+  rawUrl: string,
+): Promise<void> {
   if (captureNavigationAbortInFlight) {
     return;
   }
@@ -1674,11 +1829,13 @@ async function getBrowserCaptureStatus(): Promise<BrowserCaptureStatus | null> {
         __HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__?: string | null;
       };
       const captureStatus =
-        (win.__captureControl__?.getStatus?.() as Record<string, unknown>) ?? {};
+        (win.__captureControl__?.getStatus?.() as Record<string, unknown>) ??
+        {};
       return {
         ...captureStatus,
         captureSessionGeneration:
-          typeof win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ === "string"
+          typeof win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ ===
+          "string"
             ? win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__
             : null,
       };
@@ -1870,7 +2027,10 @@ async function main() {
       )
       .catch(() => undefined)
       .finally(() => {
-        const sourceRuntime = writeExternalStatusSnapshot(bridge, activeCaptureMode);
+        const sourceRuntime = writeExternalStatusSnapshot(
+          bridge,
+          activeCaptureMode,
+        );
         const degradedReason = sourceRuntime?.degradedReason ?? null;
         const withinLaunchGrace =
           Date.now() - launchTime <

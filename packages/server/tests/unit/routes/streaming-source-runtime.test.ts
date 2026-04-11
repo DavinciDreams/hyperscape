@@ -126,6 +126,38 @@ describe("deriveStreamSourceRuntime", () => {
     expect(runtime.statusSource).toBe("external_worker");
     expect(runtime.captureMode).toBe("cdp");
   });
+
+  it("fails closed when renderer health reports a scene blocker", () => {
+    const runtime = deriveStreamSourceRuntime({
+      externalStatusSnapshot: {
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        captureMode: "cdp",
+        destinations: [],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: 1_000,
+      },
+      externalStatusMaxAgeMs: 15_000,
+      rendererHealth: {
+        ready: false,
+        degradedReason: "terrain_not_ready",
+        updatedAt: 1_000,
+      },
+      captureStats: {
+        clientConnected: true,
+        ffmpegRunning: true,
+      },
+      nowMs: 1_500,
+    });
+
+    expect(runtime.ready).toBe(false);
+    expect(runtime.degradedReason).toBe("page_not_ready");
+    expect(runtime.statusSource).toBe("external_worker");
+    expect(runtime.captureMode).toBe("cdp");
+  });
 });
 
 describe("resolveBrowserCaptureLastFrameAt", () => {
