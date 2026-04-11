@@ -8,7 +8,7 @@
 
 import Yoga from "yoga-layout";
 import type * as YogaTypes from "yoga-layout";
-import { every, isArray, isBoolean, isNumber, isString } from "lodash-es";
+import { isArray, isBoolean, isNumber, isString } from "lodash-es";
 
 import { Node } from "./Node";
 import { Display, isDisplay, isEdge } from "../extras/ui/yoga";
@@ -73,6 +73,9 @@ export class UIImage extends Node {
   ui?: UIContext;
   yogaNode?: YogaTypes.Node;
   box?: { left: number; top: number; width: number; height: number };
+  private _mounted = false;
+  /** Cached redraw callback — stable reference for imageCache deduplication. */
+  private _onImageLoad = () => this.ui?.redraw();
 
   constructor(data: UIImageData = {}) {
     super(data);
@@ -120,7 +123,7 @@ export class UIImage extends Node {
 
     // Load and draw image
     if (this._src) {
-      const img = loadCachedImage(this._src, () => this.ui?.redraw());
+      const img = loadCachedImage(this._src, this._onImageLoad);
       if (img) {
         const imgNaturalW = img.naturalWidth;
         const imgNaturalH = img.naturalHeight;
@@ -161,6 +164,7 @@ export class UIImage extends Node {
     if (!isBrowser) return;
     this.ui = (this.parent as Node & { ui?: UIContext })?.ui;
     if (!this.ui) return console.error("uiimage: must be child of ui node");
+    this._mounted = true;
 
     this.yogaNode = Yoga.Node.create();
     this.yogaNode.setMeasureFunc(this.measureImageFunc());
@@ -216,6 +220,10 @@ export class UIImage extends Node {
 
   unmount() {
     if (!isBrowser) return;
+    this._mounted = false;
+    // Clear ui reference so in-flight imageCache callbacks don't trigger
+    // redraws on a parent UI that no longer contains this node.
+    this.ui = undefined;
     if (this.yogaNode) {
       const parentNode = (this.parent as Node & { yogaNode?: YogaTypes.Node })
         ?.yogaNode;

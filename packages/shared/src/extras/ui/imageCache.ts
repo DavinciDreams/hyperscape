@@ -84,8 +84,11 @@ export function loadCachedImage(
       return existing.img;
     }
     if (existing.status === "loading") {
-      // Coalesce callback
-      existing.callbacks.push(onLoad);
+      // Coalesce callback — deduplicate by reference to avoid accumulation
+      // from repeated draw() cycles (callers should cache their callback).
+      if (!existing.callbacks.includes(onLoad)) {
+        existing.callbacks.push(onLoad);
+      }
       return null;
     }
     // Error — allow retry after TTL expires

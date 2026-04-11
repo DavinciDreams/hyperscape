@@ -60,19 +60,35 @@ export function attachScrollHandler(
     const viewportHeight = scrollView.yogaNode.getComputedHeight();
     const viewportWidth = scrollView.yogaNode.getComputedWidth();
 
+    // Compute content size based on flex direction:
+    // - Column (default): content height = sum of children, width = max child
+    // - Row: content width = sum of children, height = max child
+    const isRow =
+      scrollView.yogaNode.getFlexDirection() === Yoga.FLEX_DIRECTION_ROW ||
+      scrollView.yogaNode.getFlexDirection() ===
+        Yoga.FLEX_DIRECTION_ROW_REVERSE;
+
     let contentHeight = 0;
     let contentWidth = 0;
     const childCount = scrollView.yogaNode.getChildCount();
     for (let i = 0; i < childCount; i++) {
       const child = scrollView.yogaNode.getChild(i);
-      contentHeight +=
+      const childH =
         child.getComputedHeight() +
         child.getComputedMargin(Yoga.EDGE_TOP) +
         child.getComputedMargin(Yoga.EDGE_BOTTOM);
-      contentWidth +=
+      const childW =
         child.getComputedWidth() +
         child.getComputedMargin(Yoga.EDGE_LEFT) +
         child.getComputedMargin(Yoga.EDGE_RIGHT);
+
+      if (isRow) {
+        contentWidth += childW;
+        contentHeight = Math.max(contentHeight, childH);
+      } else {
+        contentHeight += childH;
+        contentWidth = Math.max(contentWidth, childW);
+      }
     }
 
     const res = rootUI.res ?? 2;
@@ -112,9 +128,22 @@ export function attachScrollHandler(
       return;
     }
 
+    // Normalize deltas based on deltaMode (DOM WheelEvent spec):
+    // 0 = pixels, 1 = lines (~16px), 2 = pages (~viewport height)
+    let dx = event.deltaX;
+    let dy = event.deltaY;
+    if (event.deltaMode === 1) {
+      dx *= 16;
+      dy *= 16;
+    } else if (event.deltaMode === 2) {
+      const { height, width } = scrollView.box;
+      dx *= width;
+      dy *= height;
+    }
+
     // Accumulate deltas; flush on next animation frame
-    pendingDeltaX += event.deltaX;
-    pendingDeltaY += event.deltaY;
+    pendingDeltaX += dx;
+    pendingDeltaY += dy;
     lastShiftKey = event.shiftKey ?? false;
     if (!rafId) {
       rafId = requestAnimationFrame(flushScroll);
@@ -123,14 +152,18 @@ export function attachScrollHandler(
 
   // Attach to root UI's onWheel
   const prevHandler = rootUI.onWheel;
-  rootUI.onWheel = (event: UIWheelEvent) => {
+  const wrappedHandler = (event: UIWheelEvent) => {
     prevHandler?.(event);
     handler(event);
   };
+  rootUI.onWheel = wrappedHandler;
 
-  // Return cleanup function
+  // Return cleanup function — only restore if we're still the active handler.
+  // If another handler was attached after us, don't overwrite it.
   return () => {
-    rootUI.onWheel = prevHandler;
+    if (rootUI.onWheel === wrappedHandler) {
+      rootUI.onWheel = prevHandler;
+    }
     if (rafId) cancelAnimationFrame(rafId);
   };
 }

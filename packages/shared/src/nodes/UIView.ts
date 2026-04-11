@@ -759,6 +759,12 @@ export class UIView extends Node {
   }
 
   set overflow(value: OverflowMode) {
+    if (value !== "visible" && value !== "hidden" && value !== "scroll") {
+      console.warn(
+        `[UIView] Invalid overflow value "${value}", defaulting to "visible"`,
+      );
+      value = "visible";
+    }
     if (this._overflow === value) return;
     this._overflow = value;
     if (this.yogaNode) {
