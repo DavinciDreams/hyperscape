@@ -2037,8 +2037,10 @@ async function main() {
           Math.max(CDP_STARTUP_TIMEOUT_MS, SOURCE_CAPTURE_STALL_MS);
         const shouldRestartForDegradation =
           !withinLaunchGrace &&
+          // Keep scene readiness as a health gate, not a restart trigger. A
+          // live capture can render a degraded/loading scene while terrain,
+          // camera, or avatar data converges.
           (degradedReason === "browser_missing" ||
-            degradedReason === "page_not_ready" ||
             degradedReason === "unexpected_navigation" ||
             degradedReason === "capture_stalled" ||
             degradedReason === "encoder_stalled" ||
