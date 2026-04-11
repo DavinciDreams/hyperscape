@@ -722,7 +722,7 @@ export interface UIImageData extends NodeData {
   right?: number | null;
   bottom?: number | null;
   left?: number | null;
-  objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down" | string;
+  objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down";
   backgroundColor?: string | null;
   borderRadius?: number | null;
   margin?: number | number[] | null;

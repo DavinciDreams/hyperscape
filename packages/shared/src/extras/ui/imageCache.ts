@@ -39,6 +39,7 @@ const insertionOrder: string[] = [];
  * Skips entries that are still loading.
  */
 function evictIfNeeded(): void {
+  let attempts = 0;
   while (insertionOrder.length > MAX_CACHE_SIZE) {
     const oldestUrl = insertionOrder[0];
     const entry = cache.get(oldestUrl);
@@ -49,8 +50,8 @@ function evictIfNeeded(): void {
       // Don't evict loading entries; rotate to back
       insertionOrder.shift();
       if (oldestUrl) insertionOrder.push(oldestUrl);
-      break;
     }
+    if (++attempts >= insertionOrder.length) break; // all loading, give up
   }
 }
 

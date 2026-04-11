@@ -353,11 +353,13 @@ export class UIImage extends Node {
     }
     if (this._width === value) return;
     this._width = value;
-    this.yogaNode?.setWidth(
-      this._width === null ? undefined : this._width * this.ui!._res,
-    );
-    this.yogaNode?.markDirty();
-    this.ui?.redraw();
+    if (this.ui) {
+      this.yogaNode?.setWidth(
+        this._width === null ? undefined : this._width * this.ui._res,
+      );
+      this.yogaNode?.markDirty();
+      this.ui.redraw();
+    }
   }
 
   get height() {
@@ -371,11 +373,13 @@ export class UIImage extends Node {
     }
     if (this._height === value) return;
     this._height = value;
-    this.yogaNode?.setHeight(
-      this._height === null ? undefined : this._height * this.ui!._res,
-    );
-    this.yogaNode?.markDirty();
-    this.ui?.redraw();
+    if (this.ui) {
+      this.yogaNode?.setHeight(
+        this._height === null ? undefined : this._height * this.ui._res,
+      );
+      this.yogaNode?.markDirty();
+      this.ui.redraw();
+    }
   }
 
   get absolute() {
@@ -409,11 +413,13 @@ export class UIImage extends Node {
     }
     if (this._top === value) return;
     this._top = value;
-    this.yogaNode?.setPosition(
-      Yoga.EDGE_TOP,
-      isNum && this._top !== null ? this._top * this.ui!._res : undefined,
-    );
-    this.ui?.redraw();
+    if (this.ui) {
+      this.yogaNode?.setPosition(
+        Yoga.EDGE_TOP,
+        isNum && this._top !== null ? this._top * this.ui._res : undefined,
+      );
+      this.ui.redraw();
+    }
   }
 
   get right() {
@@ -428,11 +434,13 @@ export class UIImage extends Node {
     }
     if (this._right === value) return;
     this._right = value;
-    this.yogaNode?.setPosition(
-      Yoga.EDGE_RIGHT,
-      isNum && this._right !== null ? this._right * this.ui!._res : undefined,
-    );
-    this.ui?.redraw();
+    if (this.ui) {
+      this.yogaNode?.setPosition(
+        Yoga.EDGE_RIGHT,
+        isNum && this._right !== null ? this._right * this.ui._res : undefined,
+      );
+      this.ui.redraw();
+    }
   }
 
   get bottom() {
@@ -447,11 +455,15 @@ export class UIImage extends Node {
     }
     if (this._bottom === value) return;
     this._bottom = value;
-    this.yogaNode?.setPosition(
-      Yoga.EDGE_BOTTOM,
-      isNum && this._bottom !== null ? this._bottom * this.ui!._res : undefined,
-    );
-    this.ui?.redraw();
+    if (this.ui) {
+      this.yogaNode?.setPosition(
+        Yoga.EDGE_BOTTOM,
+        isNum && this._bottom !== null
+          ? this._bottom * this.ui._res
+          : undefined,
+      );
+      this.ui.redraw();
+    }
   }
 
   get left() {
@@ -466,11 +478,13 @@ export class UIImage extends Node {
     }
     if (this._left === value) return;
     this._left = value;
-    this.yogaNode?.setPosition(
-      Yoga.EDGE_LEFT,
-      isNum && this._left !== null ? this._left * this.ui!._res : undefined,
-    );
-    this.ui?.redraw();
+    if (this.ui) {
+      this.yogaNode?.setPosition(
+        Yoga.EDGE_LEFT,
+        isNum && this._left !== null ? this._left * this.ui._res : undefined,
+      );
+      this.ui.redraw();
+    }
   }
 
   get objectFit() {
@@ -526,16 +540,18 @@ export class UIImage extends Node {
     }
     if (this._margin === value) return;
     this._margin = value;
-    if (isArray(this._margin)) {
-      const [marginTop, marginRight, marginBottom, marginLeft] = this._margin;
-      this.yogaNode?.setMargin(Yoga.EDGE_TOP, marginTop * this.ui!._res);
-      this.yogaNode?.setMargin(Yoga.EDGE_RIGHT, marginRight * this.ui!._res);
-      this.yogaNode?.setMargin(Yoga.EDGE_BOTTOM, marginBottom * this.ui!._res);
-      this.yogaNode?.setMargin(Yoga.EDGE_LEFT, marginLeft * this.ui!._res);
-    } else {
-      this.yogaNode?.setMargin(Yoga.EDGE_ALL, this._margin * this.ui!._res);
+    if (this.ui) {
+      if (isArray(this._margin)) {
+        const [marginTop, marginRight, marginBottom, marginLeft] = this._margin;
+        this.yogaNode?.setMargin(Yoga.EDGE_TOP, marginTop * this.ui._res);
+        this.yogaNode?.setMargin(Yoga.EDGE_RIGHT, marginRight * this.ui._res);
+        this.yogaNode?.setMargin(Yoga.EDGE_BOTTOM, marginBottom * this.ui._res);
+        this.yogaNode?.setMargin(Yoga.EDGE_LEFT, marginLeft * this.ui._res);
+      } else {
+        this.yogaNode?.setMargin(Yoga.EDGE_ALL, this._margin * this.ui._res);
+      }
+      this.ui.redraw();
     }
-    this.ui?.redraw();
   }
 
   getProxy() {

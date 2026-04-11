@@ -373,7 +373,7 @@ export function formatGoldValue(value: number): string {
     const remainder = Math.floor((value % 1000000) / 100000);
     return remainder > 0 ? `${m}.${remainder}M` : `${m}M`;
   } else {
-    const b = Math.floor(value / 1000000000);
+    const b = (value / 1000000000).toFixed(1);
     return `${b}B`;
   }
 }

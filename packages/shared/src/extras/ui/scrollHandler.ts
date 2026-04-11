@@ -83,7 +83,7 @@ export function attachScrollHandler(
         child.getComputedMargin(2); // EDGE_RIGHT
     }
 
-    const res = (rootUI as unknown as { _res: number })._res ?? 2;
+    const res = rootUI.res ?? 2;
 
     if (allowHorizontal && event.shiftKey) {
       const maxScrollX = Math.max(0, (contentWidth - viewportWidth) / res);

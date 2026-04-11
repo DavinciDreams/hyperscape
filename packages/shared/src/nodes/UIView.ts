@@ -350,6 +350,9 @@ export class UIView extends Node {
     this._flexShrink = source._flexShrink;
     this._flexWrap = source._flexWrap;
     this._gap = source._gap;
+    this._overflow = source._overflow;
+    this._scrollX = source._scrollX;
+    this._scrollY = source._scrollY;
     return this;
   }
 
