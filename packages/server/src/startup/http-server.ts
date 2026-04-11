@@ -48,12 +48,60 @@ import {
   enforceSameSiteCookies,
 } from "../middleware/csrf.js";
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function derivePagesProjectHost(hostname: string): string | null {
+  const normalized = hostname.trim().toLowerCase();
+  if (!normalized.endsWith(".pages.dev")) {
+    return null;
+  }
+
+  const segments = normalized.split(".");
+  if (segments.length < 3) {
+    return null;
+  }
+
+  return segments.slice(-3).join(".");
+}
+
+export function buildPagesPreviewOriginPatterns(
+  origin: string | null | undefined,
+): RegExp[] {
+  const trimmed = origin?.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return [];
+    }
+
+    const projectHost = derivePagesProjectHost(parsed.hostname);
+    if (!projectHost) {
+      return [];
+    }
+
+    return [
+      new RegExp(
+        `^${escapeRegExp(parsed.protocol)}//(?:[a-z0-9-]+\\.)+${escapeRegExp(projectHost)}$`,
+        "i",
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * SECURITY: Validate Origin header for state-changing requests.
  * This provides additional protection against cross-origin attacks
  * even though we don't use cookies (which would make CSRF a non-issue).
  */
-function createOriginValidator(allowedOrigins: (string | RegExp)[]) {
+export function createOriginValidator(allowedOrigins: (string | RegExp)[]) {
   return function validateOrigin(origin: string | undefined): boolean {
     if (!origin) return true; // Server-to-server or same-origin requests may not have Origin
 
@@ -148,6 +196,11 @@ export async function createHttpServer(
     process.env.PUBLIC_APP_URL ||
     getDefaultPublicAppUrl();
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
+  const derivedPagesPreviewOrigins = [
+    ...buildPagesPreviewOriginPatterns(clientUrl),
+    ...buildPagesPreviewOriginPatterns(process.env.PUBLIC_APP_URL),
+    ...buildPagesPreviewOriginPatterns(process.env.CLIENT_URL),
+  ];
 
   const allowedOrigins = [
     // Production domains (HTTPS)
@@ -186,6 +239,7 @@ export async function createHttpServer(
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
     /^https:\/\/.+\.up\.railway\.app$/,
+    ...derivedPagesPreviewOrigins,
   ];
 
   // Add custom domain from env if set

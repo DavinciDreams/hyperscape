@@ -233,10 +233,10 @@ module.exports = {
   apps: [
     {
       name: "hyperscape-duel-api",
-      script: "scripts/duel-stack.mjs",
-      interpreter: "bun",
-      args: "--skip-stream --skip-betting --skip-bots --skip-chain-setup",
-      cwd: __dirname,
+      script: "dist/index.js",
+      interpreter: "node",
+      node_args: "--import ./scripts/register-hooks.mjs",
+      cwd: require("path").join(__dirname, "packages/server"),
       autorestart: true,
       max_restarts: 999999,
       min_uptime: "10s",
