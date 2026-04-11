@@ -80,6 +80,52 @@ describe("deriveStreamSourceRuntime", () => {
     expect(runtime.statusSource).toBe("external_worker");
     expect(runtime.captureMode).toBe("cdp");
   });
+
+  it("does not downgrade source runtime solely because a delivery destination is disconnected", () => {
+    const runtime = deriveStreamSourceRuntime({
+      externalStatusSnapshot: {
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        captureMode: "cdp",
+        destinations: [
+          {
+            id: "fallback-cloudflare",
+            connected: false,
+            error: "delivery_disconnected",
+          },
+        ],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: 1_000,
+        delivery: {
+          mode: "self_hls",
+          provider: "self_hls",
+          playbackUrl: "https://self.example/live/stream.m3u8",
+          hlsUrl: "https://self.example/live/stream.m3u8",
+          llhlsUrl: null,
+          ingestUrl: null,
+        },
+      },
+      externalStatusMaxAgeMs: 15_000,
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1_000,
+      },
+      captureStats: {
+        clientConnected: true,
+        ffmpegRunning: true,
+      },
+      nowMs: 1_500,
+    });
+
+    expect(runtime.ready).toBe(true);
+    expect(runtime.degradedReason).toBeNull();
+    expect(runtime.statusSource).toBe("external_worker");
+    expect(runtime.captureMode).toBe("cdp");
+  });
 });
 
 describe("resolveBrowserCaptureLastFrameAt", () => {

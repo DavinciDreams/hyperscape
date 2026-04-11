@@ -115,13 +115,6 @@ function resolveFallbackSourceReason(params: {
     return "manifest_stale";
   }
 
-  if (
-    externalSnapshot?.destinations.length &&
-    externalSnapshot.destinations.every((destination) => destination.connected !== true)
-  ) {
-    return "destination_disconnected";
-  }
-
   return null;
 }
 

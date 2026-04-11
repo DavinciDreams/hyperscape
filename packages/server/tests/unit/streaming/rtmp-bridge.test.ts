@@ -220,6 +220,43 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     ]);
   });
 
+  it("marks destinations connected after FFmpeg reports progress", () => {
+    process.env.STREAM_INGEST_PROFILE = "cloudflare_live";
+    process.env.STREAM_CLOUDFLARE_PROBE_ONLY = "true";
+    process.env.STREAM_DELIVERY_MODE = "external_hls";
+    process.env.STREAM_DELIVERY_PROVIDER = "cloudflare_stream";
+    process.env.STREAM_PLAYBACK_URL =
+      "https://videodelivery.net/test/manifest/video.m3u8";
+    process.env.STREAM_PLAYBACK_HLS_URL =
+      "https://videodelivery.net/test/manifest/video.m3u8";
+    process.env.STREAM_PLAYBACK_LLHLS_URL =
+      "https://videodelivery.net/test/manifest/video.m3u8?protocol=llhls";
+    process.env.STREAM_INGEST_RTMPS_URL = "rtmps://live.cloudflare.com:443/live";
+    process.env.STREAM_INGEST_STREAM_KEY = "stream-key";
+
+    const bridge = new RTMPBridge();
+    (bridge as any).initOutputs();
+    (bridge as any).status.destinations = [
+      {
+        id: "canonical-cloudflare",
+        name: "External Delivery",
+        role: "canonical",
+        provider: "cloudflare_stream",
+        transport: "rtmps",
+        playbackUrl: "https://videodelivery.net/test/manifest/video.m3u8",
+        ingestUrl: "rtmps://live.cloudflare.com:443/live",
+        connected: false,
+        bytesWritten: 0,
+        startedAt: 123,
+      },
+    ];
+
+    (bridge as any).parseFFmpegOutput("frame=   42 fps=29.97");
+
+    expect((bridge as any).status.destinations[0]?.connected).toBe(true);
+    expect((bridge as any).status.destinations[0]?.error).toBeUndefined();
+  });
+
   it("omits global headers for SRT transport", () => {
     process.env.STREAM_INGEST_PROFILE = "cloudflare_live";
     process.env.STREAM_INGEST_TRANSPORT = "srt";

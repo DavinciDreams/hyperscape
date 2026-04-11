@@ -2033,6 +2033,13 @@ export class RTMPBridge {
     }
   }
 
+  private markHealthyDestinationsConnected(): void {
+    for (const destination of this.status.destinations) {
+      if (destination.error) continue;
+      destination.connected = true;
+    }
+  }
+
   /**
    * Start FFmpeg process
    */
@@ -2196,6 +2203,10 @@ export class RTMPBridge {
       if (Number.isFinite(parsedFps)) {
         this.ffmpegEncoderFps = parsedFps;
       }
+    }
+
+    if (/frame=\s*\d+/i.test(msg) || encoderFpsMatch) {
+      this.markHealthyDestinationsConnected();
     }
 
     const slaveMuxerFailureMatch = msg.match(/Slave muxer #(\d+) failed/i);
