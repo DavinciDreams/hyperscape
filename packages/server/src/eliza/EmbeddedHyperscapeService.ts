@@ -1623,7 +1623,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
         quantity,
       });
       return added;
-    } else {
     }
 
     // Fallback: emit event (may not be handled)
@@ -2782,11 +2781,6 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
 
   getPlayerId(): string | null {
     return this.playerEntityId;
-  }
-
-  /** Expose the world instance for global entity queries (e.g. findGlobalMobTarget). */
-  getWorld(): World {
-    return this.world;
   }
 
   onGameEvent(event: string, handler: EventHandler): void {

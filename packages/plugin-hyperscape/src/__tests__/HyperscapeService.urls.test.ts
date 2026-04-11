@@ -54,10 +54,8 @@ describe("HyperscapeService URL resolution", () => {
     vi.stubEnv("UWS_PORT", "5556");
     vi.stubEnv("UWS_ENABLED", undefined);
 
-    expect(
-      resolveHyperscapeApiBaseUrl(
-        "wss://hyperscape-production.up.railway.app/ws",
-      ),
-    ).toBe("https://hyperscape-production.up.railway.app");
+    expect(resolveHyperscapeApiBaseUrl("wss://hyperscape.gg/ws")).toBe(
+      "https://hyperscape.gg",
+    );
   });
 });

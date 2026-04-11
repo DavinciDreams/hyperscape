@@ -380,6 +380,39 @@ export class ModelCache {
       },
     ) => arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength);
 
+    // Extract a geometry attribute's data into a contiguous typed array buffer.
+    // InterleavedBufferAttribute.array returns the FULL interleaved buffer
+    // (containing positions + normals + UVs all packed together), so we must
+    // deinterleave by reading each component individually via getComponent().
+    // Without this, deserialized geometries get fractional vertex counts and
+    // NaN bounding boxes because the byte length isn't divisible by itemSize*4.
+    const extractAttr = (
+      attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+    ): ArrayBuffer => {
+      if (
+        (attr as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute
+      ) {
+        const iba = attr as THREE.InterleavedBufferAttribute;
+        const TypedArrayCtor = iba.data.array.constructor as new (
+          len: number,
+        ) => Float32Array | Uint16Array | Uint8Array | Int16Array;
+        const out = new TypedArrayCtor(iba.count * iba.itemSize);
+        for (let i = 0; i < iba.count; i++) {
+          for (let j = 0; j < iba.itemSize; j++) {
+            out[i * iba.itemSize + j] = iba.getComponent(i, j);
+          }
+        }
+        return out.buffer as ArrayBuffer;
+      }
+      return sliceView(
+        (attr as THREE.BufferAttribute).array as ArrayLike<number> & {
+          buffer: ArrayBuffer;
+          byteOffset: number;
+          byteLength: number;
+        },
+      );
+    };
+
     // Collect all meshes and build identity map (avoids name-collision bugs)
     scene.traverse((node) => {
       if (node instanceof THREE.Mesh || node instanceof THREE.SkinnedMesh) {
@@ -388,7 +421,11 @@ export class ModelCache {
         const sm: SerializedMesh = {
           name: node.name,
           type: node instanceof THREE.SkinnedMesh ? "SkinnedMesh" : "Mesh",
-          positions: sliceView(geo.getAttribute("position").array),
+          positions: extractAttr(
+            geo.getAttribute("position") as
+              | THREE.BufferAttribute
+              | THREE.InterleavedBufferAttribute,
+          ),
           material: Array.isArray(node.material)
             ? node.material.map((m) => this.serializeMaterialProps(m))
             : this.serializeMaterialProps(node.material),
@@ -396,17 +433,28 @@ export class ModelCache {
 
         // Optional attributes
         const normals = geo.getAttribute("normal");
-        if (normals) sm.normals = sliceView(normals.array);
+        if (normals)
+          sm.normals = extractAttr(
+            normals as THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+          );
 
         const uvs = geo.getAttribute("uv");
-        if (uvs) sm.uvs = sliceView(uvs.array);
+        if (uvs)
+          sm.uvs = extractAttr(
+            uvs as THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+          );
 
         const uv2s = geo.getAttribute("uv2");
-        if (uv2s) sm.uv2s = sliceView(uv2s.array);
+        if (uv2s)
+          sm.uv2s = extractAttr(
+            uv2s as THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+          );
 
         const colors = geo.getAttribute("color");
         if (colors) {
-          sm.colors = sliceView(colors.array);
+          sm.colors = extractAttr(
+            colors as THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+          );
           sm.colorItemSize = colors.itemSize;
         }
 
@@ -420,8 +468,18 @@ export class ModelCache {
         if (node instanceof THREE.SkinnedMesh) {
           const skinWeights = geo.getAttribute("skinWeight");
           const skinIndices = geo.getAttribute("skinIndex");
-          if (skinWeights) sm.skinWeights = sliceView(skinWeights.array);
-          if (skinIndices) sm.skinIndices = sliceView(skinIndices.array);
+          if (skinWeights)
+            sm.skinWeights = extractAttr(
+              skinWeights as
+                | THREE.BufferAttribute
+                | THREE.InterleavedBufferAttribute,
+            );
+          if (skinIndices)
+            sm.skinIndices = extractAttr(
+              skinIndices as
+                | THREE.BufferAttribute
+                | THREE.InterleavedBufferAttribute,
+            );
         }
 
         meshes.push(sm);
@@ -475,6 +533,32 @@ export class ModelCache {
   private textureToPixelData(
     texture: THREE.Texture,
   ): SerializedTextureData | null {
+    // DataTexture already has raw pixel data — read it directly without canvas round-trip
+    if ((texture as THREE.DataTexture).isDataTexture) {
+      const img = texture.image as {
+        data: Uint8ClampedArray | Uint8Array;
+        width: number;
+        height: number;
+      };
+      if (img?.data && img.width > 0 && img.height > 0) {
+        const pixels = new Uint8ClampedArray(
+          img.data.buffer,
+          img.data.byteOffset,
+          img.data.byteLength,
+        );
+        // Slice to get a plain ArrayBuffer (not SharedArrayBuffer) for serialization
+        const plainBuffer =
+          pixels.buffer instanceof ArrayBuffer
+            ? pixels.buffer.slice(
+                pixels.byteOffset,
+                pixels.byteOffset + pixels.byteLength,
+              )
+            : new Uint8ClampedArray(pixels).buffer;
+        return { pixels: plainBuffer, width: img.width, height: img.height };
+      }
+      return null;
+    }
+
     const image = texture.source?.data ?? texture.image;
     if (!image) return null;
 
@@ -1102,6 +1186,44 @@ export class ModelCache {
   }
 
   /**
+   * Converts an ImageBitmapTexture to a DataTexture so it uses WebGPU's
+   * writeTexture upload path instead of copyExternalImageToTexture.
+   * DataTextures upload raw bytes without browser-side colorspace conversion,
+   * giving consistent rendering between fresh GLTF loads and cached loads.
+   */
+  private ensureDataTexture(
+    texture: THREE.Texture,
+    srgb: boolean,
+  ): THREE.Texture {
+    if ((texture as THREE.DataTexture).isDataTexture) return texture;
+    const pixelData = this.textureToPixelData(texture);
+    if (!pixelData) {
+      console.warn(
+        `[ModelCache] ensureDataTexture: could not read pixels from "${texture.name}" — sRGB decode may be incorrect`,
+      );
+      return texture;
+    }
+    const dt = new THREE.DataTexture(
+      new Uint8ClampedArray(pixelData.pixels),
+      pixelData.width,
+      pixelData.height,
+      THREE.RGBAFormat,
+    );
+    dt.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.LinearSRGBColorSpace;
+    dt.name = texture.name;
+    dt.wrapS = texture.wrapS;
+    dt.wrapT = texture.wrapT;
+    dt.minFilter = texture.minFilter;
+    dt.magFilter = texture.magFilter;
+    dt.generateMipmaps = texture.generateMipmaps;
+    dt.repeat.copy(texture.repeat);
+    dt.offset.copy(texture.offset);
+    dt.flipY = texture.flipY;
+    dt.needsUpdate = true;
+    return dt;
+  }
+
+  /**
    * Setup a single material for WebGPU/CSM
    */
   private setupSingleMaterial(material: THREE.Material, world?: World): void {
@@ -1126,14 +1248,26 @@ export class ModelCache {
 
     if (
       material instanceof THREE.MeshStandardMaterial ||
-      material instanceof THREE.MeshPhysicalMaterial
+      material instanceof THREE.MeshPhysicalMaterial ||
+      material instanceof MeshStandardNodeMaterial
     ) {
-      // Set up texture color spaces
+      // Set up texture color spaces and force ImageBitmapTexture → DataTexture.
+      // WebGPU uses two different upload paths:
+      //   DataTexture   → writeTexture (raw bytes, reliable)
+      //   ImageBitmap   → copyExternalImageToTexture (browser-side colorspace decode,
+      //                   can double-apply sRGB and corrupt colors)
+      // Converting here guarantees the raw-bytes path for both fresh and cached loads.
       if (materialWithMaps.map) {
-        materialWithMaps.map.colorSpace = THREE.SRGBColorSpace;
+        materialWithMaps.map = this.ensureDataTexture(
+          materialWithMaps.map,
+          true,
+        );
       }
       if (materialWithMaps.emissiveMap) {
-        materialWithMaps.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        materialWithMaps.emissiveMap = this.ensureDataTexture(
+          materialWithMaps.emissiveMap,
+          true,
+        );
       }
       // Force metalness to 0 — the game has no environment map, so metallic
       // materials lose their diffuse component and appear black. Zeroing metalness
@@ -1144,12 +1278,17 @@ export class ModelCache {
       material instanceof THREE.MeshBasicMaterial ||
       material instanceof THREE.MeshPhongMaterial
     ) {
-      // Set up texture color spaces for non-PBR materials
       if (materialWithMaps.map) {
-        materialWithMaps.map.colorSpace = THREE.SRGBColorSpace;
+        materialWithMaps.map = this.ensureDataTexture(
+          materialWithMaps.map,
+          true,
+        );
       }
       if (materialWithMaps.emissiveMap) {
-        materialWithMaps.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        materialWithMaps.emissiveMap = this.ensureDataTexture(
+          materialWithMaps.emissiveMap,
+          true,
+        );
       }
     }
 
@@ -1368,9 +1507,6 @@ export class ModelCache {
             world,
           );
           if (processedResult) {
-            console.log(
-              `[ModelCache] ⚡ Restored ${resolvedPath} from processed cache (skipped GLTF parse)`,
-            );
             // Return a pseudo-GLTF result so downstream code works unchanged
             return {
               scene: processedResult.scene,

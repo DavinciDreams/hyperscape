@@ -10,6 +10,13 @@
 export type ViewportMode = "spectator" | "free";
 
 /**
+ * Embedded surface variants
+ * - viewport: passive live view
+ * - agent-control: live view with command/log panels for steering the agent
+ */
+export type EmbeddedSurface = "viewport" | "agent-control";
+
+/**
  * Graphics quality presets
  * - potato: Minimal effects for very old devices
  * - low: Basic rendering for older devices
@@ -61,6 +68,7 @@ export interface EmbeddedViewportConfig {
   characterId?: string;
   wsUrl: string;
   mode: ViewportMode;
+  surface?: EmbeddedSurface;
   followEntity?: string;
   hiddenUI?: HideableUIElement[];
   quality?: GraphicsQuality;

@@ -47,7 +47,7 @@ function getGroundedY(
     : fallbackY;
 }
 
-function isActiveStreamingDuelContestant(playerId: string): boolean {
+export function isActiveStreamingDuelContestant(playerId: string): boolean {
   const scheduler = getStreamingDuelScheduler();
   const cycle = scheduler?.getCurrentCycle();
   if (!cycle?.agent1 || !cycle.agent2) {

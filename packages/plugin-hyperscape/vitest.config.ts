@@ -4,7 +4,9 @@ import path from "path";
 export default defineConfig({
   test: {
     globals: true,
-    environment: "jsdom",
+    // These tests exercise providers/services and don't require a DOM runtime.
+    // Keeping them on Node avoids jsdom worker startup failures in CI.
+    environment: "node",
     setupFiles: ["./vitest.setup.ts"],
     coverage: {
       provider: "v8",

@@ -650,7 +650,6 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
     selectedPreset,
     metalness,
     roughness,
-    detailLevel,
     extractionResult,
     sharedExtraction,
     onExtract,
@@ -1257,7 +1256,7 @@ export const TextureGeneratorTab: React.FC<TextureGeneratorTabProps> = ({
                   Detail Level
                 </label>
                 <div className="flex gap-1">
-                  {DETAIL_LEVELS.map((level, i) => (
+                  {DETAIL_LEVELS.map((level, _i) => (
                     <button
                       key={level.id}
                       onClick={() => setDetailLevel(level.id)}
