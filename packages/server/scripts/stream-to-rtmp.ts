@@ -1972,7 +1972,7 @@ async function main() {
         5_000,
         "Stop failed CDP capture",
       ).catch(() => undefined);
-      bridge.stop();
+      await bridge.stop();
       bridge.startSpectatorServer(SPECTATOR_PORT);
       captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
       activeCaptureMode = "webcodecs";
@@ -1998,7 +1998,7 @@ async function main() {
         captureWatchdog = null;
       }
       await stopInPageCaptureControl();
-      bridge.stop();
+      await bridge.stop();
       bridge.startSpectatorServer(SPECTATOR_PORT);
       await startCdpCapture(bridge);
       activeCaptureMode = "cdp";
@@ -2171,7 +2171,7 @@ async function main() {
               5_000,
               "Stop stalled CDP capture",
             ).catch(() => undefined);
-            bridge.stop();
+            await bridge.stop();
             bridge.startSpectatorServer(SPECTATOR_PORT);
             captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
             activeCaptureMode = "webcodecs";
@@ -2258,7 +2258,7 @@ async function main() {
     clearInterval(statusSnapshotInterval);
     clearInterval(statusInterval);
     await stopCdpCapture();
-    getRTMPBridge().stop();
+    await getRTMPBridge().stop();
     clearExternalStatusSnapshot();
     await cleanup();
 
@@ -2301,8 +2301,7 @@ async function cleanup() {
   }
 
   const bridge = getRTMPBridge();
-  bridge.stopProcessing();
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  await bridge.stopProcessing();
 
   if (browser) {
     await browser.close();

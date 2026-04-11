@@ -1638,19 +1638,19 @@ export class RTMPBridge {
   /**
    * Stop processing (FFmpeg only) for browser rotation
    */
-  stopProcessing(): void {
+  async stopProcessing(): Promise<void> {
     if (this.ffmpegRestartTimeout) {
       clearTimeout(this.ffmpegRestartTimeout);
       this.ffmpegRestartTimeout = null;
     }
     this.stopHealthMonitoring();
-    this.stopFFmpeg();
+    await this.stopFFmpeg();
   }
 
   /**
    * Stop the server and clean up
    */
-  stop(): void {
+  async stop(): Promise<void> {
     // Clear any pending restart timeout
     if (this.ffmpegRestartTimeout) {
       clearTimeout(this.ffmpegRestartTimeout);
@@ -1660,7 +1660,7 @@ export class RTMPBridge {
     // Stop health monitoring
     this.stopHealthMonitoring();
 
-    this.stopFFmpeg();
+    await this.stopFFmpeg();
     this.setFfmpegBackpressured(false);
 
     if (this.client) {
@@ -1845,7 +1845,7 @@ export class RTMPBridge {
       console.log("[RTMPBridge] Client disconnected");
       this.client = null;
       this.status.clientConnected = false;
-      this.stopFFmpeg();
+      void this.stopFFmpeg();
     });
 
     ws.on("error", (err) => {
@@ -1887,7 +1887,7 @@ export class RTMPBridge {
       console.log("[RTMPBridge] Client disconnected");
       this.client = null;
       this.status.clientConnected = false;
-      this.stopFFmpeg();
+      void this.stopFFmpeg();
     });
 
     ws.on("error", (err) => {
@@ -2255,7 +2255,7 @@ export class RTMPBridge {
   /**
    * Stop FFmpeg process
    */
-  private stopFFmpeg(): void {
+  private async stopFFmpeg(): Promise<void> {
     if (!this.ffmpeg) return;
 
     console.log("[RTMPBridge] Stopping FFmpeg");
@@ -2279,19 +2279,60 @@ export class RTMPBridge {
     oldFfmpeg.stdin?.removeAllListeners("drain");
     oldFfmpeg.stdin?.removeAllListeners("error");
 
-    // Close stdin first to signal end of input
-    oldFfmpeg.stdin?.end();
-    try {
-      oldFfmpeg.kill("SIGTERM");
-    } catch {}
+    if (oldFfmpeg.exitCode !== null || oldFfmpeg.signalCode !== null) {
+      return;
+    }
 
-    // Give it a moment to finish, then kill
-    const killTimer = setTimeout(() => {
+    let forceKilled = false;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let killTimer: ReturnType<typeof setTimeout> | null = null;
+      let hardTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        if (killTimer) {
+          clearTimeout(killTimer);
+        }
+        if (hardTimeoutTimer) {
+          clearTimeout(hardTimeoutTimer);
+        }
+        oldFfmpeg.removeListener("exit", settle);
+        oldFfmpeg.removeListener("close", settle);
+        resolve();
+      };
+
+      oldFfmpeg.once("exit", settle);
+      oldFfmpeg.once("close", settle);
+
+      // Close stdin first to signal end of input.
+      oldFfmpeg.stdin?.end();
+
+      // Give it a moment to finish, then kill.
+      killTimer = setTimeout(() => {
+        forceKilled = true;
+        try {
+          oldFfmpeg.kill("SIGKILL"); // Force kill to prevent zombie FFmpeg processes taking up GPU/CPU
+        } catch {}
+      }, 750);
+      killTimer.unref?.();
+
+      hardTimeoutTimer = setTimeout(() => {
+        forceKilled = true;
+        settle();
+      }, 3_000);
+      hardTimeoutTimer.unref?.();
+
       try {
-        oldFfmpeg.kill("SIGKILL"); // Force kill to prevent zombie FFmpeg processes taking up GPU/CPU
+        oldFfmpeg.kill("SIGTERM");
       } catch {}
-    }, 750);
-    killTimer.unref?.();
+    });
+
+    if (forceKilled) {
+      console.warn(
+        "[RTMPBridge] FFmpeg did not exit after SIGTERM; forced SIGKILL",
+      );
+    }
   }
 
   /**

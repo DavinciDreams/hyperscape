@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTMPBridge } from "../../../src/streaming/rtmp-bridge.js";
 
 const ENV_KEYS = [
@@ -44,8 +45,21 @@ function restoreEnv(): void {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   restoreEnv();
 });
+
+function createFakeFfmpegProcess() {
+  const proc = new EventEmitter() as any;
+  proc.exitCode = null;
+  proc.signalCode = null;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = new EventEmitter();
+  proc.stdin.end = vi.fn();
+  proc.kill = vi.fn(() => true);
+  return proc;
+}
 
 describe("RTMPBridge Cloudflare ingest profile", () => {
   it("builds Cloudflare-safe NVENC args", () => {
@@ -101,7 +115,9 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
 
     const bridge = new RTMPBridge();
     const videoArgs = (bridge as any).buildVideoEncoderArgs() as string[];
-    const audioInputArgs = (bridge as any).buildBridgeAudioInputArgs() as string[];
+    const audioInputArgs = (
+      bridge as any
+    ).buildBridgeAudioInputArgs() as string[];
 
     expect(videoArgs).toEqual(
       expect.arrayContaining([
@@ -145,7 +161,8 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
       "https://videodelivery.net/test/manifest/video.m3u8";
     process.env.STREAM_PLAYBACK_LLHLS_URL =
       "https://videodelivery.net/test/manifest/video.m3u8?protocol=llhls";
-    process.env.STREAM_INGEST_RTMPS_URL = "rtmps://live.cloudflare.com:443/live";
+    process.env.STREAM_INGEST_RTMPS_URL =
+      "rtmps://live.cloudflare.com:443/live";
     process.env.STREAM_INGEST_STREAM_KEY = "stream-key";
     process.env.HLS_OUTPUT_PATH = "/tmp/hyperscape/live/stream.m3u8";
 
@@ -172,7 +189,8 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
       "https://videodelivery.net/test/manifest/video.m3u8";
     process.env.STREAM_PLAYBACK_LLHLS_URL =
       "https://videodelivery.net/test/manifest/video.m3u8?protocol=llhls";
-    process.env.STREAM_INGEST_RTMPS_URL = "rtmps://live.cloudflare.com:443/live";
+    process.env.STREAM_INGEST_RTMPS_URL =
+      "rtmps://live.cloudflare.com:443/live";
     process.env.STREAM_INGEST_SRT_URL = "srt://live.cloudflare.com:778";
     process.env.STREAM_INGEST_SRT_STREAM_ID = "stream-id";
     process.env.STREAM_INGEST_SRT_PASSPHRASE = "stream-passphrase";
@@ -198,14 +216,17 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
       "https://videodelivery.net/test/manifest/video.m3u8";
     process.env.STREAM_PLAYBACK_LLHLS_URL =
       "https://videodelivery.net/test/manifest/video.m3u8?protocol=llhls";
-    process.env.STREAM_INGEST_RTMPS_URL = "rtmps://live.cloudflare.com:443/live";
+    process.env.STREAM_INGEST_RTMPS_URL =
+      "rtmps://live.cloudflare.com:443/live";
     process.env.STREAM_INGEST_SRT_URL = "srt://live.cloudflare.com:778";
     process.env.STREAM_INGEST_SRT_STREAM_ID = "stream-id";
     process.env.STREAM_INGEST_SRT_PASSPHRASE = "stream-passphrase";
 
     const bridge = new RTMPBridge();
     (bridge as any).initOutputs();
-    const outputArgs = (bridge as any).buildDirectOutputArgs() as string[] | null;
+    const outputArgs = (bridge as any).buildDirectOutputArgs() as
+      | string[]
+      | null;
 
     expect(outputArgs).toEqual([
       "-f",
@@ -231,7 +252,8 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
       "https://videodelivery.net/test/manifest/video.m3u8";
     process.env.STREAM_PLAYBACK_LLHLS_URL =
       "https://videodelivery.net/test/manifest/video.m3u8?protocol=llhls";
-    process.env.STREAM_INGEST_RTMPS_URL = "rtmps://live.cloudflare.com:443/live";
+    process.env.STREAM_INGEST_RTMPS_URL =
+      "rtmps://live.cloudflare.com:443/live";
     process.env.STREAM_INGEST_STREAM_KEY = "stream-key";
 
     const bridge = new RTMPBridge();
@@ -275,10 +297,8 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     process.env.STREAM_INGEST_TRANSPORT = "srt";
     process.env.STREAM_CLOUDFLARE_PROBE_ONLY = "false";
     process.env.STREAM_DELIVERY_MODE = "self_hls";
-    process.env.STREAM_PLAYBACK_URL =
-      "https://self.example/live/stream.m3u8";
-    process.env.STREAM_PLAYBACK_HLS_URL =
-      "https://video.example/live.m3u8";
+    process.env.STREAM_PLAYBACK_URL = "https://self.example/live/stream.m3u8";
+    process.env.STREAM_PLAYBACK_HLS_URL = "https://video.example/live.m3u8";
     process.env.STREAM_PLAYBACK_LLHLS_URL =
       "https://video.example/live.m3u8?protocol=llhls";
     process.env.STREAM_DELIVERY_PROVIDER = "cloudflare_stream";
@@ -311,5 +331,40 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
         }),
       ]),
     );
+  });
+
+  it("waits for FFmpeg process close during stopProcessing", async () => {
+    const bridge = new RTMPBridge();
+    const proc = createFakeFfmpegProcess();
+    (bridge as any).ffmpeg = proc;
+    (bridge as any).status.ffmpegRunning = true;
+
+    const stopPromise = bridge.stopProcessing();
+
+    expect(proc.stdin.end).toHaveBeenCalledOnce();
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect((bridge as any).status.ffmpegRunning).toBe(false);
+
+    proc.emit("close", 0, null);
+    await stopPromise;
+
+    expect(proc.kill).not.toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("force-kills FFmpeg when graceful stop exceeds the bounded timeout", async () => {
+    vi.useFakeTimers();
+    const bridge = new RTMPBridge();
+    const proc = createFakeFfmpegProcess();
+    (bridge as any).ffmpeg = proc;
+    (bridge as any).status.ffmpegRunning = true;
+
+    const stopPromise = bridge.stopProcessing();
+    await vi.advanceTimersByTimeAsync(751);
+
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(proc.kill).toHaveBeenCalledWith("SIGKILL");
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    await stopPromise;
   });
 });

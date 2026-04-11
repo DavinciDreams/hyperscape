@@ -28,6 +28,7 @@ import type {
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
 import type {
   CaptureControlStatus,
+  StreamingWindowBootDiagnostics,
   StreamingWindow,
   StreamingWindowHeartbeat,
 } from "@/lib/streamingWindow";
@@ -128,10 +129,50 @@ function normalizeCaptureBridgeUrl(rawValue: string | null): string {
 }
 
 function createCaptureSessionGeneration(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   return `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function findStreamingTargetEntity(
+  world: World,
+  targetEntityId: string,
+): Entity | null {
+  let entity = world.entities?.get(targetEntityId) ?? null;
+
+  if (!entity && world.entities?.players) {
+    for (const [, player] of world.entities.players) {
+      const playerAny = player as {
+        id?: string;
+        characterId?: string;
+        data?: { id?: string; characterId?: string };
+      };
+      if (
+        playerAny.id === targetEntityId ||
+        playerAny.characterId === targetEntityId ||
+        playerAny.data?.id === targetEntityId ||
+        playerAny.data?.characterId === targetEntityId
+      ) {
+        entity = player as Entity;
+        break;
+      }
+    }
+  }
+
+  if (!entity && world.entities?.items) {
+    for (const [, item] of world.entities.items) {
+      if (item.id === targetEntityId) {
+        entity = item;
+        break;
+      }
+    }
+  }
+
+  return entity;
 }
 
 function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
@@ -176,6 +217,112 @@ function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
   }
 
   return false;
+}
+
+function readNumericCollectionSize(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value instanceof Map || value instanceof Set) return value.size;
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === "object") {
+    const record = value as { size?: unknown; length?: unknown };
+    if (typeof record.size === "number" && Number.isFinite(record.size)) {
+      return record.size;
+    }
+    if (typeof record.length === "number" && Number.isFinite(record.length)) {
+      return record.length;
+    }
+  }
+  return null;
+}
+
+function readFirstNumericField(
+  record: Record<string, unknown>,
+  fields: string[],
+): number | null {
+  for (const field of fields) {
+    const value = readNumericCollectionSize(record[field]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function buildStreamingBootDiagnostics(params: {
+  world: World | null;
+  connected: boolean;
+  worldReady: boolean;
+  terrainReady: boolean;
+  terrainStalled: boolean;
+  cameraTarget: string | null;
+  cameraLocked: boolean;
+  needsCameraLock: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
+  targetAvatarGraceExpired: boolean;
+  phase: StreamingState["cycle"]["phase"] | null;
+  hasStreamingState: boolean;
+}): StreamingWindowBootDiagnostics {
+  const world = params.world;
+  const terrain = world?.getSystem("terrain") as
+    | (Record<string, unknown> & { isReady?: () => boolean })
+    | null
+    | undefined;
+  const targetEntityPresent =
+    world && params.cameraTarget
+      ? Boolean(findStreamingTargetEntity(world, params.cameraTarget))
+      : params.cameraTarget
+        ? false
+        : null;
+
+  return {
+    updatedAt: Date.now(),
+    connected: params.connected,
+    worldReady: params.worldReady,
+    terrainReady: params.terrainReady,
+    terrainStalled: params.terrainStalled,
+    terrain: {
+      systemPresent: Boolean(terrain),
+      isReady: terrain?.isReady ? terrain.isReady() : null,
+      initialized:
+        typeof terrain?._terrainInitialized === "boolean"
+          ? terrain._terrainInitialized
+          : typeof terrain?.terrainInitialized === "boolean"
+            ? terrain.terrainInitialized
+            : null,
+      activeChunks: terrain
+        ? readFirstNumericField(terrain, [
+            "activeChunks",
+            "chunks",
+            "_chunks",
+            "loadedChunks",
+          ])
+        : null,
+      pendingChunks: terrain
+        ? readFirstNumericField(terrain, [
+            "pendingChunks",
+            "_pendingChunks",
+            "loadingChunks",
+            "chunkQueue",
+          ])
+        : null,
+      loadedTiles: terrain
+        ? readFirstNumericField(terrain, [
+            "loadedTiles",
+            "_loadedTiles",
+            "tiles",
+            "_tiles",
+          ])
+        : null,
+    },
+    cameraTarget: params.cameraTarget,
+    cameraLocked: params.cameraLocked,
+    targetEntityPresent,
+    needsCameraLock: params.needsCameraLock,
+    needsTargetAvatar: params.needsTargetAvatar,
+    targetAvatarReady: params.targetAvatarReady,
+    targetAvatarGraceExpired: params.targetAvatarGraceExpired,
+    phase: params.phase,
+    hasStreamingState: params.hasStreamingState,
+  };
 }
 
 function toGuardrailAgent(
@@ -417,70 +564,47 @@ export function StreamingMode() {
 
   // The first public state frame must drive the exact same bootstrap work
   // regardless of whether it arrived via WS or the HTTP fallback.
-  const updateCameraTarget = useCallback((world: World, targetId: string) => {
-    const maxRetries = 20;
-    const retryDelayMs = 250;
+  const updateCameraTarget = useCallback(
+    (world: World, targetId: string) => {
+      const maxRetries = 20;
+      const retryDelayMs = 250;
 
-    const attemptLock = (attempt: number) => {
-      let entity = world.entities?.get(targetId);
+      const attemptLock = (attempt: number) => {
+        const entity = findStreamingTargetEntity(world, targetId);
 
-      if (!entity && world.entities?.players) {
-        for (const [, player] of world.entities.players) {
-          const playerAny = player as {
-            id?: string;
-            data?: { id?: string; characterId?: string };
-          };
-          if (
-            playerAny.id === targetId ||
-            playerAny.data?.id === targetId ||
-            playerAny.data?.characterId === targetId
-          ) {
-            entity = player as Entity;
-            break;
-          }
-        }
-      }
-
-      if (!entity && world.entities?.items) {
-        for (const [, item] of world.entities.items) {
-          if (item.id === targetId) {
-            entity = item;
-            break;
-          }
-        }
-      }
-
-      if (!entity) {
-        if (attempt < maxRetries) {
-          if (import.meta.env.DEV && (attempt === 0 || attempt % 10 === 0)) {
-            console.log(
-              `[StreamingMode] Waiting for initial camera target "${targetId}" (attempt ${attempt}/${maxRetries})`,
+        if (!entity) {
+          if (attempt < maxRetries) {
+            if (import.meta.env.DEV && (attempt === 0 || attempt % 10 === 0)) {
+              console.log(
+                `[StreamingMode] Waiting for initial camera target "${targetId}" (attempt ${attempt}/${maxRetries})`,
+              );
+            }
+            const timeoutId = setTimeout(
+              () => attemptLock(attempt + 1),
+              retryDelayMs,
             );
+            cameraRetryTimeoutsRef.current.push(timeoutId);
+          } else {
+            console.warn(
+              `[StreamingMode] Initial camera target not found after ${maxRetries} retries, proceeding anyway`,
+            );
+            setCameraLocked(true);
           }
-          const timeoutId = setTimeout(
-            () => attemptLock(attempt + 1),
-            retryDelayMs,
-          );
-          cameraRetryTimeoutsRef.current.push(timeoutId);
-        } else {
-          console.warn(
-            `[StreamingMode] Initial camera target not found after ${maxRetries} retries, proceeding anyway`,
-          );
-          setCameraLocked(true);
+          return;
         }
-        return;
-      }
 
-      setCameraLocked(true);
-      if (import.meta.env.DEV) {
-        console.log(
-          `[StreamingMode] Initial camera target acquired: ${targetId}`,
-        );
-      }
-    };
+        setCameraLocked(true);
+        if (import.meta.env.DEV) {
+          console.log(
+            `[StreamingMode] Initial camera target acquired: ${targetId}`,
+          );
+        }
+      };
 
-    attemptLock(0);
-  }, [clearCameraRetryTimeouts]);
+      attemptLock(0);
+    },
+    [clearCameraRetryTimeouts],
+  );
 
   const applyStreamingStateUpdate = useCallback(
     (state: StreamingState, world: World | null) => {
@@ -782,9 +906,7 @@ export function StreamingMode() {
       delete win.__captureControl__;
     }
 
-    const bridgeUrl = normalizeCaptureBridgeUrl(
-      searchParams.get("bridgeUrl"),
-    );
+    const bridgeUrl = normalizeCaptureBridgeUrl(searchParams.get("bridgeUrl"));
 
     if (captureVerbose) {
       console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
@@ -1250,6 +1372,45 @@ export function StreamingMode() {
   }, [rendererHealth]);
 
   useEffect(() => {
+    const writeDiagnostics = () => {
+      const win = window as StreamingWindow;
+      win.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__ =
+        buildStreamingBootDiagnostics({
+          world: worldRef.current,
+          connected,
+          worldReady,
+          terrainReady,
+          terrainStalled,
+          cameraTarget: streamingState?.cameraTarget ?? null,
+          cameraLocked,
+          needsCameraLock,
+          needsTargetAvatar,
+          targetAvatarReady: effectiveTargetAvatarReady,
+          targetAvatarGraceExpired,
+          phase: streamingState?.cycle.phase ?? null,
+          hasStreamingState: streamingState !== null,
+        });
+    };
+
+    writeDiagnostics();
+    const interval = window.setInterval(writeDiagnostics, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    cameraLocked,
+    connected,
+    effectiveTargetAvatarReady,
+    needsCameraLock,
+    needsTargetAvatar,
+    streamingState,
+    targetAvatarGraceExpired,
+    terrainReady,
+    terrainStalled,
+    worldReady,
+  ]);
+
+  useEffect(() => {
     if (window.parent === window) {
       return;
     }
@@ -1266,12 +1427,11 @@ export function StreamingMode() {
     const postStatus = () => {
       const win = window as StreamingWindow;
       const degradedReason = rendererHealth.degradedReason;
-      const status =
-        rendererHealth.ready
-          ? "playing"
-          : degradedReason === "initialization_failed"
-            ? "error:init_failed"
-            : degradedReason || "loading";
+      const status = rendererHealth.ready
+        ? "playing"
+        : degradedReason === "initialization_failed"
+          ? "error:init_failed"
+          : degradedReason || "loading";
 
       window.parent.postMessage(
         {

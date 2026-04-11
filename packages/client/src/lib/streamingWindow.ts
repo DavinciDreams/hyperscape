@@ -22,6 +22,31 @@ export type StreamingWindowHeartbeat = {
   latestDuelStateTickAt: number | null;
 };
 
+export type StreamingWindowBootDiagnostics = {
+  updatedAt: number;
+  connected: boolean;
+  worldReady: boolean;
+  terrainReady: boolean;
+  terrainStalled: boolean;
+  terrain: {
+    systemPresent: boolean;
+    isReady: boolean | null;
+    initialized: boolean | null;
+    activeChunks: number | null;
+    pendingChunks: number | null;
+    loadedTiles: number | null;
+  };
+  cameraTarget: string | null;
+  cameraLocked: boolean;
+  targetEntityPresent: boolean | null;
+  needsCameraLock: boolean;
+  needsTargetAvatar: boolean;
+  targetAvatarReady: boolean;
+  targetAvatarGraceExpired: boolean;
+  phase: string | null;
+  hasStreamingState: boolean;
+};
+
 export type CaptureControlStatus = {
   recording?: boolean;
   wsConnected?: boolean;
@@ -43,6 +68,7 @@ export type StreamingWindow = Window & {
   __HYPERSCAPE_STREAM_READY__?: boolean;
   __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingWindowRendererHealth | null;
   __HYPERSCAPE_STREAM_HEARTBEAT__?: StreamingWindowHeartbeat | null;
+  __HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__?: StreamingWindowBootDiagnostics | null;
   __HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__?: string | null;
   /**
    * Boot/loading phase indicator read by the capture pipeline's renderer
