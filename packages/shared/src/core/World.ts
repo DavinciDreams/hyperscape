@@ -151,11 +151,17 @@ let hasLoggedMissingAssetBase = false;
 const TREE_ASSET_FAMILY_REWRITES = Object.freeze<
   Record<string, readonly string[]>
 >({
+  bamboo: ["bamboo_01", "bamboo_02", "bamboo_03", "bamboo_04"],
   banana: ["oak_01", "oak_02", "oak_03", "oak_04"],
+  dead: ["dead_01", "dead_02", "dead_03", "dead_04", "dead_05", "dead_06"],
   eucalyptus: ["oak_01", "oak_02", "oak_03", "oak_04", "oak_01"],
   general: ["oak_01", "oak_02", "oak_03", "oak_04", "oak_01", "oak_02"],
   magic: ["oak_03", "oak_04"],
+  maple: ["maple_01", "maple_02", "maple_03", "maple_01"],
   mahogany: ["oak_02", "oak_03"],
+  oak: ["oak_01", "oak_02", "oak_03", "oak_04"],
+  palm: ["palm_01", "palm_02", "palm_03", "palm_04", "palm_05"],
+  pine: ["pine_01", "pine_02", "pine_03", "pine_01", "pine_02"],
   pineDead: ["dead_01", "dead_02", "dead_03"],
 });
 

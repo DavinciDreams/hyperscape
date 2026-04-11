@@ -12,6 +12,12 @@ describe("World.resolveURL", () => {
     expect(
       world.resolveURL("asset://models/trees/eucalyptus/eucalyptus_04.glb"),
     ).toBe("https://cdn.example.com/game-assets/models/trees/oak_04.glb");
+    expect(
+      world.resolveURL("asset://models/trees/oak/oak_02.glb"),
+    ).toBe("https://cdn.example.com/game-assets/models/trees/oak_02.glb");
+    expect(
+      world.resolveURL("asset://models/trees/pine/pine_05.glb"),
+    ).toBe("https://cdn.example.com/game-assets/models/trees/pine_02.glb");
   });
 
   it("rewrites missing packaged tree families to existing local assets", () => {
@@ -30,6 +36,9 @@ describe("World.resolveURL", () => {
         true,
       ),
     ).toBe("/tmp/hyperscape-assets/models/trees/dead_03.glb#preview");
+    expect(
+      world.resolveURL("asset://models/trees/maple/maple_04.glb", true),
+    ).toBe("/tmp/hyperscape-assets/models/trees/maple_01.glb");
   });
 
   it("leaves valid packaged asset paths untouched", () => {
