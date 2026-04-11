@@ -2248,7 +2248,9 @@ async function main() {
   }, 30000);
 
   // Handle shutdown
-  const shutdown = async (exitCode = 0) => {
+  const shutdown = async (exitCodeOrSignal: number | NodeJS.Signals = 0) => {
+    const exitCode =
+      typeof exitCodeOrSignal === "number" ? exitCodeOrSignal : 0;
     console.log("\n[Main] Shutting down...");
     if (captureWatchdog) clearInterval(captureWatchdog);
     clearInterval(statusSnapshotInterval);
