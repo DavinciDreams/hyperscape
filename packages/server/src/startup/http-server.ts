@@ -33,6 +33,7 @@ import Fastify, {
   type FastifyReply,
 } from "fastify";
 import fs from "fs-extra";
+import { Readable } from "node:stream";
 import path from "path";
 import type { ServerConfig } from "./config.js";
 import {
@@ -606,15 +607,28 @@ async function registerStaticFiles(
       : null;
 
   if (gameAssetsRoot) {
-    await fastify.register(statics, {
-      root: gameAssetsRoot,
-      prefix: "/game-assets/",
-      decorateReply: false,
-      setHeaders: (res, filePath) => {
-        setAssetHeaders(res, filePath);
-      },
-    });
-    console.log(`[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot}`);
+    const gameAssetsFallbackUrl =
+      process.env["GAME_ASSETS_FALLBACK_URL"]?.trim() || null;
+    if (gameAssetsFallbackUrl) {
+      registerGameAssetsRoute(
+        fastify,
+        gameAssetsRoot,
+        gameAssetsFallbackUrl,
+      );
+      console.log(
+        `[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot} (fallback: ${gameAssetsFallbackUrl})`,
+      );
+    } else {
+      await fastify.register(statics, {
+        root: gameAssetsRoot,
+        prefix: "/game-assets/",
+        decorateReply: false,
+        setHeaders: (res, filePath) => {
+          setAssetHeaders(res, filePath);
+        },
+      });
+      console.log(`[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot}`);
+    }
 
     const legacyAssetsRoot = hasCachedAssetsDir
       ? config.assetsDir
@@ -816,6 +830,124 @@ function setAssetHeaders(
   // browser) can fetch assets served from :5555 without triggering CORP blocks.
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+}
+
+function normalizeGameAssetPath(rawPath: string): string | null {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(rawPath);
+  } catch {
+    return null;
+  }
+
+  const normalizedPath = path.posix
+    .normalize(decodedPath)
+    .replace(/^\/+/, "");
+  if (
+    normalizedPath.length === 0 ||
+    normalizedPath === "." ||
+    normalizedPath === ".." ||
+    normalizedPath.startsWith("../")
+  ) {
+    return null;
+  }
+  return normalizedPath;
+}
+
+function copyHeaderIfPresent(
+  reply: FastifyReply,
+  upstreamHeaders: Headers,
+  headerName: string,
+): void {
+  const value = upstreamHeaders.get(headerName);
+  if (value) {
+    reply.header(headerName, value);
+  }
+}
+
+function registerGameAssetsRoute(
+  fastify: FastifyInstance,
+  gameAssetsRoot: string,
+  fallbackBaseUrl: string,
+): void {
+  const resolvedRoot = path.resolve(gameAssetsRoot);
+  const fallbackRoot = fallbackBaseUrl.endsWith("/")
+    ? fallbackBaseUrl
+    : `${fallbackBaseUrl}/`;
+
+  fastify.route({
+    method: ["GET", "HEAD"],
+    url: "/game-assets/*",
+    handler: async (request, reply) => {
+      const rawPath = String((request.params as { "*": string })["*"] || "");
+      const normalizedPath = normalizeGameAssetPath(rawPath);
+      if (!normalizedPath) {
+        return reply.code(400).send({ error: "Invalid asset path" });
+      }
+
+      const localAssetPath = path.resolve(resolvedRoot, normalizedPath);
+      if (
+        localAssetPath === resolvedRoot ||
+        !localAssetPath.startsWith(`${resolvedRoot}${path.sep}`)
+      ) {
+        return reply.code(400).send({ error: "Invalid asset path" });
+      }
+
+      if (await fs.pathExists(localAssetPath)) {
+        setAssetHeaders(reply.raw, localAssetPath);
+        if (request.method === "HEAD") {
+          const stats = await fs.stat(localAssetPath);
+          reply.header("Content-Length", String(stats.size));
+          return reply.code(200).send();
+        }
+        return reply.send(fs.createReadStream(localAssetPath));
+      }
+
+      if (normalizedPath.startsWith("manifests/")) {
+        return reply.code(404).send({ error: "Asset not found" });
+      }
+
+      const requestUrl = new URL(
+        request.raw.url || `/game-assets/${normalizedPath}`,
+        "http://localhost",
+      );
+      const fallbackUrl = new URL(normalizedPath, fallbackRoot);
+      fallbackUrl.search = requestUrl.search;
+
+      console.warn(
+        `[HTTP] Local asset miss for /game-assets/${normalizedPath}; proxying to ${fallbackUrl.toString()}`,
+      );
+
+      const upstreamResponse = await fetch(fallbackUrl, {
+        method: request.method,
+        redirect: "follow",
+      });
+      if (!upstreamResponse.ok) {
+        return reply
+          .code(upstreamResponse.status)
+          .send({ error: "Asset not found" });
+      }
+
+      setAssetHeaders(reply.raw, normalizedPath);
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "content-type");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "content-length");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "etag");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "last-modified");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "accept-ranges");
+
+      if (request.method === "HEAD") {
+        return reply.code(200).send();
+      }
+
+      if (!upstreamResponse.body) {
+        return reply.code(502).send({ error: "Asset fallback returned no body" });
+      }
+
+      return reply.send(
+        Readable.fromWeb(upstreamResponse.body as any),
+      );
+    },
+  });
 }
 
 /**
