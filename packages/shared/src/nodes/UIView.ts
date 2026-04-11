@@ -4,7 +4,7 @@
  * Container element for UI layouts with flexbox support.
  */
 
-import { every, isArray, isBoolean, isNumber, isString } from "lodash-es";
+import { isArray, isBoolean, isNumber, isString } from "lodash-es";
 import type * as YogaTypes from "yoga-layout";
 import Yoga from "yoga-layout";
 import { borderRoundRect } from "../extras/ui/borderRoundRect";
@@ -760,10 +760,9 @@ export class UIView extends Node {
 
   set overflow(value: OverflowMode) {
     if (value !== "visible" && value !== "hidden" && value !== "scroll") {
-      console.warn(
-        `[UIView] Invalid overflow value "${value}", defaulting to "visible"`,
+      throw new Error(
+        `[uiview] overflow must be "visible", "hidden", or "scroll", got "${value}"`,
       );
-      value = "visible";
     }
     if (this._overflow === value) return;
     this._overflow = value;

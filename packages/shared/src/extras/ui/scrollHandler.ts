@@ -136,7 +136,6 @@ export function attachScrollHandler(
       dx *= 16;
       dy *= 16;
     } else if (event.deltaMode === 2) {
-      const { height, width } = scrollView.box;
       dx *= width;
       dy *= height;
     }

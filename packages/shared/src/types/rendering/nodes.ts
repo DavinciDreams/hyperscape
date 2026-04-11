@@ -725,7 +725,7 @@ export interface UIImageData extends NodeData {
   objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down";
   backgroundColor?: string | null;
   borderRadius?: number | null;
-  margin?: number | number[] | null;
+  margin?: number | [number, number, number, number] | null;
 }
 
 // UI component interfaces shared across UI nodes
