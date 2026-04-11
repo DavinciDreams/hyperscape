@@ -133,10 +133,10 @@ export class UIView extends Node {
     this.flexBasis = data.flexBasis ?? (defaults.flexBasis as FlexBasis);
     this.flexGrow = data.flexGrow ?? defaults.flexGrow;
     this.flexShrink = data.flexShrink ?? defaults.flexShrink;
-    this._overflow =
+    this.overflow =
       (data.overflow as OverflowMode) ?? (defaults.overflow as OverflowMode);
-    this._scrollX = data.scrollX ?? defaults.scrollX;
-    this._scrollY = data.scrollY ?? defaults.scrollY;
+    this.scrollX = data.scrollX ?? defaults.scrollX;
+    this.scrollY = data.scrollY ?? defaults.scrollY;
   }
 
   draw(ctx: CanvasRenderingContext2D, offsetLeft: number, offsetTop: number) {

@@ -242,7 +242,9 @@ export class UIImage extends Node {
     this._objectFit = source._objectFit;
     this._backgroundColor = source._backgroundColor;
     this._borderRadius = source._borderRadius;
-    this._margin = source._margin;
+    this._margin = Array.isArray(source._margin)
+      ? [...source._margin]
+      : source._margin;
     return this;
   }
 

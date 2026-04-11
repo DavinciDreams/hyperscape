@@ -129,6 +129,8 @@ export class UI extends Node implements HotReloadable {
   mesh?: THREE.Mesh | null;
   sItem?: UISceneItem | null;
   cleanupPointer: (() => void) | null = null;
+  /** Optional wheel event handler, set by attachScrollHandler(). */
+  onWheel?: (e: { deltaX: number; deltaY: number; shiftKey: boolean }) => void;
   needsRebuild?: boolean;
   needsRedraw?: boolean;
   box?: { left: number; top: number; width: number; height: number } | null;

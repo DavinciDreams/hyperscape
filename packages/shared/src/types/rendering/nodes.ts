@@ -715,8 +715,8 @@ export type OverflowMode = "visible" | "hidden" | "scroll";
 export interface UIImageData extends NodeData {
   display?: string;
   src?: string | null;
-  width?: number | string | null;
-  height?: number | string | null;
+  width?: number | null;
+  height?: number | null;
   absolute?: boolean;
   top?: number | null;
   right?: number | null;

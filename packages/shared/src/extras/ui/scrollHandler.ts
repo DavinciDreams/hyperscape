@@ -6,6 +6,7 @@
  * speed scaling, and horizontal scroll via shift+wheel.
  */
 
+import Yoga from "yoga-layout";
 import type { UI } from "../../nodes/UI";
 import type { UIView } from "../../nodes/UIView";
 import type { UIWheelEvent } from "../../types/rendering/nodes";
@@ -75,12 +76,12 @@ export function attachScrollHandler(
       const child = scrollView.yogaNode.getChild(i);
       contentHeight +=
         child.getComputedHeight() +
-        child.getComputedMargin(1) + // EDGE_TOP
-        child.getComputedMargin(3); // EDGE_BOTTOM
+        child.getComputedMargin(Yoga.EDGE_TOP) +
+        child.getComputedMargin(Yoga.EDGE_BOTTOM);
       contentWidth +=
         child.getComputedWidth() +
-        child.getComputedMargin(0) + // EDGE_LEFT
-        child.getComputedMargin(2); // EDGE_RIGHT
+        child.getComputedMargin(Yoga.EDGE_LEFT) +
+        child.getComputedMargin(Yoga.EDGE_RIGHT);
     }
 
     const res = rootUI.res ?? 2;
@@ -101,20 +102,14 @@ export function attachScrollHandler(
   };
 
   // Attach to root UI's onWheel
-  const prevHandler = (
-    rootUI as unknown as { _onWheel?: (e: UIWheelEvent) => void }
-  )._onWheel;
-  (rootUI as unknown as { onWheel: (e: UIWheelEvent) => void }).onWheel = (
-    event: UIWheelEvent,
-  ) => {
+  const prevHandler = rootUI.onWheel;
+  rootUI.onWheel = (event: UIWheelEvent) => {
     prevHandler?.(event);
     handler(event);
   };
 
   // Return cleanup function
   return () => {
-    (
-      rootUI as unknown as { onWheel: ((e: UIWheelEvent) => void) | undefined }
-    ).onWheel = prevHandler;
+    rootUI.onWheel = prevHandler;
   };
 }

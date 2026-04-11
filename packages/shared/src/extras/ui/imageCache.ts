@@ -107,14 +107,25 @@ export function loadCachedImage(
     cache.set(url, loadedEntry);
     // Fire all coalesced callbacks
     for (const cb of entry.callbacks) {
-      cb();
+      try {
+        cb();
+      } catch (e) {
+        console.error("[imageCache] callback error", e);
+      }
     }
     entry.callbacks.length = 0;
   });
 
   img.addEventListener("error", () => {
-    const errorEntry: ErrorEntry = { status: "error" };
-    cache.set(url, errorEntry);
+    cache.set(url, { status: "error" } as ErrorEntry);
+    // Notify callers so they can show a placeholder or retry
+    for (const cb of entry.callbacks) {
+      try {
+        cb();
+      } catch (e) {
+        console.error("[imageCache] error callback error", e);
+      }
+    }
     entry.callbacks.length = 0;
   });
 
