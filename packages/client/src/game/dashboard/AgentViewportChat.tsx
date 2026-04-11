@@ -147,7 +147,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
     return () => {
       isMountedRef.current = false;
     };
-  }, [agent.id, agent.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agent.id, agent.status]);
 
   // ── Fullscreen listener ──────────────────────────────────────────────────
   useEffect(() => {
@@ -168,7 +168,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
     if (!chatOpen && messages.at(-1)?.sender === "agent") {
       setUnreadCount((n) => n + 1);
     }
-  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [messages]); // chatOpen intentionally omitted: only trigger on new messages
 
   const openChat = () => {
     setChatOpen(true);
@@ -383,7 +383,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [agent.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agent.id]);
 
   // ── Toggle fullscreen ─────────────────────────────────────────────────────
   const toggleFullscreen = async () => {

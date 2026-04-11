@@ -224,6 +224,11 @@ export const ShellPreviewViewer = forwardRef<
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(container);
 
+    // Capture ref values for cleanup (avoids stale ref.current in cleanup)
+    const currentScene = sceneRef.current;
+    const currentArmorPieces = armorPiecesRef.current;
+    const currentBoneAttachments = boneAttachmentsRef.current;
+
     return () => {
       mounted = false;
       cancelAnimationFrame(animationIdRef.current);
@@ -240,7 +245,7 @@ export const ShellPreviewViewer = forwardRef<
       }
 
       // Dispose all objects in the scene (geometries, materials, textures)
-      sceneRef.current?.traverse((obj) => {
+      currentScene?.traverse((obj) => {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.SkinnedMesh) {
           obj.geometry?.dispose();
           const materials = Array.isArray(obj.material)
@@ -260,8 +265,8 @@ export const ShellPreviewViewer = forwardRef<
       });
 
       // Clear scene children
-      if (sceneRef.current) {
-        sceneRef.current.clear();
+      if (currentScene) {
+        currentScene.clear();
       }
 
       // Clear group refs (children already removed via scene.clear())
@@ -269,8 +274,8 @@ export const ShellPreviewViewer = forwardRef<
       overlayGroupRef.current = new THREE.Group();
 
       // Clear other refs
-      armorPiecesRef.current.clear();
-      boneAttachmentsRef.current.clear();
+      currentArmorPieces.clear();
+      currentBoneAttachments.clear();
       vrmRef.current = null;
       vrmSceneRef.current = null;
       cameraRef.current = null;
@@ -889,10 +894,8 @@ export const ShellPreviewViewer = forwardRef<
           mixerRef.current.stopAllAction();
         }
       },
-      // All methods reference stable refs — no reactive deps needed
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [],
+    [detachGroup, disposeGroup, doAddArmorPiece, doSetupAvatar, frameCamera],
   );
 
   return (

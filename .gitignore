@@ -53,6 +53,7 @@ packages/market-maker-bot/wallets.generated.json
 *~
 .agents/
 .claude/skills/
+.claude/worktrees/
 .cursor/skills/
 packages/website/.cursor/
 

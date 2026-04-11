@@ -301,12 +301,13 @@ describe("CookingCalculator", () => {
       expect(rangeChance).toBeLessThanOrEqual(fireChance);
     });
 
-    it("returns 1 at exact level requirement (highest burn rate)", () => {
-      // At exactly level 1 for shrimp, burn chance is 100%
-      // (at the start of the interpolation range)
-      expect(calculateBurnChance(1, "raw_shrimp", "fire")).toBe(1);
-      // One level above requirement should have slightly less burn chance
-      expect(calculateBurnChance(2, "raw_shrimp", "fire")).toBeLessThan(1);
+    it("returns MAX_BURN_CHANCE at exact level requirement (highest burn rate)", () => {
+      // At exactly level 1 for shrimp, burn chance is capped at MAX_BURN_CHANCE (0.55)
+      // (OSRS-like: meeting the requirement guarantees some chance of success)
+      expect(calculateBurnChance(1, "raw_shrimp", "fire")).toBe(0.55);
+      // Well above requirement, burn chance drops below the cap
+      // rawBurn < 0.55 when progress/range > 0.45, i.e. level >= 16 for shrimp
+      expect(calculateBurnChance(16, "raw_shrimp", "fire")).toBeLessThan(0.55);
     });
   });
 

@@ -887,7 +887,7 @@ export class ConnectionHandler {
           data?: Record<string, unknown>;
           serialize: () => unknown;
           position?: unknown;
-        }[]
+        }
       >[];
       for (const collection of entityCollections) {
         for (const [_entityId, entity] of (
@@ -915,7 +915,7 @@ export class ConnectionHandler {
 
           const serialized = (
             entity as { serialize: () => unknown }
-          ).serialize();
+          ).serialize() as Record<string, unknown>;
           this.applyAuthoritativeTransformSnapshot(entity, serialized, {
             groundPlayersToTerrain: true,
           });
@@ -1808,7 +1808,9 @@ export class ConnectionHandler {
 
     // Subscribe to followed player's region topics
     // Use findEntityBySpectatorKey so it searches both items AND players collections
-    const followedEntity = this.findEntityBySpectatorKey(characterId);
+    const followedEntity = this.findEntityBySpectatorKey(characterId) as
+      | { position?: { x: number; z: number } }
+      | undefined;
     if (followedEntity?.position && this.spatialIndex) {
       const regionKeys = this.spatialIndex.getAdjacentRegionKeys(
         followedEntity.position.x,

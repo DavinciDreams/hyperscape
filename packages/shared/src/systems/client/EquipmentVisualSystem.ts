@@ -28,6 +28,7 @@ import type { VRM } from "@pixiv/three-vrm";
 import { EQUIPMENT_SLOT_NAMES } from "../../constants/EquipmentConstants";
 import type { Entity } from "../../entities/Entity";
 import { AttackType } from "../../types/game/item-types";
+import { getItem } from "../../data/items";
 import {
   attachEquipmentVisualToVRM,
   removeEquipmentVisual,
