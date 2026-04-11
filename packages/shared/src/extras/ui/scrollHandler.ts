@@ -46,29 +46,20 @@ export function attachScrollHandler(
   const speed = options?.scrollSpeed ?? 1;
   const allowHorizontal = options?.horizontal ?? false;
 
-  const handler = (event: UIWheelEvent) => {
+  // Accumulate deltas and flush once per animation frame to avoid
+  // redundant redraws from high-frequency trackpad/wheel events.
+  let pendingDeltaX = 0;
+  let pendingDeltaY = 0;
+  let lastShiftKey = false;
+  let rafId = 0;
+
+  const flushScroll = () => {
+    rafId = 0;
     if (!scrollView.box || !scrollView.yogaNode) return;
 
-    // Check if pointer is within the scrollable view's bounds
-    const { left, top, width, height } = scrollView.box;
-    const pointerX = event.coords?.x ?? 0;
-    const pointerY = event.coords?.y ?? 0;
-
-    if (
-      pointerX < left ||
-      pointerX > left + width ||
-      pointerY < top ||
-      pointerY > top + height
-    ) {
-      return; // Pointer not over this scroll view
-    }
-
-    // Calculate content height from Yoga layout
-    // The yoga node's computed height is the viewport; children may exceed it
     const viewportHeight = scrollView.yogaNode.getComputedHeight();
     const viewportWidth = scrollView.yogaNode.getComputedWidth();
 
-    // Sum children's computed heights for total content size
     let contentHeight = 0;
     let contentWidth = 0;
     const childCount = scrollView.yogaNode.getChildCount();
@@ -86,18 +77,47 @@ export function attachScrollHandler(
 
     const res = rootUI.res ?? 2;
 
-    if (allowHorizontal && event.shiftKey) {
+    if (allowHorizontal && lastShiftKey) {
       const maxScrollX = Math.max(0, (contentWidth - viewportWidth) / res);
       scrollView.scrollX = Math.max(
         0,
-        Math.min(maxScrollX, scrollView.scrollX + event.deltaX * speed),
+        Math.min(maxScrollX, scrollView.scrollX + pendingDeltaX * speed),
       );
     } else {
       const maxScrollY = Math.max(0, (contentHeight - viewportHeight) / res);
       scrollView.scrollY = Math.max(
         0,
-        Math.min(maxScrollY, scrollView.scrollY + event.deltaY * speed),
+        Math.min(maxScrollY, scrollView.scrollY + pendingDeltaY * speed),
       );
+    }
+
+    pendingDeltaX = 0;
+    pendingDeltaY = 0;
+  };
+
+  const handler = (event: UIWheelEvent) => {
+    if (!scrollView.box || !scrollView.yogaNode) return;
+
+    // Check if pointer is within the scrollable view's bounds
+    const { left, top, width, height } = scrollView.box;
+    const pointerX = event.coords?.x ?? 0;
+    const pointerY = event.coords?.y ?? 0;
+
+    if (
+      pointerX < left ||
+      pointerX > left + width ||
+      pointerY < top ||
+      pointerY > top + height
+    ) {
+      return;
+    }
+
+    // Accumulate deltas; flush on next animation frame
+    pendingDeltaX += event.deltaX;
+    pendingDeltaY += event.deltaY;
+    lastShiftKey = event.shiftKey ?? false;
+    if (!rafId) {
+      rafId = requestAnimationFrame(flushScroll);
     }
   };
 
@@ -111,5 +131,6 @@ export function attachScrollHandler(
   // Return cleanup function
   return () => {
     rootUI.onWheel = prevHandler;
+    if (rafId) cancelAnimationFrame(rafId);
   };
 }

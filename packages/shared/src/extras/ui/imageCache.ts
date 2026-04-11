@@ -25,8 +25,12 @@ interface LoadedEntry {
   img: HTMLImageElement;
 }
 
+/** How long to cache a failed load before allowing retry (30 seconds). */
+const ERROR_TTL_MS = 30_000;
+
 interface ErrorEntry {
   status: "error";
+  timestamp: number;
 }
 
 type CacheEntry = LoadingEntry | LoadedEntry | ErrorEntry;
@@ -84,8 +88,14 @@ export function loadCachedImage(
       existing.callbacks.push(onLoad);
       return null;
     }
-    // Error — don't retry
-    return null;
+    // Error — allow retry after TTL expires
+    if (Date.now() - existing.timestamp < ERROR_TTL_MS) {
+      return null;
+    }
+    // TTL expired, clear and fall through to re-load
+    cache.delete(url);
+    const idx = insertionOrder.indexOf(url);
+    if (idx !== -1) insertionOrder.splice(idx, 1);
   }
 
   // Start new load
@@ -117,7 +127,7 @@ export function loadCachedImage(
   });
 
   img.addEventListener("error", () => {
-    cache.set(url, { status: "error" } as ErrorEntry);
+    cache.set(url, { status: "error", timestamp: Date.now() });
     // Notify callers so they can show a placeholder or retry
     for (const cb of entry.callbacks) {
       try {

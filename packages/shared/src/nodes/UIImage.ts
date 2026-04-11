@@ -11,7 +11,7 @@ import type * as YogaTypes from "yoga-layout";
 import { every, isArray, isBoolean, isNumber, isString } from "lodash-es";
 
 import { Node } from "./Node";
-import { Display, isDisplay } from "../extras/ui/yoga";
+import { Display, isDisplay, isEdge } from "../extras/ui/yoga";
 import { fillRoundRect, imageRoundRect } from "../extras/ui/roundRect";
 import { loadCachedImage } from "../extras/ui/imageCache";
 import type {
@@ -708,14 +708,4 @@ function computeObjectFit(
       return { drawX, drawY, drawW, drawH };
     }
   }
-}
-
-function isEdge(value: unknown): value is number | EdgeValue {
-  if (isNumber(value)) {
-    return true;
-  }
-  if (isArray(value)) {
-    return value.length === 4 && every(value, (n) => isNumber(n));
-  }
-  return false;
 }

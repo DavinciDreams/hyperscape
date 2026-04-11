@@ -19,6 +19,7 @@ import {
   isAlignItem,
   isDisplay,
   isFlexDirection,
+  isEdge,
   isFlexWrap,
   isJustifyContent,
   JustifyContent,
@@ -961,14 +962,4 @@ export class UIView extends Node {
     }
     return this.proxy;
   }
-}
-
-function isEdge(value: unknown): value is number | EdgeValue {
-  if (isNumber(value)) {
-    return true;
-  }
-  if (isArray(value)) {
-    return value.length === 4 && every(value, (n) => isNumber(n));
-  }
-  return false;
 }
