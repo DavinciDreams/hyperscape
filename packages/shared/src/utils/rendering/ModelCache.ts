@@ -1213,9 +1213,11 @@ export class ModelCache {
     dt.name = texture.name;
     dt.wrapS = texture.wrapS;
     dt.wrapT = texture.wrapT;
-    dt.minFilter = texture.minFilter;
-    dt.magFilter = texture.magFilter;
-    dt.generateMipmaps = texture.generateMipmaps;
+    // DataTexture defaults (generateMipmaps=false, NearestFilter) are intentionally
+    // kept to match the deserialized-from-IndexedDB path in restoreTex(). Copying
+    // generateMipmaps=true from the source ImageBitmapTexture would trigger a GPU
+    // mipmap-generation render pass whose output has incorrect colors for
+    // rgba8unorm-srgb textures, breaking the appearance on first (clean-cache) load.
     dt.repeat.copy(texture.repeat);
     dt.offset.copy(texture.offset);
     dt.flipY = texture.flipY;
