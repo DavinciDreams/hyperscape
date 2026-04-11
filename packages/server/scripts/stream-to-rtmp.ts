@@ -2302,6 +2302,7 @@ async function cleanup() {
 
   const bridge = getRTMPBridge();
   bridge.stopProcessing();
+  await new Promise((resolve) => setTimeout(resolve, 900));
 
   if (browser) {
     await browser.close();

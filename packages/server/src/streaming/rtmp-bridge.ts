@@ -589,9 +589,7 @@ export class RTMPBridge {
 
   private pushDiagnosticSample<T>(samples: T[], value: T): void {
     samples.push(value);
-    while (
-      samples.length > RTMPBridge.CAPTURE_DIAGNOSTIC_HISTORY_LIMIT
-    ) {
+    while (samples.length > RTMPBridge.CAPTURE_DIAGNOSTIC_HISTORY_LIMIT) {
       samples.shift();
     }
   }
@@ -718,18 +716,18 @@ export class RTMPBridge {
       ""
     ).trim();
     const externalDeliveryInfo = resolveExternalStreamDeliveryInfo(process.env);
-    const providerPriority = resolveStreamCanonicalProviderPriority(process.env);
+    const providerPriority = resolveStreamCanonicalProviderPriority(
+      process.env,
+    );
     const hasExternalDeliveryIngest =
       ingestSettings.transport === "srt"
         ? Boolean(
             ingestSettings.srtUrl &&
-              ingestSettings.srtStreamId &&
-              ingestSettings.srtPassphrase,
+            ingestSettings.srtStreamId &&
+            ingestSettings.srtPassphrase,
           )
         : Boolean(externalDeliveryInfo.ingestUrl);
-    const addDestination = (
-      destination: RTMPDestination,
-    ) => {
+    const addDestination = (destination: RTMPDestination) => {
       if (!destination.url || existingNames.has(destination.name)) return;
       this.destinations.push(destination);
       existingNames.add(destination.name);
@@ -1144,7 +1142,8 @@ export class RTMPBridge {
       ingestSettings.profile === "cloudflare_live"
         ? targetBitrate
         : Math.floor(targetBitrate * 1.1); // 10% overhead for VBR spikes
-    const minrate = ingestSettings.profile === "cloudflare_live" ? targetBitrate : 0;
+    const minrate =
+      ingestSettings.profile === "cloudflare_live" ? targetBitrate : 0;
     const bufsize = targetBitrate * 2; // 2 seconds of buffering to absorb network jitter
 
     if (encoder === "h264_videotoolbox") {
@@ -1957,10 +1956,14 @@ export class RTMPBridge {
   }
 
   private buildDirectOutputArgs(): string[] | null {
-    const enabledDests = this.destinations.filter((destination) => destination.enabled);
+    const enabledDests = this.destinations.filter(
+      (destination) => destination.enabled,
+    );
     const ingestSettings = this.resolveIngestSettings();
     const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();
-    const hasLocalHlsOutput = Boolean(hlsOutputPath && !ingestSettings.probeOnly);
+    const hasLocalHlsOutput = Boolean(
+      hlsOutputPath && !ingestSettings.probeOnly,
+    );
     if (hasLocalHlsOutput || enabledDests.length !== 1) {
       return null;
     }
@@ -1981,7 +1984,9 @@ export class RTMPBridge {
       ];
     }
 
-    const fullUrl = destination.key ? `${destination.url}/${destination.key}` : destination.url;
+    const fullUrl = destination.key
+      ? `${destination.url}/${destination.key}`
+      : destination.url;
     return ["-f", "flv", fullUrl];
   }
 
@@ -2002,7 +2007,8 @@ export class RTMPBridge {
     for (const destination of this.status.destinations) {
       const ingestCandidates = [
         destination.ingestUrl,
-        this.destinations.find((candidate) => candidate.id === destination.id)?.url,
+        this.destinations.find((candidate) => candidate.id === destination.id)
+          ?.url,
       ]
         .filter(Boolean)
         .map((value) => {
@@ -2016,7 +2022,9 @@ export class RTMPBridge {
 
       if (
         normalized.includes(destination.name.toLowerCase()) ||
-        ingestCandidates.some((candidate) => normalized.includes(candidate.toLowerCase()))
+        ingestCandidates.some((candidate) =>
+          normalized.includes(candidate.toLowerCase()),
+        )
       ) {
         destination.connected = false;
         destination.error = trimmed;
@@ -2273,13 +2281,16 @@ export class RTMPBridge {
 
     // Close stdin first to signal end of input
     oldFfmpeg.stdin?.end();
+    try {
+      oldFfmpeg.kill("SIGTERM");
+    } catch {}
 
     // Give it a moment to finish, then kill
     const killTimer = setTimeout(() => {
       try {
         oldFfmpeg.kill("SIGKILL"); // Force kill to prevent zombie FFmpeg processes taking up GPU/CPU
       } catch {}
-    }, 2000);
+    }, 750);
     killTimer.unref?.();
   }
 
