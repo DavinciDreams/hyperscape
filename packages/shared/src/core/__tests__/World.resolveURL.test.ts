@@ -18,6 +18,11 @@ describe("World.resolveURL", () => {
     expect(
       world.resolveURL("asset://models/trees/pine/pine_05.glb"),
     ).toBe("https://cdn.example.com/game-assets/models/trees/pine_02.glb");
+    expect(
+      world.resolveURL("asset://models/trees/magic/magic_02_lod2.glb"),
+    ).toBe(
+      "https://cdn.example.com/game-assets/models/trees/oak_04_lod2.glb",
+    );
   });
 
   it("rewrites missing packaged tree families to existing local assets", () => {

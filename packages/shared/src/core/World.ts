@@ -171,10 +171,10 @@ function normalizeTreeAssetAlias(url: string): string {
   const baseUrl = suffix ? url.slice(0, -suffix.length) : url;
 
   const assetMatch = baseUrl.match(
-    /^(asset:\/\/models\/trees\/)([^/]+)\/[^/]+_(\d+)\.glb$/i,
+    /^(asset:\/\/models\/trees\/)([^/]+)\/[^/]+_(\d+)((?:_lod[12])?)\.glb$/i,
   );
   if (assetMatch) {
-    const [, prefix, family, rawIndex] = assetMatch;
+    const [, prefix, family, rawIndex, lodSuffix] = assetMatch;
     const replacements =
       TREE_ASSET_FAMILY_REWRITES[
         family as keyof typeof TREE_ASSET_FAMILY_REWRITES
@@ -183,15 +183,15 @@ function normalizeTreeAssetAlias(url: string): string {
       const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
       const replacement =
         replacements[index] ?? replacements[index % replacements.length];
-      return `${prefix}${replacement}.glb${suffix}`;
+      return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
     }
   }
 
   const absoluteMatch = baseUrl.match(
-    /^(.*\/models\/trees\/)([^/]+)\/[^/]+_(\d+)\.glb$/i,
+    /^(.*\/models\/trees\/)([^/]+)\/[^/]+_(\d+)((?:_lod[12])?)\.glb$/i,
   );
   if (absoluteMatch) {
-    const [, prefix, family, rawIndex] = absoluteMatch;
+    const [, prefix, family, rawIndex, lodSuffix] = absoluteMatch;
     const replacements =
       TREE_ASSET_FAMILY_REWRITES[
         family as keyof typeof TREE_ASSET_FAMILY_REWRITES
@@ -200,7 +200,7 @@ function normalizeTreeAssetAlias(url: string): string {
       const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
       const replacement =
         replacements[index] ?? replacements[index % replacements.length];
-      return `${prefix}${replacement}.glb${suffix}`;
+      return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
     }
   }
 
