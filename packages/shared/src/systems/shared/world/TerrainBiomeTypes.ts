@@ -196,3 +196,76 @@ export const SNOW_BIOMES: ReadonlySet<string> = new Set(
     .filter(([, cfg]) => cfg.enableSnow)
     .map(([id]) => id),
 );
+
+// ---------------------------------------------------------------------------
+// Per-biome scatter configs (rocks, cacti, flowers, etc.)
+// ---------------------------------------------------------------------------
+
+export interface BiomeScatterLayer {
+  /** Asset IDs from vegetation.json to scatter */
+  assets: string[];
+  /** Instances per 100×100m tile */
+  density: number;
+  /** Min distance between instances of this layer */
+  minSpacing: number;
+  /** Max terrain slope (0–1) for placement */
+  maxSlope?: number;
+  /** Skip positions below water */
+  avoidWater?: boolean;
+  /** Only place where terrain weights are in range, e.g. { grass: [0.5, 1.0] } */
+  terrainWeights?: {
+    grass?: [number, number];
+    dirt?: [number, number];
+    cliff?: [number, number];
+  };
+  /** RGB color multiplier applied as a tint over the base albedo */
+  biomeTint?: [number, number, number];
+  /** 0–1 — how strongly biomeTint blends over base albedo */
+  biomeTintStrength?: number;
+  /** 0–1 — how strongly terrain ground colour blends at the asset root */
+  groundColorBlend?: number;
+  /** 0–1 fraction of model height over which the ground blend fades out */
+  groundColorBlendHeight?: number;
+}
+
+export interface BiomeScatterConfig {
+  layers: BiomeScatterLayer[];
+}
+
+const FOREST_SCATTER_CONFIG: BiomeScatterConfig = { layers: [] };
+const TUNDRA_SCATTER_CONFIG: BiomeScatterConfig = { layers: [] };
+
+const CANYON_SCATTER_CONFIG: BiomeScatterConfig = {
+  layers: [
+    {
+      assets: [
+        "cactus01",
+        "cactus02",
+        "cactus03",
+        "cactus04",
+        "cactus05",
+        "cactus06",
+        "cactus07",
+        "cactus08",
+      ],
+      density: 4,
+      minSpacing: 8,
+      maxSlope: 0.5,
+      avoidWater: true,
+      biomeTint: [1.1, 0.88, 0.65],
+      biomeTintStrength: 0.35,
+      groundColorBlend: 1.0,
+      groundColorBlendHeight: 0.4,
+    },
+  ],
+};
+
+const BIOME_SCATTER_CONFIGS: Record<BiomeType, BiomeScatterConfig> = {
+  [BiomeType.Forest]: FOREST_SCATTER_CONFIG,
+  [BiomeType.Canyon]: CANYON_SCATTER_CONFIG,
+  [BiomeType.Tundra]: TUNDRA_SCATTER_CONFIG,
+};
+
+export function getScatterConfigForBiome(biomeId: string): BiomeScatterConfig {
+  return BIOME_SCATTER_CONFIGS[biomeId as BiomeType] ?? FOREST_SCATTER_CONFIG;
+}

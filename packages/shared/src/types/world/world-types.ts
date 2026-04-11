@@ -170,6 +170,8 @@ export interface VegetationAsset {
   alignToNormal?: boolean;
   /** Y offset to apply after placement (for buried objects, etc.) */
   yOffset?: number;
+  /** Whether this asset casts shadows (default true; set false for small props like flowers) */
+  castShadow?: boolean;
   /** LOD configuration (optional - uses category defaults if not specified) */
   lod?: VegetationLODConfig;
 }
@@ -203,6 +205,20 @@ export interface VegetationLayer {
   avoidWater?: boolean;
   /** Whether to avoid steep slopes */
   avoidSteepSlopes?: boolean;
+  /** Terrain weight filter ranges for scatter placement */
+  terrainWeights?: {
+    grass?: [number, number];
+    dirt?: [number, number];
+    cliff?: [number, number];
+  };
+  /** RGB biome tint color multiplier */
+  biomeTint?: [number, number, number];
+  /** 0–1 biome tint blend strength */
+  biomeTintStrength?: number;
+  /** 0–1 ground colour blend strength at the root */
+  groundColorBlend?: number;
+  /** 0–1 fraction of model height over which ground blend fades */
+  groundColorBlendHeight?: number;
 }
 
 /**

@@ -59,11 +59,14 @@ import {
   positionView,
   normalLocal,
   modelNormalMatrix,
+  uv,
+  cameraViewMatrix,
 } from "../../../extras/three/three";
 import { varyingProperty } from "three/tsl";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 import { SUN_SHADE, SUN_LIGHT, NIGHT, applySunShade } from "./LightingConfig";
+import { applyAnimeShade } from "./TerrainShader";
 
 // ============================================================================
 // CONFIGURATION
@@ -167,6 +170,8 @@ export type GPUVegetationUniforms = {
   cameraPos: { value: THREE.Vector3 };
   fadeStart: { value: number };
   fadeEnd: { value: number };
+  /** Sun direction — only present on scatter materials (ground-blend enabled) */
+  sunDir?: { value: THREE.Vector3 };
 };
 
 /**
@@ -187,6 +192,17 @@ export type GPUVegetationMaterialOptions = {
   vertexColors?: boolean;
   /** Enable camera-to-player occlusion dissolve (default: true) */
   enableOcclusionDissolve?: boolean;
+  // ---- Scatter / ground-blend options (activates per-asset terrain blending) ----
+  /** Texture from the GLB material — enables texture-based albedo */
+  colorMap?: THREE.Texture | null;
+  /** Total model height in local Y (for blend height calculation) */
+  modelHeight?: number;
+  /** Bounding box min.y of the model (handles non-zero pivots) */
+  modelBaseY?: number;
+  /** 0–1 overall strength of ground-colour blend at the root */
+  groundColorBlend?: number;
+  /** 0–1 fraction of modelHeight over which the blend fades to zero */
+  groundColorBlendHeight?: number;
 };
 
 /**
@@ -430,6 +446,108 @@ export function createGPUVegetationMaterial(
     fogDistSq,
   );
 
+  // ========== COLOR NODE ==========
+  const hasGroundBlend = (options.groundColorBlend ?? 0) > 0;
+
+  if (hasGroundBlend) {
+    // --- SCATTER MODE: texture + biome tint + applyAnimeShade terrain blend ---
+    const uSunDir = uniform(
+      new THREE.Vector3(...SUN_LIGHT.DEFAULT_DIRECTION).normalize(),
+    );
+    const mh = float(Math.max(0.001, options.modelHeight ?? 1.0));
+    const blendFrac = float(
+      Math.max(0.001, options.groundColorBlendHeight ?? 0.3),
+    );
+    const blendStrength = float(
+      Math.max(0, Math.min(1, options.groundColorBlend ?? 0)),
+    );
+
+    material.colorNode = Fn(() => {
+      const groundCol = attribute("instanceGroundColor", "vec3");
+      const biomeTintA = attribute("instanceBiomeTint", "vec4");
+      const baseY = attribute("instanceBaseY", "float");
+      const terrainN = attribute("instanceTerrainNormal", "vec3");
+
+      // Base albedo
+      const baseAlbedo = options.colorMap
+        ? (texture(options.colorMap, uv()).rgb as ReturnType<
+            typeof vertexColor
+          >)
+        : options.vertexColors
+          ? (vertexColor().rgb as ReturnType<typeof vertexColor>)
+          : (vec3(1, 1, 1) as unknown as ReturnType<typeof vertexColor>);
+
+      // Biome tint
+      const tinted = mix(baseAlbedo, biomeTintA.xyz, biomeTintA.w);
+
+      // Blend ratio: 1 at root, 0 at blendFrac * modelHeight
+      const heightAboveBase = sub(positionWorld.y, baseY);
+      const localYNorm = clamp(
+        div(heightAboveBase, mul(mh, blendFrac)),
+        float(0.0),
+        float(1.0),
+      );
+      const hasGround = step(float(0.001), dot(groundCol, vec3(1, 1, 1)));
+      const blend = mul(
+        mul(sub(float(1.0), localYNorm), blendStrength),
+        hasGround,
+      );
+
+      // Terrain portion lit with applyAnimeShade — exactly matches terrain shader output
+      const terrainLit = applyAnimeShade(groundCol, terrainN, uSunDir);
+
+      return mix(tinted, terrainLit, blend);
+    })();
+
+    // Blend normal toward terrain normal — PBR NdotL also matches terrain in the blend zone
+    material.normalNode = Fn(() => {
+      const terrainN = attribute("instanceTerrainNormal", "vec3");
+      const baseY = attribute("instanceBaseY", "float");
+      const heightAboveBase = sub(positionWorld.y, baseY);
+      const localYNorm = clamp(
+        div(heightAboveBase, mul(mh, blendFrac)),
+        float(0.0),
+        float(1.0),
+      );
+      const hasGround = step(float(0.001), dot(terrainN, terrainN));
+      const blend = mul(
+        mul(sub(float(1.0), localYNorm), blendStrength),
+        hasGround,
+      );
+      const terrainNView = normalize(
+        cameraViewMatrix.transformDirection(terrainN),
+      );
+      return normalize(mix(normalView, terrainNView, blend));
+    })();
+
+    if (options.colorMap) material.map = options.colorMap;
+
+    const gpuMaterial = material as unknown as GPUVegetationMaterial;
+    gpuMaterial.gpuUniforms = {
+      playerPos: uPlayerPos,
+      cameraPos: uCameraPos,
+      fadeStart: uFadeStart,
+      fadeEnd: uFadeEnd,
+      sunDir: uSunDir,
+    };
+
+    material.outputNode = Fn(() => {
+      const litColor = output;
+      return vec4(mix(litColor.rgb, fogTexNode.rgb, fogFactor), litColor.a);
+    })();
+
+    material.transparent = false;
+    material.opacity = 1.0;
+    material.alphaTest = options.alphaTest ?? 0.5;
+    material.side = THREE.DoubleSide;
+    material.depthWrite = true;
+    material.roughness = 0.95;
+    material.metalness = 0.0;
+
+    return gpuMaterial;
+  }
+
+  // --- STANDARD MODE: vertex colors or flat color ---
   material.colorNode = options.vertexColors
     ? Fn(() => vertexColor().rgb)()
     : undefined;
@@ -462,6 +580,20 @@ export function createGPUVegetationMaterial(
   };
 
   return gpuMaterial;
+}
+
+// ============================================================================
+// SCATTER ALIAS — kept for call-site compat; delegates to createGPUVegetationMaterial
+// ============================================================================
+
+/** @deprecated Use createGPUVegetationMaterial with groundColorBlend option */
+export type ScatterVegetationMaterialOptions = GPUVegetationMaterialOptions;
+
+/** @deprecated Use createGPUVegetationMaterial with groundColorBlend option */
+export function createScatterVegetationMaterial(
+  options: ScatterVegetationMaterialOptions = {},
+): GPUVegetationMaterial {
+  return createGPUVegetationMaterial(options);
 }
 
 // ============================================================================
