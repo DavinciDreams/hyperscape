@@ -319,6 +319,7 @@ declare global {
     readonly PUBLIC_EMBED_ALLOWED_ORIGINS?: string;
     readonly PUBLIC_API_URL?: string;
     readonly PUBLIC_ELIZAOS_URL?: string;
+    readonly PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN?: string;
   }
 }
 

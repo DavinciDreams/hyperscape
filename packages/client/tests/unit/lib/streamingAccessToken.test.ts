@@ -47,6 +47,27 @@ describe("streamingAccessToken", () => {
     expect(resolved.nextUrl).toBeNull();
   });
 
+  it("falls back to the runtime viewer token when the URL is not tokenized", () => {
+    const replaceState = vi.fn();
+    const fakeWindow = {
+      env: {
+        PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN: "viewer-token",
+      },
+      location: {
+        href: "https://example.com/stream?foo=bar#mode=stream",
+      },
+      history: {
+        state: { page: "stream" },
+        replaceState,
+      },
+    } as unknown as Window;
+
+    expect(primeStreamingAccessTokenFromWindow(fakeWindow)).toBe(
+      "viewer-token",
+    );
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
   it("primes from window state, scrubs the URL, and caches the token", () => {
     const replaceState = vi.fn();
     const fakeWindow = {

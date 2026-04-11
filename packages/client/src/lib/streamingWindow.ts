@@ -5,6 +5,7 @@ export type PublicRuntimeEnv = {
   PUBLIC_API_URL?: string;
   PUBLIC_APP_URL?: string;
   PUBLIC_EMBED_ALLOWED_ORIGINS?: string;
+  PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN?: string;
 };
 
 export type StreamingWindowRendererHealth = {

@@ -5,6 +5,28 @@ type StreamingAccessTokenResolution = {
 
 let cachedStreamingAccessToken: string | null | undefined;
 
+function resolveStreamingAccessTokenFromEnv(
+  targetWindow?: Window,
+): string | null {
+  const runtimeToken =
+    (
+      targetWindow as
+        | (Window & {
+            env?: { PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN?: string };
+          })
+        | undefined
+    )?.env?.PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN?.trim() || null;
+
+  if (runtimeToken) {
+    return runtimeToken;
+  }
+
+  const buildToken =
+    import.meta.env.PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN?.trim() || null;
+
+  return buildToken || null;
+}
+
 export function resolveStreamingAccessTokenFromHref(
   href: string,
 ): StreamingAccessTokenResolution {
@@ -55,7 +77,8 @@ export function primeStreamingAccessTokenFromWindow(
   const resolved = resolveStreamingAccessTokenFromHref(
     targetWindow.location.href,
   );
-  cachedStreamingAccessToken = resolved.token;
+  cachedStreamingAccessToken =
+    resolved.token ?? resolveStreamingAccessTokenFromEnv(targetWindow);
 
   if (resolved.nextUrl) {
     targetWindow.history.replaceState(

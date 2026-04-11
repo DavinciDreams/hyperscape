@@ -100,7 +100,10 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
-const TARGET_AVATAR_READY_GRACE_MS = 30_000;
+// The public stream should not sit behind the loading shell for tens of
+// seconds once the live world, target entity, and spectator camera are real.
+// Keep a short grace window for avatar pop-in, then degrade visibly in-scene.
+const TARGET_AVATAR_READY_GRACE_MS = 8_000;
 
 function normalizeCaptureBridgeUrl(rawValue: string | null): string {
   const fallbackUrl = "ws://localhost:8765";
@@ -350,6 +353,17 @@ export function StreamingMode() {
     getStreamingAccessToken(),
   );
 
+  const markWorldReady = useCallback(() => {
+    if (worldReadyRef.current) return;
+    worldReadyRef.current = true;
+    setWorldReady(true);
+    setReadyEventDelayed(false);
+    if (worldReadyTimeoutRef.current) {
+      clearTimeout(worldReadyTimeoutRef.current);
+      worldReadyTimeoutRef.current = null;
+    }
+  }, []);
+
   const writeHeartbeat = useCallback(() => {
     const win = window as StreamingWindow;
     const heartbeat: StreamingWindowHeartbeat = {
@@ -401,179 +415,8 @@ export function StreamingMode() {
     cameraRetryTimeoutsRef.current = [];
   }, []);
 
-  // Handle world setup
-  const handleSetup = useCallback(
-    (world: World) => {
-      worldListenerCleanupRef.current?.();
-      worldListenerCleanupRef.current = null;
-      worldRef.current = world;
-      setConnected(true);
-      const win = window as StreamingWindow;
-      win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ =
-        createCaptureSessionGeneration();
-      win.__HYPERSCAPE_STREAM_READY__ = false;
-      win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
-      setWorldReady(false);
-      setTerrainReady(false);
-      setTargetAvatarReady(false);
-      setTargetAvatarGraceExpired(false);
-      setTerrainStalled(false);
-      setReadyEventDelayed(false);
-      setClientInitError(null);
-      renderTickRef.current = 0;
-      duelStateTickRef.current = 0;
-      latestRenderTickAtRef.current = null;
-      latestDuelStateTickAtRef.current = null;
-      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = {
-        renderTick: 0,
-        latestRenderTickAt: null,
-        duelStateTick: 0,
-        latestDuelStateTickAt: null,
-      };
-
-      // Force potato-mode graphics tuned for stable 720p streaming output.
-      // Keep DPR at 1 so capture canvas stays at target resolution.
-      const prefs = world.getSystem("prefs") as {
-        setDPR?: (v: number) => void;
-        setShadows?: (v: string) => void;
-        setPostprocessing?: (v: boolean) => void;
-        setBloom?: (v: boolean) => void;
-        setColorGrading?: (v: string) => void;
-        setDepthBlur?: (v: boolean) => void;
-        setWaterReflections?: (v: boolean) => void;
-        setEntityHighlighting?: (v: boolean) => void;
-      } | null;
-      if (prefs) {
-        prefs.setDPR?.(1);
-        prefs.setShadows?.("none");
-        prefs.setPostprocessing?.(false);
-        prefs.setBloom?.(false);
-        prefs.setColorGrading?.("none");
-        prefs.setDepthBlur?.(false);
-        prefs.setWaterReflections?.(false);
-        prefs.setEntityHighlighting?.(false);
-      }
-
-      const markWorldReady = () => {
-        if (worldReadyRef.current) return;
-        worldReadyRef.current = true;
-        setWorldReady(true);
-        setReadyEventDelayed(false);
-        if (worldReadyTimeoutRef.current) {
-          clearTimeout(worldReadyTimeoutRef.current);
-          worldReadyTimeoutRef.current = null;
-        }
-      };
-
-      world.on(EventType.READY, markWorldReady);
-
-      // Safety net logging only: do not force world-ready state. Forcing
-      // readiness can hide renderer/bootstrap failures and lock streams at 3%.
-      if (worldReadyTimeoutRef.current) {
-        clearTimeout(worldReadyTimeoutRef.current);
-      }
-      worldReadyTimeoutRef.current = setTimeout(() => {
-        setReadyEventDelayed(true);
-        console.warn(
-          "[StreamingMode] READY event timeout reached; waiting for READY event instead of forcing world-ready",
-        );
-        worldReadyTimeoutRef.current = null;
-      }, 60000);
-
-      // Start terrain readiness polling so we avoid presenting chunk-pop-in.
-      clearTerrainPolling();
-      terrainPollRef.current = setInterval(() => {
-        const terrain = world.getSystem("terrain") as {
-          isReady?: () => boolean;
-        } | null;
-        if (terrain?.isReady?.()) {
-          setTerrainReady(true);
-          setTerrainStalled(false);
-          clearTerrainPolling();
-        }
-      }, 100);
-
-      terrainTimeoutRef.current = setTimeout(() => {
-        setTerrainStalled(true);
-        console.warn(
-          "[StreamingMode] Terrain readiness timeout reached; continuing to wait for terrain instead of forcing ready",
-        );
-      }, 30000);
-
-      // Subscribe to streaming state updates (forwarded from server via WebSocket)
-      const onStreamingStateUpdate = (data: unknown) => {
-        const state = data as StreamingState;
-
-        // Initial camera lock: only needed for the very first target so
-        // the loading screen can dismiss.  After that, ClientCameraSystem
-        // handles all target switches via its own streaming:state:update
-        // subscription with smooth cinematic transitions — no loading screen.
-        markWorldReady();
-        if (
-          state.cameraTarget &&
-          state.cameraTarget !== lastCameraTargetRef.current
-        ) {
-          const isFirstTarget = lastCameraTargetRef.current === null;
-          lastCameraTargetRef.current = state.cameraTarget;
-
-          if (isFirstTarget) {
-            clearCameraRetryTimeouts();
-            updateCameraTarget(world, state.cameraTarget);
-          }
-        }
-
-        // Only trigger React re-render when visible state actually changed
-        setStreamingState((prev) => {
-          if (!prev) return state;
-          // Skip re-render if phase, HP, countdown, and leaderboard are unchanged
-          const c = state.cycle;
-          const p = prev.cycle;
-          if (
-            c.phase === p.phase &&
-            c.countdown === p.countdown &&
-            c.winnerId === p.winnerId &&
-            c.agent1?.hp === p.agent1?.hp &&
-            c.agent2?.hp === p.agent2?.hp &&
-            c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
-            c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
-            Math.floor(c.timeRemaining / 1000) ===
-              Math.floor(p.timeRemaining / 1000) &&
-            state.leaderboard.length === prev.leaderboard.length
-          ) {
-            return prev; // Same reference = no re-render
-          }
-          return state;
-        });
-      };
-      world.on("streaming:state:update", onStreamingStateUpdate);
-      worldListenerCleanupRef.current = () => {
-        world.off(EventType.READY, markWorldReady);
-        world.off("streaming:state:update", onStreamingStateUpdate);
-      };
-
-      // Disable player controls (spectator mode)
-      const inputSystem = world.getSystem("client-input") as {
-        disable?: () => void;
-        setEnabled?: (enabled: boolean) => void;
-      } | null;
-
-      if (inputSystem?.disable) {
-        inputSystem.disable();
-      } else if (inputSystem?.setEnabled) {
-        inputSystem.setEnabled(false);
-      }
-
-      if (import.meta.env.DEV) {
-        console.log("[StreamingMode] World setup complete");
-      }
-    },
-    [clearTerrainPolling, clearCameraRetryTimeouts],
-  );
-
-  // Initial camera lock — only used once to dismiss the loading screen.
-  // After this, ClientCameraSystem handles all camera targeting internally
-  // via its streaming:state:update subscription with smooth transitions.
+  // The first public state frame must drive the exact same bootstrap work
+  // regardless of whether it arrived via WS or the HTTP fallback.
   const updateCameraTarget = useCallback((world: World, targetId: string) => {
     const maxRetries = 20;
     const retryDelayMs = 250;
@@ -637,7 +480,173 @@ export function StreamingMode() {
     };
 
     attemptLock(0);
-  }, []);
+  }, [clearCameraRetryTimeouts]);
+
+  const applyStreamingStateUpdate = useCallback(
+    (state: StreamingState, world: World | null) => {
+      markWorldReady();
+
+      if (
+        world &&
+        state.cameraTarget &&
+        state.cameraTarget !== lastCameraTargetRef.current
+      ) {
+        const isFirstTarget = lastCameraTargetRef.current === null;
+        lastCameraTargetRef.current = state.cameraTarget;
+
+        if (isFirstTarget) {
+          clearCameraRetryTimeouts();
+          updateCameraTarget(world, state.cameraTarget);
+        }
+      }
+
+      setStreamingState((prev) => {
+        if (!prev) return state;
+        // Skip re-render if phase, HP, countdown, and leaderboard are unchanged
+        const c = state.cycle;
+        const p = prev.cycle;
+        if (
+          c.phase === p.phase &&
+          c.countdown === p.countdown &&
+          c.winnerId === p.winnerId &&
+          c.agent1?.hp === p.agent1?.hp &&
+          c.agent2?.hp === p.agent2?.hp &&
+          c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
+          c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
+          Math.floor(c.timeRemaining / 1000) ===
+            Math.floor(p.timeRemaining / 1000) &&
+          state.leaderboard.length === prev.leaderboard.length
+        ) {
+          return prev; // Same reference = no re-render
+        }
+        return state;
+      });
+    },
+    [clearCameraRetryTimeouts, markWorldReady, updateCameraTarget],
+  );
+
+  // Handle world setup
+  const handleSetup = useCallback(
+    (world: World) => {
+      worldListenerCleanupRef.current?.();
+      worldListenerCleanupRef.current = null;
+      worldRef.current = world;
+      setConnected(true);
+      const win = window as StreamingWindow;
+      win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ =
+        createCaptureSessionGeneration();
+      win.__HYPERSCAPE_STREAM_READY__ = false;
+      win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
+      setStreamingState(null);
+      setWorldReady(false);
+      setTerrainReady(false);
+      setCameraLocked(false);
+      setTargetAvatarReady(false);
+      setTargetAvatarGraceExpired(false);
+      setTerrainStalled(false);
+      setReadyEventDelayed(false);
+      setClientInitError(null);
+      lastCameraTargetRef.current = null;
+      lastCycleIdRef.current = null;
+      renderTickRef.current = 0;
+      duelStateTickRef.current = 0;
+      latestRenderTickAtRef.current = null;
+      latestDuelStateTickAtRef.current = null;
+      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = {
+        renderTick: 0,
+        latestRenderTickAt: null,
+        duelStateTick: 0,
+        latestDuelStateTickAt: null,
+      };
+
+      // Force potato-mode graphics tuned for stable 720p streaming output.
+      // Keep DPR at 1 so capture canvas stays at target resolution.
+      const prefs = world.getSystem("prefs") as {
+        setDPR?: (v: number) => void;
+        setShadows?: (v: string) => void;
+        setPostprocessing?: (v: boolean) => void;
+        setBloom?: (v: boolean) => void;
+        setColorGrading?: (v: string) => void;
+        setDepthBlur?: (v: boolean) => void;
+        setWaterReflections?: (v: boolean) => void;
+        setEntityHighlighting?: (v: boolean) => void;
+      } | null;
+      if (prefs) {
+        prefs.setDPR?.(1);
+        prefs.setShadows?.("none");
+        prefs.setPostprocessing?.(false);
+        prefs.setBloom?.(false);
+        prefs.setColorGrading?.("none");
+        prefs.setDepthBlur?.(false);
+        prefs.setWaterReflections?.(false);
+        prefs.setEntityHighlighting?.(false);
+      }
+
+      world.on(EventType.READY, markWorldReady);
+
+      // Safety net logging only: do not force world-ready state. Forcing
+      // readiness can hide renderer/bootstrap failures and lock streams at 3%.
+      if (worldReadyTimeoutRef.current) {
+        clearTimeout(worldReadyTimeoutRef.current);
+      }
+      worldReadyTimeoutRef.current = setTimeout(() => {
+        setReadyEventDelayed(true);
+        console.warn(
+          "[StreamingMode] READY event timeout reached; waiting for READY event instead of forcing world-ready",
+        );
+        worldReadyTimeoutRef.current = null;
+      }, 60000);
+
+      // Start terrain readiness polling so we avoid presenting chunk-pop-in.
+      clearTerrainPolling();
+      terrainPollRef.current = setInterval(() => {
+        const terrain = world.getSystem("terrain") as {
+          isReady?: () => boolean;
+        } | null;
+        if (terrain?.isReady?.()) {
+          setTerrainReady(true);
+          setTerrainStalled(false);
+          clearTerrainPolling();
+        }
+      }, 100);
+
+      terrainTimeoutRef.current = setTimeout(() => {
+        setTerrainStalled(true);
+        console.warn(
+          "[StreamingMode] Terrain readiness timeout reached; continuing to wait for terrain instead of forcing ready",
+        );
+      }, 30000);
+
+      // Subscribe to streaming state updates (forwarded from server via WebSocket)
+      const onStreamingStateUpdate = (data: unknown) => {
+        const state = data as StreamingState;
+        applyStreamingStateUpdate(state, world);
+      };
+      world.on("streaming:state:update", onStreamingStateUpdate);
+      worldListenerCleanupRef.current = () => {
+        world.off(EventType.READY, markWorldReady);
+        world.off("streaming:state:update", onStreamingStateUpdate);
+      };
+
+      // Disable player controls (spectator mode)
+      const inputSystem = world.getSystem("client-input") as {
+        disable?: () => void;
+        setEnabled?: (enabled: boolean) => void;
+      } | null;
+
+      if (inputSystem?.disable) {
+        inputSystem.disable();
+      } else if (inputSystem?.setEnabled) {
+        inputSystem.setEnabled(false);
+      }
+
+      if (import.meta.env.DEV) {
+        console.log("[StreamingMode] World setup complete");
+      }
+    },
+    [applyStreamingStateUpdate, clearTerrainPolling, markWorldReady],
+  );
 
   // Poll for initial state if not received via WebSocket
   useEffect(() => {
@@ -671,7 +680,7 @@ export function StreamingMode() {
         .then((data) => {
           if (!mounted) return;
           if (data && data.type === "STREAMING_STATE_UPDATE") {
-            setStreamingState(data);
+            applyStreamingStateUpdate(data, worldRef.current);
           }
         })
         .catch((err) => {
@@ -697,7 +706,7 @@ export function StreamingMode() {
       }
       controllers.clear();
     };
-  }, [connected, streamingState]);
+  }, [applyStreamingStateUpdate, connected, streamingState]);
 
   // Lock the world's built-in MusicSystem to use exclusively combat tracks
   useEffect(() => {
