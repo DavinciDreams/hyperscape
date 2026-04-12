@@ -1330,6 +1330,20 @@ function assertAllowedCaptureNavigation(rawUrl: string): void {
   );
 }
 
+function assertCaptureDocumentResponse(
+  response: Awaited<ReturnType<Page["goto"]>>,
+  rawUrl: string,
+): void {
+  const status = response?.status();
+  if (typeof status !== "number" || status < 400) {
+    return;
+  }
+
+  throw new Error(
+    `Capture document request returned HTTP ${status}: ${redactStreamingSecretsFromUrl(rawUrl)}`,
+  );
+}
+
 async function abortCaptureForUnexpectedNavigation(
   rawUrl: string,
 ): Promise<void> {
@@ -1592,10 +1606,11 @@ async function setupBrowser(forceReselect = false) {
       const redactedCandidateUrl = redactStreamingSecretsFromUrl(candidateUrl);
       console.log(`[Main] Navigating to ${redactedCandidateUrl}...`);
       try {
-        await page.goto(candidateUrl, {
+        const response = await page.goto(candidateUrl, {
           timeout: 120_000,
           waitUntil: "domcontentloaded",
         });
+        assertCaptureDocumentResponse(response, candidateUrl);
         assertAllowedCaptureNavigation(page.url());
       } catch (err) {
         console.warn(`[Main] Failed to load ${redactedCandidateUrl}:`, err);
@@ -1625,10 +1640,11 @@ async function setupBrowser(forceReselect = false) {
     }
   } else {
     try {
-      await page.goto(selectedGameUrl, {
+      const response = await page.goto(selectedGameUrl, {
         timeout: 120_000,
         waitUntil: "domcontentloaded",
       });
+      assertCaptureDocumentResponse(response, selectedGameUrl);
       assertAllowedCaptureNavigation(page.url());
     } catch (err) {
       console.error(
