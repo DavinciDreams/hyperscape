@@ -16,7 +16,6 @@ import type {
 const RENDER_TICK_STALE_MS = 3_000;
 const VISUAL_CHANGE_STALE_MS = 5_000;
 const VISUAL_CHANGE_GRACE_MS = 8_000;
-const MIN_CAPTURE_FPS = 24;
 const MIN_ENCODE_FPS = 24;
 
 type NormalizedRendererMetrics = {
@@ -179,9 +178,9 @@ function deriveMetricsDegradedReason(params: {
     ) {
       return "visual_change_stale";
     }
-    if (metrics.captureFps != null && metrics.captureFps < MIN_CAPTURE_FPS) {
-      return "capture_fps_low";
-    }
+    // captureFps is raw browser compositor ingress. In CDP mode we intentionally
+    // throttle source frames and repeat the latest valid frame to keep encoder
+    // cadence stable, so content freshness and encodeFps are the hard gates.
     if (metrics.encodeFps != null && metrics.encodeFps < MIN_ENCODE_FPS) {
       return "encoder_fps_low";
     }
@@ -232,9 +231,9 @@ export function deriveBettingRendererHealth(
   const externalRendererMetrics = normalizeRendererMetrics(
     externalSnapshot?.metrics,
   );
-  const externalHlsManifest = normalizeHlsManifest(
-    externalSnapshot?.hlsManifest,
-  ) ?? normalizeHlsManifest(options?.localHlsManifest);
+  const externalHlsManifest =
+    normalizeHlsManifest(externalSnapshot?.hlsManifest) ??
+    normalizeHlsManifest(options?.localHlsManifest);
   const metricsReason = deriveMetricsDegradedReason({
     cycle,
     metrics: externalRendererMetrics,
@@ -282,10 +281,7 @@ export function deriveBettingRendererHealth(
       };
     }
 
-    if (
-      externalRendererHealth.ready ||
-      !phaseNeedsVisualChange(cycle)
-    ) {
+    if (externalRendererHealth.ready || !phaseNeedsVisualChange(cycle)) {
       return {
         ...externalRendererHealth,
         updatedAt: healthSnapshotUpdatedAt,

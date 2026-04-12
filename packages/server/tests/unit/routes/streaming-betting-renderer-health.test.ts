@@ -2,7 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { deriveBettingRendererHealth, loadExternalRtmpStatusSnapshot } from "../../../src/routes/streaming-betting-routes.js";
+import {
+  deriveBettingRendererHealth,
+  loadExternalRtmpStatusSnapshot,
+} from "../../../src/routes/streaming-betting-routes.js";
 import type { StreamingDuelCycle } from "../../../src/systems/StreamingDuelScheduler/types.js";
 
 function createCycle(
@@ -198,32 +201,32 @@ describe("deriveBettingRendererHealth", () => {
         phaseStartTime: now - 2_000,
       }),
       {
-      externalStatusSnapshot: {
-        destinations: [],
-        stats: {},
-        updatedAt: now,
-        rendererHealth: {
-          ready: true,
-          degradedReason: null,
+        externalStatusSnapshot: {
+          destinations: [],
+          stats: {},
           updatedAt: now,
+          rendererHealth: {
+            ready: true,
+            degradedReason: null,
+            updatedAt: now,
+          },
+          metrics: {
+            captureFps: 60,
+            encodeFps: 45,
+            latestRenderTickAt: now,
+            latestVisualChangeAt: now - 10_000,
+            visualChangeAgeMs: 10_000,
+          },
+          hlsManifest: {
+            updatedAt: now,
+            mediaSequence: 42,
+          },
         },
-        metrics: {
-          captureFps: 60,
-          encodeFps: 45,
-          latestRenderTickAt: now,
-          latestVisualChangeAt: now - 10_000,
-          visualChangeAgeMs: 10_000,
+        externalStatusMaxAgeMs: 15_000,
+        captureStats: {
+          clientConnected: true,
+          ffmpegRunning: true,
         },
-        hlsManifest: {
-          updatedAt: now,
-          mediaSequence: 42,
-        },
-      },
-      externalStatusMaxAgeMs: 15_000,
-      captureStats: {
-        clientConnected: true,
-        ffmpegRunning: true,
-      },
       },
     );
 
@@ -383,36 +386,39 @@ describe("deriveBettingRendererHealth", () => {
 
   it("reports stale visual output during fighting phases", () => {
     const now = Date.now();
-    const health = deriveBettingRendererHealth(createCycle({
-      phaseStartTime: now - 12_000,
-    }), {
-      externalStatusSnapshot: {
-        destinations: [],
-        stats: {},
-        updatedAt: now,
-        rendererHealth: {
-          ready: false,
-          degradedReason: "renderer_health_stale",
+    const health = deriveBettingRendererHealth(
+      createCycle({
+        phaseStartTime: now - 12_000,
+      }),
+      {
+        externalStatusSnapshot: {
+          destinations: [],
+          stats: {},
           updatedAt: now,
+          rendererHealth: {
+            ready: false,
+            degradedReason: "renderer_health_stale",
+            updatedAt: now,
+          },
+          metrics: {
+            captureFps: 30,
+            encodeFps: 30,
+            latestRenderTickAt: now,
+            latestVisualChangeAt: now - 5_000,
+            visualChangeAgeMs: 5_000,
+          },
+          hlsManifest: {
+            updatedAt: now,
+            mediaSequence: 42,
+          },
         },
-        metrics: {
-          captureFps: 30,
-          encodeFps: 30,
-          latestRenderTickAt: now,
-          latestVisualChangeAt: now - 5_000,
-          visualChangeAgeMs: 5_000,
-        },
-        hlsManifest: {
-          updatedAt: now,
-          mediaSequence: 42,
+        externalStatusMaxAgeMs: 15_000,
+        captureStats: {
+          clientConnected: true,
+          ffmpegRunning: true,
         },
       },
-      externalStatusMaxAgeMs: 15_000,
-      captureStats: {
-        clientConnected: true,
-        ffmpegRunning: true,
-      },
-    });
+    );
 
     expect(health).toMatchObject({
       ready: false,
@@ -420,7 +426,7 @@ describe("deriveBettingRendererHealth", () => {
     });
   });
 
-  it("reports low capture fps during fighting phases", () => {
+  it("keeps renderer health ready when raw capture fps is low but encoded output is fresh", () => {
     const now = Date.now();
     const health = deriveBettingRendererHealth(createCycle(), {
       externalStatusSnapshot: {
@@ -452,8 +458,45 @@ describe("deriveBettingRendererHealth", () => {
     });
 
     expect(health).toMatchObject({
+      ready: true,
+      degradedReason: null,
+    });
+  });
+
+  it("reports low encoder fps during fighting phases", () => {
+    const now = Date.now();
+    const health = deriveBettingRendererHealth(createCycle(), {
+      externalStatusSnapshot: {
+        destinations: [],
+        stats: {},
+        updatedAt: now,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: now,
+        },
+        metrics: {
+          captureFps: 30,
+          encodeFps: 12,
+          latestRenderTickAt: now,
+          latestVisualChangeAt: now,
+          visualChangeAgeMs: 200,
+        },
+        hlsManifest: {
+          updatedAt: now,
+          mediaSequence: 42,
+        },
+      },
+      externalStatusMaxAgeMs: 15_000,
+      captureStats: {
+        clientConnected: true,
+        ffmpegRunning: true,
+      },
+    });
+
+    expect(health).toMatchObject({
       ready: false,
-      degradedReason: "capture_fps_low",
+      degradedReason: "encoder_fps_low",
     });
   });
 
