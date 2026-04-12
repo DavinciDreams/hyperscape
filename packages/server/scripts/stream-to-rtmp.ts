@@ -92,10 +92,10 @@ getStreamLeakDiagnostics();
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const GAME_URL = process.env.GAME_URL || "http://localhost:3333/?page=stream";
+const GAME_URL = process.env.GAME_URL || "http://localhost:3333/stream.html";
 const GAME_FALLBACK_URLS = (
   process.env.GAME_FALLBACK_URLS ||
-  "http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/"
+  "http://localhost:3333/stream.html,http://localhost:3333/?embedded=true&mode=spectator,http://localhost:3333/"
 )
   .split(",")
   .map((value) => value.trim())
@@ -111,6 +111,12 @@ function normalizeCaptureGameUrl(rawUrl: string): string {
 
   try {
     const url = new URL(rawUrl);
+    // The source encoder needs the dedicated stream entrypoint. The public
+    // /stream route is a normal SPA route in some deployments and will try to
+    // authenticate as a player.
+    if (url.pathname === "/stream") {
+      url.pathname = "/stream.html";
+    }
     // CDP capture reads frames directly from the compositor and does not
     // expose the legacy in-page WebSocket bridge. Leaving these params on the
     // stream URL makes the page repeatedly dial a bridge that will never exist.
@@ -269,6 +275,10 @@ const FATAL_WRITE_PAGE_STALL_THRESHOLD_MS = Math.max(
   2_000,
   Math.min(5_000, Math.floor(SOURCE_CAPTURE_STALL_MS / 2)),
 );
+const CDP_FRAME_PUMP_INTERVAL_MS = Math.max(
+  16,
+  Math.round(1000 / Math.max(1, TARGET_FPS)),
+);
 
 // ── CDP Frame Rate Tracking ────────────────────────────────────────────────
 
@@ -277,6 +287,10 @@ let cdpFps = 0;
 let cdpFpsIntervalId: ReturnType<typeof setInterval> | null = null;
 let cdpDroppedFrames = 0;
 let lastCaptureFrameAt: number | null = null;
+let lastEncodedFrameAt: number | null = null;
+let latestCdpFrameBuffer: Buffer | null = null;
+let cdpFramePumpIntervalId: ReturnType<typeof setInterval> | null = null;
+let cdpRepeatedFrameCount = 0;
 let latestRenderTickAt: number | null = null;
 let latestDuelStateTickAt: number | null = null;
 let latestVisualChangeAt: number | null = null;
@@ -298,6 +312,66 @@ function stopFpsTracking() {
   if (cdpFpsIntervalId) {
     clearInterval(cdpFpsIntervalId);
     cdpFpsIntervalId = null;
+  }
+}
+
+function feedCdpFrameToEncoder(
+  bridge: ReturnType<typeof getRTMPBridge>,
+  jpegBuffer: Buffer,
+  options: {
+    frameAt: number;
+    cdpTimestamp: number | null;
+    repeated: boolean;
+  },
+): boolean {
+  const written = bridge.feedFrame(jpegBuffer, {
+    frameAt: options.frameAt,
+    cdpTimestamp: options.cdpTimestamp,
+  });
+  if (written) {
+    lastEncodedFrameAt = options.frameAt;
+    if (options.repeated) {
+      cdpRepeatedFrameCount += 1;
+    } else {
+      cdpFrameCount += 1;
+    }
+  } else {
+    cdpDroppedFrames += 1;
+  }
+  return written;
+}
+
+function startCdpFramePump(bridge: ReturnType<typeof getRTMPBridge>): void {
+  if (cdpFramePumpIntervalId) {
+    clearInterval(cdpFramePumpIntervalId);
+  }
+  cdpFramePumpIntervalId = setInterval(() => {
+    if (!latestCdpFrameBuffer) return;
+    if (bridge.getStatus().ffmpegRunning !== true) return;
+
+    const nowMs = Date.now();
+    if (
+      lastEncodedFrameAt != null &&
+      nowMs - lastEncodedFrameAt < CDP_FRAME_PUMP_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    // CDP screencast is event-driven; a static but valid live scene can stop
+    // emitting frames. A live encoder still needs continuous input, so repeat
+    // the latest real browser frame while renderer health reports content truth.
+    feedCdpFrameToEncoder(bridge, latestCdpFrameBuffer, {
+      frameAt: nowMs,
+      cdpTimestamp: null,
+      repeated: true,
+    });
+  }, CDP_FRAME_PUMP_INTERVAL_MS);
+}
+
+function stopCdpFramePump(): void {
+  if (cdpFramePumpIntervalId) {
+    clearInterval(cdpFramePumpIntervalId);
+    cdpFramePumpIntervalId = null;
   }
 }
 
@@ -478,7 +552,7 @@ function buildRendererMetricsSnapshot(
     droppedFrames: Math.max(stats.droppedFrames, cdpDroppedFrames),
     renderTick: lastObservedRenderTick,
     duelStateTick: lastObservedDuelStateTick,
-    latestFrameAt: lastCaptureFrameAt,
+    latestFrameAt: lastEncodedFrameAt ?? lastCaptureFrameAt,
     latestRenderTickAt,
     latestDuelStateTickAt,
     latestVisualChangeAt,
@@ -497,10 +571,13 @@ function buildCaptureDiagnosticsSnapshot(
     ? { ...diagnostics.lastFatalWriteError }
     : null;
   const latestFrameAt =
-    typeof lastCaptureFrameAt === "number" &&
-    Number.isFinite(lastCaptureFrameAt)
-      ? lastCaptureFrameAt
-      : null;
+    typeof lastEncodedFrameAt === "number" &&
+    Number.isFinite(lastEncodedFrameAt)
+      ? lastEncodedFrameAt
+      : typeof lastCaptureFrameAt === "number" &&
+          Number.isFinite(lastCaptureFrameAt)
+        ? lastCaptureFrameAt
+        : null;
 
   return {
     recentFrames: diagnostics.recentFrames.map((sample) => ({
@@ -722,7 +799,9 @@ function resolveSourceRuntimeSnapshot(
     nowMs,
   );
   const lastFrameAt =
-    captureMode === "cdp" ? lastCaptureFrameAt : browserCaptureLastFrameAt;
+    captureMode === "cdp"
+      ? (lastEncodedFrameAt ?? lastCaptureFrameAt)
+      : browserCaptureLastFrameAt;
   const rendererReason = mapRendererReasonToSourceDegradedReason(
     latestRendererHealth.degradedReason,
   );
@@ -741,8 +820,7 @@ function resolveSourceRuntimeSnapshot(
     degradedReason = "encoder_stalled";
   } else if (
     captureMode === "cdp" &&
-    (lastCaptureFrameAt == null ||
-      nowMs - lastCaptureFrameAt > SOURCE_CAPTURE_STALL_MS)
+    (lastFrameAt == null || nowMs - lastFrameAt > SOURCE_CAPTURE_STALL_MS)
   ) {
     degradedReason = "capture_stalled";
   } else if (
@@ -934,6 +1012,7 @@ async function probeRendererHealth(
         latestDuelStateTickAt?: number | null;
       } | null;
       __HYPERSCAPE_STREAM_BOOT_STATUS__?: string | null;
+      __HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__?: unknown;
     };
     const activeBundle =
       Array.from(
@@ -1109,6 +1188,11 @@ async function probeRendererHealth(
       canvasRect,
       currentSceneUrl: window.location.href,
       activeBundle,
+      bootDiagnostics:
+        win.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__ &&
+        typeof win.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__ === "object"
+          ? win.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__
+          : null,
     };
   });
 
@@ -1189,6 +1273,7 @@ async function probeRendererHealth(
         hasStreamingBootUi: probe.hasStreamingBootUi === true,
         hasCriticalErrorUi: criticalUiVisible,
         readyFlag: probe.readyFlag === true,
+        bootDiagnostics: probe.bootDiagnostics ?? null,
       },
     };
   }
@@ -1215,6 +1300,7 @@ async function probeRendererHealth(
       hasStreamingBootUi: probe.hasStreamingBootUi === true,
       hasCriticalErrorUi: probe.hasCriticalErrorUi === true,
       readyFlag: probe.readyFlag === true,
+      bootDiagnostics: probe.bootDiagnostics ?? null,
     },
   };
 }
@@ -1466,6 +1552,23 @@ async function setupBrowser(forceReselect = false) {
     }
   });
 
+  page.on("response", (response) => {
+    const status = response.status();
+    if (status < 400) {
+      return;
+    }
+    console.warn(
+      `[Browser] Resource response ${status}: ${redactStreamingSecretsFromUrl(response.url())}`,
+    );
+  });
+
+  page.on("requestfailed", (request) => {
+    const failure = request.failure();
+    console.warn(
+      `[Browser] Request failed: ${redactStreamingSecretsFromUrl(request.url())}${failure?.errorText ? ` (${failure.errorText})` : ""}`,
+    );
+  });
+
   page.on("framenavigated", (frame) => {
     if (frame !== page?.mainFrame()) {
       return;
@@ -1575,6 +1678,7 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   bridge.startFFmpegDirect();
 
   startFpsTracking();
+  startCdpFramePump(bridge);
 
   // Handle incoming frames from CDP
   cdpSession.on("Page.screencastFrame", async (params) => {
@@ -1590,6 +1694,7 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
     // Decode base64 JPEG and feed to FFmpeg
     const jpegBuffer = Buffer.from(base64Data, "base64");
     const frameAt = Date.now();
+    latestCdpFrameBuffer = jpegBuffer;
     const metadataRecord =
       params.metadata && typeof params.metadata === "object"
         ? (params.metadata as Record<string, unknown>)
@@ -1601,16 +1706,11 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
         ? metadataRecord.timestamp
         : null;
     lastCaptureFrameAt = frameAt;
-    const written = bridge.feedFrame(jpegBuffer, {
+    feedCdpFrameToEncoder(bridge, jpegBuffer, {
       frameAt,
       cdpTimestamp,
+      repeated: false,
     });
-
-    if (written) {
-      cdpFrameCount++;
-    } else {
-      cdpDroppedFrames++;
-    }
   });
 
   // Start the screencast
@@ -1627,6 +1727,9 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
 
 async function stopCdpCapture() {
   stopFpsTracking();
+  stopCdpFramePump();
+  latestCdpFrameBuffer = null;
+  lastEncodedFrameAt = null;
 
   if (cdpSession) {
     try {
@@ -2091,7 +2194,7 @@ async function main() {
 
     if (activeCaptureMode === "cdp") {
       console.log(
-        `[Stream Health] CDP FPS: ${cdpFps} | Frames: ${bridge.getDirectFrameCount()} | Dropped: ${cdpDroppedFrames} | BridgeDrops: ${stats.droppedFrames} | Backpressure: ${stats.backpressured ? "ON" : "off"}`,
+        `[Stream Health] CDP FPS: ${cdpFps} | Frames: ${bridge.getDirectFrameCount()} | Repeated: ${cdpRepeatedFrameCount} | Dropped: ${cdpDroppedFrames} | BridgeDrops: ${stats.droppedFrames} | Backpressure: ${stats.backpressured ? "ON" : "off"}`,
       );
 
       // CDP can occasionally stall after initial page setup on remote GPU stacks.

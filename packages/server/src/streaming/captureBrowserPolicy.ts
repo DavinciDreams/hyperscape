@@ -3,6 +3,7 @@ type CaptureReadinessDiagnostics = {
   hasStreamingBootUi: boolean;
   hasCriticalErrorUi: boolean;
   readyFlag: boolean;
+  bootDiagnostics?: unknown;
 };
 
 export type CaptureRendererHealthSnapshot = {
