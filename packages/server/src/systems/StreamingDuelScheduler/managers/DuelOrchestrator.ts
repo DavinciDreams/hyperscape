@@ -6,7 +6,7 @@
  * management, HP tracking, fight resolution, and post-duel cleanup.
  */
 
-import type { World } from "@hyperscape/shared";
+import type { DuelArenaConfig, World } from "@hyperscape/shared";
 import {
   AttackType,
   COMBAT_SPELLS,
@@ -20,6 +20,8 @@ import {
   getDuelArenaConfig,
   getItem,
   isPositionInsideCombatArena,
+  tileChebyshevDistance,
+  worldToTile,
 } from "@hyperscape/shared";
 import { DuelCombatAI } from "../../../duel/DuelCombatAI.js";
 import {
@@ -124,6 +126,8 @@ type AgentCombatData = {
 
 /** Reserved regular duel arena for streaming agents (always use a single arena). */
 const STREAMING_AGENT_ARENA_ID = 1;
+/** Streaming agents enter combat immediately, so they must spawn in melee range. */
+const STREAMING_AGENT_ENGAGEMENT_TILE_DISTANCE = 1;
 /** Duel-eligible bronze weapons — only types with new models in swords/ directory. */
 const DUEL_BRONZE_WEAPON_IDS = [
   "bronze_longsword",
@@ -144,6 +148,62 @@ const STALL_NUDGE_MAX_DAMAGE = 5;
 
 /** Combat role types for duel arena agents. */
 type DuelCombatRole = "melee" | "ranged" | "mage" | "prayer";
+
+export function computeStreamingArenaEngagementSpawnPoints(
+  arenaConfig: DuelArenaConfig,
+  requestedArenaId = STREAMING_AGENT_ARENA_ID,
+): {
+  arenaId: number;
+  agent1: { x: number; z: number };
+  agent2: { x: number; z: number };
+} {
+  const arenaId = Math.max(
+    1,
+    Math.min(requestedArenaId, arenaConfig.arenaCount),
+  );
+  const row = Math.floor((arenaId - 1) / arenaConfig.columns);
+  const col = (arenaId - 1) % arenaConfig.columns;
+  const centerX =
+    arenaConfig.baseX +
+    col * (arenaConfig.arenaWidth + arenaConfig.arenaGap) +
+    arenaConfig.arenaWidth / 2;
+  const centerZ =
+    arenaConfig.baseZ +
+    row * (arenaConfig.arenaLength + arenaConfig.arenaGap) +
+    arenaConfig.arenaLength / 2;
+  const centerTileX = Math.floor(centerX);
+  const centerTileZ = Math.floor(centerZ);
+  const tileCenter = (tile: number) => tile + 0.5;
+
+  // Regular player duels use opposite spawn points. Streaming agents skip the
+  // human chase phase and call CombatSystem.startCombat immediately, so they
+  // must begin on adjacent tiles or melee combat deterministically fails.
+  if (arenaConfig.spawnLayout === "alongWidth") {
+    return {
+      arenaId,
+      agent1: {
+        x: tileCenter(centerTileX - STREAMING_AGENT_ENGAGEMENT_TILE_DISTANCE),
+        z: tileCenter(centerTileZ),
+      },
+      agent2: {
+        x: tileCenter(centerTileX),
+        z: tileCenter(centerTileZ),
+      },
+    };
+  }
+
+  return {
+    arenaId,
+    agent1: {
+      x: tileCenter(centerTileX),
+      z: tileCenter(centerTileZ - STREAMING_AGENT_ENGAGEMENT_TILE_DISTANCE),
+    },
+    agent2: {
+      x: tileCenter(centerTileX),
+      z: tileCenter(centerTileZ),
+    },
+  };
+}
 
 /**
  * When skill scores tie, prefer ranged/mage over melee so streaming duels
@@ -1963,50 +2023,22 @@ export class DuelOrchestrator {
     // Use a single reserved regular duel arena so all agent duels happen in
     // the same standard arena as player duels (no custom arena coordinates).
     const arenaConfig = getDuelArenaConfig();
-    const arenaId = Math.max(
-      1,
-      Math.min(STREAMING_AGENT_ARENA_ID, arenaConfig.arenaCount),
-    );
-    const row = Math.floor((arenaId - 1) / arenaConfig.columns);
-    const col = (arenaId - 1) % arenaConfig.columns;
-    const arenaCenterX =
-      arenaConfig.baseX +
-      col * (arenaConfig.arenaWidth + arenaConfig.arenaGap) +
-      arenaConfig.arenaWidth / 2;
-    const arenaCenterZ =
-      arenaConfig.baseZ +
-      row * (arenaConfig.arenaLength + arenaConfig.arenaGap) +
-      arenaConfig.arenaLength / 2;
-    const cx = arenaCenterX;
-    const cz = arenaCenterZ;
-    const off = arenaConfig.spawnOffset;
-
-    let agent1X: number;
-    let agent1Z: number;
-    let agent2X: number;
-    let agent2Z: number;
-    if (arenaConfig.spawnLayout === "alongWidth") {
-      agent1X = cx - off;
-      agent1Z = cz;
-      agent2X = cx + off;
-      agent2Z = cz;
-    } else {
-      agent1X = cx;
-      agent1Z = cz - off;
-      agent2X = cx;
-      agent2Z = cz + off;
-    }
+    const { arenaId, agent1, agent2 } =
+      computeStreamingArenaEngagementSpawnPoints(
+        arenaConfig,
+        STREAMING_AGENT_ARENA_ID,
+      );
 
     const agent1Pos: [number, number, number] = [
-      agent1X,
-      this.getGroundedY(agent1X, agent1Z, arenaConfig.baseY),
-      agent1Z,
+      agent1.x,
+      this.getGroundedY(agent1.x, agent1.z, arenaConfig.baseY),
+      agent1.z,
     ];
 
     const agent2Pos: [number, number, number] = [
-      agent2X,
-      this.getGroundedY(agent2X, agent2Z, arenaConfig.baseY),
-      agent2Z,
+      agent2.x,
+      this.getGroundedY(agent2.x, agent2.z, arenaConfig.baseY),
+      agent2.z,
     ];
 
     // Teleport both agents, facing each other
@@ -2810,19 +2842,7 @@ export class DuelOrchestrator {
       // Re-teleport to fix spacing, then retry combat
       this.ensureDuelProximity(agent1Id, agent2Id);
 
-      if (combatSystem?.startCombat) {
-        combatSystem.startCombat(agent1Id, agent2Id, {
-          attackerType: "player",
-          targetType: "player",
-        });
-        const cycleAfterRetry = this.getCurrentCycle();
-        if (cycleAfterRetry?.phase === "FIGHTING") {
-          combatSystem.startCombat(agent2Id, agent1Id, {
-            attackerType: "player",
-            targetType: "player",
-          });
-        }
-      }
+      this.tryMutualCombat(agent1Id, agent2Id);
 
       this.setAgentCombatTarget(agent1Id, agent2Id);
       this.setAgentCombatTarget(agent2Id, agent1Id);
@@ -2856,11 +2876,7 @@ export class DuelOrchestrator {
     const bx = Array.isArray(posB) ? posB[0] : posB.x;
     const bz = Array.isArray(posB) ? posB[2] : posB.z;
 
-    const tileAx = Math.floor(ax);
-    const tileAz = Math.floor(az);
-    const tileBx = Math.floor(bx);
-    const tileBz = Math.floor(bz);
-    return Math.max(Math.abs(tileAx - tileBx), Math.abs(tileAz - tileBz));
+    return tileChebyshevDistance(worldToTile(ax, az), worldToTile(bx, bz));
   }
 
   // ============================================================================
