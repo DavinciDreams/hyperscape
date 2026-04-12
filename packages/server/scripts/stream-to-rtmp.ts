@@ -1722,6 +1722,15 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
         ? metadataRecord.timestamp
         : null;
     lastCaptureFrameAt = frameAt;
+    // CDP can emit compositor frames faster than the configured stream FPS.
+    // Keep FFmpeg on the target cadence instead of overfeeding the encoder.
+    if (
+      lastEncodedFrameAt != null &&
+      frameAt - lastEncodedFrameAt < CDP_FRAME_PUMP_INTERVAL_MS
+    ) {
+      return;
+    }
+
     feedCdpFrameToEncoder(bridge, jpegBuffer, {
       frameAt,
       cdpTimestamp,
