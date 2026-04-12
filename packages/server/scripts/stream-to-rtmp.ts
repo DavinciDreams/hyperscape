@@ -279,6 +279,13 @@ const CDP_FRAME_PUMP_INTERVAL_MS = Math.max(
   16,
   Math.round(1000 / Math.max(1, TARGET_FPS)),
 );
+const CDP_EVERY_NTH_FRAME = Math.max(
+  1,
+  parseIntegerSetting(
+    process.env.STREAM_CDP_EVERY_NTH_FRAME,
+    Math.max(1, Math.round(60 / Math.max(1, TARGET_FPS))),
+  ),
+);
 
 // ── CDP Frame Rate Tracking ────────────────────────────────────────────────
 
@@ -1707,9 +1714,19 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
       // Session may have been destroyed during page navigation
     }
 
-    // Decode base64 JPEG and feed to FFmpeg
-    const jpegBuffer = Buffer.from(base64Data, "base64");
     const frameAt = Date.now();
+    lastCaptureFrameAt = frameAt;
+    // CDP can emit compositor frames faster than the configured stream FPS.
+    // Keep FFmpeg on the target cadence instead of overfeeding the encoder.
+    if (
+      lastEncodedFrameAt != null &&
+      frameAt - lastEncodedFrameAt < CDP_FRAME_PUMP_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    // Decode only accepted frames; skipped CDP frames can be large base64 JPEGs.
+    const jpegBuffer = Buffer.from(base64Data, "base64");
     latestCdpFrameBuffer = jpegBuffer;
     const metadataRecord =
       params.metadata && typeof params.metadata === "object"
@@ -1721,16 +1738,6 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
       Number.isFinite(metadataRecord.timestamp)
         ? metadataRecord.timestamp
         : null;
-    lastCaptureFrameAt = frameAt;
-    // CDP can emit compositor frames faster than the configured stream FPS.
-    // Keep FFmpeg on the target cadence instead of overfeeding the encoder.
-    if (
-      lastEncodedFrameAt != null &&
-      frameAt - lastEncodedFrameAt < CDP_FRAME_PUMP_INTERVAL_MS
-    ) {
-      return;
-    }
-
     feedCdpFrameToEncoder(bridge, jpegBuffer, {
       frameAt,
       cdpTimestamp,
@@ -1744,10 +1751,12 @@ async function startCdpCapture(bridge: ReturnType<typeof getRTMPBridge>) {
     quality: CDP_QUALITY,
     maxWidth: VIEWPORT.width,
     maxHeight: VIEWPORT.height,
-    everyNthFrame: 1, // Capture every frame
+    everyNthFrame: CDP_EVERY_NTH_FRAME,
   });
 
-  console.log("[CDP] ✅ Screencast capture started — frames piping to FFmpeg");
+  console.log(
+    `[CDP] ✅ Screencast capture started — frames piping to FFmpeg (everyNthFrame=${CDP_EVERY_NTH_FRAME})`,
+  );
 }
 
 async function stopCdpCapture() {
