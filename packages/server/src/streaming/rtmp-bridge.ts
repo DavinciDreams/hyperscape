@@ -815,7 +815,11 @@ export class RTMPBridge {
       });
     }
 
-    if (hasExternalDeliveryIngest && !existingNames.has("External Delivery")) {
+    if (
+      isStreamDestinationEnabled(enabledDestinations, "external") &&
+      hasExternalDeliveryIngest &&
+      !existingNames.has("External Delivery")
+    ) {
       const role =
         providerPriority[0] === "cloudflare_stream" ? "canonical" : "fallback";
       const destination = this.buildExternalDeliveryDestination(
