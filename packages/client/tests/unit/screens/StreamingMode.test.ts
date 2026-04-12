@@ -255,6 +255,71 @@ describe("shouldDismissStreamingLoading", () => {
     ).toBe("arena_positions_invalid");
   });
 
+  it("keeps the stream unhealthy until active duel arena visuals mount", () => {
+    const health = deriveStreamingRendererHealth({
+      connected: true,
+      worldReady: true,
+      terrainReady: true,
+      hasStreamingState: true,
+      initError: null,
+      needsCameraLock: true,
+      cameraLocked: true,
+      needsArenaVisuals: true,
+      arenaVisualsReady: false,
+      needsTargetAvatar: false,
+      targetAvatarReady: true,
+      loadingDismissed: true,
+      phase: "FIGHTING",
+      agent1: {
+        id: "a",
+        name: "Agent A",
+        provider: "provider",
+        model: "model",
+        hp: 10,
+        maxHp: 10,
+        combatLevel: 1,
+        wins: 0,
+        losses: 0,
+        damageDealtThisFight: 0,
+        highestHit: 0,
+        attacksLanded: 0,
+        healsUsed: 0,
+        equipment: {},
+        inventory: [],
+        rank: 1,
+        headToHeadWins: 0,
+        headToHeadLosses: 0,
+      },
+      agent2: {
+        id: "b",
+        name: "Agent B",
+        provider: "provider",
+        model: "model",
+        hp: 10,
+        maxHp: 10,
+        combatLevel: 1,
+        wins: 0,
+        losses: 0,
+        damageDealtThisFight: 0,
+        highestHit: 0,
+        attacksLanded: 0,
+        healsUsed: 0,
+        equipment: {},
+        inventory: [],
+        rank: 2,
+        headToHeadWins: 0,
+        headToHeadLosses: 0,
+      },
+      arenaPositions: {
+        agent1: [1, 0, 1],
+        agent2: [4, 0, 4],
+      },
+    });
+
+    expect(health.ready).toBe(false);
+    expect(health.degradedReason).toBe("arena_visuals_not_ready");
+  });
+
   it("reports ready only after the live duel surface is sane and the overlay is gone", () => {
     const health = deriveStreamingRendererHealth({
       connected: true,

@@ -903,7 +903,16 @@ export class VegetationSystem extends System {
     this.initializeGPUCulling();
 
     // Process existing terrain tiles that were generated before we subscribed
-    await this.processExistingTiles();
+    if (isDedicatedStreamMode) {
+      this.processExistingTiles().catch((error) => {
+        console.warn(
+          "[VegetationSystem] Deferred stream vegetation startup failed:",
+          error,
+        );
+      });
+    } else {
+      await this.processExistingTiles();
+    }
   }
 
   /**

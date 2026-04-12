@@ -36,6 +36,12 @@ export type StreamingWindowBootDiagnostics = {
     pendingChunks: number | null;
     loadedTiles: number | null;
   };
+  arenaVisuals: {
+    systemPresent: boolean;
+    isReady: boolean | null;
+    sceneObjectPresent: boolean | null;
+    sceneObjectChildren: number | null;
+  };
   cameraTarget: string | null;
   cameraLocked: boolean;
   targetEntityPresent: boolean | null;

@@ -246,6 +246,36 @@ function readFirstNumericField(
   return null;
 }
 
+function readArenaVisualDiagnostics(
+  world: World | null,
+): StreamingWindowBootDiagnostics["arenaVisuals"] {
+  const arenaSystem = world?.getSystem("duel-arena-visuals") as
+    | { isReady?: () => boolean }
+    | null
+    | undefined;
+  const sceneObject =
+    world?.stage?.scene?.getObjectByName?.("DuelArenaVisuals") ?? null;
+
+  return {
+    systemPresent: Boolean(arenaSystem),
+    isReady: arenaSystem?.isReady ? arenaSystem.isReady() : null,
+    sceneObjectPresent: world?.stage?.scene ? Boolean(sceneObject) : null,
+    sceneObjectChildren:
+      sceneObject && Array.isArray(sceneObject.children)
+        ? sceneObject.children.length
+        : null,
+  };
+}
+
+function isDuelArenaVisualsReady(world: World | null): boolean {
+  const diagnostics = readArenaVisualDiagnostics(world);
+  return (
+    diagnostics.systemPresent &&
+    diagnostics.isReady === true &&
+    diagnostics.sceneObjectPresent === true
+  );
+}
+
 function buildStreamingBootDiagnostics(params: {
   world: World | null;
   connected: boolean;
@@ -313,6 +343,7 @@ function buildStreamingBootDiagnostics(params: {
           ])
         : null,
     },
+    arenaVisuals: readArenaVisualDiagnostics(world ?? null),
     cameraTarget: params.cameraTarget,
     cameraLocked: params.cameraLocked,
     targetEntityPresent,
@@ -345,6 +376,8 @@ function deriveStreamingSurfaceBlockReason(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsArenaVisuals?: boolean;
+  arenaVisualsReady?: boolean;
   needsTargetAvatar: boolean;
   targetAvatarReady: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
@@ -366,6 +399,9 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (!params.terrainReady) {
     return "terrain_not_ready";
   }
+  if (params.needsArenaVisuals && !params.arenaVisualsReady) {
+    return "arena_visuals_not_ready";
+  }
   if (params.needsCameraLock && !params.cameraLocked) {
     return "camera_target_unresolved";
   }
@@ -383,6 +419,8 @@ export function deriveStreamingRendererHealth(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsArenaVisuals?: boolean;
+  arenaVisualsReady?: boolean;
   needsTargetAvatar: boolean;
   targetAvatarReady: boolean;
   loadingDismissed: boolean;
@@ -400,6 +438,8 @@ export function deriveStreamingRendererHealth(params: {
     initError: params.initError,
     needsCameraLock: params.needsCameraLock,
     cameraLocked: params.cameraLocked,
+    needsArenaVisuals: params.needsArenaVisuals,
+    arenaVisualsReady: params.arenaVisualsReady,
     needsTargetAvatar: params.needsTargetAvatar,
     targetAvatarReady: params.targetAvatarReady,
     phase: params.phase,
@@ -433,6 +473,8 @@ export function shouldDismissStreamingLoading(params: {
   initError?: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
+  needsArenaVisuals?: boolean;
+  arenaVisualsReady?: boolean;
   needsTargetAvatar: boolean;
   targetAvatarReady: boolean;
   phase?: StreamingState["cycle"]["phase"] | null;
@@ -446,6 +488,8 @@ export function shouldDismissStreamingLoading(params: {
       initError: params.initError ?? null,
       needsCameraLock: params.needsCameraLock,
       cameraLocked: params.cameraLocked,
+      needsArenaVisuals: params.needsArenaVisuals,
+      arenaVisualsReady: params.arenaVisualsReady,
       needsTargetAvatar: params.needsTargetAvatar,
       targetAvatarReady: params.targetAvatarReady,
       phase: params.phase ?? null,
@@ -467,6 +511,7 @@ export function StreamingMode() {
   const [connected, setConnected] = useState(false);
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
+  const [arenaVisualsReady, setArenaVisualsReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
   const [targetAvatarReady, setTargetAvatarReady] = useState(false);
   const [targetAvatarGraceExpired, setTargetAvatarGraceExpired] =
@@ -483,6 +528,12 @@ export function StreamingMode() {
   const lastCameraTargetRef = useRef<string | null>(null);
   const terrainPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const terrainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const arenaVisualsPollRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const arenaVisualsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const avatarTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const worldReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -541,6 +592,17 @@ export function StreamingMode() {
     if (terrainTimeoutRef.current) {
       clearTimeout(terrainTimeoutRef.current);
       terrainTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearArenaVisualsPolling = useCallback(() => {
+    if (arenaVisualsPollRef.current) {
+      clearInterval(arenaVisualsPollRef.current);
+      arenaVisualsPollRef.current = null;
+    }
+    if (arenaVisualsTimeoutRef.current) {
+      clearTimeout(arenaVisualsTimeoutRef.current);
+      arenaVisualsTimeoutRef.current = null;
     }
   }, []);
 
@@ -665,6 +727,7 @@ export function StreamingMode() {
       setStreamingState(null);
       setWorldReady(false);
       setTerrainReady(false);
+      setArenaVisualsReady(false);
       setCameraLocked(false);
       setTargetAvatarReady(false);
       setTargetAvatarGraceExpired(false);
@@ -724,6 +787,7 @@ export function StreamingMode() {
 
       // Start terrain readiness polling so we avoid presenting chunk-pop-in.
       clearTerrainPolling();
+      clearArenaVisualsPolling();
       terrainPollRef.current = setInterval(() => {
         const terrain = world.getSystem("terrain") as {
           isReady?: () => boolean;
@@ -739,6 +803,19 @@ export function StreamingMode() {
         setTerrainStalled(true);
         console.warn(
           "[StreamingMode] Terrain readiness timeout reached; continuing to wait for terrain instead of forcing ready",
+        );
+      }, 30000);
+
+      arenaVisualsPollRef.current = setInterval(() => {
+        if (isDuelArenaVisualsReady(world)) {
+          setArenaVisualsReady(true);
+          clearArenaVisualsPolling();
+        }
+      }, 100);
+
+      arenaVisualsTimeoutRef.current = setTimeout(() => {
+        console.warn(
+          "[StreamingMode] Arena visuals readiness timeout reached; continuing to report degraded renderer health",
         );
       }, 30000);
 
@@ -769,7 +846,12 @@ export function StreamingMode() {
         console.log("[StreamingMode] World setup complete");
       }
     },
-    [applyStreamingStateUpdate, clearTerrainPolling, markWorldReady],
+    [
+      applyStreamingStateUpdate,
+      clearArenaVisualsPolling,
+      clearTerrainPolling,
+      markWorldReady,
+    ],
   );
 
   // Poll for initial state if not received via WebSocket
@@ -1230,10 +1312,16 @@ export function StreamingMode() {
       worldRef.current = null;
       worldReadyRef.current = false;
       clearTerrainPolling();
+      clearArenaVisualsPolling();
       clearAvatarPolling();
       clearCameraRetryTimeouts();
     };
-  }, [clearAvatarPolling, clearTerrainPolling, clearCameraRetryTimeouts]);
+  }, [
+    clearArenaVisualsPolling,
+    clearAvatarPolling,
+    clearTerrainPolling,
+    clearCameraRetryTimeouts,
+  ]);
 
   // Loading screen is shown only during initial boot. Once everything is
   // ready for the first time, we fade out and never show it again — camera
@@ -1243,6 +1331,9 @@ export function StreamingMode() {
     streamingState?.cameraTarget &&
     streamingState?.cycle.phase &&
     streamingState.cycle.phase !== "IDLE",
+  );
+  const needsArenaVisuals = Boolean(
+    streamingState?.cycle.phase && streamingState.cycle.phase !== "IDLE",
   );
   const effectiveTargetAvatarReady =
     targetAvatarReady || targetAvatarGraceExpired;
@@ -1329,6 +1420,8 @@ export function StreamingMode() {
     initError: clientInitError,
     needsCameraLock,
     cameraLocked,
+    needsArenaVisuals,
+    arenaVisualsReady,
     needsTargetAvatar,
     targetAvatarReady: effectiveTargetAvatarReady,
     phase: streamingState?.cycle.phase ?? null,
@@ -1343,6 +1436,8 @@ export function StreamingMode() {
         initError: clientInitError,
         needsCameraLock,
         cameraLocked,
+        needsArenaVisuals,
+        arenaVisualsReady,
         needsTargetAvatar,
         targetAvatarReady: effectiveTargetAvatarReady,
         loadingDismissed,
@@ -1356,10 +1451,12 @@ export function StreamingMode() {
       clientInitError,
       connected,
       loadingDismissed,
+      needsArenaVisuals,
       needsCameraLock,
       needsTargetAvatar,
       streamingState,
       terrainReady,
+      arenaVisualsReady,
       effectiveTargetAvatarReady,
       worldReady,
     ],
@@ -1401,6 +1498,7 @@ export function StreamingMode() {
     cameraLocked,
     connected,
     effectiveTargetAvatarReady,
+    arenaVisualsReady,
     needsCameraLock,
     needsTargetAvatar,
     streamingState,
@@ -1473,6 +1571,8 @@ export function StreamingMode() {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
     } else if (!terrainReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
+    } else if (needsArenaVisuals && !arenaVisualsReady) {
+      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_arena";
     } else if (waitingForTargetAvatar) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_avatar";
     } else {
@@ -1481,7 +1581,9 @@ export function StreamingMode() {
   }, [
     clientInitError,
     connected,
+    arenaVisualsReady,
     loadingDismissed,
+    needsArenaVisuals,
     terrainReady,
     waitingForTargetAvatar,
     worldReady,

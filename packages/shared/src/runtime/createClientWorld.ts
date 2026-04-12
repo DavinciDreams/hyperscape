@@ -52,6 +52,7 @@ import { ClientActions } from "../systems/client/ClientActions";
 import { ClientAudio } from "../systems/client/ClientAudio";
 import { ClientCameraSystem } from "../systems/client/ClientCameraSystem";
 import { DevStats } from "../systems/client/DevStats";
+import { DuelArenaVisualsSystem } from "../systems/client/DuelArenaVisualsSystem";
 import { PathfindingDebugSystem } from "../systems/client/PathfindingDebugSystem";
 import { BFSPathDebugSystem } from "../systems/client/BFSPathDebugSystem";
 import { WalkableTileDebugSystem } from "../systems/client/WalkableTileDebugSystem";
@@ -305,6 +306,12 @@ export function createClientWorld() {
 
   world.register("terrain", TerrainSystem);
   world.register("bridges", BridgeSystem);
+
+  // Dedicated broadcast capture is duel-first: arena geometry must mount before
+  // decorative world systems such as vegetation/towns can delay startup.
+  if (isDedicatedStreamCaptureViewport) {
+    world.register("duel-arena-visuals", DuelArenaVisualsSystem);
+  }
 
   // ============================================================================
   // VEGETATION SYSTEM
