@@ -184,14 +184,24 @@ if (STREAM_CAPTURE_DISABLE_WEBGPU) {
     "STREAM_CAPTURE_DISABLE_WEBGPU is not supported. Hyperscape capture is WebGPU-only.",
   );
 }
+
+function parseIntegerSetting(
+  rawValue: string | undefined,
+  fallback: number,
+): number {
+  const normalized = rawValue?.trim().replace(/_/g, "") ?? "";
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 const CDP_QUALITY = Math.min(
   100,
-  Math.max(1, parseInt(process.env.STREAM_CDP_QUALITY || "80", 10)),
+  Math.max(1, parseIntegerSetting(process.env.STREAM_CDP_QUALITY, 80)),
 );
-const TARGET_FPS = parseInt(process.env.STREAM_FPS || "30", 10);
+const TARGET_FPS = parseIntegerSetting(process.env.STREAM_FPS, 30);
 const STREAM_CAPTURE_WARMUP_MS = Math.max(
   250,
-  Number.parseInt(process.env.STREAM_CAPTURE_WARMUP_MS || "1000", 10) || 1000,
+  parseIntegerSetting(process.env.STREAM_CAPTURE_WARMUP_MS, 1000),
 );
 const REQUIRE_IN_PAGE_READY_PROBE =
   process.env.STREAM_CAPTURE_REQUIRE_READY_PROBE === "true";
@@ -201,18 +211,17 @@ const USE_TIMED_STREAM_WARMUP =
   !STREAM_CAPTURE_HEADLESS;
 const STREAM_CAPTURE_POST_NAV_DELAY_MS = Math.max(
   0,
-  Number.parseInt(
-    process.env.STREAM_CAPTURE_POST_NAV_DELAY_MS ||
-      (USE_TIMED_STREAM_WARMUP ? "250" : "5000"),
-    10,
-  ) || 0,
+  parseIntegerSetting(
+    process.env.STREAM_CAPTURE_POST_NAV_DELAY_MS,
+    USE_TIMED_STREAM_WARMUP ? 250 : 5000,
+  ),
 );
 
 function parseEvenDimension(
   rawValue: string | undefined,
   fallback: number,
 ): number {
-  const parsed = Number.parseInt(rawValue || "", 10);
+  const parsed = parseIntegerSetting(rawValue, fallback);
   const candidate = Number.isFinite(parsed) ? parsed : fallback;
   const clamped = Math.max(2, candidate);
   return clamped % 2 === 0 ? clamped : clamped - 1;
@@ -234,43 +243,27 @@ let launchTime = Date.now();
 const BROWSER_RESTART_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 Hour
 const CAPTURE_RECOVERY_TIMEOUT_MS = Math.max(
   10_000,
-  Number.parseInt(
-    process.env.STREAM_CAPTURE_RECOVERY_TIMEOUT_MS || "30000",
-    10,
-  ) || 30_000,
+  parseIntegerSetting(process.env.STREAM_CAPTURE_RECOVERY_TIMEOUT_MS, 30_000),
 );
 const CAPTURE_RECOVERY_MAX_FAILURES = Math.max(
   1,
-  Number.parseInt(
-    process.env.STREAM_CAPTURE_RECOVERY_MAX_FAILURES || "2",
-    10,
-  ) || 2,
+  parseIntegerSetting(process.env.STREAM_CAPTURE_RECOVERY_MAX_FAILURES, 2),
 );
 const CDP_STARTUP_TIMEOUT_MS = Math.max(
   5_000,
-  Number.parseInt(
-    process.env.STREAM_CAPTURE_START_TIMEOUT_MS || "15_000",
-    10,
-  ) || 15_000,
+  parseIntegerSetting(process.env.STREAM_CAPTURE_START_TIMEOUT_MS, 15_000),
 );
 const SOURCE_CAPTURE_STALL_MS = Math.max(
   5_000,
-  Number.parseInt(process.env.STREAM_SOURCE_CAPTURE_STALL_MS || "10_000", 10) ||
-    10_000,
+  parseIntegerSetting(process.env.STREAM_SOURCE_CAPTURE_STALL_MS, 10_000),
 );
 const SOURCE_VISUAL_CHANGE_STALE_MS = Math.max(
   5_000,
-  Number.parseInt(
-    process.env.STREAM_SOURCE_VISUAL_CHANGE_STALE_MS || "10_000",
-    10,
-  ) || 10_000,
+  parseIntegerSetting(process.env.STREAM_SOURCE_VISUAL_CHANGE_STALE_MS, 10_000),
 );
 const SOURCE_DEGRADED_RESTART_POLLS = Math.max(
   2,
-  Number.parseInt(
-    process.env.STREAM_SOURCE_DEGRADED_RESTART_POLLS || "6",
-    10,
-  ) || 6,
+  parseIntegerSetting(process.env.STREAM_SOURCE_DEGRADED_RESTART_POLLS, 6),
 );
 const FATAL_WRITE_PAGE_STALL_THRESHOLD_MS = Math.max(
   2_000,
