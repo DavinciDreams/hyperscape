@@ -362,7 +362,7 @@ describe("deriveBettingRendererHealth", () => {
         metrics: {
           captureFps: 30,
           encodeFps: 30,
-          latestRenderTickAt: now - 10_000,
+          latestRenderTickAt: now - 12_000,
           latestVisualChangeAt: now,
           visualChangeAgeMs: 200,
         },
@@ -381,6 +381,43 @@ describe("deriveBettingRendererHealth", () => {
     expect(health).toMatchObject({
       ready: false,
       degradedReason: "render_tick_stale",
+    });
+  });
+
+  it("allows CDP capture tick jitter while encoded HLS output is fresh", () => {
+    const now = Date.now();
+    const health = deriveBettingRendererHealth(createCycle(), {
+      externalStatusSnapshot: {
+        destinations: [],
+        stats: {},
+        updatedAt: now,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: now,
+        },
+        metrics: {
+          captureFps: 30,
+          encodeFps: 30,
+          latestRenderTickAt: now - 6_000,
+          latestVisualChangeAt: now,
+          visualChangeAgeMs: 200,
+        },
+        hlsManifest: {
+          updatedAt: now,
+          mediaSequence: 42,
+        },
+      },
+      externalStatusMaxAgeMs: 15_000,
+      captureStats: {
+        clientConnected: true,
+        ffmpegRunning: true,
+      },
+    });
+
+    expect(health).toMatchObject({
+      ready: true,
+      degradedReason: null,
     });
   });
 

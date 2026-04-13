@@ -4,7 +4,7 @@
  * Displays:
  * - Duel info panel (top center)
  * - Agent HP bars (bottom)
- * - Leaderboard (left)
+ * - Debug leaderboard (left, opt-in)
  * - Lower third (brand + live status for viewers)
  * - Countdown timer
  * - Victory announcement
@@ -141,7 +141,9 @@ export function StreamingOverlay({
   }, [state?.cycle?.cycleId]);
 
   const handleFloaterExpire = useCallback((id: string) => {
-    setDamageFloaters((existing) => existing.filter((floater) => floater.id !== id));
+    setDamageFloaters((existing) =>
+      existing.filter((floater) => floater.id !== id),
+    );
   }, []);
 
   // When transitioning to FIGHTING, keep the fight text visible for a linger period
@@ -182,13 +184,7 @@ export function StreamingOverlay({
   }
 
   const { cycle, leaderboard } = state;
-  const {
-    winnerId,
-    winnerName,
-    winReason,
-    timeRemaining,
-    duelId,
-  } = cycle;
+  const { winnerId, winnerName, winReason, timeRemaining, duelId } = cycle;
 
   // Get winner agent info
   const winnerAgent =
@@ -241,20 +237,20 @@ export function StreamingOverlay({
     import.meta.env.VITE_STREAMING_DEBUG_COMBAT_LOG === "1";
   const showCombatLog =
     debugCombatLogEnabled &&
-    (phase === "FIGHTING" ||
-      phase === "COUNTDOWN" ||
-      phase === "RESOLUTION");
+    (phase === "FIGHTING" || phase === "COUNTDOWN" || phase === "RESOLUTION");
+  const showDebugLeaderboard =
+    !showCombatLog && import.meta.env.VITE_STREAMING_DEBUG_LEADERBOARD === "1";
 
   return (
     <div className="streaming-overlay-root" style={styles.overlay}>
-      {/* Left panel: combat log during a fight, leaderboard during intermission */}
+      {/* Left-side diagnostic panels are opt-in only for the public capture. */}
       {showCombatLog ? (
         <CombatLog state={state} />
-      ) : (
+      ) : showDebugLeaderboard ? (
         <aside className="streaming-leaderboard-mount">
           <LeaderboardPanel leaderboard={leaderboard} />
         </aside>
-      )}
+      ) : null}
 
       <StreamingBettingRail
         config={bettingConfig}

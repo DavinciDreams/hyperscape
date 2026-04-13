@@ -1,4 +1,4 @@
-/* Public stream overlay — vignette, leaderboard, lower third, waiting */
+/* Public stream overlay — vignette, opt-in diagnostics, lower third, waiting */
 
 .streaming-overlay-root {
   isolation: isolate;

@@ -13,7 +13,10 @@ import type {
   ExternalRtmpStatusSnapshot,
 } from "./streaming-external-status.js";
 
-const RENDER_TICK_STALE_MS = 3_000;
+// External CDP capture status is sampled out-of-process and can legitimately
+// arrive several seconds behind the HLS edge. Keep this above segment cadence
+// plus polling jitter so healthy self-HLS playback is not blanked prematurely.
+const RENDER_TICK_STALE_MS = 10_000;
 const VISUAL_CHANGE_STALE_MS = 5_000;
 const VISUAL_CHANGE_GRACE_MS = 8_000;
 const MIN_ENCODE_FPS = 24;
