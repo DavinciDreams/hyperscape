@@ -41,6 +41,7 @@ export interface StreamingState {
   type: "STREAMING_STATE_UPDATE";
   cycle: {
     cycleId: string;
+    duelId?: string | null;
     phase: "IDLE" | "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" | "RESOLUTION";
     cycleStartTime: number;
     phaseStartTime: number;
@@ -73,6 +74,9 @@ export interface AgentInfo {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
+  highestHit: number;
+  attacksLanded: number;
+  healsUsed: number;
   equipment: Record<string, string>;
   inventory: Array<{ itemId: string; quantity: number } | null>;
   rank: number;
@@ -101,9 +105,8 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
-// The public stream should not sit behind the loading shell for tens of
-// seconds once the live world, target entity, and spectator camera are real.
-// Keep a short grace window for avatar pop-in, then degrade visibly in-scene.
+// Keep this diagnostic-only: renderer readiness must still require the real
+// target avatar so the public stream cannot look healthy with missing fighters.
 const TARGET_AVATAR_READY_GRACE_MS = 8_000;
 
 function normalizeCaptureBridgeUrl(rawValue: string | null): string {
@@ -378,8 +381,8 @@ function deriveStreamingSurfaceBlockReason(params: {
   cameraLocked: boolean;
   needsArenaVisuals?: boolean;
   arenaVisualsReady?: boolean;
-  needsTargetAvatar: boolean;
-  targetAvatarReady: boolean;
+  needsTargetAvatar?: boolean;
+  targetAvatarReady?: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
 }): string | null {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
@@ -405,7 +408,7 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (params.needsCameraLock && !params.cameraLocked) {
     return "camera_target_unresolved";
   }
-  if (params.needsTargetAvatar && !params.targetAvatarReady) {
+  if (params.needsTargetAvatar && params.targetAvatarReady !== true) {
     return "avatar_not_ready";
   }
   return null;
@@ -421,8 +424,8 @@ export function deriveStreamingRendererHealth(params: {
   cameraLocked: boolean;
   needsArenaVisuals?: boolean;
   arenaVisualsReady?: boolean;
-  needsTargetAvatar: boolean;
-  targetAvatarReady: boolean;
+  needsTargetAvatar?: boolean;
+  targetAvatarReady?: boolean;
   loadingDismissed: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
   agent1: AgentInfo | null;
@@ -475,8 +478,8 @@ export function shouldDismissStreamingLoading(params: {
   cameraLocked: boolean;
   needsArenaVisuals?: boolean;
   arenaVisualsReady?: boolean;
-  needsTargetAvatar: boolean;
-  targetAvatarReady: boolean;
+  needsTargetAvatar?: boolean;
+  targetAvatarReady?: boolean;
   phase?: StreamingState["cycle"]["phase"] | null;
 }): boolean {
   return (
@@ -1335,8 +1338,7 @@ export function StreamingMode() {
   const needsArenaVisuals = Boolean(
     streamingState?.cycle.phase && streamingState.cycle.phase !== "IDLE",
   );
-  const effectiveTargetAvatarReady =
-    targetAvatarReady || targetAvatarGraceExpired;
+  const effectiveTargetAvatarReady = targetAvatarReady;
   const waitingForTargetAvatar =
     needsTargetAvatar && !effectiveTargetAvatarReady;
 
@@ -1396,7 +1398,7 @@ export function StreamingMode() {
       clearAvatarPolling();
       setTargetAvatarGraceExpired(true);
       console.warn(
-        `[StreamingMode] Avatar readiness grace expired for "${targetEntityId}", continuing with spectator capture`,
+        `[StreamingMode] Avatar readiness grace expired for "${targetEntityId}", keeping renderer degraded until avatar is ready`,
       );
     }, TARGET_AVATAR_READY_GRACE_MS);
 

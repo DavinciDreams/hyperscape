@@ -1,51 +1,40 @@
 import { describe, expect, it } from "vitest";
-import type { ExternalResourceData } from "../DataManager";
-import { normalizeGatheringResourceData } from "../DataManager";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-function makeResource(id: string): ExternalResourceData {
-  return {
-    id,
-    name: id,
-    type: "tree",
-    modelPath: null,
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
-    modelVariants: ["asset://models/trees/example/example_01.glb"],
-    scale: 1,
-    depletedScale: 0.1,
-    harvestSkill: "woodcutting",
-    toolRequired: "bronze_hatchet",
-    levelRequired: 1,
-    baseCycleTicks: 4,
-    depleteChance: 0.125,
-    respawnTicks: 80,
-    harvestYield: [
-      {
-        itemId: "logs",
-        itemName: "Logs",
-        quantity: 1,
-        chance: 1,
-        xpAmount: 25,
-        stackable: true,
-      },
-    ],
-  };
+type WoodcuttingManifest = {
+  trees: Array<{
+    id: string;
+    modelVariants?: string[];
+  }>;
+};
+
+function loadWoodcuttingManifest(): WoodcuttingManifest {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const manifestPath = path.resolve(
+    __dirname,
+    "../../../../server/world/assets/manifests/gathering/woodcutting.json",
+  );
+  return JSON.parse(
+    fs.readFileSync(manifestPath, "utf8"),
+  ) as WoodcuttingManifest;
 }
 
-describe("normalizeGatheringResourceData", () => {
-  it("rewrites staging tree resources onto packaged models", () => {
-    const normalized = normalizeGatheringResourceData(makeResource("tree_general"));
-    expect(normalized.modelVariants).toEqual([
-      "asset://models/trees/oak_01.glb",
-      "asset://models/trees/oak_02.glb",
-      "asset://models/trees/oak_03.glb",
-      "asset://models/trees/oak_04.glb",
-      "asset://models/trees/oak_01.glb",
-      "asset://models/trees/oak_02.glb",
-    ]);
-  });
+describe("woodcutting manifest asset paths", () => {
+  it("uses source-of-truth flat tree model refs without runtime aliases", () => {
+    const manifest = loadWoodcuttingManifest();
+    const modelVariants = manifest.trees.flatMap(
+      (tree) => tree.modelVariants ?? [],
+    );
+    const staleNestedTreeRefs = modelVariants.filter((modelPath) => {
+      const prefix = "asset://models/trees/";
+      return (
+        modelPath.startsWith(prefix) &&
+        modelPath.slice(prefix.length).includes("/")
+      );
+    });
 
-  it("leaves unrelated resources untouched", () => {
-    const resource = makeResource("tree_oak");
-    expect(normalizeGatheringResourceData(resource)).toBe(resource);
+    expect(staleNestedTreeRefs).toEqual([]);
   });
 });

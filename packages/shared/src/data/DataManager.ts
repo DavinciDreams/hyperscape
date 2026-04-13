@@ -313,59 +313,6 @@ export interface FishingManifest {
   spots: ExternalResourceData[];
 }
 
-const NORMALIZED_OAK_TREE_VARIANTS = Object.freeze([
-  "asset://models/trees/oak_01.glb",
-  "asset://models/trees/oak_02.glb",
-  "asset://models/trees/oak_03.glb",
-  "asset://models/trees/oak_04.glb",
-]);
-
-const NORMALIZED_DEAD_TREE_VARIANTS = Object.freeze([
-  "asset://models/trees/dead_01.glb",
-  "asset://models/trees/dead_02.glb",
-  "asset://models/trees/dead_03.glb",
-]);
-
-const GATHERING_RESOURCE_MODEL_VARIANT_OVERRIDES = Object.freeze<
-  Record<string, readonly string[]>
->({
-  tree_banana: [
-    ...NORMALIZED_OAK_TREE_VARIANTS,
-    "asset://models/trees/oak_01.glb",
-  ],
-  tree_pineDead: [...NORMALIZED_DEAD_TREE_VARIANTS],
-  tree_eucalyptus: [
-    ...NORMALIZED_OAK_TREE_VARIANTS,
-    "asset://models/trees/oak_01.glb",
-  ],
-  tree_general: [
-    ...NORMALIZED_OAK_TREE_VARIANTS,
-    "asset://models/trees/oak_01.glb",
-    "asset://models/trees/oak_02.glb",
-  ],
-  tree_magic: [
-    "asset://models/trees/oak_03.glb",
-    "asset://models/trees/oak_04.glb",
-  ],
-  tree_mahogany: [
-    "asset://models/trees/oak_02.glb",
-    "asset://models/trees/oak_03.glb",
-  ],
-});
-
-export function normalizeGatheringResourceData(
-  resource: ExternalResourceData,
-): ExternalResourceData {
-  const modelVariants = GATHERING_RESOURCE_MODEL_VARIANT_OVERRIDES[resource.id];
-  if (!modelVariants) {
-    return resource;
-  }
-  return {
-    ...resource,
-    modelVariants: [...modelVariants],
-  };
-}
-
 /**
  * Centralized Data Manager
  */
@@ -1576,8 +1523,7 @@ export class DataManager {
           const woodcuttingManifest =
             (await woodcuttingRes.json()) as WoodcuttingManifest;
           for (const tree of woodcuttingManifest.trees) {
-            const normalizedTree = normalizeGatheringResourceData(tree);
-            resourcesMap.set(normalizedTree.id, normalizedTree);
+            resourcesMap.set(tree.id, tree);
           }
         } catch {
           console.warn(
@@ -1628,8 +1574,7 @@ export class DataManager {
         const resourceList =
           (await resourcesRes.json()) as Array<ExternalResourceData>;
         for (const resource of resourceList) {
-          const normalizedResource = normalizeGatheringResourceData(resource);
-          resourcesMap.set(normalizedResource.id, normalizedResource);
+          resourcesMap.set(resource.id, resource);
         }
       } catch {
         console.error(
@@ -1703,8 +1648,7 @@ export class DataManager {
         woodcuttingData,
       ) as WoodcuttingManifest;
       for (const tree of woodcuttingManifest.trees) {
-        const normalizedTree = normalizeGatheringResourceData(tree);
-        resourcesMap.set(normalizedTree.id, normalizedTree);
+        resourcesMap.set(tree.id, tree);
       }
       console.log(
         `[DataManager] ✅ Loaded woodcutting manifest (${woodcuttingManifest.trees.length} trees) from: ${source}`,
@@ -1755,8 +1699,7 @@ export class DataManager {
           resourcesData,
         ) as Array<ExternalResourceData>;
         for (const resource of resourceList) {
-          const normalizedResource = normalizeGatheringResourceData(resource);
-          resourcesMap.set(normalizedResource.id, normalizedResource);
+          resourcesMap.set(resource.id, resource);
         }
       } catch {
         console.error(

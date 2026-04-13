@@ -102,6 +102,25 @@ describe("shouldDismissStreamingLoading", () => {
     ).toBe(false);
   });
 
+  it("keeps the overlay up until the target avatar is actually ready", () => {
+    expect(
+      shouldDismissStreamingLoading({
+        connected: true,
+        worldReady: true,
+        terrainReady: true,
+        hasStreamingState: true,
+        initError: null,
+        needsCameraLock: true,
+        cameraLocked: true,
+        needsArenaVisuals: true,
+        arenaVisualsReady: true,
+        needsTargetAvatar: true,
+        targetAvatarReady: false,
+        phase: "FIGHTING",
+      }),
+    ).toBe(false);
+  });
+
   it("keeps the overlay up when the client is in an active duel without streaming state", () => {
     expect(
       shouldDismissStreamingLoading({
@@ -318,6 +337,30 @@ describe("shouldDismissStreamingLoading", () => {
 
     expect(health.ready).toBe(false);
     expect(health.degradedReason).toBe("arena_visuals_not_ready");
+  });
+
+  it("keeps the stream unhealthy until the active target avatar loads", () => {
+    const health = deriveStreamingRendererHealth({
+      connected: true,
+      worldReady: true,
+      terrainReady: true,
+      hasStreamingState: true,
+      initError: null,
+      needsCameraLock: true,
+      cameraLocked: true,
+      needsArenaVisuals: true,
+      arenaVisualsReady: true,
+      needsTargetAvatar: true,
+      targetAvatarReady: false,
+      loadingDismissed: true,
+      phase: "FIGHTING",
+      agent1: null,
+      agent2: null,
+      arenaPositions: null,
+    });
+
+    expect(health.ready).toBe(false);
+    expect(health.degradedReason).toBe("avatar_not_ready");
   });
 
   it("reports ready only after the live duel surface is sane and the overlay is gone", () => {
