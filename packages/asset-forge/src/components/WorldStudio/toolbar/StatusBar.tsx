@@ -91,7 +91,7 @@ export function StatusBar() {
   const selection = builder.editing.selection;
 
   return (
-    <div className="h-6 flex items-center justify-between px-3 bg-bg-secondary border-t border-border-primary text-[11px] text-text-tertiary flex-shrink-0 select-none">
+    <div className="h-6 flex items-center justify-between px-3 bg-bg-secondary border-t border-border-primary text-[11px] text-text-tertiary flex-shrink-0 select-none tracking-tight">
       {/* ====== LEFT: Project info ====== */}
       <div className="flex items-center gap-2.5 min-w-0">
         {project.projectName ? (

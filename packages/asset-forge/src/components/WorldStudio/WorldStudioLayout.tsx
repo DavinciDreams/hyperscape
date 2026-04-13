@@ -146,11 +146,12 @@ function ResizeDivider({
 
   return (
     <div
-      className={`flex-shrink-0 group ${
+      className={`ws-divider ${
         direction === "horizontal"
-          ? "w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
-          : "h-1 cursor-row-resize hover:bg-primary/30 active:bg-primary/50"
-      } transition-colors bg-transparent`}
+          ? "w-[3px] cursor-col-resize"
+          : "h-[3px] cursor-row-resize"
+      }`}
+      style={{ background: "var(--bg-primary)" }}
       onMouseDown={handleMouseDown}
     />
   );
@@ -179,21 +180,27 @@ function RightPanelTabs({
   onSetTab: (tab: RightPanelTab) => void;
 }) {
   return (
-    <div className="flex items-center border-b border-border-primary bg-bg-secondary flex-shrink-0">
+    <div
+      className="flex items-center border-b border-border-primary bg-bg-secondary flex-shrink-0"
+      style={{ borderTop: "1px solid var(--surface-highlight)" }}
+    >
       {RIGHT_TABS.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium transition-colors relative ${
+          className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium transition-all relative ${
             activeTab === id
-              ? "text-primary"
-              : "text-text-tertiary hover:text-text-primary"
+              ? "text-primary bg-primary/[0.08]"
+              : "text-text-tertiary hover:text-text-secondary hover:bg-bg-tertiary/50"
           }`}
           onClick={() => onSetTab(id)}
         >
           <Icon size={12} />
           {label}
           {activeTab === id && (
-            <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+            <span
+              className="absolute bottom-0 left-1 right-1 h-[2px] bg-primary rounded-full"
+              style={{ boxShadow: "0 0 6px rgba(99, 102, 241, 0.4)" }}
+            />
           )}
         </button>
       ))}
@@ -391,7 +398,10 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
           <>
             <div
               className="flex-shrink-0 bg-bg-secondary overflow-hidden flex flex-col border-r border-border-primary"
-              style={{ width: layout.leftWidth }}
+              style={{
+                width: layout.leftWidth,
+                borderTop: "1px solid var(--surface-highlight)",
+              }}
             >
               <ErrorBoundary fallback={<PanelError label="Left panel" />}>
                 {renderLeftPanel()}
@@ -422,7 +432,10 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
             <ResizeDivider onDrag={handleRightResize} direction="horizontal" />
             <div
               className="flex-shrink-0 bg-bg-secondary overflow-hidden flex flex-col border-l border-border-primary"
-              style={{ width: layout.rightWidth }}
+              style={{
+                width: layout.rightWidth,
+                borderTop: "1px solid var(--surface-highlight)",
+              }}
             >
               {/* Tab bar */}
               <RightPanelTabs

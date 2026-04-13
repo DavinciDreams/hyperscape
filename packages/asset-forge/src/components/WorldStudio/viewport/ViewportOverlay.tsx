@@ -153,15 +153,15 @@ const BIOME_COLORS: Record<string, string> = {
   canyon: "#a0764a",
 };
 
-/** Shared chip style — frosted glass for passive HUD */
+/** Shared chip style — deep frosted glass for passive HUD */
 const CHIP =
-  "inline-flex items-center gap-1.5 bg-black/70 backdrop-blur-md rounded px-2 py-1 border border-white/[0.08] shadow-md";
+  "inline-flex items-center gap-1.5 bg-[rgba(8,9,14,0.78)] backdrop-blur-xl rounded-[5px] px-2.5 py-1 border border-white/[0.06] shadow-[0_2px_8px_rgba(0,0,0,0.5)]";
 
-/** Button — fully opaque for interactive controls */
+/** Button — opaque surface for interactive controls */
 const CHIP_BTN_OFF =
-  "flex items-center gap-1 px-1.5 py-1 rounded bg-[#1e1e1e] text-white/60 hover:text-white hover:bg-[#2a2a2a] border border-[#333] transition-colors";
+  "flex items-center gap-1 px-2 py-1 rounded-[4px] bg-[#16171d] text-white/50 hover:text-white/80 hover:bg-[#1e1f28] border border-[#252733] transition-all duration-120";
 const CHIP_BTN_ON =
-  "flex items-center gap-1 px-1.5 py-1 rounded bg-[#1a1a30] text-primary border border-primary/50 transition-colors";
+  "flex items-center gap-1 px-2 py-1 rounded-[4px] bg-[rgba(99,102,241,0.12)] text-primary border border-primary/40 shadow-[0_0_8px_rgba(99,102,241,0.15)] transition-all duration-120";
 
 // ---------------------------------------------------------------------------
 // Minimap Popover — draws once per data change, NO animation loop
@@ -309,7 +309,7 @@ function MinimapPopover({
   );
 
   return (
-    <div className="bg-[#111] border border-[#333] rounded-lg shadow-xl p-1.5 mb-1.5">
+    <div className="bg-[rgba(10,11,16,0.92)] backdrop-blur-xl border border-[#252733] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.6)] p-2 mb-1.5">
       <div className="flex items-center justify-between mb-1 px-0.5">
         <span className="text-[9px] text-white/50 uppercase tracking-wider font-medium">
           World Map
@@ -424,7 +424,7 @@ function ControlsTooltip() {
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-1.5 bg-black/90 backdrop-blur-md rounded-lg border border-white/[0.08] shadow-xl p-2.5 w-52 pointer-events-auto">
+        <div className="absolute bottom-full right-0 mb-1.5 bg-[rgba(8,9,14,0.92)] backdrop-blur-xl rounded-lg border border-white/[0.06] shadow-[0_8px_32px_rgba(0,0,0,0.6)] p-3 w-56 pointer-events-auto">
           <div className="text-[9px] text-white/50 uppercase tracking-wider font-medium mb-1.5">
             Controls
           </div>
@@ -506,8 +506,8 @@ export function ViewportOverlay({
           )}
         </div>
 
-        {/* Top-right: viewport controls — mr-24 clears the ViewModeDropdown */}
-        <div className="flex items-center gap-1 pointer-events-auto mr-24">
+        {/* Top-right: viewport controls — right margin clears Player Preview + ViewModeDropdown */}
+        <div className="flex items-center gap-1 pointer-events-auto mr-[220px]">
           <button
             className={`${gridEnabled ? CHIP_BTN_ON : CHIP_BTN_OFF} text-[10px]`}
             onClick={onToggleGrid}
@@ -558,7 +558,7 @@ export function ViewportOverlay({
           )}
 
           {/* Coordinate system */}
-          <div className="flex items-center gap-1.5 px-1.5 py-1 rounded bg-[#1e1e1e] text-white/60 border border-[#333] text-[10px]">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-[4px] bg-[#16171d] text-white/50 border border-[#252733] text-[10px]">
             {transformSpace === "world" ? (
               <Globe size={10} />
             ) : (

@@ -1,31 +1,17 @@
 /**
- * ViewportOverlayBar — Floating toolbar for viewport overlay toggles
+ * ViewportOverlayBar — Floating toolbar for viewport overlay toggles.
  *
- * Shows toggle buttons for:
- * - Biome color overlay
- * - Audio zone boundaries
- * - Difficulty zones
- * - Entity density heatmap
- * - Road network
- * - Day/Night slider
- * - Weather preview
+ * Positioned top-right below the Player Preview / ViewMode bar.
+ * Uses frosted-glass styling consistent with other viewport overlays.
+ *
+ * Only shows overlays that are actually wired to rendering:
+ * - Biome color overlay (useAreaBoundaryOverlay)
+ * - Difficulty zone boundaries (useAreaBoundaryOverlay)
+ * - Zone color overlay (useZonePainting)
+ * - Day/Night time slider (TileBasedTerrain lighting)
  */
 
-import {
-  TreePine,
-  Volume2,
-  Shield,
-  Flame,
-  Route,
-  Map,
-  Sun,
-  Moon,
-  Cloud,
-  CloudRain,
-  CloudSnow,
-  CloudFog,
-  X,
-} from "lucide-react";
+import { TreePine, Shield, Map, Sun, Moon } from "lucide-react";
 import React, { useCallback } from "react";
 
 import type { StudioViewportOverlays } from "../WorldStudioContext";
@@ -46,28 +32,10 @@ const OVERLAY_TOGGLES: OverlayToggle[] = [
     color: "text-green-400",
   },
   {
-    key: "audioZoneOverlay",
-    icon: Volume2,
-    label: "Audio Zones",
-    color: "text-fuchsia-400",
-  },
-  {
     key: "difficultyOverlay",
     icon: Shield,
     label: "Difficulty Zones",
     color: "text-rose-400",
-  },
-  {
-    key: "densityHeatmap",
-    icon: Flame,
-    label: "Entity Density",
-    color: "text-orange-400",
-  },
-  {
-    key: "roadOverlay",
-    icon: Route,
-    label: "Road Network",
-    color: "text-stone-400",
   },
   {
     key: "zoneOverlay",
@@ -75,18 +43,6 @@ const OVERLAY_TOGGLES: OverlayToggle[] = [
     label: "Zone Colors",
     color: "text-cyan-400",
   },
-];
-
-const WEATHER_OPTIONS: Array<{
-  value: StudioViewportOverlays["weatherPreview"];
-  icon: typeof Cloud;
-  label: string;
-}> = [
-  { value: null, icon: X, label: "No Weather" },
-  { value: "clear", icon: Sun, label: "Clear" },
-  { value: "rain", icon: CloudRain, label: "Rain" },
-  { value: "snow", icon: CloudSnow, label: "Snow" },
-  { value: "fog", icon: CloudFog, label: "Fog" },
 ];
 
 export function ViewportOverlayBar() {
@@ -110,41 +66,34 @@ export function ViewportOverlayBar() {
     [actions],
   );
 
-  const setWeather = useCallback(
-    (weather: StudioViewportOverlays["weatherPreview"]) => {
-      actions.setOverlay({ weatherPreview: weather });
-    },
-    [actions],
-  );
-
   return (
-    <div className="absolute top-12 right-2 z-10 flex flex-col gap-1">
+    <div className="absolute top-[44px] right-2 z-10 flex flex-col gap-1.5">
       {/* Overlay toggles */}
-      <div className="bg-bg-primary border border-border-primary rounded-lg p-1 flex flex-col gap-0.5 shadow-lg">
+      <div className="bg-[rgba(8,9,14,0.78)] backdrop-blur-xl border border-white/[0.06] rounded-[5px] p-1 flex flex-col gap-0.5 shadow-[0_2px_8px_rgba(0,0,0,0.5)]">
         {OVERLAY_TOGGLES.map(({ key, icon: Icon, label, color }) => {
           const active = overlays[key] === true;
           return (
             <button
               key={key}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] transition-colors ${
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-[3px] text-[10px] transition-all duration-120 ${
                 active
-                  ? `${color} bg-white/5`
-                  : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
+                  ? `${color} bg-white/[0.06]`
+                  : "text-white/40 hover:text-white/70 hover:bg-white/[0.04]"
               }`}
               onClick={() => toggleOverlay(key)}
               title={label}
             >
               <Icon size={12} />
-              <span className="hidden xl:inline">{label}</span>
+              <span>{label}</span>
             </button>
           );
         })}
       </div>
 
       {/* Day/Night slider */}
-      <div className="bg-bg-primary border border-border-primary rounded-lg p-2 shadow-lg">
+      <div className="bg-[rgba(8,9,14,0.78)] backdrop-blur-xl border border-white/[0.06] rounded-[5px] p-2 shadow-[0_2px_8px_rgba(0,0,0,0.5)]">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-text-tertiary flex items-center gap-1">
+          <span className="text-[10px] text-white/40 flex items-center gap-1">
             {overlays.timeOfDay != null ? (
               overlays.timeOfDay < 6 || overlays.timeOfDay > 18 ? (
                 <Moon size={10} />
@@ -154,13 +103,15 @@ export function ViewportOverlayBar() {
             ) : (
               <Sun size={10} />
             )}
-            {overlays.timeOfDay != null
-              ? `${Math.floor(overlays.timeOfDay)}:${String(Math.round((overlays.timeOfDay % 1) * 60)).padStart(2, "0")}`
-              : "Default"}
+            <span className="text-white/70">
+              {overlays.timeOfDay != null
+                ? `${Math.floor(overlays.timeOfDay)}:${String(Math.round((overlays.timeOfDay % 1) * 60)).padStart(2, "0")}`
+                : "Default"}
+            </span>
           </span>
           {overlays.timeOfDay != null && (
             <button
-              className="text-[9px] text-text-tertiary hover:text-text-primary"
+              className="text-[9px] text-white/40 hover:text-white/80 transition-colors"
               onClick={() => setTimeOfDay(null)}
             >
               Reset
@@ -177,34 +128,13 @@ export function ViewportOverlayBar() {
           className="w-full h-1 accent-primary"
           title="Time of Day"
         />
-        <div className="flex justify-between text-[8px] text-text-tertiary mt-0.5">
+        <div className="flex justify-between text-[8px] text-white/30 mt-0.5">
           <span>0:00</span>
           <span>6:00</span>
           <span>12:00</span>
           <span>18:00</span>
           <span>24:00</span>
         </div>
-      </div>
-
-      {/* Weather toggle */}
-      <div className="bg-bg-primary border border-border-primary rounded-lg p-1 flex gap-0.5 shadow-lg">
-        {WEATHER_OPTIONS.map(({ value, icon: Icon, label }) => {
-          const active = overlays.weatherPreview === value;
-          return (
-            <button
-              key={label}
-              className={`p-1.5 rounded transition-colors ${
-                active
-                  ? "text-primary bg-primary/10"
-                  : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
-              }`}
-              onClick={() => setWeather(value)}
-              title={label}
-            >
-              <Icon size={12} />
-            </button>
-          );
-        })}
       </div>
     </div>
   );

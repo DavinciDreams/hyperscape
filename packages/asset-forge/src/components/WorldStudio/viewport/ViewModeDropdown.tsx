@@ -81,10 +81,10 @@ export function ViewModeDropdown({
   return (
     <div ref={dropdownRef} className="relative">
       <button
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors border ${
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-[4px] text-xs font-medium transition-all duration-120 border ${
           open
-            ? "bg-[#1a1a30] text-primary border-primary/50"
-            : "bg-[#1e1e1e] text-white/70 hover:text-white border-[#333] hover:bg-[#2a2a2a]"
+            ? "bg-[rgba(99,102,241,0.12)] text-primary border-primary/40 shadow-[0_0_8px_rgba(99,102,241,0.15)]"
+            : "bg-[#16171d] text-white/60 hover:text-white/80 border-[#252733] hover:bg-[#1e1f28]"
         }`}
         onClick={() => setOpen((v) => !v)}
         title="View Mode"
@@ -98,17 +98,20 @@ export function ViewModeDropdown({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 bg-[#1a1a1a] border border-[#333] rounded shadow-xl py-1 min-w-[170px]">
+        <div
+          className="absolute right-0 top-full mt-1.5 z-50 bg-[rgba(10,11,16,0.95)] backdrop-blur-xl border border-[#252733] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.6)] py-1 min-w-[180px] ws-dropdown"
+          style={{ borderTop: "1px solid var(--surface-highlight-strong)" }}
+        >
           {VIEW_MODES.map((option) => {
             const Icon = option.icon;
             const isActive = currentMode === option.mode;
             return (
               <button
                 key={option.mode}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-all duration-120 ${
                   isActive
-                    ? "text-primary bg-primary/15"
-                    : "text-white/70 hover:text-white hover:bg-[#2a2a2a]"
+                    ? "text-primary bg-primary/[0.12]"
+                    : "text-white/60 hover:text-white/90 hover:bg-white/[0.04]"
                 }`}
                 onClick={() => handleSelect(option.mode)}
               >

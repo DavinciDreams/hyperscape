@@ -101,21 +101,18 @@ function ToolButton({
   const title = shortcut ? `${label} (${shortcut})` : label;
   return (
     <button
-      className={`p-1.5 rounded-md transition-colors relative ${
+      className={`p-1.5 rounded-md transition-all duration-150 relative ${
         active
-          ? "text-primary bg-primary/15"
+          ? "ws-tool-active"
           : disabled
-            ? "text-text-tertiary/30 cursor-not-allowed"
-            : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
+            ? "text-text-muted cursor-not-allowed opacity-40"
+            : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary/70"
       } ${className}`}
       onClick={onClick}
       disabled={disabled}
       title={title}
     >
       <Icon size={size} />
-      {active && (
-        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3 h-0.5 bg-primary rounded-full" />
-      )}
     </button>
   );
 }
@@ -222,7 +219,10 @@ export function MainToolbar({
   };
 
   return (
-    <div className="h-10 flex items-center justify-between px-2 bg-bg-secondary border-b border-border-primary flex-shrink-0 select-none">
+    <div
+      className="h-10 flex items-center justify-between px-2 bg-bg-secondary border-b border-border-primary flex-shrink-0 select-none"
+      style={{ borderTop: "1px solid var(--surface-highlight)" }}
+    >
       {/* ============ LEFT SECTION ============ */}
       <div className="flex items-center gap-0.5 min-w-0">
         {/* Left panel toggle */}
@@ -284,7 +284,10 @@ export function MainToolbar({
             <ChevronDown size={10} />
           </button>
           {genDropdownOpen && (
-            <div className="absolute top-full left-0 mt-1 w-48 py-1 bg-bg-secondary border border-border-primary rounded-md shadow-xl z-50">
+            <div
+              className="absolute top-full left-0 mt-1.5 w-48 py-1 bg-bg-elevated border border-border-secondary rounded-lg shadow-xl z-50 ws-dropdown"
+              style={{ borderTop: "1px solid var(--surface-highlight-strong)" }}
+            >
               <DropdownItem
                 icon={Wand2}
                 label="Full World Wizard"
@@ -405,12 +408,12 @@ export function MainToolbar({
           <button
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
               saveFlash
-                ? "text-green-400 bg-green-400/10"
+                ? "text-emerald-400 bg-emerald-400/10"
                 : state.persistence.isSaving
                   ? "text-text-tertiary cursor-wait"
                   : hasUnsaved
-                    ? "text-amber-400 hover:bg-amber-400/10"
-                    : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
+                    ? "text-amber-400 hover:bg-amber-400/10 ws-unsaved-pulse"
+                    : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary/70"
             }`}
             onClick={handleSave}
             disabled={state.persistence.isSaving || !hasUnsaved}

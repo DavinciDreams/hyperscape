@@ -1245,7 +1245,14 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
   return (
     <div className="flex flex-col h-full">
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary">
+      <div
+        className="flex items-center justify-between px-3 py-2"
+        style={{
+          borderBottom: "1px solid var(--border-primary)",
+          background: "var(--bg-tertiary)",
+          borderTop: "1px solid var(--surface-highlight)",
+        }}
+      >
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
             Outliner
@@ -1270,7 +1277,13 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
             <Filter size={12} />
           </button>
           {showFilterDropdown && (
-            <div className="absolute right-0 top-full mt-1 z-50 bg-bg-secondary border border-border-primary rounded-md shadow-lg py-1 min-w-[180px]">
+            <div
+              className="absolute right-0 top-full mt-1 z-50 bg-bg-elevated border border-border-secondary rounded-lg py-1 min-w-[180px] ws-dropdown"
+              style={{
+                borderTop: "1px solid var(--surface-highlight-strong)",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.6)",
+              }}
+            >
               {CATEGORY_FILTERS.map((f) => (
                 <button
                   key={f.id}
@@ -1288,7 +1301,7 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
                 </button>
               ))}
               {/* Separator */}
-              <div className="border-t border-border-primary my-1" />
+              <div className="border-t border-border-secondary my-1" />
               <div className="px-3 py-1 text-[10px] text-text-tertiary uppercase tracking-wider">
                 Layers
               </div>
@@ -1331,7 +1344,10 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
       </div>
 
       {/* Search with clear button */}
-      <div className="px-2 py-1.5 border-b border-border-primary">
+      <div
+        className="px-2 py-1.5"
+        style={{ borderBottom: "1px solid var(--border-primary)" }}
+      >
         <div className="relative">
           <Search
             size={12}
@@ -1340,7 +1356,12 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
           <input
             type="text"
             placeholder="Search... (-term to exclude)"
-            className="w-full pl-6 pr-7 py-1 text-xs bg-bg-tertiary rounded-sm border border-border-primary text-text-primary placeholder-text-tertiary focus:outline-none focus:border-primary/50"
+            className="w-full pl-6 pr-7 py-1 text-xs rounded-[3px] text-text-primary placeholder-text-tertiary focus:outline-none focus:border-primary/50"
+            style={{
+              background: "var(--input-bg)",
+              border: "1px solid var(--input-border)",
+              boxShadow: "var(--input-shadow)",
+            }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
@@ -1443,7 +1464,13 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-1.5 border-t border-border-primary text-[10px] text-text-tertiary flex items-center gap-2">
+      <div
+        className="px-3 py-1.5 text-[10px] text-text-tertiary flex items-center gap-2"
+        style={{
+          borderTop: "1px solid var(--border-primary)",
+          background: "var(--bg-tertiary)",
+        }}
+      >
         {activeFilter !== "all" && (
           <span className="text-primary">
             Filter: {CATEGORY_FILTERS.find((f) => f.id === activeFilter)?.label}

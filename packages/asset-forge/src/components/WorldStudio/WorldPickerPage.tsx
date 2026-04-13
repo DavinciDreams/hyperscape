@@ -230,7 +230,13 @@ export function WorldPickerPage() {
   return (
     <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border-primary bg-bg-secondary">
+      <div
+        className="flex items-center justify-between px-6 py-4 bg-bg-secondary"
+        style={{
+          borderBottom: "1px solid var(--border-primary)",
+          borderTop: "1px solid var(--surface-highlight)",
+        }}
+      >
         <div className="flex items-center gap-4">
           <h1 className="text-lg font-semibold text-text-primary">
             World Studio
@@ -239,7 +245,12 @@ export function WorldPickerPage() {
           {/* Team selector */}
           {user.teams.length > 1 && (
             <select
-              className="px-2 py-1.5 text-xs bg-bg-tertiary border border-border-primary rounded text-text-primary focus:outline-none focus:border-primary/50"
+              className="px-2 py-1.5 text-xs rounded-[3px] text-text-primary focus:outline-none focus:border-primary/50 cursor-pointer"
+              style={{
+                background: "var(--input-bg)",
+                border: "1px solid var(--input-border)",
+                boxShadow: "var(--input-shadow)",
+              }}
               value={selectedTeamId ?? ""}
               onChange={(e) => handleTeamChange(e.target.value)}
             >
@@ -254,7 +265,12 @@ export function WorldPickerPage() {
           {/* Game selector */}
           {games.length > 1 && (
             <select
-              className="px-2 py-1.5 text-xs bg-bg-tertiary border border-border-primary rounded text-text-primary focus:outline-none focus:border-primary/50"
+              className="px-2 py-1.5 text-xs rounded-[3px] text-text-primary focus:outline-none focus:border-primary/50 cursor-pointer"
+              style={{
+                background: "var(--input-bg)",
+                border: "1px solid var(--input-border)",
+                boxShadow: "var(--input-shadow)",
+              }}
               value={selectedGameId ?? ""}
               onChange={(e) => setSelectedGameId(e.target.value)}
             >
@@ -301,7 +317,8 @@ export function WorldPickerPage() {
             {projects.map((project) => (
               <div
                 key={project.id}
-                className="group relative bg-bg-secondary border border-border-primary rounded-lg overflow-hidden hover:border-primary/50 transition-colors cursor-pointer"
+                className="group relative bg-bg-secondary border border-border-secondary rounded-lg overflow-hidden hover:border-primary/40 transition-all duration-150 cursor-pointer"
+                style={{ borderTop: "1px solid var(--surface-highlight)" }}
                 onClick={() => navigate(`${ROUTES.WORLD_STUDIO}/${project.id}`)}
               >
                 {/* Thumbnail placeholder */}

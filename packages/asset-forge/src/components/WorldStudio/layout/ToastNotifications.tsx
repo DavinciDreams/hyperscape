@@ -155,12 +155,16 @@ function ToastCard({ toast }: { toast: Toast }) {
         ${exiting ? "opacity-0 translate-x-8" : "opacity-100 translate-x-0"}
       `}
       style={{
-        backgroundColor: "#2a2a2a",
-        borderColor: "#3a3a3a",
+        backgroundColor: "var(--bg-elevated)",
+        borderColor: "var(--border-secondary)",
         minWidth: 300,
         maxWidth: 400,
+        boxShadow:
+          "0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04)",
         // Slide-in via CSS animation on mount
-        animation: exiting ? undefined : "toast-slide-in 200ms ease-out",
+        animation: exiting
+          ? undefined
+          : "toast-slide-in 250ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
       {/* Left accent bar */}
@@ -177,7 +181,7 @@ function ToastCard({ toast }: { toast: Toast }) {
               {toast.title}
             </p>
             {toast.message && (
-              <p className="text-[11px] text-[#a0a0a0] mt-0.5 leading-snug line-clamp-2">
+              <p className="text-[11px] text-text-secondary mt-0.5 leading-snug line-clamp-2">
                 {toast.message}
               </p>
             )}
@@ -185,7 +189,7 @@ function ToastCard({ toast }: { toast: Toast }) {
 
           {/* Close button */}
           <button
-            className="flex-shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors text-[#808080] hover:text-white"
+            className="flex-shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors text-text-tertiary hover:text-white"
             onClick={handleDismiss}
             aria-label="Dismiss notification"
           >

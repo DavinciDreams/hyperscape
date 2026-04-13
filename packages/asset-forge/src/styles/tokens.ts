@@ -16,23 +16,23 @@ export const colors = {
     rgb: "139, 92, 246",
   },
 
-  // Dark Theme Colors (Default)
+  // Dark Theme Colors (Default) — subtle cool undertone for depth
   dark: {
-    "bg-primary": "#0f0f0f",
-    "bg-secondary": "#1a1a1a",
-    "bg-tertiary": "#262626",
-    "bg-card": "#1a1a1a",
-    "bg-hover": "#2a2a2a",
-    "bg-elevated": "#2d2d2d",
+    "bg-primary": "#0c0d10",
+    "bg-secondary": "#141518",
+    "bg-tertiary": "#1c1d22",
+    "bg-card": "#141518",
+    "bg-hover": "#22232a",
+    "bg-elevated": "#1e1f26",
 
-    "text-primary": "#ffffff",
-    "text-secondary": "#a1a1aa",
-    "text-tertiary": "#71717a",
-    "text-muted": "#52525b",
+    "text-primary": "#e8e9ed",
+    "text-secondary": "#9a9caa",
+    "text-tertiary": "#636577",
+    "text-muted": "#464860",
 
-    "border-primary": "#27272a",
-    "border-secondary": "#3f3f46",
-    "border-hover": "#52525b",
+    "border-primary": "#1e2028",
+    "border-secondary": "#2a2d38",
+    "border-hover": "#3a3d4a",
   },
 
   // Light Theme Colors (Future)
@@ -141,8 +141,8 @@ export const borderRadius = {
 
 export const typography = {
   fontFamily: {
-    sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif',
-    mono: '"SF Mono", "Monaco", "Inconsolata", "Fira Code", monospace',
+    sans: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif',
+    mono: '"JetBrains Mono", "SF Mono", "Cascadia Code", "Fira Code", monospace',
   },
 
   fontSize: {
@@ -189,20 +189,23 @@ export const typography = {
 
 export const effects = {
   boxShadow: {
-    sm: "0 1px 2px 0 rgba(0, 0, 0, 0.3)",
-    md: "0 4px 6px -1px rgba(0, 0, 0, 0.3)",
-    lg: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
-    xl: "0 20px 25px -5px rgba(0, 0, 0, 0.4)",
-    "2xl": "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-    inner: "inset 0 2px 4px 0 rgba(0, 0, 0, 0.3)",
+    sm: "0 1px 2px 0 rgba(0, 0, 0, 0.4)",
+    md: "0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.2)",
+    lg: "0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.3)",
+    xl: "0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.3)",
+    "2xl": "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
+    inner: "inset 0 1px 3px 0 rgba(0, 0, 0, 0.4)",
     none: "none",
 
     // Special shadows
-    "glow-primary": `0 0 20px ${colors.primary.DEFAULT}40`,
-    "glow-secondary": `0 0 20px ${colors.secondary.DEFAULT}40`,
-    "elevation-1": "0 2px 4px rgba(0, 0, 0, 0.3)",
-    "elevation-2": "0 4px 8px rgba(0, 0, 0, 0.3)",
-    "elevation-3": "0 8px 16px rgba(0, 0, 0, 0.3)",
+    "glow-primary": `0 0 20px ${colors.primary.DEFAULT}30, 0 0 6px ${colors.primary.DEFAULT}20`,
+    "glow-secondary": `0 0 20px ${colors.secondary.DEFAULT}30, 0 0 6px ${colors.secondary.DEFAULT}20`,
+    "elevation-1":
+      "0 2px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.03)",
+    "elevation-2":
+      "0 4px 12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04)",
+    "elevation-3":
+      "0 8px 24px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)",
   },
 
   opacity: {

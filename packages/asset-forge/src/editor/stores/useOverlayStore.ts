@@ -6,12 +6,9 @@ import { create } from "zustand";
 
 interface StudioViewportOverlays {
   biomeOverlay: boolean;
-  audioZoneOverlay: boolean;
   difficultyOverlay: boolean;
-  densityHeatmap: boolean;
-  roadOverlay: boolean;
+  zoneOverlay: boolean;
   timeOfDay: number | null;
-  weatherPreview: "clear" | "rain" | "snow" | "fog" | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -20,12 +17,9 @@ interface StudioViewportOverlays {
 
 const DEFAULT_OVERLAYS: StudioViewportOverlays = {
   biomeOverlay: false,
-  audioZoneOverlay: false,
   difficultyOverlay: false,
-  densityHeatmap: false,
-  roadOverlay: false,
+  zoneOverlay: true,
   timeOfDay: null,
-  weatherPreview: null,
 };
 
 // ---------------------------------------------------------------------------

@@ -112,16 +112,17 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     <div
       ref={menuRef}
       role="menu"
-      className="fixed z-[9999] py-1 rounded-md border shadow-lg bg-bg-secondary border-border-primary"
+      className={`fixed z-[9999] py-1 rounded-lg border bg-bg-elevated border-border-secondary ${adjusted ? "ws-dropdown" : ""}`}
       style={{
         left: adjusted?.x ?? position.x,
         top: adjusted?.y ?? position.y,
         minWidth: MENU_MIN_WIDTH,
         maxHeight: `calc(100vh - ${VIEWPORT_MARGIN * 2}px)`,
         overflowY: "auto",
-        // Keep invisible until edge-detection adjusts position, then fade in
         opacity: adjusted ? 1 : 0,
-        transition: "opacity 100ms ease-out",
+        borderTop: "1px solid var(--surface-highlight-strong)",
+        boxShadow:
+          "0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02)",
       }}
     >
       {items.map((item, idx) => {
@@ -129,7 +130,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
           return (
             <div
               key={`sep-${idx}`}
-              className="my-1 mx-2 border-t border-border-primary"
+              className="my-1 mx-2 border-t border-border-secondary"
               role="separator"
             />
           );
@@ -143,12 +144,12 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
             role="menuitem"
             disabled={item.disabled}
             className={[
-              "flex w-full items-center gap-2 text-left text-xs transition-colors",
+              "flex w-full items-center gap-2 text-left text-xs transition-colors duration-100",
               item.disabled
                 ? "text-text-tertiary/50 cursor-not-allowed"
                 : item.danger
                   ? "text-red-400 hover:bg-red-400/10"
-                  : "text-text-primary hover:bg-bg-tertiary",
+                  : "text-text-primary hover:bg-white/[0.04]",
             ].join(" ")}
             style={{
               height: ITEM_HEIGHT,

@@ -606,20 +606,28 @@ export const BottomPanel = React.memo(function BottomPanel() {
   return (
     <div
       className="flex-shrink-0 border-t border-border-primary bg-bg-secondary"
-      style={{ height: expanded ? height + TAB_BAR_HEIGHT : TAB_BAR_HEIGHT }}
+      style={{
+        height: expanded ? height + TAB_BAR_HEIGHT : TAB_BAR_HEIGHT,
+        borderTop: "1px solid var(--surface-highlight)",
+      }}
     >
       {/* Drag handle — only visible when expanded */}
       {expanded && (
         <div
-          className="h-1 cursor-ns-resize hover:bg-primary/30 transition-colors"
+          className="ws-divider h-[3px] cursor-ns-resize"
+          style={{ background: "var(--bg-primary)" }}
           onMouseDown={handleDragStart}
         />
       )}
 
       {/* Tab bar */}
       <div
-        className="flex items-center border-b border-border-primary/50 px-1"
-        style={{ height: TAB_BAR_HEIGHT }}
+        className="flex items-center px-1"
+        style={{
+          height: TAB_BAR_HEIGHT,
+          borderBottom: expanded ? "1px solid var(--border-primary)" : "none",
+          background: "var(--bg-tertiary)",
+        }}
       >
         {/* Tabs */}
         <div className="flex items-center gap-0 flex-1">
@@ -630,11 +638,16 @@ export const BottomPanel = React.memo(function BottomPanel() {
             return (
               <button
                 key={tab.id}
-                className={`flex items-center gap-1 px-2.5 h-full text-[11px] transition-colors border-b-2 ${
+                className={`flex items-center gap-1 px-2.5 h-full text-[11px] transition-colors duration-120 border-b ${
                   isActive
                     ? "text-text-primary border-primary"
-                    : "text-text-tertiary border-transparent hover:text-text-secondary hover:border-border-primary"
+                    : "text-text-tertiary border-transparent hover:text-text-secondary"
                 }`}
+                style={
+                  isActive
+                    ? { background: "rgba(99, 102, 241, 0.08)" }
+                    : undefined
+                }
                 onClick={() => handleTabClick(tab.id)}
               >
                 <TabIcon size={11} />

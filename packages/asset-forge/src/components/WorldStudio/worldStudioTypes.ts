@@ -185,31 +185,19 @@ export interface ZonePaintState {
 export interface StudioViewportOverlays {
   /** Show biome color overlay on terrain */
   biomeOverlay: boolean;
-  /** Show audio zone boundaries */
-  audioZoneOverlay: boolean;
   /** Show difficulty zone boundaries */
   difficultyOverlay: boolean;
-  /** Show entity density heatmap */
-  densityHeatmap: boolean;
-  /** Show road network overlay */
-  roadOverlay: boolean;
   /** Show zone tile color overlay (auto-gen + hand-painted regions) */
   zoneOverlay: boolean;
   /** Day/night time-of-day (0-24 hours, null = default lighting) */
   timeOfDay: number | null;
-  /** Weather preview mode */
-  weatherPreview: "clear" | "rain" | "snow" | "fog" | null;
 }
 
 export const DEFAULT_VIEWPORT_OVERLAYS: StudioViewportOverlays = {
   biomeOverlay: false,
-  audioZoneOverlay: false,
   difficultyOverlay: false,
-  densityHeatmap: false,
-  roadOverlay: false,
   zoneOverlay: true,
   timeOfDay: null,
-  weatherPreview: null,
 };
 
 // ============== COMBINED STATE ==============

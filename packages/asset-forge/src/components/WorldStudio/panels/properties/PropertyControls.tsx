@@ -268,29 +268,49 @@ export function PropertySection({
   return (
     <div className="border-b border-border-primary">
       <button
-        className="w-full flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1a1a] hover:bg-bg-tertiary/50 transition-colors relative"
+        className="w-full flex items-center gap-1.5 px-3 py-2 transition-all duration-120 relative group/section"
+        style={{
+          background: open ? "var(--bg-tertiary)" : "var(--bg-secondary)",
+          borderTop: "1px solid var(--surface-highlight)",
+        }}
         onClick={handleToggle}
+        onMouseEnter={(e) => {
+          if (!open)
+            (e.currentTarget as HTMLElement).style.background =
+              "var(--bg-tertiary)";
+        }}
+        onMouseLeave={(e) => {
+          if (!open)
+            (e.currentTarget as HTMLElement).style.background =
+              "var(--bg-secondary)";
+        }}
       >
         {/* UE5-style left accent bar when expanded */}
         {open && (
-          <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-primary" />
+          <div
+            className="absolute left-0 top-0 bottom-0 w-[2px] bg-primary"
+            style={{ boxShadow: "1px 0 6px rgba(99, 102, 241, 0.25)" }}
+          />
         )}
-        {open ? (
-          <ChevronDown size={8} className="text-text-tertiary/60" />
-        ) : (
-          <ChevronRight size={8} className="text-text-tertiary/60" />
-        )}
+        <ChevronDown
+          size={9}
+          className={`text-text-muted transition-transform duration-150 ${open ? "" : "-rotate-90"}`}
+        />
         {icon && <span className="text-text-tertiary">{icon}</span>}
         <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider flex-1 text-left">
           {title}
         </span>
         {badge != null && (
-          <span className="text-[10px] text-text-tertiary font-mono">
+          <span className="text-[10px] text-text-muted font-mono tabular-nums">
             {badge}
           </span>
         )}
       </button>
-      {open && <div className="px-3 py-2 space-y-2">{children}</div>}
+      {open && (
+        <div className="px-3 py-2.5 space-y-2.5 ws-section-content">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -372,24 +392,35 @@ export function DragNumberInput({
           onChange={(e) => setEditText(e.target.value)}
           onBlur={commitEdit}
           onKeyDown={handleKeyDown}
-          className="w-20 px-1.5 py-0.5 text-xs bg-bg-tertiary border border-primary/50 rounded font-mono text-text-primary text-right focus:outline-none"
+          className="w-20 px-1.5 py-0.5 text-xs border border-primary/50 rounded-[3px] font-mono text-text-primary text-right focus:outline-none"
+          style={{
+            background: "var(--input-bg)",
+            boxShadow: "var(--input-shadow), 0 0 0 1px rgba(99, 102, 241, 0.2)",
+          }}
         />
       ) : (
         <div
-          className="relative w-20 h-5 bg-bg-tertiary border border-border-primary rounded overflow-hidden cursor-text"
+          className="relative w-20 h-[22px] border rounded-[3px] overflow-hidden cursor-text transition-colors duration-120 hover:border-[var(--input-border-hover)]"
+          style={{
+            background: "var(--input-bg)",
+            borderColor: "var(--input-border)",
+            boxShadow: "var(--input-shadow)",
+          }}
           onClick={startEdit}
         >
-          {/* Fill bar */}
+          {/* Fill bar with gradient */}
           <div
-            className="absolute inset-y-0 left-0 bg-primary/20 transition-[width] duration-75"
-            style={{ width: `${pct}%` }}
+            className="absolute inset-y-0 left-0 transition-[width] duration-75"
+            style={{
+              width: `${pct}%`,
+              background:
+                "linear-gradient(90deg, rgba(99, 102, 241, 0.1) 0%, rgba(99, 102, 241, 0.22) 100%)",
+            }}
           />
           {/* Value text */}
           <span className="relative z-10 flex items-center justify-end h-full px-1.5 text-xs font-mono text-text-primary">
             {formatValue(value, step)}
-            {unit && (
-              <span className="text-text-tertiary/60 ml-0.5">{unit}</span>
-            )}
+            {unit && <span className="text-text-muted ml-0.5">{unit}</span>}
           </span>
         </div>
       )}
@@ -506,7 +537,12 @@ export function SliderInput({
             onChange={(e) => setEditText(e.target.value)}
             onBlur={commitEdit}
             onKeyDown={handleKeyDown}
-            className="flex-1 px-1.5 py-0.5 text-xs bg-bg-tertiary border border-primary/50 rounded font-mono text-text-primary text-right focus:outline-none"
+            className="flex-1 px-1.5 py-0.5 text-xs border border-primary/50 rounded-[3px] font-mono text-text-primary text-right focus:outline-none"
+            style={{
+              background: "var(--input-bg)",
+              boxShadow:
+                "var(--input-shadow), 0 0 0 1px rgba(99, 102, 241, 0.2)",
+            }}
           />
           {unit && (
             <span className="text-[10px] text-text-tertiary">{unit}</span>
@@ -515,25 +551,42 @@ export function SliderInput({
       ) : (
         <div
           ref={barRef}
-          className={`relative h-5 bg-bg-tertiary border rounded overflow-hidden select-none ${
-            dragging
-              ? "border-primary/50 cursor-ew-resize"
-              : "border-border-primary cursor-ew-resize hover:border-border-hover"
+          className={`relative h-[22px] rounded-[3px] overflow-hidden select-none transition-all duration-120 ${
+            dragging ? "border-primary/50 cursor-ew-resize" : "cursor-ew-resize"
           }`}
+          style={{
+            background: "var(--input-bg)",
+            border: `1px solid ${dragging ? "rgba(99, 102, 241, 0.4)" : "var(--input-border)"}`,
+            boxShadow: dragging
+              ? "var(--input-shadow), 0 0 8px rgba(99, 102, 241, 0.1)"
+              : "var(--input-shadow)",
+          }}
           onMouseDown={handleBarMouseDown}
           onDoubleClick={startEdit}
+          onMouseEnter={(e) => {
+            if (!dragging)
+              (e.currentTarget as HTMLElement).style.borderColor =
+                "var(--input-border-hover)";
+          }}
+          onMouseLeave={(e) => {
+            if (!dragging)
+              (e.currentTarget as HTMLElement).style.borderColor =
+                "var(--input-border)";
+          }}
         >
-          {/* Fill bar */}
+          {/* Fill bar with gradient */}
           <div
-            className="absolute inset-y-0 left-0 bg-primary/25 transition-[width] duration-75"
-            style={{ width: `${pct}%` }}
+            className="absolute inset-y-0 left-0 transition-[width] duration-75"
+            style={{
+              width: `${pct}%`,
+              background:
+                "linear-gradient(90deg, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0.28) 100%)",
+            }}
           />
           {/* Value overlay text */}
           <span className="relative z-10 flex items-center justify-end h-full px-1.5 text-xs font-mono text-text-primary pointer-events-none">
             {formatValue(value, step)}
-            {unit && (
-              <span className="text-text-tertiary/60 ml-0.5">{unit}</span>
-            )}
+            {unit && <span className="text-text-muted ml-0.5">{unit}</span>}
           </span>
         </div>
       )}
@@ -611,18 +664,40 @@ export function NumberInput({
             onChange={(e) => setEditText(e.target.value)}
             onBlur={commitEdit}
             onKeyDown={handleKeyDown}
-            className="w-16 px-1.5 py-0.5 text-xs bg-bg-tertiary border border-primary/50 rounded font-mono text-text-primary text-right focus:outline-none"
+            className="w-16 px-1.5 py-0.5 text-xs border border-primary/50 rounded-[3px] font-mono text-text-primary text-right focus:outline-none"
+            style={{
+              background: "var(--input-bg)",
+              boxShadow:
+                "var(--input-shadow), 0 0 0 1px rgba(99, 102, 241, 0.2)",
+            }}
           />
         ) : (
           <div
-            className="relative w-16 h-5 bg-bg-tertiary border border-border-primary rounded overflow-hidden cursor-text"
+            className="relative w-16 h-[22px] border rounded-[3px] overflow-hidden cursor-text transition-colors duration-120"
+            style={{
+              background: "var(--input-bg)",
+              borderColor: "var(--input-border)",
+              boxShadow: "var(--input-shadow)",
+            }}
             onClick={startEdit}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLElement).style.borderColor =
+                "var(--input-border-hover)")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLElement).style.borderColor =
+                "var(--input-border)")
+            }
           >
             {/* Subtle fill bar when bounds are known */}
             {hasBounds && (
               <div
-                className="absolute inset-y-0 left-0 bg-primary/15 transition-[width] duration-75"
-                style={{ width: `${pct}%` }}
+                className="absolute inset-y-0 left-0 transition-[width] duration-75"
+                style={{
+                  width: `${pct}%`,
+                  background:
+                    "linear-gradient(90deg, rgba(99, 102, 241, 0.08) 0%, rgba(99, 102, 241, 0.18) 100%)",
+                }}
               />
             )}
             <span className="relative z-10 flex items-center justify-end h-full px-1.5 text-xs font-mono text-text-primary">
@@ -652,14 +727,19 @@ export function TextInput({
   placeholder,
 }: TextInputProps) {
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       <label className="text-xs text-text-secondary">{label}</label>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-2 py-1 text-xs bg-bg-tertiary border border-border-primary rounded text-text-primary focus:outline-none focus:border-primary/50"
+        className="w-full px-2 py-1.5 text-xs border rounded-[3px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary/50"
+        style={{
+          background: "var(--input-bg)",
+          borderColor: "var(--input-border)",
+          boxShadow: "var(--input-shadow)",
+        }}
       />
     </div>
   );
@@ -678,15 +758,21 @@ export function Toggle({ label, value, onChange }: ToggleProps) {
     <div className="flex items-center justify-between">
       <label className="text-xs text-text-secondary">{label}</label>
       <button
-        className={`w-8 h-4 rounded-full transition-colors relative ${
-          value ? "bg-primary" : "bg-bg-tertiary border border-border-primary"
+        className={`w-9 h-[18px] rounded-full relative transition-all duration-200 ${
+          value
+            ? "bg-primary shadow-[0_0_8px_rgba(99,102,241,0.3)]"
+            : "bg-[var(--input-bg)] border border-[var(--input-border)] shadow-[var(--input-shadow)]"
         }`}
         onClick={() => onChange(!value)}
       >
         <div
-          className={`w-3 h-3 rounded-full bg-white absolute top-0.5 transition-transform ${
-            value ? "translate-x-4" : "translate-x-0.5"
-          }`}
+          className="w-3.5 h-3.5 rounded-full absolute top-[2px] shadow-sm"
+          style={{
+            background: value ? "#fff" : "var(--text-tertiary)",
+            transform: value ? "translateX(18px)" : "translateX(2px)",
+            transition:
+              "transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), background 150ms",
+          }}
         />
       </button>
     </div>
@@ -714,7 +800,12 @@ export function SelectInput({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="px-1.5 py-0.5 text-xs bg-bg-tertiary border border-border-primary rounded text-text-primary focus:outline-none focus:border-primary/50"
+        className="px-2 py-1 text-xs border rounded-[3px] text-text-primary focus:outline-none focus:border-primary/50 cursor-pointer"
+        style={{
+          background: "var(--input-bg)",
+          borderColor: "var(--input-border)",
+          boxShadow: "var(--input-shadow)",
+        }}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -800,16 +891,33 @@ function AxisInput({
           onChange={(e) => setEditText(e.target.value)}
           onBlur={commitEdit}
           onKeyDown={handleKeyDown}
-          className={`flex-1 w-full px-1 py-0.5 text-[11px] bg-bg-tertiary border border-primary/50 border-l-2 ${AXIS_COLORS[axis]} rounded font-mono text-text-primary text-right focus:outline-none`}
+          className={`flex-1 w-full px-1 py-0.5 text-[11px] border border-primary/50 border-l-2 ${AXIS_COLORS[axis]} rounded-[3px] font-mono text-text-primary text-right focus:outline-none`}
+          style={{
+            background: "var(--input-bg)",
+            boxShadow: "var(--input-shadow)",
+          }}
         />
       ) : (
         <div
-          className={`relative flex-1 w-full h-5 bg-bg-tertiary border border-border-primary border-l-2 ${AXIS_COLORS[axis]} rounded overflow-hidden cursor-text`}
+          className={`relative flex-1 w-full h-[22px] border border-l-2 ${AXIS_COLORS[axis]} rounded-[3px] overflow-hidden cursor-text transition-colors duration-120`}
+          style={{
+            background: "var(--input-bg)",
+            borderColor: "var(--input-border)",
+            boxShadow: "var(--input-shadow)",
+          }}
           onClick={startEdit}
+          onMouseEnter={(e) =>
+            ((e.currentTarget as HTMLElement).style.borderColor =
+              "var(--input-border-hover)")
+          }
+          onMouseLeave={(e) =>
+            ((e.currentTarget as HTMLElement).style.borderColor =
+              "var(--input-border)")
+          }
         >
           {/* Subtle axis-colored tint */}
-          <div className={`absolute inset-0 ${AXIS_ACCENT[axis]}`} />
-          <span className="relative z-10 flex items-center justify-end h-full px-1 text-[11px] font-mono text-text-primary">
+          <div className={`absolute inset-0 ${AXIS_ACCENT[axis]} opacity-60`} />
+          <span className="relative z-10 flex items-center justify-end h-full px-1.5 text-[11px] font-mono text-text-primary">
             {display}
           </span>
         </div>

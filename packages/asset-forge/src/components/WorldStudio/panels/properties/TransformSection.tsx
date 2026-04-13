@@ -96,7 +96,11 @@ function EditableField({
       {editing ? (
         <input
           type="number"
-          className={`flex-1 min-w-0 px-1.5 py-0.5 text-xs bg-[#141414] border border-primary/50 rounded-sm text-text-primary focus:outline-none text-right font-mono ${axisBorder}`}
+          className={`flex-1 min-w-0 px-1.5 py-0.5 text-xs border border-primary/50 rounded-[3px] text-text-primary focus:outline-none text-right font-mono ${axisBorder}`}
+          style={{
+            background: "var(--input-bg)",
+            boxShadow: "var(--input-shadow)",
+          }}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={commitEdit}
@@ -106,13 +110,27 @@ function EditableField({
         />
       ) : (
         <button
-          className={`flex-1 min-w-0 px-1.5 py-0.5 text-xs rounded-sm text-right font-mono transition-colors ${axisBorder} ${
+          className={`flex-1 min-w-0 px-1.5 py-0.5 text-xs rounded-[3px] text-right font-mono transition-all duration-120 border ${axisBorder} ${
             readOnly
-              ? "bg-[#141414]/50 text-text-tertiary cursor-default border border-[#1a1a1a]"
-              : "bg-[#141414] text-text-primary border border-[#1a1a1a] hover:border-[#2a2a2a] cursor-text"
+              ? "text-text-tertiary cursor-default opacity-60"
+              : "text-text-primary cursor-text"
           }`}
+          style={{
+            background: "var(--input-bg)",
+            borderColor: "var(--input-border)",
+            boxShadow: "var(--input-shadow)",
+          }}
           onClick={startEditing}
           disabled={readOnly}
+          onMouseEnter={(e) => {
+            if (!readOnly)
+              (e.currentTarget as HTMLElement).style.borderColor =
+                "var(--input-border-hover)";
+          }}
+          onMouseLeave={(e) =>
+            ((e.currentTarget as HTMLElement).style.borderColor =
+              "var(--input-border)")
+          }
         >
           {value.toFixed(2)}
         </button>
@@ -157,7 +175,14 @@ export function TransformSection({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between bg-[#1a1a1a] -mx-3 px-3 py-1 border-b border-[#141414]">
+      <div
+        className="flex items-center justify-between -mx-3 px-3 py-1.5"
+        style={{
+          background: "var(--bg-tertiary)",
+          borderBottom: "1px solid var(--bg-primary)",
+          borderTop: "1px solid var(--surface-highlight)",
+        }}
+      >
         <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">
           Transform
         </span>

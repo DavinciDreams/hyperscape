@@ -227,7 +227,8 @@ export function ViewportContainer() {
 
   // ----- Player preview mode -----
   const [playerMode, setPlayerMode] = useState(false);
-  const [timeOfDay, setTimeOfDay] = useState(12);
+  // Time of day: driven by the overlay bar's time slider (context), default 12
+  const timeOfDay = state.overlays.timeOfDay ?? 12;
 
   const handleTogglePlayerMode = useCallback(() => {
     const refs = sceneRefsRef.current;
@@ -1805,36 +1806,18 @@ export function ViewportContainer() {
 
       {/* View mode dropdown + player preview button (top-right) */}
       {isEditing && (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+        <div className="absolute top-2 right-2 z-20 flex items-center gap-1.5">
           <button
-            className={`px-2 py-1 text-xs rounded border ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-[4px] border transition-all duration-120 ${
               playerMode
-                ? "bg-blue-600 border-blue-500 text-white"
-                : "bg-bg-secondary border-border-primary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+                ? "bg-[rgba(99,102,241,0.15)] text-primary border-primary/40 shadow-[0_0_8px_rgba(99,102,241,0.15)]"
+                : "bg-[#16171d] text-white/60 hover:text-white/80 border-[#252733] hover:bg-[#1e1f28]"
             }`}
             onClick={handleTogglePlayerMode}
             title="Player Preview (walk the world at eye height)"
           >
             Player Preview
           </button>
-          {/* Time of day slider */}
-          <div className="flex items-center gap-1 px-2 py-1 bg-bg-secondary border border-border-primary rounded text-[10px] text-text-secondary">
-            <span className="whitespace-nowrap">
-              {timeOfDay < 10 ? "0" : ""}
-              {Math.floor(timeOfDay)}:
-              {String(Math.round((timeOfDay % 1) * 60)).padStart(2, "0")}
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={24}
-              step={0.25}
-              value={timeOfDay}
-              onChange={(e) => setTimeOfDay(Number(e.target.value))}
-              className="w-20 h-1 accent-primary"
-              title="Time of day"
-            />
-          </div>
           <ViewModeDropdown
             currentMode={viewMode}
             onModeChange={handleViewModeChange}
@@ -1844,7 +1827,7 @@ export function ViewportContainer() {
 
       {/* Player preview overlay indicator */}
       {playerMode && (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-blue-600/90 text-white text-xs rounded-md shadow-lg">
+        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-[rgba(99,102,241,0.85)] backdrop-blur-sm text-white text-xs font-medium rounded-[4px] border border-primary/30 shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
           Player Preview — Escape to exit
         </div>
       )}
