@@ -8,7 +8,7 @@
  * Uses TerrainSceneRefs from TileBasedTerrain for raycasting.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { useEffect, useRef, useCallback } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";

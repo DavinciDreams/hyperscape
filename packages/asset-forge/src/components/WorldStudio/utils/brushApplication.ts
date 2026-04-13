@@ -6,7 +6,7 @@
  * This ensures sculpt strokes persist across tile unload/reload.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 
 import type {
   TerrainSculptStroke,

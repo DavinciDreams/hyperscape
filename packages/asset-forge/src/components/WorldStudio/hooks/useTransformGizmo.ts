@@ -13,7 +13,7 @@
  * instead of at the entity's visual location.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { useEffect, useRef, useCallback } from "react";
 

@@ -224,6 +224,11 @@ export function createWaterMaterial(): THREE.Material {
 /**
  * Generate tile geometry with proper heightmap, colors, and road influence.
  * Uses the same approach as the game's TerrainSystem for unified rendering.
+ *
+ * If `existingGeometry` is provided with the same vertex count, updates its
+ * attributes IN-PLACE — no new GPU buffers are created. This is critical for
+ * dirty-tile regeneration performance: avoids Metal staging buffer churn and
+ * eliminates allocation + dispose overhead (~20% faster per tile).
  */
 export function generateTileGeometry(
   tileX: number,
@@ -237,16 +242,56 @@ export function generateTileGeometry(
   roads?: GeneratedRoad[],
   townFlattenZones?: TownFlattenZone[],
   mines?: MineAreaData[],
-): { geometry: THREE.PlaneGeometry; hasWater: boolean } {
-  const geometry = templateGeometry.clone();
+  existingGeometry?: THREE.BufferGeometry,
+): { geometry: THREE.PlaneGeometry | THREE.BufferGeometry; hasWater: boolean } {
+  // Reuse existing geometry if it has the same vertex count (dirty-tile regen).
+  // Fall back to cloning the template for new tiles or LOD changes.
+  const canReuse =
+    existingGeometry &&
+    existingGeometry.attributes.position &&
+    existingGeometry.attributes.position.count ===
+      templateGeometry.attributes.position.count;
+
+  const geometry = canReuse ? existingGeometry : templateGeometry.clone();
   const positions = geometry.attributes.position;
-  const colors = new Float32Array(positions.count * 3);
-  const roadInfluences = new Float32Array(positions.count);
-  const mineInfluences = new Float32Array(positions.count);
-  const mineBiomeIds = new Float32Array(positions.count);
-  const biomeIds = new Float32Array(positions.count);
-  const forestWeights = new Float32Array(positions.count);
-  const canyonWeights = new Float32Array(positions.count);
+
+  // Reuse existing typed arrays when updating in-place, allocate for new geometry
+  const colorAttr = canReuse
+    ? (geometry.getAttribute("color") as THREE.BufferAttribute | null)
+    : null;
+  const colors = colorAttr
+    ? (colorAttr.array as Float32Array)
+    : new Float32Array(positions.count * 3);
+  const roadInfluences =
+    canReuse && geometry.getAttribute("roadInfluence")
+      ? ((geometry.getAttribute("roadInfluence") as THREE.BufferAttribute)
+          .array as Float32Array)
+      : new Float32Array(positions.count);
+  const mineInfluences =
+    canReuse && geometry.getAttribute("mineInfluence")
+      ? ((geometry.getAttribute("mineInfluence") as THREE.BufferAttribute)
+          .array as Float32Array)
+      : new Float32Array(positions.count);
+  const mineBiomeIds =
+    canReuse && geometry.getAttribute("mineBiomeId")
+      ? ((geometry.getAttribute("mineBiomeId") as THREE.BufferAttribute)
+          .array as Float32Array)
+      : new Float32Array(positions.count);
+  const biomeIds =
+    canReuse && geometry.getAttribute("biomeId")
+      ? ((geometry.getAttribute("biomeId") as THREE.BufferAttribute)
+          .array as Float32Array)
+      : new Float32Array(positions.count);
+  const forestWeights =
+    canReuse && geometry.getAttribute("biomeForestWeight")
+      ? ((geometry.getAttribute("biomeForestWeight") as THREE.BufferAttribute)
+          .array as Float32Array)
+      : new Float32Array(positions.count);
+  const canyonWeights =
+    canReuse && geometry.getAttribute("biomeCanyonWeight")
+      ? ((geometry.getAttribute("biomeCanyonWeight") as THREE.BufferAttribute)
+          .array as Float32Array)
+      : new Float32Array(positions.count);
 
   let hasWater = false;
   const shorelineThreshold = waterThreshold / maxHeight + 0.1; // Normalized
@@ -502,30 +547,64 @@ export function generateTileGeometry(
     }
   }
 
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
-  geometry.setAttribute(
-    "biomeForestWeight",
-    new THREE.BufferAttribute(forestWeights, 1),
-  );
-  geometry.setAttribute(
-    "biomeCanyonWeight",
-    new THREE.BufferAttribute(canyonWeights, 1),
-  );
-  geometry.setAttribute(
-    "roadInfluence",
-    new THREE.BufferAttribute(roadInfluences, 1),
-  );
-  geometry.setAttribute(
-    "mineInfluence",
-    new THREE.BufferAttribute(mineInfluences, 1),
-  );
-  geometry.setAttribute(
-    "mineBiomeId",
-    new THREE.BufferAttribute(mineBiomeIds, 1),
-  );
+  if (canReuse) {
+    // In-place update: mark existing attributes as needing GPU upload.
+    // No new BufferAttribute objects — reuses the same GPU buffers.
+    positions.needsUpdate = true;
+    if (colorAttr) colorAttr.needsUpdate = true;
+    const riAttr = geometry.getAttribute(
+      "roadInfluence",
+    ) as THREE.BufferAttribute | null;
+    if (riAttr) riAttr.needsUpdate = true;
+    const miAttr = geometry.getAttribute(
+      "mineInfluence",
+    ) as THREE.BufferAttribute | null;
+    if (miAttr) miAttr.needsUpdate = true;
+    const mbAttr = geometry.getAttribute(
+      "mineBiomeId",
+    ) as THREE.BufferAttribute | null;
+    if (mbAttr) mbAttr.needsUpdate = true;
+    const biAttr = geometry.getAttribute(
+      "biomeId",
+    ) as THREE.BufferAttribute | null;
+    if (biAttr) biAttr.needsUpdate = true;
+    const fwAttr = geometry.getAttribute(
+      "biomeForestWeight",
+    ) as THREE.BufferAttribute | null;
+    if (fwAttr) fwAttr.needsUpdate = true;
+    const cwAttr = geometry.getAttribute(
+      "biomeCanyonWeight",
+    ) as THREE.BufferAttribute | null;
+    if (cwAttr) cwAttr.needsUpdate = true;
+  } else {
+    // New geometry: create fresh BufferAttribute objects
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
+    geometry.setAttribute(
+      "biomeForestWeight",
+      new THREE.BufferAttribute(forestWeights, 1),
+    );
+    geometry.setAttribute(
+      "biomeCanyonWeight",
+      new THREE.BufferAttribute(canyonWeights, 1),
+    );
+    geometry.setAttribute(
+      "roadInfluence",
+      new THREE.BufferAttribute(roadInfluences, 1),
+    );
+    geometry.setAttribute(
+      "mineInfluence",
+      new THREE.BufferAttribute(mineInfluences, 1),
+    );
+    geometry.setAttribute(
+      "mineBiomeId",
+      new THREE.BufferAttribute(mineBiomeIds, 1),
+    );
+    positions.needsUpdate = true;
+  }
+
   geometry.computeVertexNormals();
-  positions.needsUpdate = true;
+  geometry.computeBoundingSphere();
 
   return { geometry, hasWater };
 }

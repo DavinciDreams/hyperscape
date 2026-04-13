@@ -7,7 +7,7 @@
  * Inspired by UE5's selection highlight — uses a blue wireframe bounding box.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { useEffect, useRef } from "react";
 

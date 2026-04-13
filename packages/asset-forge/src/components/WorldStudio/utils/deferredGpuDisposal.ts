@@ -17,12 +17,25 @@
  * buffers in the same frame — only one system processes per frame.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 
 // ============== Configuration ==============
 
-/** GPU resources disposed per frame */
-const DISPOSAL_BATCH_SIZE = 4;
+/** GPU resources disposed per frame (normal operation) */
+const DISPOSAL_BATCH_NORMAL = 4;
+
+/**
+ * GPU resources disposed per frame when the queue is large.
+ * After a wizard apply, thousands of resources queue up. At 4/frame it takes
+ * ~13 seconds to drain, during which Metal can reclaim backing memory for
+ * buffers that were removed from the scene graph but not yet .dispose()'d,
+ * causing "setIndexBuffer: parameter 1 is not of type 'GPUBuffer'" crashes.
+ * Draining faster (32/frame) keeps the backlog under ~3 seconds.
+ */
+const DISPOSAL_BATCH_BURST = 32;
+
+/** Threshold above which we switch to burst disposal rate */
+const DISPOSAL_BURST_THRESHOLD = 100;
 
 /**
  * Scene objects added to parents per frame.
@@ -98,9 +111,15 @@ export function processDeferredFrame(): boolean {
     // disposal so GPU cleanup isn't blocked by unprocessable additions.
   }
 
-  // Process disposals when no visible additions remain
+  // Process disposals when no visible additions remain.
+  // Use burst rate when the queue is large to prevent Metal from reclaiming
+  // backing memory before we call .dispose().
   if (disposalQueue.length > 0) {
-    const end = Math.min(DISPOSAL_BATCH_SIZE, disposalQueue.length);
+    const batchSize =
+      disposalQueue.length > DISPOSAL_BURST_THRESHOLD
+        ? DISPOSAL_BATCH_BURST
+        : DISPOSAL_BATCH_NORMAL;
+    const end = Math.min(batchSize, disposalQueue.length);
     for (let i = 0; i < end; i++) {
       try {
         disposalQueue[i].dispose();
@@ -114,6 +133,37 @@ export function processDeferredFrame(): boolean {
   }
 
   return additionQueue.length > 0;
+}
+
+/**
+ * Process ONLY the disposal queue — free GPU resources without touching additions.
+ *
+ * Called every frame by the render loop regardless of SceneResourceManager state.
+ * Disposal only destroys GPU buffers (never creates them), so it is safe to run
+ * alongside SceneResourceManager staging. Without this, wizard apply leaves
+ * thousands of unreleased GPU resources while new objects are being staged,
+ * exhausting Metal's staging buffer pool and crashing the device.
+ *
+ * @returns Number of items disposed this frame
+ */
+export function processDeferredDisposalOnly(): number {
+  if (disposalQueue.length === 0) return 0;
+
+  const batchSize =
+    disposalQueue.length > DISPOSAL_BURST_THRESHOLD
+      ? DISPOSAL_BATCH_BURST
+      : DISPOSAL_BATCH_NORMAL;
+  const end = Math.min(batchSize, disposalQueue.length);
+  for (let i = 0; i < end; i++) {
+    try {
+      disposalQueue[i].dispose();
+    } catch {
+      // WebGPU internal state may already be cleaned up
+    }
+  }
+  disposalQueue.splice(0, end);
+  _totalDisposed += end;
+  return end;
 }
 
 // ============== Disposal API ==============
@@ -138,11 +188,23 @@ export function deferredDisposeGroup(group: THREE.Group): void {
       child instanceof THREE.Mesh ||
       child instanceof THREE.InstancedMesh
     ) {
-      disposalQueue.push(child.geometry);
+      // Skip shared/cached resources — these are owned by GameWorldEntitySync
+      // or GameWorldAssets singleton caches and must not be disposed here
+      const geo = child.geometry;
+      if (!geo.userData?._cachedModel && !geo.userData?._shared) {
+        disposalQueue.push(geo);
+      }
       if (Array.isArray(child.material)) {
-        for (const m of child.material) disposalQueue.push(m);
+        for (const m of child.material) {
+          if (!m.userData?._cachedModel && !m.userData?._shared) {
+            disposalQueue.push(m);
+          }
+        }
       } else {
-        disposalQueue.push(child.material);
+        const mat = child.material;
+        if (!mat.userData?._cachedModel && !mat.userData?._shared) {
+          disposalQueue.push(mat);
+        }
       }
     }
     if (child instanceof THREE.Sprite) {

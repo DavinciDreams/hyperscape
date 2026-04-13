@@ -9,7 +9,7 @@
  * - Teleport network connections are drawn as lines
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import {
   MeshStandardNodeMaterial,
   MeshBasicNodeMaterial,

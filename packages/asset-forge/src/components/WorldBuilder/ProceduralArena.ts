@@ -7,7 +7,7 @@
  * Uses merged geometries per material type for minimal draw calls.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import type { MeshStandardNodeMaterial } from "three/webgpu";
 
 // ============== CONSTANTS (from DuelArenaVisualsSystem.ts) ==============

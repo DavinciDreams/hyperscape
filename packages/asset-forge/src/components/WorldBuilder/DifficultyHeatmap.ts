@@ -9,7 +9,7 @@
  * mesh that loads/unloads alongside the terrain tile.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { NoiseGenerator } from "@hyperscape/procgen/terrain";
 

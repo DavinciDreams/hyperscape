@@ -13,7 +13,7 @@
  * to render coordinates using the worldCenterOffset.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import {
   MeshStandardNodeMaterial,
   MeshBasicNodeMaterial,

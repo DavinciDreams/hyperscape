@@ -10,7 +10,7 @@
  * are released on the next rebuild via `releaseOverlay()`.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import {
   MeshStandardNodeMaterial,
   MeshBasicNodeMaterial,

@@ -8,7 +8,7 @@
  * useEffect, rebuilt when wizard preview data changes, disposed on unmount.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { useEffect, useRef } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";

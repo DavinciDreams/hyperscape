@@ -32,6 +32,8 @@ import {
   MeshBasicNodeMaterial,
   LineBasicNodeMaterial,
 } from "three/webgpu";
+import { pass } from "three/tsl";
+import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 
 import { useCameraControls } from "./useCameraControls";
 import { ViewHelper } from "three/examples/jsm/helpers/ViewHelper.js";
@@ -48,6 +50,7 @@ import {
 import {
   generateTrees,
   type ResourceGenerationContext,
+  type BiomeTreeConfig,
   getTreeConfigForBiome,
   precomputeExclusions,
   filterTreesByExclusions,
@@ -77,6 +80,7 @@ import { SceneResourceManager } from "./SceneResourceManager";
 import {
   getGpuLifecycleStats,
   processDeferredFrame,
+  processDeferredDisposalOnly,
 } from "../WorldStudio/utils/deferredGpuDisposal";
 import { applySculptStrokesToGeometry } from "../WorldStudio/utils/brushApplication";
 import type {
@@ -744,6 +748,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   } = cam;
 
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
+  const postProcessingRef = useRef<THREE.PostProcessing | null>(null);
+  const gpuRecoveryCountRef = useRef(0);
+  const gpuRecoveringRef = useRef(false);
+  const [gpuRecovering, setGpuRecovering] = useState(false);
+  const [gpuError, setGpuError] = useState<string | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const sunRef = useRef<THREE.DirectionalLight | null>(null);
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
@@ -818,6 +827,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const prevMaxHeightRef = useRef<number>(config.terrain.maxHeight);
   /** Previous waterThreshold for fast-path water plane move */
   const prevWaterThresholdRef = useRef<number>(config.terrain.waterThreshold);
+
+  /** Previous deps for the terrain config effect — used to detect maxHeight-only
+   *  changes so we can skip expensive dirty-tile regeneration (fast-path handles it). */
+  const prevTerrainEffectDepsRef = useRef({
+    seed: config.seed,
+    useGamePipeline: config.useGamePipeline,
+    tileSize: config.terrain.tileSize,
+    tileResolution: config.terrain.tileResolution,
+    maxHeight: config.terrain.maxHeight,
+    terrainConfig: null as object | null,
+    importedQuerier: null as unknown,
+  });
 
   // GPU resource lifecycle manager — handles staged object addition and
   // deferred GPU disposal to prevent Metal WebGPU device loss.
@@ -1148,6 +1169,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   // Swap a tile's geometry to a target resolution in-place — mesh stays in
   // scene the whole time (no flash). Used for both LOD upgrades/downgrades
   // and dirty-tile regeneration (regenerateTileInPlace delegates here).
+  //
+  // When the target resolution matches the tile's current resolution (dirty
+  // regen), passes the existing geometry for IN-PLACE attribute updates —
+  // no new GPU buffers are created, eliminating Metal staging buffer churn
+  // and allocation/dispose overhead.
   const swapTileResolution = useCallback(
     (key: string, targetResolution: number) => {
       const tile = tilesRef.current.get(key);
@@ -1163,6 +1189,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const isLowRes =
         lowResTemplate && targetResolution <= TILE_LOD_LOW_RESOLUTION;
       const template = isLowRes ? lowResTemplate : fullTemplate;
+
+      // Reuse existing geometry for dirty regen (same resolution) — avoids
+      // creating new GPU buffers. Only create new geometry for LOD swaps
+      // where vertex count changes.
+      const sameResolution = tile.resolution === targetResolution;
+      const reuseGeometry = sameResolution ? tile.mesh.geometry : undefined;
 
       const roadsForTile = providedRoadsRef.current;
       const minesForTile = runtimeMinesRef.current;
@@ -1188,6 +1220,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         roadsForTile,
         flattenZones,
         minesForTile,
+        reuseGeometry,
       );
 
       // Apply brush strokes
@@ -1202,10 +1235,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         );
       }
 
-      // Atomic geometry swap — mesh stays in scene (no flash)
-      const oldGeometry = tile.mesh.geometry;
-      tile.mesh.geometry = geometry;
-      oldGeometry.dispose();
+      // Only swap geometry when a NEW geometry was created (LOD change).
+      // For in-place updates, the mesh already references the updated geometry.
+      if (!sameResolution) {
+        const oldGeometry = tile.mesh.geometry;
+        tile.mesh.geometry = geometry;
+        oldGeometry.dispose();
+      }
 
       // Update per-tile water — skip in studio mode (uses single world-sized water plane)
       if (!isStudioModeRef.current) {
@@ -1475,18 +1511,24 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
 
       // Process dirty tiles progressively — regenerate geometry in-place without
-      // unloading. Budget is shared with new tile generation to avoid GPU spikes.
-      let dirtyProcessed = 0;
-      const dirtyBudget = hasStagedWork ? 1 : MAX_TILES_PER_FRAME;
-      while (
-        dirtyTileKeysRef.current.length > 0 &&
-        dirtyProcessed < dirtyBudget
-      ) {
-        const dirtyKey = dirtyTileKeysRef.current.shift()!;
-        const dirtyTile = tilesRef.current.get(dirtyKey);
-        if (dirtyTile?.dirty) {
-          regenerateTileInPlace(dirtyKey);
-          dirtyProcessed++;
+      // unloading. Uses a time-based budget (12ms) instead of a fixed count so
+      // that slider changes (noise, biomes, waterThreshold) regenerate 12-24×
+      // faster. Each 32×32 tile takes ~0.5-1ms to regenerate. In-place attribute
+      // updates (no new GPU buffers) make this safe even at higher budgets.
+      // During staged work (buildings/vegetation being added), cap at 1 tile.
+      {
+        const DIRTY_TIME_BUDGET_MS = 12;
+        const dirtyDeadline = performance.now() + DIRTY_TIME_BUDGET_MS;
+        let dirtyProcessed = 0;
+        while (dirtyTileKeysRef.current.length > 0) {
+          if (hasStagedWork && dirtyProcessed >= 1) break;
+          if (dirtyProcessed > 0 && performance.now() >= dirtyDeadline) break;
+          const dirtyKey = dirtyTileKeysRef.current.shift()!;
+          const dirtyTile = tilesRef.current.get(dirtyKey);
+          if (dirtyTile?.dirty) {
+            regenerateTileInPlace(dirtyKey);
+            dirtyProcessed++;
+          }
         }
       }
 
@@ -3349,12 +3391,133 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
-      // Monitor GPU device loss — logs the actual reason from Metal/WebGPU
-      // "destroyed" reason is expected during effect cleanup (preset/config changes);
-      // only log unexpected device losses as errors.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const backend = (renderer as any).backend;
-      if (backend?.device?.lost) {
+      // ---- PostProcessing pipeline (FXAA anti-aliasing via TSL) ----
+      try {
+        const postProcessing = new THREE.PostProcessing(renderer);
+        const scenePass = pass(scene, camera);
+        const sceneColor = scenePass.getTextureNode("output");
+        postProcessing.outputNode = fxaa(sceneColor);
+        postProcessingRef.current = postProcessing;
+      } catch (ppErr) {
+        console.warn(
+          "[TileBasedTerrain] PostProcessing init failed, falling back to direct render:",
+          ppErr,
+        );
+        postProcessingRef.current = null;
+      }
+
+      // ---- GPU device loss recovery ----
+      // Shared recovery function — called from both device.lost and render catch.
+      // Uses gpuRecoveringRef for re-entrance guard (checked by render loop).
+      const recoverGpu = async (reason: string) => {
+        if (gpuRecoveringRef.current || !mounted) return;
+        gpuRecoveringRef.current = true;
+
+        const stats = getGpuLifecycleStats();
+        console.error(
+          `[GPU-DEBUG] DEVICE LOST reason="${reason}" ` +
+            `tiles=${tilesRef.current.size} ` +
+            `staging=${resourceManager.pendingStaged} disposing=${resourceManager.pendingDisposal} ` +
+            `deferredDisposals=${stats.pendingDisposals} deferredAdditions=${stats.pendingAdditions} ` +
+            `totalDisposed=${stats.totalDisposed} totalAdded=${stats.totalAdded} ` +
+            `sceneChildren=${scene.children.length} ` +
+            `markers=${resourceManager.areMarkersHidden ? "hidden" : "visible"}`,
+        );
+
+        gpuRecoveryCountRef.current++;
+        if (gpuRecoveryCountRef.current > 2) {
+          setGpuError(
+            "GPU recovery failed after multiple attempts. Please reload the page.",
+          );
+          gpuRecoveringRef.current = false;
+          return;
+        }
+
+        setGpuRecovering(true);
+
+        // Save camera state
+        const camPos = camera.position.clone();
+        const camQuat = camera.quaternion.clone();
+
+        // Null out rendering refs to prevent render loop from using stale objects
+        postProcessingRef.current = null;
+
+        try {
+          // Dispose old renderer
+          const oldRenderer = rendererRef.current;
+          rendererRef.current = null;
+          if (oldRenderer) {
+            try {
+              oldRenderer.dispose();
+            } catch {
+              /* already lost */
+            }
+            if (oldRenderer.domElement.parentNode === container) {
+              container.removeChild(oldRenderer.domElement);
+            }
+          }
+
+          // Create fresh renderer
+          const newRenderer = await createWebGPURenderer({
+            antialias: !isStudioModeRef.current,
+            alpha: true,
+          });
+          if (!mounted) {
+            newRenderer.dispose();
+            gpuRecoveringRef.current = false;
+            return;
+          }
+
+          const maxPr = isStudioModeRef.current
+            ? 1
+            : Math.min(window.devicePixelRatio, 2);
+          newRenderer.setPixelRatio(maxPr);
+          const w = container.clientWidth || 1;
+          const h = container.clientHeight || 1;
+          newRenderer.setSize(w, h);
+          newRenderer.outputColorSpace = THREE.SRGBColorSpace;
+          newRenderer.shadowMap.enabled = !isStudioModeRef.current;
+          if (newRenderer.shadowMap.enabled) {
+            newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+          }
+
+          container.appendChild(newRenderer.domElement);
+          rendererRef.current = newRenderer;
+
+          // Recreate PostProcessing pipeline
+          try {
+            const pp = new THREE.PostProcessing(newRenderer);
+            const sp = pass(scene, camera);
+            pp.outputNode = fxaa(sp.getTextureNode("output"));
+            postProcessingRef.current = pp;
+          } catch {
+            postProcessingRef.current = null;
+          }
+
+          // Restore camera
+          camera.position.copy(camPos);
+          camera.quaternion.copy(camQuat);
+
+          // Wire up loss handler on new renderer
+          wireDeviceLossHandler(newRenderer);
+
+          console.log(
+            `[GPU-DEBUG] Device recovery #${gpuRecoveryCountRef.current} successful`,
+          );
+        } catch (recoverErr) {
+          console.error("[GPU-DEBUG] Device recovery failed:", recoverErr);
+          setGpuError("GPU recovery failed. Please reload the page.");
+        } finally {
+          gpuRecoveringRef.current = false;
+          setGpuRecovering(false);
+        }
+      };
+
+      // Wire device.lost handler — "destroyed" is expected during cleanup
+      const wireDeviceLossHandler = (r: AssetForgeRenderer) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const backend = (r as any).backend;
+        if (!backend?.device?.lost) return;
         backend.device.lost.then(
           (info: { reason: string; message: string }) => {
             if (info.reason === "destroyed") {
@@ -3363,22 +3526,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               );
               return;
             }
-            const stats = getGpuLifecycleStats();
-            console.error(
-              `[GPU-DEBUG] DEVICE LOST reason="${info.reason}" message="${info.message}"`,
-            );
-            console.error(
-              `[GPU-DEBUG] DEVICE LOST state: ` +
-                `tiles=${tilesRef.current.size} ` +
-                `staging=${resourceManager.pendingStaged} disposing=${resourceManager.pendingDisposal} ` +
-                `deferredDisposals=${stats.pendingDisposals} deferredAdditions=${stats.pendingAdditions} ` +
-                `totalDisposed=${stats.totalDisposed} totalAdded=${stats.totalAdded} ` +
-                `sceneChildren=${scene.children.length} ` +
-                `markers=${resourceManager.areMarkersHidden ? "hidden" : "visible"}`,
-            );
+            recoverGpu(info.reason);
           },
         );
-      }
+      };
+      wireDeviceLossHandler(renderer);
 
       // Create ViewHelper orientation cube (bottom-right corner)
       // Skip in World Studio — it provides its own viewport controls
@@ -3646,6 +3798,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const editorWaterThreshold = GAME_WATER_THRESHOLD;
           const halfTiles = Math.floor(editorWorldSize / 2);
 
+          // Build a resolveTreeConfig that merges user overrides (if any) with game defaults.
+          // When vegConfig is provided (from ProcgenPanel), biomes with overrides use them;
+          // biomes without overrides fall back to the game's authoritative config.
+          const resolveTreeConfig:
+            | ((biomeId: string) => BiomeTreeConfig)
+            | undefined = vegConfig
+            ? (biomeId: string) =>
+                vegConfig[biomeId] ?? getTreeConfigForBiome(biomeId)
+            : undefined;
+
           if (querier) {
             for (let tileX = -halfTiles; tileX < halfTiles; tileX++) {
               for (let tileZ = -halfTiles; tileZ < halfTiles; tileZ++) {
@@ -3655,7 +3817,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 const tileCenterZ = tileZ * editorTileSize;
                 const tileQuery = querier(tileCenterX, tileCenterZ);
                 const tileBiome = tileQuery.biome;
-                const treeConfig = getTreeConfigForBiome(tileBiome);
+                const treeConfig = resolveTreeConfig
+                  ? resolveTreeConfig(tileBiome)
+                  : getTreeConfigForBiome(tileBiome);
 
                 if (!treeConfig.enabled || treeConfig.density <= 0) continue;
 
@@ -3669,6 +3833,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                     querier(wx, wz).height,
                   getDominantBiome: (wx: number, wz: number) =>
                     querier(wx, wz).biome,
+                  resolveTreeConfig,
                   createRng: (salt: string) =>
                     _createTileRng(currentSeed, tileX, tileZ, salt),
                 };
@@ -4247,10 +4412,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             console.log(
               `[refreshTownMarkers] Marking ${tilesRef.current.size} tiles dirty for town terrain flattening`,
             );
+            const camTile = lastCameraTileRef.current;
+            const dEntries: Array<{ key: string; dist: number }> = [];
             for (const [key, tile] of tilesRef.current) {
               tile.dirty = true;
-              dirtyTileKeysRef.current.push(key);
+              const dx = tile.tileX - camTile.tileX;
+              const dz = tile.tileZ - camTile.tileZ;
+              dEntries.push({ key, dist: dx * dx + dz * dz });
             }
+            dEntries.sort((a, b) => a.dist - b.dist);
+            dirtyTileKeysRef.current = dEntries.map((e) => e.key);
             // Force updateTiles to re-scan on next frame
             lastCameraTileRef.current.tileX = -Infinity;
           }
@@ -4616,10 +4787,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
+        // Skip rendering while GPU recovery is in progress
+        if (gpuRecoveringRef.current || !rendererRef.current) {
+          return;
+        }
+
         try {
-          renderer.render(scene, camera);
+          if (postProcessingRef.current) {
+            postProcessingRef.current.render();
+          } else {
+            rendererRef.current.render(scene, camera);
+          }
         } catch (err) {
-          // GPU device lost — stop the animation loop to prevent error cascade
+          // GPU error — attempt device loss recovery instead of dying
           const crashStats = getGpuLifecycleStats();
           console.error(
             `[GPU-DEBUG] RENDER CRASH: deferDispose=${crashStats.pendingDisposals} deferAdd=${crashStats.pendingAdditions} ` +
@@ -4627,28 +4807,35 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               `scene=${scene.children.length}`,
           );
           console.error(
-            "[TileBasedTerrain] GPU device lost, stopping render loop:",
+            "[TileBasedTerrain] Render error, triggering device loss recovery:",
             err,
           );
-          mounted = false;
+          recoverGpu("render-crash");
           return;
         }
 
         // Render ViewHelper orientation cube overlay
         // ViewHelper types expect WebGLRenderer but work with WebGPURenderer at runtime
-        if (viewHelperRef.current) {
+        if (viewHelperRef.current && rendererRef.current) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          viewHelperRef.current.render(renderer as any);
+          viewHelperRef.current.render(rendererRef.current as any);
         }
 
-        // GPU resource disposal — runs AFTER rendering, only when staging is done.
-        // See SceneResourceManager for phase separation invariant.
+        // GPU resource disposal — runs AFTER rendering every frame.
+        // Safe to run alongside staging because disposal only destroys
+        // buffers after the GPU command buffer has been submitted.
         resourceManager.processDisposal();
 
-        // Process deferred GPU operations (overlay hooks) ONLY when
-        // SceneResourceManager has no pending work. This prevents both
-        // systems from creating GPU buffers in the same frame, which
-        // exhausts Metal's staging buffer pool and kills the device.
+        // Deferred GPU disposal — runs EVERY frame to free old GPU resources.
+        // Disposal only destroys buffers (never creates them), so it is safe
+        // to run alongside SceneResourceManager staging. Without this, wizard
+        // apply leaves thousands of unreleased buffers while staging adds new
+        // ones, exhausting Metal's staging buffer pool and crashing the device.
+        processDeferredDisposalOnly();
+
+        // Deferred additions (entity markers) — only when SceneResourceManager
+        // has no pending work, to avoid both systems creating GPU buffers in
+        // the same frame.
         if (
           !resourceManager.hasStagedWork &&
           resourceManager.pendingDisposal === 0
@@ -4788,7 +4975,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         orbitControlsRef.current = null;
       }
 
-      // Dispose WebGPU renderer
+      // Dispose PostProcessing and WebGPU renderer
+      if (postProcessingRef.current) {
+        postProcessingRef.current.dispose();
+        postProcessingRef.current = null;
+      }
       if (rendererRef.current) {
         if (
           container &&
@@ -4828,6 +5019,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       terrainQuerierRef.current = importedQuerier;
     } else if (config.useGamePipeline) {
       const gameQuerier = createGameTerrainQuerier(config.seed);
+      const heightScale = maxHeight / GAME_MAX_HEIGHT;
       const _gr: import("./terrainHelpers").TerrainQueryResult = {
         height: 0,
         biome: "forest",
@@ -4836,7 +5028,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       };
       terrainQuerierRef.current = (worldX: number, worldZ: number) => {
         const q = gameQuerier.queryPoint(worldX, worldZ);
-        _gr.height = q.height;
+        _gr.height = q.height * heightScale;
         _gr.biome = q.biomeId;
         _gr.color = q.biomeColor;
         _gr.biomeForestWeight = q.biomeForestWeight;
@@ -4880,14 +5072,44 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       );
     }
 
+    // Detect whether ONLY maxHeight changed — if so, skip dirty marking
+    // because the fast-path effect (Y-scaling + normal recompute) produces
+    // identical geometry without needing per-tile regeneration.
+    const prev = prevTerrainEffectDepsRef.current;
+    const onlyMaxHeightChanged =
+      prev.seed === config.seed &&
+      prev.useGamePipeline === config.useGamePipeline &&
+      prev.tileSize === tileSize &&
+      prev.tileResolution === tileResolution &&
+      prev.importedQuerier === importedQuerier &&
+      prev.maxHeight !== maxHeight;
+
+    prevTerrainEffectDepsRef.current = {
+      seed: config.seed,
+      useGamePipeline: config.useGamePipeline,
+      tileSize,
+      tileResolution,
+      maxHeight,
+      terrainConfig,
+      importedQuerier,
+    };
+
     // Mark all loaded tiles as dirty for progressive in-place regeneration
     // instead of tearing them all down and rebuilding from scratch.
-    if (tilesRef.current.size > 0) {
+    // Skip dirty marking when only maxHeight changed — the fast-path handles it.
+    if (tilesRef.current.size > 0 && !onlyMaxHeightChanged) {
       dirtyTileKeysRef.current = [];
+      // Sort dirty tiles by distance to camera so nearby tiles update first
+      const camTile = lastCameraTileRef.current;
+      const entries: Array<{ key: string; dist: number }> = [];
       for (const [key, tile] of tilesRef.current) {
         tile.dirty = true;
-        dirtyTileKeysRef.current.push(key);
+        const dx = tile.tileX - camTile.tileX;
+        const dz = tile.tileZ - camTile.tileZ;
+        entries.push({ key, dist: dx * dx + dz * dz });
       }
+      entries.sort((a, b) => a.dist - b.dist);
+      dirtyTileKeysRef.current = entries.map((e) => e.key);
     }
 
     prevMaxHeightRef.current = maxHeight;
@@ -4901,7 +5123,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     importedQuerier,
   ]);
 
-  // Fast-path: when ONLY waterThreshold changes, move water planes without
+  // Fast-path: when waterThreshold changes, move water planes without
   // regenerating terrain geometry. This runs in addition to the terrain config
   // effect which marks tiles dirty — the dirty regen will also update water,
   // but this gives an instant visual response before dirty tiles process.
@@ -4910,7 +5132,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     if (waterThreshold === prev) return;
     prevWaterThresholdRef.current = waterThreshold;
 
-    // Instantly reposition all existing water meshes
+    // Instantly reposition all existing water meshes.
+    // In studio mode there's a single world-sized water plane in the container;
+    // in standalone mode each tile has its own water mesh.
+    const wc = waterContainerRef.current;
+    if (wc) {
+      for (const child of wc.children) {
+        child.position.y = waterThreshold;
+      }
+    }
     for (const [, tile] of tilesRef.current) {
       if (tile.water) {
         tile.water.position.y = waterThreshold;
@@ -4918,9 +5148,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     }
   }, [waterThreshold]);
 
-  // Fast-path: when ONLY maxHeight changes, scale vertex Y positions on all
-  // loaded tiles by the ratio newMax/oldMax. This gives immediate visual
-  // feedback; the dirty-tile queue will do a proper full regen progressively.
+  // Fast-path: when maxHeight changes, scale vertex Y positions on all
+  // loaded tiles by the ratio newMax/oldMax. Also recomputes normals so the
+  // result is visually identical to a full tile regeneration — this means
+  // dirty-tile regen can be skipped entirely for maxHeight-only changes.
   useEffect(() => {
     const prev = prevMaxHeightRef.current;
     if (maxHeight === prev) return;
@@ -4938,6 +5169,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         arr[i] *= scale;
       }
       posAttr.needsUpdate = true;
+      tile.mesh.geometry.computeVertexNormals();
       tile.mesh.geometry.computeBoundingSphere();
     }
   }, [maxHeight]);
@@ -4958,11 +5190,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       `[TileBasedTerrain] Roads changed — marking ${tilesRef.current.size} tiles dirty for ${providedRoads.length} roads`,
     );
 
-    dirtyTileKeysRef.current = [];
+    const camTile = lastCameraTileRef.current;
+    const entries: Array<{ key: string; dist: number }> = [];
     for (const [key, tile] of tilesRef.current) {
       tile.dirty = true;
-      dirtyTileKeysRef.current.push(key);
+      const dx = tile.tileX - camTile.tileX;
+      const dz = tile.tileZ - camTile.tileZ;
+      entries.push({ key, dist: dx * dx + dz * dz });
     }
+    entries.sort((a, b) => a.dist - b.dist);
+    dirtyTileKeysRef.current = entries.map((e) => e.key);
   }, [providedRoads]);
 
   // Regenerate ALL tiles when mines change so the terrain shader picks up
@@ -4981,11 +5218,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       `[TileBasedTerrain] Mines changed — marking ${tilesRef.current.size} tiles dirty for ${providedMines.length} mines`,
     );
 
-    dirtyTileKeysRef.current = [];
+    const camTile = lastCameraTileRef.current;
+    const entries: Array<{ key: string; dist: number }> = [];
     for (const [key, tile] of tilesRef.current) {
       tile.dirty = true;
-      dirtyTileKeysRef.current.push(key);
+      const dx = tile.tileX - camTile.tileX;
+      const dz = tile.tileZ - camTile.tileZ;
+      entries.push({ key, dist: dx * dx + dz * dz });
     }
+    entries.sort((a, b) => a.dist - b.dist);
+    dirtyTileKeysRef.current = entries.map((e) => e.key);
   }, [providedMines]);
 
   // Notify parent of tile count changes
@@ -5240,6 +5482,38 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   return (
     <div className={`relative w-full h-full ${className}`}>
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* ---- GPU recovery overlay ---- */}
+      {gpuRecovering && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 pointer-events-none">
+          <div className="text-center text-white">
+            <div className="text-lg font-semibold mb-2">
+              GPU connection lost — recovering...
+            </div>
+            <div className="text-sm text-gray-300">
+              Attempt {gpuRecoveryCountRef.current} of 3
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- GPU permanent error ---- */}
+      {gpuError && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80">
+          <div className="text-center text-white max-w-md">
+            <div className="text-lg font-semibold mb-2 text-red-400">
+              GPU Error
+            </div>
+            <div className="text-sm text-gray-300 mb-4">{gpuError}</div>
+            <button
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm"
+              onClick={() => window.location.reload()}
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ---- Loading overlay — shown until all low-res tiles are seeded ---- */}
       {loadingOverlayVisible && (

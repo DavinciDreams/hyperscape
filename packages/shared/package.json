@@ -19,6 +19,7 @@
       "default": "./build/framework.client.js"
     },
     "./world": {
+      "types": "./src/world/world.d.ts",
       "import": "./build/world.js",
       "default": "./build/world.js"
     }

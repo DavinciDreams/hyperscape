@@ -11,7 +11,7 @@
  * Event listeners are registered once per placement session (not per frame).
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { useEffect, useRef, useCallback } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";

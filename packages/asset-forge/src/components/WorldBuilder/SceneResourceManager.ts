@@ -58,8 +58,14 @@ const STAGING_BATCH_NORMAL = 4;
  */
 const STAGING_BATCH_FAST = 4;
 
-/** Objects disposed per frame (after staging completes) */
-const DISPOSAL_BATCH = 4;
+/** Objects disposed per frame (after staging completes, normal operation) */
+const DISPOSAL_BATCH_NORMAL = 4;
+
+/** Objects disposed per frame when backlog is large (post-wizard apply) */
+const DISPOSAL_BATCH_BURST = 32;
+
+/** Queue size above which burst disposal kicks in */
+const DISPOSAL_BURST_THRESHOLD = 100;
 
 // ============== Disposal helpers ==============
 
@@ -191,16 +197,23 @@ export class SceneResourceManager {
    * Call AFTER rendering to ensure the GPU has finished using resources
    * referenced in the current frame's command buffer.
    *
-   * Disposal is SKIPPED while staging is active (phase separation).
+   * Disposal runs every frame regardless of staging state. This is safe
+   * because disposal only calls .dispose() (GPU buffer destruction) AFTER
+   * the render is complete — the GPU command buffer for this frame has
+   * already been submitted. Without this, large disposal backlogs from
+   * wizard apply accumulate unreleased GPU memory while staging adds new
+   * buffers, exhausting Metal's staging buffer pool and crashing the device.
    *
    * @returns Number of items disposed this frame
    */
   processDisposal(): number {
-    // Phase separation: never dispose while staging is active
-    if (this.stagingQueue.length > 0) return 0;
     if (this.disposalQueue.length === 0) return 0;
 
-    const end = Math.min(DISPOSAL_BATCH, this.disposalQueue.length);
+    const batchSize =
+      this.disposalQueue.length > DISPOSAL_BURST_THRESHOLD
+        ? DISPOSAL_BATCH_BURST
+        : DISPOSAL_BATCH_NORMAL;
+    const end = Math.min(batchSize, this.disposalQueue.length);
     const batch = this.disposalQueue.splice(0, end);
 
     for (const item of batch) {

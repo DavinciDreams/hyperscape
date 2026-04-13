@@ -149,8 +149,8 @@ const WATER_PROXIMITY_BOOST = 20.0; // water-affinity trees get 20x weight near 
 const WATER_HEIGHT_PRECHECK = 35; // only run expensive water search within this height above water
 
 const DENSITY_NOISE_SCALE = 0.006; // ~170m dense/sparse zones
-const DENSITY_NOISE_MIN = 0.15; // sparse zones still get 15% of trees
-const DENSITY_NOISE_POWER = 1.5; // push noise toward extremes
+const DENSITY_NOISE_MIN = 0.4; // sparse zones still get 40% of trees
+const DENSITY_NOISE_POWER = 1.2; // moderate variation between dense/sparse
 
 function intHash2D(ix: number, iz: number): number {
   let h = (ix * 374761393 + iz * 668265263) | 0;

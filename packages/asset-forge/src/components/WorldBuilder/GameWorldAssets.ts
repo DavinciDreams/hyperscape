@@ -8,7 +8,9 @@
  * Also creates bridge and duel arena geometry at game positions.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import { texture, normalMap } from "three/tsl";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   createBridgeWoodMaterial,
@@ -22,6 +24,12 @@ import {
   type BridgeDef,
 } from "./ProceduralBridge";
 import { createProceduralArena } from "./ProceduralArena";
+
+import {
+  getTreeConfigForBiome,
+  BIOME_LIST,
+  BiomeType,
+} from "@hyperscape/shared/world";
 
 // ============== TYPES ==============
 
@@ -46,52 +54,6 @@ export interface TreeSpeciesInstance {
   /** Manifest scale applied to instances (very small, e.g. 0.008-0.018) */
   manifestScale: number;
 }
-
-/** Biome tree configs matching TerrainBiomeTypes.ts */
-export interface BiomeTreeEntry {
-  id: string;
-  weight: number;
-}
-
-/** Must match FOREST/CANYON/TUNDRA_TREE_CONFIG in TerrainBiomeTypes.ts exactly */
-export const BIOME_TREES: Record<
-  string,
-  { density: number; trees: BiomeTreeEntry[] }
-> = {
-  forest: {
-    density: 15,
-    trees: [
-      { id: "tree_knotwood", weight: 40 },
-      { id: "tree_oak", weight: 20 },
-      { id: "tree_birch", weight: 20 },
-      { id: "tree_maple", weight: 40 },
-      { id: "tree_fir", weight: 15 },
-      { id: "tree_pine", weight: 15 },
-      { id: "tree_chinaPine", weight: 15 },
-      { id: "tree_bamboo", weight: 15 },
-    ],
-  },
-  canyon: {
-    density: 15,
-    trees: [
-      { id: "tree_cactus", weight: 20 },
-      { id: "tree_dead", weight: 20 },
-      { id: "tree_palm", weight: 20 },
-      { id: "tree_coconut", weight: 10 },
-    ],
-  },
-  tundra: {
-    density: 10,
-    trees: [
-      { id: "tree_windPine", weight: 40 },
-      { id: "tree_fir", weight: 30 },
-      { id: "tree_pine", weight: 25 },
-      { id: "tree_birch", weight: 10 },
-    ],
-  },
-};
-
-const DEFAULT_BIOME_TREES = BIOME_TREES.forest;
 
 // ============== GLB TREE LOADING ==============
 
@@ -120,7 +82,43 @@ function resolveAssetUrl(assetPath: string): string {
 }
 
 /**
+ * Convert a GLTFLoader MeshStandardMaterial to a WebGPU-compatible
+ * MeshStandardNodeMaterial, copying PBR properties and texture maps.
+ */
+function convertToNodeMaterial(src: THREE.Material): MeshStandardNodeMaterial {
+  const dst = new MeshStandardNodeMaterial();
+
+  if (src instanceof THREE.MeshStandardMaterial) {
+    dst.color.copy(src.color);
+    dst.roughness = src.roughness;
+    dst.metalness = src.metalness;
+    dst.emissive.copy(src.emissive);
+    dst.emissiveIntensity = src.emissiveIntensity;
+    dst.side = src.side;
+    dst.transparent = src.transparent;
+    dst.opacity = src.opacity;
+    dst.alphaTest = src.alphaTest;
+    dst.depthWrite = src.depthWrite;
+
+    // Assign textures via TSL nodes for proper WebGPU pipeline integration
+    if (src.map) {
+      src.map.colorSpace = THREE.SRGBColorSpace;
+      dst.colorNode = texture(src.map);
+    }
+    if (src.normalMap) dst.normalNode = normalMap(texture(src.normalMap));
+    if (src.roughnessMap) dst.roughnessNode = texture(src.roughnessMap);
+    if (src.metalnessMap) dst.metalnessNode = texture(src.metalnessMap);
+    if (src.aoMap) dst.aoNode = texture(src.aoMap);
+    if (src.emissiveMap) dst.emissiveNode = texture(src.emissiveMap);
+    if (src.alphaMap) dst.alphaMap = src.alphaMap;
+  }
+
+  return dst;
+}
+
+/**
  * Load a single GLB model and extract all mesh geometry + materials.
+ * Materials are converted to MeshStandardNodeMaterial for WebGPU compatibility.
  */
 async function loadGLBMeshParts(
   url: string,
@@ -143,7 +141,8 @@ async function loadGLBMeshParts(
     geom.applyMatrix4(child.matrixWorld);
 
     const rawMat = child.material;
-    const mat: THREE.Material = Array.isArray(rawMat) ? rawMat[0] : rawMat;
+    const src: THREE.Material = Array.isArray(rawMat) ? rawMat[0] : rawMat;
+    const mat = convertToNodeMaterial(src);
     parts.push({ geometry: geom, material: mat });
   });
 
@@ -238,12 +237,14 @@ export function getTreeSpeciesInstance(
 
 /**
  * Get all unique tree species IDs used across all biomes.
+ * Reads from the game's authoritative BiomeTreeConfig via getTreeConfigForBiome().
  */
 export function getAllTreeSpeciesIds(): string[] {
   const ids = new Set<string>();
-  for (const config of Object.values(BIOME_TREES)) {
-    for (const tree of config.trees) {
-      ids.add(tree.id);
+  for (const biome of BIOME_LIST) {
+    const config = getTreeConfigForBiome(biome);
+    for (const treeId of Object.keys(config.trees)) {
+      ids.add(treeId);
     }
   }
   return [...ids];
@@ -251,23 +252,28 @@ export function getAllTreeSpeciesIds(): string[] {
 
 /**
  * Pick a random tree species for a biome based on weighted probabilities.
+ * Reads from the game's authoritative BiomeTreeConfig via getTreeConfigForBiome().
  */
 export function pickTreeSpecies(biome: string, random: () => number): string {
-  const config = BIOME_TREES[biome] ?? DEFAULT_BIOME_TREES;
-  const totalWeight = config.trees.reduce((sum, t) => sum + t.weight, 0);
+  const config = getTreeConfigForBiome(biome);
+  const trees = config.trees as Record<string, { weight: number }>;
+  const entries = Object.entries(trees);
+  if (entries.length === 0) return "tree_general";
+  const totalWeight = entries.reduce((sum, [, cfg]) => sum + cfg.weight, 0);
   let r = random() * totalWeight;
-  for (const tree of config.trees) {
-    r -= tree.weight;
-    if (r <= 0) return tree.id;
+  for (const [treeId, cfg] of entries) {
+    r -= cfg.weight;
+    if (r <= 0) return treeId;
   }
-  return config.trees[0].id;
+  return entries[0][0];
 }
 
 /**
  * Get tree density (trees per tile) for a biome.
+ * Reads from the game's authoritative BiomeTreeConfig via getTreeConfigForBiome().
  */
 export function getTreeDensity(biome: string): number {
-  return (BIOME_TREES[biome] ?? DEFAULT_BIOME_TREES).density;
+  return getTreeConfigForBiome(biome).density;
 }
 
 /**

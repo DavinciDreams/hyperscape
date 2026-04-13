@@ -9,7 +9,7 @@
  * All stone components merged into a single draw call.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import type { MeshStandardNodeMaterial } from "three/webgpu";
 
 // ============== CONSTANTS (from BridgeSystem.ts) ==============

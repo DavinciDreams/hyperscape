@@ -22,8 +22,6 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 import { WebGPURenderer, MeshBasicNodeMaterial } from "three/webgpu";
 
 import { getTierColor } from "../../constants/materials";
@@ -128,7 +126,6 @@ const ThreeViewer = forwardRef(
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const transformControlsRef = useRef<TransformControls | null>(null);
-    const composerRef = useRef<EffectComposer | null>(null);
     const modelRef = useRef<THREE.Object3D | null>(null);
     const activeSkinnedMeshRef = useRef<THREE.SkinnedMesh | null>(null);
     const editingSkeletonRootRef = useRef<THREE.Object3D | null>(null);
@@ -805,19 +802,13 @@ const ThreeViewer = forwardRef(
           }
         },
         takeScreenshot: () => {
-          if (
-            rendererRef.current &&
-            sceneRef.current &&
-            cameraRef.current &&
-            composerRef.current
-          ) {
+          if (rendererRef.current && sceneRef.current && cameraRef.current) {
             // Render at higher resolution for screenshot
             const originalSize = new THREE.Vector2();
             rendererRef.current.getSize(originalSize);
             rendererRef.current.setSize(originalSize.x * 2, originalSize.y * 2);
-            composerRef.current.setSize(originalSize.x * 2, originalSize.y * 2);
 
-            composerRef.current.render();
+            rendererRef.current.render(sceneRef.current, cameraRef.current);
 
             const canvas = rendererRef.current.domElement;
             canvas.toBlob(
@@ -833,7 +824,6 @@ const ThreeViewer = forwardRef(
 
                 // Restore original size
                 rendererRef.current!.setSize(originalSize.x, originalSize.y);
-                composerRef.current!.setSize(originalSize.x, originalSize.y);
               },
               "image/png",
               1.0,
@@ -2273,13 +2263,8 @@ const ThreeViewer = forwardRef(
             modelRef.current.updateMatrixWorld(true);
 
             // Force update the renderer to show the changes
-            if (
-              rendererRef.current &&
-              sceneRef.current &&
-              cameraRef.current &&
-              composerRef.current
-            ) {
-              composerRef.current.render();
+            if (rendererRef.current && sceneRef.current && cameraRef.current) {
+              rendererRef.current.render(sceneRef.current, cameraRef.current);
             }
           }
 
@@ -3151,9 +3136,19 @@ const ThreeViewer = forwardRef(
         rendererRef.current = renderer;
         rendererReady = true;
 
-        // Note: For post-processing with WebGPU, use TSL-based effects.
-        // For now, we render directly without post-processing effects.
-        composerRef.current = null;
+        // Monitor GPU device loss for error reporting
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const backend = (renderer as any).backend;
+        if (backend?.device?.lost) {
+          backend.device.lost.then(
+            (info: { reason: string; message: string }) => {
+              if (info.reason === "destroyed") return; // intentional cleanup
+              console.error(
+                `[ThreeViewer] GPU device lost: reason="${info.reason}" message="${info.message}"`,
+              );
+            },
+          );
+        }
 
         return true;
       })();
@@ -3632,14 +3627,9 @@ const ThreeViewer = forwardRef(
 
         controls.update();
 
-        // Render with composer if available, otherwise use raw renderer
-        // Only render if WebGPU renderer is ready
+        // Render (WebGPU)
         if (rendererReady) {
-          if (composerRef.current) {
-            composerRef.current.render();
-          } else {
-            renderer.render(scene, camera);
-          }
+          renderer.render(scene, camera);
         }
       };
       animate();
@@ -3657,11 +3647,6 @@ const ThreeViewer = forwardRef(
         if (rendererReady) {
           renderer.setSize(width, height);
         }
-        if (composerRef.current) {
-          composerRef.current.setSize(width, height);
-        }
-
-        // SSAO pass will automatically resize with composer
         if (shouldReframeOnResizeRef.current) {
           // Reframe once after first non-zero resize
           shouldReframeOnResizeRef.current = false;
@@ -3888,7 +3873,6 @@ const ThreeViewer = forwardRef(
         if (resizeObserver) resizeObserver.disconnect();
         if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
         renderer.dispose();
-        if (composerRef.current) composerRef.current.dispose();
         controls.dispose();
         if (containerEl && canvas.parentElement) {
           containerEl.removeChild(canvas);
@@ -3979,17 +3963,6 @@ const ThreeViewer = forwardRef(
       if (rimLight) {
         rimLight.color = new THREE.Color(env.rimLightColor);
         rimLight.intensity = env.rimLightIntensity * lightModeFactor * 0.6;
-      }
-
-      // Update SSAO intensity for light mode
-      if (composerRef.current) {
-        const ssaoPass = composerRef.current.passes.find(
-          (pass) => pass instanceof SSAOPass,
-        ) as SSAOPass;
-        if (ssaoPass) {
-          ssaoPass.minDistance = isLightBackground ? 0.002 : 0.001;
-          ssaoPass.maxDistance = isLightBackground ? 0.05 : 0.1;
-        }
       }
     }, [currentEnvironment, isLightBackground]);
 

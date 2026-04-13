@@ -14,7 +14,7 @@
  * for each thumbnail render and dispose them after.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import {
   WebGPURenderer,
   MeshStandardNodeMaterial,

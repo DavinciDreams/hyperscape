@@ -5,18 +5,16 @@
  * All files in @hyperscape/procgen should reference these instead of
  * hardcoding magic numbers.
  *
- * NOTE: The game runtime in @hyperscape/shared has its own
- * TERRAIN_CONSTANTS.WATER_THRESHOLD (= 16) and MAX_HEIGHT (= 50).
- * The procgen defaults below use a different height scale (maxHeight=30).
- * When procgen is used inside the game, the game passes its own values
- * via config overrides — these are just standalone defaults.
+ * Aligned with @hyperscape/shared game constants:
+ * - MAX_HEIGHT = 50 (TerrainHeightParams.ts)
+ * - TERRAIN_CONSTANTS.WATER_THRESHOLD = 16 (GameConstants.ts)
  */
 
-/** Default max terrain height in world units */
-export const DEFAULT_MAX_HEIGHT = 30;
+/** Default max terrain height in world units (matches game MAX_HEIGHT) */
+export const DEFAULT_MAX_HEIGHT = 50;
 
-/** Default water threshold in world units (terrain below this is underwater) */
-export const DEFAULT_WATER_THRESHOLD = 5.4;
+/** Default water threshold in world units (matches game TERRAIN_CONSTANTS.WATER_THRESHOLD) */
+export const DEFAULT_WATER_THRESHOLD = 16;
 
 /**
  * Water level in world-space Y for the game runtime.

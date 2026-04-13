@@ -59,7 +59,7 @@ export const DEFAULT_NOISE_CONFIG: TerrainNoiseConfig = {
  * Default shoreline configuration
  */
 export const DEFAULT_SHORELINE_CONFIG: ShorelineConfig = {
-  waterLevelNormalized: 0.15,
+  waterLevelNormalized: 0.32, // 16/50 = waterThreshold/maxHeight
   threshold: 0.25,
   colorStrength: 0.6,
   minSlope: 0.06,

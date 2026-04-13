@@ -8,7 +8,7 @@
  * Requires WebGPU renderer (uses three/tsl node materials).
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
   Fn,

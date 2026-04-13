@@ -15,7 +15,7 @@
  * - F-to-focus camera animation
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import React, {
   useRef,
   useCallback,

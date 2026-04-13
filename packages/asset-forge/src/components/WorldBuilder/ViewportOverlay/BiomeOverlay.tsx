@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useRef } from "react";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { MeshBasicNodeMaterial, LineBasicNodeMaterial } from "three/webgpu";
 
 import type {

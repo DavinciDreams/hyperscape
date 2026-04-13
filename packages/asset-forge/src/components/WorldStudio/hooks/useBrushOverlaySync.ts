@@ -11,7 +11,7 @@
  * Uses TerrainSceneRefs.terrainContainer for direct geometry manipulation.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { useEffect, useRef } from "react";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";

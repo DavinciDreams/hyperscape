@@ -901,6 +901,14 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
           icon={<SlidersHorizontal size={10} />}
           defaultOpen={false}
         >
+          {config.useGamePipeline !== false && (
+            <div className="flex items-center gap-1.5 px-2 py-1.5 mb-2 rounded bg-amber-500/10 border border-amber-500/20">
+              <span className="text-[9px] text-amber-400 leading-tight">
+                Terrain shape is fixed in Game Mode. Switch to Creative Mode to
+                customize noise layers.
+              </span>
+            </div>
+          )}
           <p className="text-[10px] text-text-tertiary leading-tight mb-2">
             Control how bumpy or flat the terrain is. Weight = strength of each
             noise layer in the final heightmap.
@@ -1019,6 +1027,14 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
           defaultOpen={false}
           badge={activeBiomes.length}
         >
+          {config.useGamePipeline !== false && (
+            <div className="flex items-center gap-1.5 px-2 py-1.5 mb-2 rounded bg-amber-500/10 border border-amber-500/20">
+              <span className="text-[9px] text-amber-400 leading-tight">
+                Biome layout is fixed in Game Mode. Switch to Creative Mode to
+                customize.
+              </span>
+            </div>
+          )}
           {/* Biome grid config */}
           <SliderInput
             label="Grid Size"
@@ -1352,6 +1368,14 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
           icon={<Waves size={10} />}
           defaultOpen={false}
         >
+          {config.useGamePipeline !== false && (
+            <div className="flex items-center gap-1.5 px-2 py-1.5 mb-2 rounded bg-amber-500/10 border border-amber-500/20">
+              <span className="text-[9px] text-amber-400 leading-tight">
+                Island shape is fixed in Game Mode. Switch to Creative Mode to
+                customize coastline.
+              </span>
+            </div>
+          )}
           <div className="space-y-1">
             <InfoRow
               label="Island Mask"

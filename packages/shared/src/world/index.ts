@@ -45,6 +45,12 @@ export {
   getTreeConfigForBiome,
 } from "../systems/shared/world/TerrainBiomeTypes";
 
+// Tree type definitions (single source of truth for tree IDs & spawn config shapes)
+export { TreeId, type TreeSpawnConfig } from "../constants/TreeTypes";
+
+// Biome tree config type (used by World Studio to match game vegetation configs)
+export { type BiomeTreeConfig } from "../types/world/world-types";
+
 // Vegetation (already used by asset-forge)
 export {
   generateTrees,

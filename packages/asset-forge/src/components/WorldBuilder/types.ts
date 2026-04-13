@@ -50,9 +50,13 @@ export interface TownLandmarkConfig {
 }
 
 // ============== VEGETATION TYPES ==============
+// These types MUST match the game's BiomeTreeConfig and TreeSpawnConfig
+// from @hyperscape/shared (TreeTypes.ts and world-types.ts).
+// Kept as local definitions because @hyperscape/shared/world doesn't emit .d.ts files.
 
 /**
- * Per-species spawn configuration (mirrors shared BiomeTreeConfig.trees entries)
+ * Per-species spawn configuration.
+ * Mirrors TreeSpawnConfig from @hyperscape/shared/constants/TreeTypes.ts
  */
 export interface TreeSpawnConfigUI {
   /** Relative spawn weight (higher = more likely) */
@@ -63,20 +67,22 @@ export interface TreeSpawnConfigUI {
   maxHeight?: number;
   /** How strongly this tree prefers water-adjacent placement (0-1) */
   waterAffinity?: number;
-  /** Max height above water to consider "near water" */
-  waterProximityHeight?: number;
+  /** Horizontal search radius (meters) when looking for nearby water. Default 40. */
+  waterSearchRadius?: number;
+  /** Max horizontal distance from shore (meters) before rejection kicks in. Default 30. */
+  waterMaxDistance?: number;
   /** Reject placement below this height above water threshold */
   avoidsWaterBelow?: number;
 }
 
 /**
- * Per-biome tree vegetation configuration
- * Matches the shape of BiomeTreeConfig from @hyperscape/shared
+ * Per-biome tree vegetation configuration.
+ * Mirrors BiomeTreeConfig from @hyperscape/shared/types/world/world-types.ts
  */
 export interface BiomeTreeVegetationConfig {
   /** Whether trees are enabled for this biome */
   enabled: boolean;
-  /** Per-tree spawn weight + placement rules, keyed by tree ID */
+  /** Per-tree spawn weight + placement rules, keyed by tree ID (e.g. "tree_oak") */
   trees: Record<string, TreeSpawnConfigUI>;
   /** Trees per tile (base density) */
   density: number;
@@ -84,11 +90,17 @@ export interface BiomeTreeVegetationConfig {
   minSpacing: number;
   /** Whether trees should cluster together */
   clustering: boolean;
-  /** Cluster size if clustering is enabled */
+  /** Whether snow-capable trees in this biome receive snow coverage */
+  enableSnow?: boolean;
+  /** Average number of trees per cluster (default: 4) */
   clusterSize?: number;
-  /** Scale variation range [min, max] multiplier */
+  /** Radius of each cluster in meters (default: clusterSize * minSpacing) */
+  clusterRadius?: number;
+  /** Minimum distance between cluster centers in meters (default: clusterRadius * 2) */
+  clusterSpacing?: number;
+  /** Scale variation range [min, max] multiplier (default: [0.8, 1.2]) */
   scaleVariation?: [number, number];
-  /** Maximum terrain slope for tree placement */
+  /** Maximum terrain slope for tree placement (gradient magnitude, default: 1.5) */
   maxSlope?: number;
 }
 
@@ -1299,7 +1311,7 @@ export const DEFAULT_ISLAND_CONFIG: IslandConfig = {
  * Default shoreline configuration
  */
 export const DEFAULT_SHORELINE_CONFIG: ShorelineConfig = {
-  waterLevelNormalized: 0.15,
+  waterLevelNormalized: 0.32, // 16/50 = waterThreshold/maxHeight
   threshold: 0.25,
   colorStrength: 0.6,
   minSlope: 0.06,
@@ -1311,64 +1323,86 @@ export const DEFAULT_SHORELINE_CONFIG: ShorelineConfig = {
 };
 
 /**
- * Default per-biome vegetation configs — mirrors TerrainBiomeTypes.ts hardcoded values.
- * Tree IDs use "tree_xxx" format matching the TreeId enum in @hyperscape/shared.
+ * Default per-biome vegetation configs — exact mirrors of the FOREST/CANYON/TUNDRA_TREE_CONFIG
+ * constants in TerrainBiomeTypes.ts.
+ *
+ * Tree IDs use the "tree_xxx" format matching the TreeId enum in @hyperscape/shared.
+ * If you change these defaults, update TerrainBiomeTypes.ts too (or vice versa).
+ * The game's getTreeConfigForBiome() is the runtime authority; these defaults are only
+ * used in the editor's creation-mode UI before the user overrides them.
  */
 export const DEFAULT_VEGETATION_CONFIG: VegetationConfig = {
   forest: {
     enabled: true,
     trees: {
-      tree_knotwood: { weight: 40, maxHeight: 30 },
-      tree_oak: { weight: 20, maxHeight: 30 },
-      tree_birch: { weight: 20, maxHeight: 30 },
-      tree_maple: { weight: 40, maxHeight: 30 },
-      tree_fir: { weight: 15, maxHeight: 30 },
-      tree_pine: { weight: 15, maxHeight: 30 },
-      tree_chinaPine: { weight: 15, minHeight: 30, maxHeight: 60 },
-      tree_bamboo: { weight: 15, minHeight: 35 },
+      tree_general: { weight: 50, maxHeight: 60 },
+      tree_eucalyptus: { weight: 10, maxHeight: 60 },
+      tree_oak: { weight: 30, maxHeight: 60 },
+      tree_mahogany: { weight: 20, maxHeight: 60 },
+      tree_pine: { weight: 50, minHeight: 60 },
+      tree_bamboo: { weight: 20, minHeight: 50 },
+      tree_palm: {
+        weight: 25,
+        waterAffinity: 0.8,
+        waterSearchRadius: 100,
+        waterMaxDistance: 80,
+      },
+      tree_banana: {
+        weight: 25,
+        waterAffinity: 0.8,
+        waterSearchRadius: 100,
+        waterMaxDistance: 80,
+      },
     },
-    density: 15,
-    minSpacing: 12,
-    clustering: false,
-    scaleVariation: [0.8, 1.2],
+    density: 50,
+    minSpacing: 5,
+    clustering: true,
+    clusterSize: 40,
+    clusterRadius: 120,
+    clusterSpacing: 80,
+    scaleVariation: [1.0, 1.2],
     maxSlope: 1.5,
   },
   canyon: {
     enabled: true,
     trees: {
-      tree_cactus: { weight: 20, avoidsWaterBelow: 3 },
-      tree_dead: { weight: 20, minHeight: 20 },
       tree_palm: {
-        weight: 20,
-        waterAffinity: 0.3,
-        waterProximityHeight: 9,
-        maxHeight: 15,
+        weight: 25,
+        waterAffinity: 0.8,
+        waterSearchRadius: 100,
+        waterMaxDistance: 80,
       },
-      tree_coconut: {
-        weight: 10,
-        waterAffinity: 0.6,
-        waterProximityHeight: 9,
-        maxHeight: 15,
+      tree_banana: {
+        weight: 25,
+        waterAffinity: 0.8,
+        waterSearchRadius: 100,
+        waterMaxDistance: 80,
       },
-    },
-    density: 15,
-    minSpacing: 18,
-    clustering: false,
-    scaleVariation: [0.7, 1.3],
-    maxSlope: 2.0,
-  },
-  tundra: {
-    enabled: true,
-    trees: {
-      tree_windPine: { weight: 40, minHeight: 15 },
-      tree_fir: { weight: 30, minHeight: 10 },
-      tree_pine: { weight: 25, minHeight: 8 },
-      tree_birch: { weight: 10 },
+      tree_maple: { weight: 20, maxHeight: 60 },
+      tree_magic: { weight: 5, maxHeight: 60 },
+      tree_dead: { weight: 25 },
     },
     density: 10,
     minSpacing: 12,
     clustering: false,
-    scaleVariation: [0.6, 1.0],
+    scaleVariation: [1.0, 1.2],
+    maxSlope: 0.1,
+  },
+  tundra: {
+    enabled: true,
+    enableSnow: true,
+    trees: {
+      tree_pine: { weight: 50, minHeight: 35 },
+      tree_pineDead: { weight: 30, minHeight: 38 },
+      tree_dead: { weight: 20, minHeight: 38 },
+    },
+    density: 25,
+    minSpacing: 5,
+    clustering: true,
+    clusterSize: 30,
+    clusterRadius: 120,
+    clusterSpacing: 100,
+    scaleVariation: [1.0, 1.2],
     maxSlope: 1.5,
   },
 };
@@ -1380,15 +1414,15 @@ export const DEFAULT_VEGETATION_CONFIG: VegetationConfig = {
  * Memory usage ≈ worldSize² × tileResolution² × 36 bytes per vertex
  */
 export const DEFAULT_CREATION_CONFIG: WorldCreationConfig = {
-  seed: 12345,
+  seed: 0,
   preset: "large-island",
   useGamePipeline: true,
   terrain: {
     tileSize: 100,
-    worldSize: 20, // 20x20 tiles = 2km x 2km (preview-friendly, increase for production)
+    worldSize: 100, // 100x100 tiles = 10km x 10km (match game world; LOD keeps perf)
     tileResolution: 32, // 32 vertices per tile side (preview quality)
-    maxHeight: 30,
-    waterThreshold: 5.4,
+    maxHeight: 50, // match game MAX_HEIGHT (TerrainHeightParams.ts)
+    waterThreshold: 16, // match game TERRAIN_CONSTANTS.WATER_THRESHOLD (GameConstants.ts)
   },
   noise: DEFAULT_NOISE_CONFIG,
   biomes: DEFAULT_BIOME_CONFIG,

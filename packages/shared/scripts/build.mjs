@@ -168,6 +168,11 @@ async function buildLibrary() {
   await ctxWorld.dispose()
   console.log('✓ world.js built successfully')
 
+  // world.d.ts lives at src/world/world.d.ts (hand-maintained).
+  // Do NOT copy it to build/ — Bun's resolver will load world.d.ts as JS
+  // instead of world.js when both exist in the same directory.
+  // Type resolution uses package.json "types" → src/world/world.d.ts.
+
   console.log('✓ All library builds completed')
 }
 

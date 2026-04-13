@@ -18,7 +18,7 @@
  *   coalesced via requestAnimationFrame.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import {
   MeshBasicNodeMaterial,
   LineBasicNodeMaterial,
