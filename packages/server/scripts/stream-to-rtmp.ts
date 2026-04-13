@@ -27,6 +27,7 @@
  *   STREAM_CAPTURE_HEADLESS  - 'true' for headless (default: false for better GPU rendering)
  *   STREAM_CAPTURE_CHANNEL   - Browser channel ('chrome', 'msedge', etc.)
  *   STREAM_CAPTURE_ANGLE     - ANGLE backend (default: metal on macOS, vulkan elsewhere)
+ *   STREAM_CAPTURE_PRESERVE_STREAM_ROUTE - Keep /stream instead of rewriting to /stream.html
  *   CAPTURE_DISABLE_SANDBOX  - 'true' to launch Chromium with --no-sandbox
  *   STREAM_CDP_QUALITY       - JPEG quality for CDP screencast (1-100, default: 80)
  *   STREAM_FPS               - Target frames per second (default: 30)
@@ -103,6 +104,9 @@ const GAME_FALLBACK_URLS = (
 const STREAMING_VIEWER_ACCESS_TOKEN = (
   process.env.STREAMING_VIEWER_ACCESS_TOKEN || ""
 ).trim();
+const STREAM_CAPTURE_PRESERVE_STREAM_ROUTE = /^(1|true|yes|on)$/i.test(
+  process.env.STREAM_CAPTURE_PRESERVE_STREAM_ROUTE || "",
+);
 
 function normalizeCaptureGameUrl(rawUrl: string): string {
   if ((process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") !== "cdp") {
@@ -114,7 +118,7 @@ function normalizeCaptureGameUrl(rawUrl: string): string {
     // The source encoder needs the dedicated stream entrypoint. The public
     // /stream route is a normal SPA route in some deployments and will try to
     // authenticate as a player.
-    if (url.pathname === "/stream") {
+    if (!STREAM_CAPTURE_PRESERVE_STREAM_ROUTE && url.pathname === "/stream") {
       url.pathname = "/stream.html";
     }
     // CDP capture reads frames directly from the compositor and does not
