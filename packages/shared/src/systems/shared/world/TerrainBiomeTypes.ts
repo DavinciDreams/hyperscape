@@ -229,6 +229,11 @@ export interface BiomeScatterLayer {
   clustering?: boolean;
   /** Average number of instances per cluster (requires clustering: true) */
   clusterSize?: number;
+  /** Radius in world metres of each cluster patch. Defaults to clusterSize * minSpacing. */
+  clusterRadius?: number;
+  /** Minimum world-space distance between cluster centers (enforces clearings).
+   *  Defaults to clusterRadius * 2. */
+  clusterSpacing?: number;
   /** Perlin noise frequency for patch mask — higher = smaller patches (default 0.05) */
   noiseScale?: number;
   /** Noise cutoff 0–1, positions below this are skipped (default 0.3) */
@@ -265,13 +270,19 @@ const CANYON_SCATTER_CONFIG: BiomeScatterConfig = {
     {
       biomeId: "canyon",
       assets: ["cactus"],
-      density: 1,
-      minSpacing: 8,
+      density: 3,
+      minSpacing: 6,
       maxSlope: 0.5,
       avoidWater: true,
       colorTint: [10.15, 0.1, 0.1],
       clustering: true,
-      clusterSize: 10,
+      clusterSize: 3,
+      clusterRadius: 10,
+      clusterSpacing: 60,
+      // noiseScale 0.008 = ~125m noise zones; noiseThreshold 0.55 keeps ~45% of tiles
+      // This creates natural large empty areas between clusters across tile boundaries
+      noiseScale: 0.008,
+      noiseThreshold: 0.55,
       scaleVariation: [0.8, 1.0],
     },
   ],

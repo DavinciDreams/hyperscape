@@ -42,7 +42,7 @@ import { getTreeConfigForBiome } from "./TerrainBiomeTypes";
  * so that points near tile edges respect spacing against hypothetical
  * neighbors, reducing cross-tile clumping.
  */
-function poissonDiskSample2D(
+export function poissonDiskSample2D(
   width: number,
   height: number,
   minDistance: number,

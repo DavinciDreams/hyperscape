@@ -61,6 +61,7 @@ import {
 import { csmLevels } from "./Environment";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import { updateTreeInstances } from "./ProcgenTreeCache";
+import { poissonDiskSample2D } from "./BiomeResourceGenerator";
 import {
   BIOME_LIST,
   getScatterConfigForBiome,
@@ -1587,6 +1588,8 @@ export class VegetationSystem extends System {
           maxHeight: scatterLayer.maxHeight,
           clustering: scatterLayer.clustering,
           clusterSize: scatterLayer.clusterSize,
+          clusterRadius: scatterLayer.clusterRadius,
+          clusterSpacing: scatterLayer.clusterSpacing,
           noiseScale: scatterLayer.noiseScale,
           noiseThreshold: scatterLayer.noiseThreshold,
           scaleVariation: scatterLayer.scaleVariation,
@@ -1915,6 +1918,8 @@ export class VegetationSystem extends System {
       maxHeight: layer.maxHeight,
       clustering: layer.clustering,
       clusterSize: layer.clusterSize,
+      clusterRadius: layer.clusterRadius,
+      clusterSpacing: layer.clusterSpacing,
       noiseScale: layer.noiseScale,
       noiseThreshold: layer.noiseThreshold,
       scaleVariation: layer.scaleVariation,
@@ -2645,7 +2650,15 @@ export class VegetationSystem extends System {
   }
 
   /**
-   * Generate placement positions with optional clustering
+   * Generate placement positions with optional clustering.
+   *
+   * When clustering is enabled uses the tree-system approach:
+   *   1. Generate a uniform grid of candidates (Poisson disk).
+   *   2. Place cluster centres via Poisson disk with minDist = clusterSpacing
+   *      (guarantees real clearings between groves).
+   *   3. Keep only candidates within clusterRadius of any centre.
+   *
+   * Without clustering falls back to uniform random + noise filter.
    */
   private generatePlacementPositions(
     tileWorldX: number,
@@ -2655,16 +2668,143 @@ export class VegetationSystem extends System {
     layer: VegetationLayer,
     rng: () => number,
   ): Array<{ x: number; z: number }> {
-    const positions: Array<{ x: number; z: number }> = [];
-    const noiseScale = layer.noiseScale ?? 0.05;
-    const noiseThreshold = layer.noiseThreshold ?? 0.3;
     const minSpacing = layer.minSpacing;
     const minSpacingSq = minSpacing * minSpacing;
-    const cellSize = Math.max(minSpacing, 0.0001);
-    const useSpacingGrid = minSpacing > 0;
-    const spacingGrid = new Map<string, Array<{ x: number; z: number }>>();
     const tileMaxX = tileWorldX + tileSize;
     const tileMaxZ = tileWorldZ + tileSize;
+
+    // -----------------------------------------------------------------------
+    // CLUSTERING PATH — filter approach (matches tree system)
+    // -----------------------------------------------------------------------
+    if (layer.clustering && layer.clusterSize) {
+      const treesPerCluster = layer.clusterSize;
+      const numClusters = Math.max(1, Math.ceil(targetCount / treesPerCluster));
+      const clusterRadius = layer.clusterRadius ?? treesPerCluster * minSpacing;
+      const clusterSpacing = layer.clusterSpacing ?? clusterRadius * 2;
+      const clusterRadiusSq = clusterRadius * clusterRadius;
+
+      // Cluster centres — Poisson disk ensures they're well-spaced
+      const rawCenters = poissonDiskSample2D(
+        tileSize,
+        tileSize,
+        clusterSpacing,
+        rng,
+      );
+      // Shuffle then trim to desired cluster count
+      for (let i = rawCenters.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        const tmp = rawCenters[i];
+        rawCenters[i] = rawCenters[j];
+        rawCenters[j] = tmp;
+      }
+      rawCenters.length = Math.min(rawCenters.length, numClusters);
+
+      if (rawCenters.length === 0) {
+        // Tile too small for clusterSpacing — place one center at a random position
+        rawCenters.push({
+          x: tileSize * (0.1 + rng() * 0.8),
+          z: tileSize * (0.1 + rng() * 0.8),
+        });
+      }
+
+      // Candidate grid within each cluster zone — Poisson disk at minSpacing
+      const noiseScale = layer.noiseScale ?? 0.05;
+      const noiseThreshold = layer.noiseThreshold ?? 0.0; // noise opt-in for clusters
+
+      const cellSize = Math.max(minSpacing, 0.0001);
+      const spacingGrid = new Map<string, Array<{ x: number; z: number }>>();
+      const positions: Array<{ x: number; z: number }> = [];
+
+      const getCellKey = (x: number, z: number) =>
+        `${Math.floor((x - tileWorldX) / cellSize)},${Math.floor((z - tileWorldZ) / cellSize)}`;
+
+      const canPlace = (wx: number, wz: number): boolean => {
+        const key = getCellKey(wx, wz);
+        const [cx, cz] = key.split(",").map(Number);
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const bucket = spacingGrid.get(`${cx + dx},${cz + dz}`);
+            if (!bucket) continue;
+            for (const p of bucket) {
+              const ddx = p.x - wx;
+              const ddz = p.z - wz;
+              if (ddx * ddx + ddz * ddz < minSpacingSq) return false;
+            }
+          }
+        }
+        return true;
+      };
+
+      const register = (wx: number, wz: number) => {
+        positions.push({ x: wx, z: wz });
+        const key = getCellKey(wx, wz);
+        const bucket = spacingGrid.get(key);
+        if (bucket) bucket.push({ x: wx, z: wz });
+        else spacingGrid.set(key, [{ x: wx, z: wz }]);
+      };
+
+      // Oversample candidates then filter — same multiplier as before
+      const candidateMultiplier = 4;
+      const maxCandidates = targetCount * candidateMultiplier;
+
+      for (
+        let i = 0;
+        i < maxCandidates && positions.length < targetCount;
+        i++
+      ) {
+        // Pick a random cluster centre and scatter around it
+        const c = rawCenters[Math.floor(rng() * rawCenters.length)];
+        const angle = rng() * Math.PI * 2;
+        // Uniform disk distribution inside clusterRadius
+        const r = Math.sqrt(rng()) * clusterRadius;
+        const lx = c.x + Math.cos(angle) * r;
+        const lz = c.z + Math.sin(angle) * r;
+        const wx = tileWorldX + lx;
+        const wz = tileWorldZ + lz;
+
+        if (
+          wx < tileWorldX ||
+          wx >= tileMaxX ||
+          wz < tileWorldZ ||
+          wz >= tileMaxZ
+        )
+          continue;
+
+        // Confirm point is inside at least one cluster zone
+        let inCluster = false;
+        for (const c2 of rawCenters) {
+          const ddx = lx - c2.x;
+          const ddz = lz - c2.z;
+          if (ddx * ddx + ddz * ddz < clusterRadiusSq) {
+            inCluster = true;
+            break;
+          }
+        }
+        if (!inCluster) continue;
+
+        // Optional noise filter — applied at world-scale so it creates large
+        // cross-tile empty zones (low noiseScale = large zones)
+        if (this.noise && noiseThreshold > 0) {
+          const nv =
+            (this.noise.perlin2D(wx * noiseScale, wz * noiseScale) + 1) / 2;
+          if (nv < noiseThreshold) continue;
+        }
+
+        if (!canPlace(wx, wz)) continue;
+        register(wx, wz);
+      }
+
+      return positions;
+    }
+
+    // -----------------------------------------------------------------------
+    // UNIFORM PATH — random spread + noise filter (no clustering)
+    // -----------------------------------------------------------------------
+    const noiseScale = layer.noiseScale ?? 0.05;
+    const noiseThreshold = layer.noiseThreshold ?? 0.3;
+    const cellSize = Math.max(minSpacing, 0.0001);
+    const spacingGrid = new Map<string, Array<{ x: number; z: number }>>();
+    const positions: Array<{ x: number; z: number }> = [];
 
     const getCellCoords = (x: number, z: number): [number, number] => [
       Math.floor((x - tileWorldX) / cellSize),
@@ -2673,7 +2813,6 @@ export class VegetationSystem extends System {
     const getCellKey = (cx: number, cz: number): string => `${cx},${cz}`;
 
     const canPlaceWithSpacing = (x: number, z: number): boolean => {
-      if (!useSpacingGrid) return true;
       const [cellX, cellZ] = getCellCoords(x, z);
       for (let dz = -1; dz <= 1; dz++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -2682,9 +2821,7 @@ export class VegetationSystem extends System {
           for (const existing of bucket) {
             const ddx = existing.x - x;
             const ddz = existing.z - z;
-            if (ddx * ddx + ddz * ddz < minSpacingSq) {
-              return false;
-            }
+            if (ddx * ddx + ddz * ddz < minSpacingSq) return false;
           }
         }
       }
@@ -2693,69 +2830,24 @@ export class VegetationSystem extends System {
 
     const registerPosition = (x: number, z: number): void => {
       positions.push({ x, z });
-      if (!useSpacingGrid) return;
       const [cellX, cellZ] = getCellCoords(x, z);
       const key = getCellKey(cellX, cellZ);
       const bucket = spacingGrid.get(key);
-      if (bucket) {
-        bucket.push({ x, z });
-      } else {
-        spacingGrid.set(key, [{ x, z }]);
-      }
+      if (bucket) bucket.push({ x, z });
+      else spacingGrid.set(key, [{ x, z }]);
     };
 
-    // Precompute deterministic cluster centers once per tile/layer.
-    let clusterCenters: Array<{ x: number; z: number }> | null = null;
-    if (layer.clustering && layer.clusterSize) {
-      const clusterCount = Math.max(
-        1,
-        Math.floor(targetCount / layer.clusterSize),
-      );
-      clusterCenters = new Array(clusterCount);
-      for (let i = 0; i < clusterCount; i++) {
-        const clusterRng = this.createTileLayerRng(
-          `${tileWorldX}_${tileWorldZ}_cluster_${i}`,
-          layer.category,
-        );
-        clusterCenters[i] = {
-          x: tileWorldX + tileSize * 0.1 + clusterRng() * tileSize * 0.8,
-          z: tileWorldZ + tileSize * 0.1 + clusterRng() * tileSize * 0.8,
-        };
-      }
-    }
-
-    // Generate more candidates than needed, then filter
     const candidateMultiplier = 3;
     const maxCandidates = targetCount * candidateMultiplier;
 
     for (let i = 0; i < maxCandidates && positions.length < targetCount; i++) {
-      let x: number;
-      let z: number;
+      const x = tileWorldX + rng() * tileSize;
+      const z = tileWorldZ + rng() * tileSize;
 
-      if (clusterCenters && layer.clusterSize) {
-        const clusterCenter =
-          clusterCenters[Math.floor(rng() * clusterCenters.length)];
-        // Scatter around cluster center with Gaussian-like distribution
-        const angle = rng() * Math.PI * 2;
-        const radius = rng() * rng() * minSpacing * layer.clusterSize;
-        x = clusterCenter.x + Math.cos(angle) * radius;
-        z = clusterCenter.z + Math.sin(angle) * radius;
-      } else {
-        // Uniform random distribution
-        x = tileWorldX + rng() * tileSize;
-        z = tileWorldZ + rng() * tileSize;
-      }
-
-      // Ensure within tile bounds
-      if (x < tileWorldX || x >= tileMaxX || z < tileWorldZ || z >= tileMaxZ) {
-        continue;
-      }
-
-      // Noise-based filtering
       if (this.noise) {
-        const noiseValue =
+        const nv =
           (this.noise.perlin2D(x * noiseScale, z * noiseScale) + 1) / 2;
-        if (noiseValue < noiseThreshold) continue;
+        if (nv < noiseThreshold) continue;
       }
 
       if (!canPlaceWithSpacing(x, z)) continue;

@@ -203,6 +203,11 @@ export interface VegetationLayer {
   clustering?: boolean;
   /** Cluster size if clustering is enabled */
   clusterSize?: number;
+  /** Radius in world metres of each cluster patch. Defaults to clusterSize * minSpacing. */
+  clusterRadius?: number;
+  /** Minimum world-space distance between cluster centers (enforces clearings).
+   *  Defaults to clusterRadius * 2. */
+  clusterSpacing?: number;
   /** Noise scale for distribution (higher = larger patterns) */
   noiseScale?: number;
   /** Noise threshold (0-1, instances only placed where noise > threshold) */
