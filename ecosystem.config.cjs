@@ -45,9 +45,10 @@ for (const secretsPath of SECRETS_FILES) {
           (value.startsWith("'") && value.endsWith("'"))) {
           value = value.slice(1, -1);
         }
-        if (!process.env[key]) {
-          process.env[key] = value;
-        }
+        // Runtime secret files are the deploy-time source of truth for this
+        // PM2 config. Override inherited PM2 env so secret rotations take
+        // effect on `pm2 restart ecosystem.config.cjs --update-env`.
+        process.env[key] = value;
       }
     }
   } catch { /* ignore missing/unreadable files */ }
@@ -136,6 +137,19 @@ const defaultHlsSegmentPattern =
     __dirname,
     "packages/server/public/live/stream-%09d.ts",
   );
+const configuredStreamDestinations =
+  process.env.STREAM_ENABLED_DESTINATIONS ||
+  process.env.DUEL_STREAM_DESTINATIONS ||
+  "";
+const normalizedStreamDestinations = configuredStreamDestinations
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+const localHlsOutputEnabled =
+  normalizedStreamDestinations.length === 0 ||
+  normalizedStreamDestinations.some((value) =>
+    ["self", "self_hls", "hls"].includes(value),
+  );
 const defaultRtmpStatusFile =
   process.env.RTMP_STATUS_FILE ||
   require("path").join(__dirname, ".runtime-locks/rtmp-status.json");
@@ -204,12 +218,10 @@ const sharedProductionEnv = {
     process.env.KICK_RTMP_URL ||
     "rtmps://fa723fc1b171.global-contribute.live-video.net/app",
   STREAM_ENABLED_DESTINATIONS:
-    process.env.STREAM_ENABLED_DESTINATIONS ||
-    process.env.DUEL_STREAM_DESTINATIONS ||
-    "",
+    configuredStreamDestinations,
   YOUTUBE_STREAM_URL: process.env.YOUTUBE_STREAM_URL || "rtmp://a.rtmp.youtube.com/live2",
-  HLS_OUTPUT_PATH: defaultHlsOutputPath,
-  HLS_SEGMENT_PATTERN: defaultHlsSegmentPattern,
+  HLS_OUTPUT_PATH: localHlsOutputEnabled ? defaultHlsOutputPath : "",
+  HLS_SEGMENT_PATTERN: localHlsOutputEnabled ? defaultHlsSegmentPattern : "",
   RTMP_STATUS_FILE: defaultRtmpStatusFile,
   GAME_URL: defaultGameUrl,
   GAME_FALLBACK_URLS: defaultGameFallbackUrls,

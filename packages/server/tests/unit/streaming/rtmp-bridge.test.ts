@@ -183,7 +183,7 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     expect(outputString).not.toContain("stream.m3u8");
   });
 
-  it("adds MPEG-TS-sized packets to SRT Cloudflare output", () => {
+  it("uses minimal SRT query credentials for Cloudflare output", () => {
     process.env.STREAM_INGEST_PROFILE = "cloudflare_live";
     process.env.STREAM_INGEST_TRANSPORT = "srt";
     process.env.STREAM_CLOUDFLARE_PROBE_ONLY = "true";
@@ -205,9 +205,10 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     (bridge as any).initOutputs();
     const outputString = (bridge as any).buildOutputString() as string;
 
-    expect(outputString).toContain("pkt_size=1316");
     expect(outputString).toContain("streamid=stream-id");
     expect(outputString).toContain("passphrase=stream-passphrase");
+    expect(outputString).not.toContain("pkt_size=");
+    expect(outputString).not.toContain("transtype=");
   });
 
   it("uses direct MPEG-TS output for a single SRT destination", () => {
@@ -239,10 +240,6 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
       "mpegts",
       "-mpegts_flags",
       "+resend_headers",
-      "-muxdelay",
-      "0",
-      "-muxpreload",
-      "0",
       expect.stringContaining("srt://live.cloudflare.com:778"),
     ]);
   });
@@ -325,7 +322,7 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     }>;
 
     expect(outputString).toContain("streamid=stream-id");
-    expect(outputString).toContain("pkt_size=1316");
+    expect(outputString).not.toContain("pkt_size=1316");
     expect(outputString).toContain("f=hls");
     expect(destinations).toEqual(
       expect.arrayContaining([

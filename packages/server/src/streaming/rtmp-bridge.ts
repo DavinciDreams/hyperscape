@@ -420,9 +420,6 @@ export class RTMPBridge {
   ): string {
     const separator = baseUrl.includes("?") ? "&" : "?";
     const query = new URLSearchParams({
-      mode: "caller",
-      transtype: "live",
-      pkt_size: "1316",
       streamid: streamId,
       passphrase,
     });
@@ -2008,10 +2005,6 @@ export class RTMPBridge {
         "mpegts",
         "-mpegts_flags",
         "+resend_headers",
-        "-muxdelay",
-        "0",
-        "-muxpreload",
-        "0",
         destination.url,
       ];
     }
