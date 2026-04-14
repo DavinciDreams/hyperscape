@@ -426,6 +426,13 @@ export class RTMPBridge {
     return `${baseUrl}${separator}${query.toString()}`;
   }
 
+  private static redactSensitiveFfmpegText(value: string): string {
+    return value
+      .replace(/(passphrase=)[^&\s\]'"]+/gi, "$1***REDACTED***")
+      .replace(/(streamid=)[^&\s\]'"]+/gi, "$1***REDACTED***")
+      .replace(/(rtmps?:\/\/[^/\s[\]'"]+\/)[^\s[\]'"]+/gi, "$1***REDACTED***");
+  }
+
   private resolveIngestSettings() {
     return assertValidStreamIngestSettings(
       process.env,
@@ -648,7 +655,7 @@ export class RTMPBridge {
   private recordFatalWriteError(message: string): void {
     const snapshot: FatalWriteDiagnostic = {
       at: Date.now(),
-      message: message.trim(),
+      message: RTMPBridge.redactSensitiveFfmpegText(message.trim()),
       frameCount: this.directFrameCount,
       droppedFrames: this.droppedFrameCount,
       bytesReceived: this.bytesReceived,
@@ -1377,7 +1384,8 @@ export class RTMPBridge {
 
     this.ffmpeg.stderr?.on("data", (data) => {
       const msg = data.toString();
-      const lines = msg
+      const sanitizedMsg = RTMPBridge.redactSensitiveFfmpegText(msg);
+      const lines = sanitizedMsg
         .split(/\r?\n/)
         .map((line: string) => line.trim())
         .filter(Boolean);
@@ -1389,10 +1397,10 @@ export class RTMPBridge {
           );
         }
       }
-      if (!msg.includes("frame=") && !msg.includes("fps=")) {
-        console.log("[FFmpeg]", msg.trim());
+      if (!sanitizedMsg.includes("frame=") && !sanitizedMsg.includes("fps=")) {
+        console.log("[FFmpeg]", sanitizedMsg.trim());
       }
-      this.parseFFmpegOutput(msg);
+      this.parseFFmpegOutput(sanitizedMsg);
     });
 
     this.ffmpeg.on("close", (code, signal) => {
@@ -1524,9 +1532,7 @@ export class RTMPBridge {
     }
 
     const redactedCdpArgs = args.map((arg) =>
-      /rtmps?:\/\//.test(arg)
-        ? arg.replace(/\/[^/\s[\]]+$/, "/***REDACTED***")
-        : arg,
+      RTMPBridge.redactSensitiveFfmpegText(arg),
     );
     console.log(
       "[RTMPBridge] Starting FFmpeg (CDP direct mode) with args:",
@@ -2129,9 +2135,7 @@ export class RTMPBridge {
     }
 
     const redactedArgs = args.map((arg) =>
-      /rtmps?:\/\//.test(arg)
-        ? arg.replace(/\/[^/\s[\]]+$/, "/***REDACTED***")
-        : arg,
+      RTMPBridge.redactSensitiveFfmpegText(arg),
     );
     console.log(
       "[RTMPBridge] Starting FFmpeg with args:",
@@ -2210,9 +2214,7 @@ export class RTMPBridge {
     }
 
     const redactedWcArgs = args.map((arg) =>
-      /rtmps?:\/\//.test(arg)
-        ? arg.replace(/\/[^/\s[\]]+$/, "/***REDACTED***")
-        : arg,
+      RTMPBridge.redactSensitiveFfmpegText(arg),
     );
     console.log(
       "[RTMPBridge] Starting FFmpeg (WebCodecs mode/Stream Copy) with args:",

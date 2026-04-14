@@ -244,6 +244,25 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     ]);
   });
 
+  it("redacts SRT and RTMP credentials from FFmpeg log text", () => {
+    const redact = (RTMPBridge as any).redactSensitiveFfmpegText as (
+      value: string,
+    ) => string;
+
+    const redacted = redact(
+      "Output #0 to 'srt://live.cloudflare.com:778?streamid=stream-id&passphrase=stream-passphrase' and rtmps://live.cloudflare.com:443/live/stream-key",
+    );
+
+    expect(redacted).toContain("streamid=***REDACTED***");
+    expect(redacted).toContain("passphrase=***REDACTED***");
+    expect(redacted).toContain(
+      "rtmps://live.cloudflare.com:443/***REDACTED***",
+    );
+    expect(redacted).not.toContain("stream-id");
+    expect(redacted).not.toContain("stream-passphrase");
+    expect(redacted).not.toContain("stream-key");
+  });
+
   it("marks destinations connected after FFmpeg reports progress", () => {
     process.env.STREAM_INGEST_PROFILE = "cloudflare_live";
     process.env.STREAM_CLOUDFLARE_PROBE_ONLY = "true";
