@@ -54,6 +54,8 @@ import {
   getLODDistances,
   getLODDistancesScaled,
   applyLODSettings,
+  inferLOD1Path,
+  inferLOD2Path,
   type LODDistancesWithSq,
 } from "./LODConfig";
 import { csmLevels } from "./Environment";
@@ -148,21 +150,45 @@ const SCATTER_BATCH_MAX_INSTANCES = 1024;
 
 /** One cactus placement — holds per-slot instance IDs from BatchedMesh.addInstance */
 interface ScatterBatchInstance {
-  /** Instance ID in each material slot's BatchedMesh */
+  /** Instance ID in each LOD0 material slot's BatchedMesh */
   slotIds: number[];
-  /** World position for future culling */
+  /** Instance ID in each LOD1 material slot's BatchedMesh (undefined if no LOD1) */
+  lod1SlotIds?: number[];
+  /** Instance ID in each LOD2 material slot's BatchedMesh (undefined if no LOD2) */
+  lod2SlotIds?: number[];
+  /** World position for LOD distance checks */
   position: THREE.Vector3;
+  /** Currently visible LOD level (0 = full detail, 1 = low poly, 2 = very low poly) */
+  currentLOD: 0 | 1 | 2;
 }
 
 /** Global BatchedMesh pool for a multi-variant scatter asset (e.g. cactus_group) */
 interface ScatterBatchPool {
   assetId: string;
-  /** One BatchedMesh per material slot */
+  /** LOD0 — one BatchedMesh per material slot (full detail) */
   batches: THREE.BatchedMesh[];
-  /** GPU material per slot (batched scatter material) */
+  /** LOD1 — one BatchedMesh per material slot (low poly ~10%), empty if no LOD1 files */
+  lod1Batches: THREE.BatchedMesh[];
+  /** LOD2 — one BatchedMesh per material slot (very low poly ~3%), empty if no LOD2 files */
+  lod2Batches: THREE.BatchedMesh[];
+  /** GPU material per LOD0 slot */
   materials: GPUVegetationMaterial[];
-  /** geometryIds[variantIndex][slotIndex] — geometry IDs returned by addGeometry */
+  /** GPU material per LOD1 slot */
+  lod1Materials: GPUVegetationMaterial[];
+  /** GPU material per LOD2 slot */
+  lod2Materials: GPUVegetationMaterial[];
+  /** geometryIds[variantIndex][slotIndex] for LOD0 */
   geometryIds: number[][];
+  /** geometryIds[variantIndex][slotIndex] for LOD1 */
+  lod1GeometryIds: number[][];
+  /** geometryIds[variantIndex][slotIndex] for LOD2 */
+  lod2GeometryIds: number[][];
+  /** Whether LOD1 files were found and loaded */
+  hasLOD1: boolean;
+  /** Whether LOD2 files were found and loaded */
+  hasLOD2: boolean;
+  /** LOD switch distances (from getLODDistances for the asset category) */
+  lodDistances: LODDistancesWithSq;
   /** All placed instances across all tiles */
   instances: Map<string, ScatterBatchInstance>;
   /** tileKey → list of instanceKeys in this pool for that tile */
@@ -1162,10 +1188,12 @@ export class VegetationSystem extends System {
     };
     this.tileVegetation.set(key, tileData);
 
-    // Generate traditional vegetation (trees, mushrooms, etc) if biome config exists
-    if (biomeConfig && biomeConfig.enabled) {
-      await this.generateTileVegetation(data.tileX, data.tileZ, biomeConfig);
-    }
+    // NOTE: Traditional vegetation (biomes.json layers) is disabled — all placement
+    // is being migrated to the scatter system (TerrainBiomeTypes.ts) which supports
+    // biome-weight blending, per-biome color tints, and BatchedMesh variants.
+    // if (biomeConfig && biomeConfig.enabled) {
+    //   await this.generateTileVegetation(data.tileX, data.tileZ, biomeConfig);
+    // }
 
     // Generate scatter objects (cacti, rocks, flowers) — runs for every biome
     await this.generateTileScatter(data.tileX, data.tileZ, data.biome);
@@ -1205,6 +1233,30 @@ export class VegetationSystem extends System {
               pool.batches[slot].deleteInstance(slotId);
             } catch {
               // Instance may already be gone
+            }
+          }
+        }
+        if (inst.lod1SlotIds) {
+          for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
+            const slotId = inst.lod1SlotIds[slot];
+            if (slotId !== undefined) {
+              try {
+                pool.lod1Batches[slot].deleteInstance(slotId);
+              } catch {
+                /* gone */
+              }
+            }
+          }
+        }
+        if (inst.lod2SlotIds) {
+          for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
+            const slotId = inst.lod2SlotIds[slot];
+            if (slotId !== undefined) {
+              try {
+                pool.lod2Batches[slot].deleteInstance(slotId);
+              } catch {
+                /* gone */
+              }
             }
           }
         }
@@ -1378,6 +1430,30 @@ export class VegetationSystem extends System {
             }
           }
         }
+        if (inst.lod1SlotIds) {
+          for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
+            const slotId = inst.lod1SlotIds[slot];
+            if (slotId !== undefined) {
+              try {
+                pool.lod1Batches[slot].deleteInstance(slotId);
+              } catch {
+                /* gone */
+              }
+            }
+          }
+        }
+        if (inst.lod2SlotIds) {
+          for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
+            const slotId = inst.lod2SlotIds[slot];
+            if (slotId !== undefined) {
+              try {
+                pool.lod2Batches[slot].deleteInstance(slotId);
+              } catch {
+                /* gone */
+              }
+            }
+          }
+        }
         pool.instances.delete(instanceKey);
       }
       pool.tileInstances.delete(key);
@@ -1507,6 +1583,12 @@ export class VegetationSystem extends System {
           avoidSteepSlopes: scatterLayer.maxSlope !== undefined,
           terrainWeights: scatterLayer.terrainWeights,
           colorTint: scatterLayer.colorTint,
+          minHeight: scatterLayer.minHeight,
+          maxHeight: scatterLayer.maxHeight,
+          clustering: scatterLayer.clustering,
+          clusterSize: scatterLayer.clusterSize,
+          noiseScale: scatterLayer.noiseScale,
+          noiseThreshold: scatterLayer.noiseThreshold,
         };
         await this.generateLayerVegetation(
           tileKey,
@@ -1564,16 +1646,7 @@ export class VegetationSystem extends System {
     const variants = asset.variants!;
     const baseUrl = (this.world.assetsUrl || "").replace(/\/$/, "");
 
-    // Load all variant models in parallel
-    const modelRoots = await Promise.all(
-      variants.map(async (path) => {
-        const url = `${baseUrl}/${path}`;
-        const { scene: s } = await modelCache.loadModel(url, this.world);
-        return s;
-      }),
-    );
-
-    // Extract mesh parts (geometry + material) per variant
+    // Extract geometry+material parts from a loaded GLB scene
     interface MeshPart {
       geometry: THREE.BufferGeometry;
       material: THREE.Material;
@@ -1592,69 +1665,144 @@ export class VegetationSystem extends System {
       });
       return parts;
     };
-    const allParts = modelRoots.map(extractParts);
-    const numSlots = allParts[0].length || 1;
 
-    // Compute total vertex / index budget per slot across all variants
-    const totalVerts = new Array<number>(numSlots).fill(0);
-    const totalIndices = new Array<number>(numSlots).fill(0);
-    for (const varParts of allParts) {
-      for (let slot = 0; slot < numSlots; slot++) {
-        const part = varParts[slot] ?? varParts[0];
-        if (!part) continue;
-        const geo = part.geometry;
-        totalVerts[slot] += geo.getAttribute("position")?.count ?? 0;
-        totalIndices[slot] += geo.index?.count ?? 0;
+    // Try loading variant models; returns null on 404/error (optional LODs)
+    const tryLoadVariantParts = async (
+      path: string,
+    ): Promise<MeshPart[] | null> => {
+      try {
+        const { scene: s } = await modelCache.loadModel(
+          `${baseUrl}/${path}`,
+          this.world,
+        );
+        return extractParts(s);
+      } catch {
+        return null;
       }
-    }
+    };
 
-    const batches: THREE.BatchedMesh[] = [];
-    const materials: GPUVegetationMaterial[] = [];
-    // geometryIds[variantIndex][slotIndex]
-    const geometryIds: number[][] = variants.map(() =>
-      new Array<number>(numSlots).fill(-1),
+    // ---- LOD0: required ----
+    const modelRoots = await Promise.all(
+      variants.map(async (path) => {
+        const { scene: s } = await modelCache.loadModel(
+          `${baseUrl}/${path}`,
+          this.world,
+        );
+        return s;
+      }),
     );
+    const lod0AllParts = modelRoots.map(extractParts);
+    const numSlots = lod0AllParts[0].length || 1;
 
-    for (let slot = 0; slot < numSlots; slot++) {
-      const srcMat = (allParts[0][slot] ?? allParts[0][0]).material;
-      const colorMap = (srcMat as THREE.MeshStandardMaterial).map ?? null;
+    // ---- LOD1 / LOD2: optional, inferred from variant paths ----
+    const lod1AllPartsRaw = await Promise.all(
+      variants.map((p) => tryLoadVariantParts(inferLOD1Path(p))),
+    );
+    const lod2AllPartsRaw = await Promise.all(
+      variants.map((p) => tryLoadVariantParts(inferLOD2Path(p))),
+    );
+    const hasLOD1 = lod1AllPartsRaw.some((p) => p !== null);
+    const hasLOD2 = lod2AllPartsRaw.some((p) => p !== null);
+    // Replace missing variants with the first available LOD parts so slot counts stay consistent
+    const lod1AllParts = hasLOD1
+      ? lod1AllPartsRaw.map(
+          (p, i) =>
+            p ?? lod1AllPartsRaw.find((x) => x !== null) ?? lod0AllParts[i],
+        )
+      : [];
+    const lod2AllParts = hasLOD2
+      ? lod2AllPartsRaw.map(
+          (p, i) =>
+            p ?? lod2AllPartsRaw.find((x) => x !== null) ?? lod0AllParts[i],
+        )
+      : [];
 
-      const bm = new THREE.BatchedMesh(
-        SCATTER_BATCH_MAX_INSTANCES,
-        totalVerts[slot],
-        totalIndices[slot] > 0 ? totalIndices[slot] : undefined,
+    // Helper: build BatchedMesh arrays for one LOD level's parts
+    const buildLODBatches = (
+      allParts: MeshPart[][],
+    ): {
+      batches: THREE.BatchedMesh[];
+      materials: GPUVegetationMaterial[];
+      geometryIds: number[][];
+    } => {
+      const batches: THREE.BatchedMesh[] = [];
+      const materials: GPUVegetationMaterial[] = [];
+      const geometryIds: number[][] = variants.map(() =>
+        new Array<number>(numSlots).fill(-1),
       );
-      bm.frustumCulled = false;
-      bm.perObjectFrustumCulled = false;
-      bm.sortObjects = false;
-      bm.castShadow = asset.castShadow !== false;
-      bm.receiveShadow = false;
-      bm.layers.set(1);
 
-      // Register each variant's geometry in this slot's BatchedMesh
-      for (let v = 0; v < variants.length; v++) {
-        const part = allParts[v][slot] ?? allParts[v][0];
-        if (!part) continue;
-        const geoId = bm.addGeometry(part.geometry);
-        geometryIds[v][slot] = geoId;
+      // Budget per slot
+      const totalVerts = new Array<number>(numSlots).fill(0);
+      const totalIndices = new Array<number>(numSlots).fill(0);
+      for (const varParts of allParts) {
+        for (let slot = 0; slot < numSlots; slot++) {
+          const part = varParts[slot] ?? varParts[0];
+          if (!part) continue;
+          totalVerts[slot] +=
+            part.geometry.getAttribute("position")?.count ?? 0;
+          totalIndices[slot] += part.geometry.index?.count ?? 0;
+        }
       }
 
-      const gpuMat = createGPUVegetationMaterial({
-        colorMap,
-        vertexColors: !colorMap,
-        fadeStart: FADE_START,
-        fadeEnd: FADE_END,
-      });
+      for (let slot = 0; slot < numSlots; slot++) {
+        const srcMat = (allParts[0][slot] ?? allParts[0][0]).material;
+        const colorMap = (srcMat as THREE.MeshStandardMaterial).map ?? null;
 
-      bm.material = gpuMat as unknown as THREE.Material;
+        const bm = new THREE.BatchedMesh(
+          SCATTER_BATCH_MAX_INSTANCES,
+          totalVerts[slot],
+          totalIndices[slot] > 0 ? totalIndices[slot] : undefined,
+        );
+        bm.frustumCulled = false;
+        bm.perObjectFrustumCulled = false;
+        bm.sortObjects = false;
+        bm.castShadow = asset.castShadow !== false;
+        bm.receiveShadow = false;
+        bm.layers.set(1);
 
-      if (this.scene) {
-        this.scene.add(bm);
+        for (let v = 0; v < variants.length; v++) {
+          const part = allParts[v][slot] ?? allParts[v][0];
+          if (!part) continue;
+          const geoId = bm.addGeometry(part.geometry);
+          geometryIds[v][slot] = geoId;
+        }
+
+        const gpuMat = createGPUVegetationMaterial({
+          colorMap,
+          vertexColors: !colorMap,
+          fadeStart: FADE_START,
+          fadeEnd: FADE_END,
+        });
+        bm.material = gpuMat as unknown as THREE.Material;
+
+        if (this.scene) this.scene.add(bm);
+        batches.push(bm);
+        materials.push(gpuMat);
       }
 
-      batches.push(bm);
-      materials.push(gpuMat);
-    }
+      return { batches, materials, geometryIds };
+    };
+
+    // Build LOD0 (required)
+    const { batches, materials, geometryIds } = buildLODBatches(lod0AllParts);
+
+    // Build LOD1 (optional)
+    const {
+      batches: lod1Batches,
+      materials: lod1Materials,
+      geometryIds: lod1GeometryIds,
+    } = hasLOD1
+      ? buildLODBatches(lod1AllParts)
+      : { batches: [], materials: [], geometryIds: [] };
+
+    // Build LOD2 (optional)
+    const {
+      batches: lod2Batches,
+      materials: lod2Materials,
+      geometryIds: lod2GeometryIds,
+    } = hasLOD2
+      ? buildLODBatches(lod2AllParts)
+      : { batches: [], materials: [], geometryIds: [] };
 
     // Approx model radius from the already-computed bounding box
     let modelRadius = 2;
@@ -1674,18 +1822,29 @@ export class VegetationSystem extends System {
       // Non-critical — use default
     }
 
+    const lodDistances = getLODDistances(asset.category);
+
     const pool: ScatterBatchPool = {
       assetId: asset.id,
       batches,
+      lod1Batches,
+      lod2Batches,
       materials,
+      lod1Materials,
+      lod2Materials,
       geometryIds,
+      lod1GeometryIds,
+      lod2GeometryIds,
+      hasLOD1,
+      hasLOD2,
+      lodDistances,
       instances: new Map(),
       tileInstances: new Map(),
       modelRadius,
     };
 
     console.log(
-      `[BatchScatter] pool "${asset.id}" built: ${variants.length} variants, ${batches.length} slot(s), modelRadius=${modelRadius.toFixed(2)}`,
+      `[BatchScatter] pool "${asset.id}" built: ${variants.length} variants, ${batches.length} slot(s), LOD1=${hasLOD1}, LOD2=${hasLOD2}, modelRadius=${modelRadius.toFixed(2)}`,
     );
 
     return pool;
@@ -1751,6 +1910,12 @@ export class VegetationSystem extends System {
       avoidWater: layer.avoidWater,
       avoidSteepSlopes: layer.maxSlope !== undefined,
       terrainWeights: layer.terrainWeights,
+      minHeight: layer.minHeight,
+      maxHeight: layer.maxHeight,
+      clustering: layer.clustering,
+      clusterSize: layer.clusterSize,
+      noiseScale: layer.noiseScale,
+      noiseThreshold: layer.noiseThreshold,
     };
     const positions = this.generatePlacementPositions(
       tileWorldX,
@@ -1778,6 +1943,9 @@ export class VegetationSystem extends System {
       for (; posIndex < batchEnd && placedCount < targetCount; posIndex++) {
         const pos = positions[posIndex];
         const height = getHeight(pos.x, pos.z);
+
+        if (layer.minHeight !== undefined && height < layer.minHeight) continue;
+        if (layer.maxHeight !== undefined && height > layer.maxHeight) continue;
 
         if (shouldAvoidWater && height < waterThreshold) continue;
 
@@ -1853,7 +2021,7 @@ export class VegetationSystem extends System {
         this._dummy.updateMatrix();
         _mat.copy(this._dummy.matrix);
 
-        // Add instance to each material slot
+        // Add instance to each LOD0 material slot
         const slotIds: number[] = [];
         for (let slot = 0; slot < pool.batches.length; slot++) {
           const bm = pool.batches[slot];
@@ -1865,24 +2033,64 @@ export class VegetationSystem extends System {
         }
         if (!slotIds.length) continue;
 
-        // Apply per-instance biome-blended color tint
+        // Add instance to LOD1 slots (hidden initially — shown when player moves away)
+        const lod1SlotIds: number[] = [];
+        if (pool.hasLOD1) {
+          for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
+            const bm = pool.lod1Batches[slot];
+            const geoId = pool.lod1GeometryIds[variantIndex]?.[slot] ?? -1;
+            if (geoId < 0) continue;
+            const instanceId = bm.addInstance(geoId);
+            bm.setMatrixAt(instanceId, _mat);
+            bm.setVisibleAt(instanceId, false);
+            lod1SlotIds.push(instanceId);
+          }
+        }
+
+        // Add instance to LOD2 slots (hidden initially)
+        const lod2SlotIds: number[] = [];
+        if (pool.hasLOD2) {
+          for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
+            const bm = pool.lod2Batches[slot];
+            const geoId = pool.lod2GeometryIds[variantIndex]?.[slot] ?? -1;
+            if (geoId < 0) continue;
+            const instanceId = bm.addInstance(geoId);
+            bm.setMatrixAt(instanceId, _mat);
+            bm.setVisibleAt(instanceId, false);
+            lod2SlotIds.push(instanceId);
+          }
+        }
+
+        // Apply per-instance biome-blended color tint to all LOD levels
         if (layer.colorTint) {
           const biomeWeights =
             terrainSystem.computeBiomeWeightsByPosition?.(pos.x, pos.z) ?? {};
           const tint = this.computeBlendedTint(asset.id, biomeWeights);
           for (let slot = 0; slot < pool.batches.length; slot++) {
-            const bm = pool.batches[slot];
             const instanceId = slotIds[slot];
-            if (instanceId === undefined) continue;
-            bm.setColorAt(instanceId, tint);
+            if (instanceId !== undefined)
+              pool.batches[slot].setColorAt(instanceId, tint);
+          }
+          for (let slot = 0; slot < lod1SlotIds.length; slot++) {
+            const instanceId = lod1SlotIds[slot];
+            if (instanceId !== undefined)
+              pool.lod1Batches[slot].setColorAt(instanceId, tint);
+          }
+          for (let slot = 0; slot < lod2SlotIds.length; slot++) {
+            const instanceId = lod2SlotIds[slot];
+            if (instanceId !== undefined)
+              pool.lod2Batches[slot].setColorAt(instanceId, tint);
           }
         }
 
-        // Track instance for tile cleanup
+        // Track instance for tile cleanup and LOD switching
         const instanceKey = `${tileKey}_sb_${placedCount}`;
         pool.instances.set(instanceKey, {
           slotIds,
+          lod1SlotIds: lod1SlotIds.length ? lod1SlotIds : undefined,
+          lod2SlotIds: lod2SlotIds.length ? lod2SlotIds : undefined,
           position: new THREE.Vector3(pos.x, height, pos.z),
+          currentLOD: 0,
         });
         let tileInst = pool.tileInstances.get(tileKey);
         if (!tileInst) {
@@ -4299,12 +4507,83 @@ export class VegetationSystem extends System {
       }
     }
 
-    // Update batched scatter pool materials
+    // Update batched scatter pool materials and LOD levels
     if (this.scatterBatchPools.size > 0) {
       for (const pool of this.scatterBatchPools.values()) {
         for (const mat of pool.materials) {
           mat.gpuUniforms.playerPos.value.set(playerX, playerY, playerZ);
           mat.gpuUniforms.cameraPos.value.set(cameraX, cameraY, cameraZ);
+        }
+        for (const mat of pool.lod1Materials) {
+          mat.gpuUniforms.playerPos.value.set(playerX, playerY, playerZ);
+          mat.gpuUniforms.cameraPos.value.set(cameraX, cameraY, cameraZ);
+        }
+        for (const mat of pool.lod2Materials) {
+          mat.gpuUniforms.playerPos.value.set(playerX, playerY, playerZ);
+          mat.gpuUniforms.cameraPos.value.set(cameraX, cameraY, cameraZ);
+        }
+
+        // Per-instance LOD switching (only runs if pool has LOD1 or LOD2)
+        if (pool.hasLOD1 || pool.hasLOD2) {
+          const lod1DistSq = pool.lodDistances.lod1DistanceSq;
+          const lod2DistSq = pool.lodDistances.lod2DistanceSq;
+          // 10% hysteresis band to prevent rapid flickering at LOD boundaries
+          const hysteresis = 0.81;
+
+          for (const inst of pool.instances.values()) {
+            const dx = cameraX - inst.position.x;
+            const dz = cameraZ - inst.position.z;
+            const distSq = dx * dx + dz * dz;
+
+            let targetLOD: 0 | 1 | 2;
+            if (distSq < lod1DistSq * hysteresis) {
+              targetLOD = 0;
+            } else if (distSq < lod1DistSq) {
+              // Hysteresis band: keep current if it's in range
+              targetLOD = inst.currentLOD === 0 ? 0 : pool.hasLOD1 ? 1 : 0;
+            } else if (distSq < lod2DistSq * hysteresis) {
+              targetLOD = pool.hasLOD1 ? 1 : 0;
+            } else if (distSq < lod2DistSq) {
+              targetLOD =
+                inst.currentLOD <= 1
+                  ? pool.hasLOD1
+                    ? 1
+                    : 0
+                  : pool.hasLOD2
+                    ? 2
+                    : pool.hasLOD1
+                      ? 1
+                      : 0;
+            } else {
+              targetLOD = pool.hasLOD2 ? 2 : pool.hasLOD1 ? 1 : 0;
+            }
+
+            if (targetLOD === inst.currentLOD) continue;
+
+            // Hide old LOD, show new LOD
+            const show = (
+              ids: number[] | undefined,
+              batches: THREE.BatchedMesh[],
+              visible: boolean,
+            ) => {
+              if (!ids) return;
+              for (let s = 0; s < ids.length; s++) {
+                batches[s]?.setVisibleAt(ids[s], visible);
+              }
+            };
+
+            if (inst.currentLOD === 0) show(inst.slotIds, pool.batches, false);
+            else if (inst.currentLOD === 1)
+              show(inst.lod1SlotIds, pool.lod1Batches, false);
+            else show(inst.lod2SlotIds, pool.lod2Batches, false);
+
+            if (targetLOD === 0) show(inst.slotIds, pool.batches, true);
+            else if (targetLOD === 1)
+              show(inst.lod1SlotIds, pool.lod1Batches, true);
+            else show(inst.lod2SlotIds, pool.lod2Batches, true);
+
+            inst.currentLOD = targetLOD;
+          }
         }
       }
     }
@@ -5079,6 +5358,18 @@ export class VegetationSystem extends System {
         if (bm.parent) bm.parent.remove(bm);
         bm.dispose();
         pool.materials[slot]?.dispose();
+      }
+      for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
+        const bm = pool.lod1Batches[slot];
+        if (bm.parent) bm.parent.remove(bm);
+        bm.dispose();
+        pool.lod1Materials[slot]?.dispose();
+      }
+      for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
+        const bm = pool.lod2Batches[slot];
+        if (bm.parent) bm.parent.remove(bm);
+        bm.dispose();
+        pool.lod2Materials[slot]?.dispose();
       }
     }
     this.scatterBatchPools.clear();

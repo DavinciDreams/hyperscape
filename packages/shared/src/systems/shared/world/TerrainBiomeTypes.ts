@@ -221,6 +221,18 @@ export interface BiomeScatterLayer {
     dirt?: [number, number];
     cliff?: [number, number];
   };
+  /** Minimum world Y height for placement */
+  minHeight?: number;
+  /** Maximum world Y height for placement */
+  maxHeight?: number;
+  /** Group instances into natural-looking patches */
+  clustering?: boolean;
+  /** Average number of instances per cluster (requires clustering: true) */
+  clusterSize?: number;
+  /** Perlin noise frequency for patch mask — higher = smaller patches (default 0.05) */
+  noiseScale?: number;
+  /** Noise cutoff 0–1, positions below this are skipped (default 0.3) */
+  noiseThreshold?: number;
   /** Per-instance RGB color multiplier blended with adjacent biome tints by weight.
    *  [1,1,1] (default) = no tint. Values > 1 boost, < 1 darken that channel. */
   colorTint?: [number, number, number];

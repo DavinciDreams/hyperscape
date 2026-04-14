@@ -148,15 +148,9 @@ export interface VegetationAsset {
    * Multiple GLB model paths for multi-variant assets.
    * When set, a single BatchedMesh is used for all variants instead of
    * individual InstancedMeshes, reducing draw calls significantly.
+   * LOD1/LOD2 paths are inferred automatically by appending _lod1/_lod2 before .glb.
    */
   variants?: string[];
-  /**
-   * Suffix appended to each variant base name to form the LOD1 path.
-   * E.g. "_lod1" → "cactus01_lod1.glb". Only used when `variants` is set.
-   */
-  lod1Suffix?: string;
-  /** Suffix for LOD2 variant GLBs. Only used when `variants` is set. */
-  lod2Suffix?: string;
   /**
    * Path to low-poly GLB model for LOD1 (optional)
    * If not provided, the full model is used until imposter distance

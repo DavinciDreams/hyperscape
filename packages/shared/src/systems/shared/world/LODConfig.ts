@@ -71,6 +71,14 @@ export const LOD_DISTANCES: Record<string, LODDistances> = {
     fadeDistance: 1800,
   },
 
+  // Scatter vegetation (cacti, flowers, rocks placed by BiomeScatterLayer)
+  plant: {
+    lod1Distance: 300,
+    lod2Distance: 500,
+    imposterDistance: 700,
+    fadeDistance: 1000,
+  },
+
   // Medium vegetation
   bush: {
     lod1Distance: 350,
