@@ -27,6 +27,7 @@ import type {
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
 import type {
   CaptureControlStatus,
+  StreamingTargetEntityDiagnostics,
   StreamingWindowBootDiagnostics,
   StreamingWindow,
   StreamingWindowHeartbeat,
@@ -205,6 +206,58 @@ function isDuelArenaVisualsReady(world: World | null): boolean {
   );
 }
 
+/**
+ * Fine-grained breakdown of where the camera-target entity lives and which
+ * readiness fields it exposes. Used exclusively by the boot diagnostic writer
+ * so that probes (or manual `copy(window.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__)`
+ * inspection) can pinpoint which link in the readiness chain is failing when
+ * `targetAvatarReady` stays false. Diagnostic-only — no behavior change.
+ */
+function readTargetEntityDiagnostics(
+  world: World,
+  targetEntityId: string,
+): StreamingTargetEntityDiagnostics {
+  const playerDirect = world.entities?.players?.get?.(targetEntityId) as
+    | Record<string, unknown>
+    | undefined;
+  const itemDirect = world.entities?.items?.get?.(targetEntityId) as
+    | Record<string, unknown>
+    | undefined;
+  const matchedByDirectKey = Boolean(playerDirect || itemDirect);
+  const resolved =
+    (playerDirect ??
+      itemDirect ??
+      findStreamingTargetEntity(world, targetEntityId)) ||
+    null;
+  const entityWithFields = resolved as {
+    avatar?: unknown;
+    _avatar?: unknown;
+    _fallbackAvatarRoot?: unknown;
+    mesh?: unknown;
+    data?: {
+      sessionAvatar?: unknown;
+      avatar?: unknown;
+      avatarUrl?: unknown;
+    };
+  } | null;
+  const avatarUrlRaw =
+    entityWithFields?.data?.sessionAvatar ??
+    entityWithFields?.data?.avatar ??
+    entityWithFields?.data?.avatarUrl ??
+    null;
+  return {
+    found: Boolean(entityWithFields),
+    inPlayers: Boolean(playerDirect),
+    inItems: Boolean(itemDirect),
+    matchedByDirectKey,
+    avatarField: Boolean(entityWithFields?.avatar),
+    underscoreAvatarField: Boolean(entityWithFields?._avatar),
+    fallbackAvatarField: Boolean(entityWithFields?._fallbackAvatarRoot),
+    meshField: Boolean(entityWithFields?.mesh),
+    avatarUrl: typeof avatarUrlRaw === "string" ? avatarUrlRaw : null,
+  };
+}
+
 function buildStreamingBootDiagnostics(params: {
   world: World | null;
   connected: boolean;
@@ -219,6 +272,7 @@ function buildStreamingBootDiagnostics(params: {
   targetAvatarGraceExpired: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
   hasStreamingState: boolean;
+  avatarLoadEventsForTarget: number;
 }): StreamingWindowBootDiagnostics {
   const world = params.world;
   const terrain = world?.getSystem("terrain") as
@@ -231,6 +285,10 @@ function buildStreamingBootDiagnostics(params: {
       : params.cameraTarget
         ? false
         : null;
+  const targetEntity =
+    world && params.cameraTarget
+      ? readTargetEntityDiagnostics(world, params.cameraTarget)
+      : null;
 
   return {
     updatedAt: Date.now(),
@@ -282,6 +340,8 @@ function buildStreamingBootDiagnostics(params: {
     targetAvatarGraceExpired: params.targetAvatarGraceExpired,
     phase: params.phase,
     hasStreamingState: params.hasStreamingState,
+    targetEntity,
+    avatarLoadEventsForTarget: params.avatarLoadEventsForTarget,
   };
 }
 
@@ -1428,6 +1488,7 @@ export function StreamingMode() {
           targetAvatarGraceExpired,
           phase: streamingState?.cycle.phase ?? null,
           hasStreamingState: streamingState !== null,
+          avatarLoadEventsForTarget: avatarLoadEventCountRef.current,
         });
     };
 

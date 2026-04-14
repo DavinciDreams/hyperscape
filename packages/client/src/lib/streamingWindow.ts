@@ -22,6 +22,29 @@ export type StreamingWindowHeartbeat = {
   latestDuelStateTickAt: number | null;
 };
 
+/**
+ * Fine-grained state of the spectator camera target entity at the time the
+ * diagnostic snapshot was written. Used by `probe-hyperscapes-stream-headless`
+ * and manual `copy(window.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__)` inspection
+ * to pinpoint which link in the readiness chain is failing.
+ *
+ * `null` means the probe had no world or no `cameraTarget` yet. A non-null
+ * value with `found === false` means the target was resolved but is not
+ * present in either the `items` or `players` collection — distinct from the
+ * "no target" case.
+ */
+export type StreamingTargetEntityDiagnostics = {
+  found: boolean;
+  inPlayers: boolean;
+  inItems: boolean;
+  matchedByDirectKey: boolean;
+  avatarField: boolean;
+  underscoreAvatarField: boolean;
+  fallbackAvatarField: boolean;
+  meshField: boolean;
+  avatarUrl: string | null;
+};
+
 export type StreamingWindowBootDiagnostics = {
   updatedAt: number;
   connected: boolean;
@@ -51,6 +74,18 @@ export type StreamingWindowBootDiagnostics = {
   targetAvatarGraceExpired: boolean;
   phase: string | null;
   hasStreamingState: boolean;
+  /**
+   * Fine-grained breakdown of where the camera-target entity lives and which
+   * readiness fields it exposes. Populated only when the probe has a world
+   * and a `cameraTarget`.
+   */
+  targetEntity: StreamingTargetEntityDiagnostics | null;
+  /**
+   * Cumulative count of `AVATAR_LOAD_COMPLETE` events matching the current
+   * `cameraTarget` observed during the current avatar-readiness effect run.
+   * Reset when the effect re-arms on cycle or target change.
+   */
+  avatarLoadEventsForTarget: number;
 };
 
 export type CaptureControlStatus = {
