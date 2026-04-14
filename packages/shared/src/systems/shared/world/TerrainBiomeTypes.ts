@@ -202,6 +202,9 @@ export const SNOW_BIOMES: ReadonlySet<string> = new Set(
 // ---------------------------------------------------------------------------
 
 export interface BiomeScatterLayer {
+  /** Biome identifier — used to key the batch pool so each biome gets its own
+   *  BatchedMesh + shader */
+  biomeId: string;
   /** Asset IDs from vegetation.json to scatter */
   assets: string[];
   /** Instances per 100×100m tile */
@@ -218,14 +221,9 @@ export interface BiomeScatterLayer {
     dirt?: [number, number];
     cliff?: [number, number];
   };
-  /** RGB color multiplier applied as a tint over the base albedo */
-  biomeTint?: [number, number, number];
-  /** 0–1 — how strongly biomeTint blends over base albedo */
-  biomeTintStrength?: number;
-  /** 0–1 — how strongly terrain ground colour blends at the asset root */
-  groundColorBlend?: number;
-  /** 0–1 fraction of model height over which the ground blend fades out */
-  groundColorBlendHeight?: number;
+  /** Per-instance RGB color multiplier blended with adjacent biome tints by weight.
+   *  [1,1,1] (default) = no tint. Values > 1 boost, < 1 darken that channel. */
+  colorTint?: [number, number, number];
 }
 
 export interface BiomeScatterConfig {
@@ -233,29 +231,30 @@ export interface BiomeScatterConfig {
 }
 
 const FOREST_SCATTER_CONFIG: BiomeScatterConfig = { layers: [] };
-const TUNDRA_SCATTER_CONFIG: BiomeScatterConfig = { layers: [] };
-
-const CANYON_SCATTER_CONFIG: BiomeScatterConfig = {
+const TUNDRA_SCATTER_CONFIG: BiomeScatterConfig = {
   layers: [
     {
-      assets: [
-        "cactus01",
-        "cactus02",
-        "cactus03",
-        "cactus04",
-        "cactus05",
-        "cactus06",
-        "cactus07",
-        "cactus08",
-      ],
+      biomeId: "tundra",
+      assets: ["cactus_group"],
       density: 4,
       minSpacing: 8,
       maxSlope: 0.5,
       avoidWater: true,
-      biomeTint: [1.1, 0.88, 0.65],
-      biomeTintStrength: 0.35,
-      groundColorBlend: 1.0,
-      groundColorBlendHeight: 0.4,
+      colorTint: [0.1, 0.1, 10.1],
+    },
+  ],
+};
+
+const CANYON_SCATTER_CONFIG: BiomeScatterConfig = {
+  layers: [
+    {
+      biomeId: "canyon",
+      assets: ["cactus_group"],
+      density: 4,
+      minSpacing: 8,
+      maxSlope: 0.5,
+      avoidWater: true,
+      colorTint: [10.15, 0.1, 0.1],
     },
   ],
 };

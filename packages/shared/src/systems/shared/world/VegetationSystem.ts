@@ -59,7 +59,11 @@ import {
 import { csmLevels } from "./Environment";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import { updateTreeInstances } from "./ProcgenTreeCache";
-import { BIOME_LIST, getScatterConfigForBiome } from "./TerrainBiomeTypes";
+import {
+  BIOME_LIST,
+  getScatterConfigForBiome,
+  type BiomeScatterLayer,
+} from "./TerrainBiomeTypes";
 import {
   isGPUComputeAvailable,
   getGlobalCullingManager,
@@ -138,6 +142,34 @@ const BOUNDING_SPHERE_BUFFER = 20;
  * This matches the tree rendering style for visual consistency.
  */
 const DISABLE_IMPOSTORS = true;
+
+/** Maximum instances per scatter BatchedMesh (across all tiles) */
+const SCATTER_BATCH_MAX_INSTANCES = 1024;
+
+/** One cactus placement — holds per-slot instance IDs from BatchedMesh.addInstance */
+interface ScatterBatchInstance {
+  /** Instance ID in each material slot's BatchedMesh */
+  slotIds: number[];
+  /** World position for future culling */
+  position: THREE.Vector3;
+}
+
+/** Global BatchedMesh pool for a multi-variant scatter asset (e.g. cactus_group) */
+interface ScatterBatchPool {
+  assetId: string;
+  /** One BatchedMesh per material slot */
+  batches: THREE.BatchedMesh[];
+  /** GPU material per slot (batched scatter material) */
+  materials: GPUVegetationMaterial[];
+  /** geometryIds[variantIndex][slotIndex] — geometry IDs returned by addGeometry */
+  geometryIds: number[][];
+  /** All placed instances across all tiles */
+  instances: Map<string, ScatterBatchInstance>;
+  /** tileKey → list of instanceKeys in this pool for that tile */
+  tileInstances: Map<string, string[]>;
+  /** Approx model radius (metres) for future frustum culling */
+  modelRadius: number;
+}
 
 /**
  * Chunked instanced mesh - one per spatial chunk per asset type
@@ -451,9 +483,12 @@ export class VegetationSystem extends System {
   // SCATTER SYSTEM — biome-aware rocks/cacti/flowers via BiomeScatterConfig
   private scatterAssetIds = new Set<string>();
   private scatterMaterials = new Map<string, GPUVegetationMaterial>();
-  private scatterAssetOptions = new Map<
+  // BATCH SCATTER SYSTEM — multi-variant assets (cactus_group etc.) via BatchedMesh
+  private scatterBatchAssetIds = new Set<string>();
+  private scatterBatchPools = new Map<string, ScatterBatchPool>();
+  private pendingScatterBatchLoads = new Map<
     string,
-    { groundColorBlend: number; groundColorBlendHeight: number }
+    Promise<ScatterBatchPool>
   >();
 
   // Noise generator for procedural placement
@@ -724,43 +759,78 @@ export class VegetationSystem extends System {
     }
   }
 
-  /** Populate scatterAssetIds and scatterAssetOptions from BiomeScatterConfig. */
+  /** Populate scatterAssetIds from BiomeScatterConfig. */
   private registerScatterAssetIds(): void {
     for (const biome of BIOME_LIST) {
       const cfg = getScatterConfigForBiome(biome);
       for (const layer of cfg.layers) {
         for (const assetId of layer.assets) {
-          this.scatterAssetIds.add(assetId);
-          if (!this.scatterAssetOptions.has(assetId)) {
-            this.scatterAssetOptions.set(assetId, {
-              groundColorBlend: layer.groundColorBlend ?? 0,
-              groundColorBlendHeight: layer.groundColorBlendHeight ?? 0.5,
-            });
+          const assetDef = this.assetDefinitions.get(assetId);
+          if (assetDef?.variants?.length) {
+            // Multi-variant asset → BatchedMesh path
+            this.scatterBatchAssetIds.add(assetId);
+          } else {
+            // Single-model asset → existing InstancedMesh path
+            this.scatterAssetIds.add(assetId);
           }
         }
       }
     }
   }
 
+  /**
+   * Compute a biome-blended RGB tint color for a scatter asset at a world position.
+   * Each biome's scatter layer can declare a `colorTint`; this blends them by the
+   * per-position biome influence weights so boundaries fade smoothly between colors.
+   * Biomes that don't list the asset (or have no colorTint) contribute neutral [1,1,1].
+   */
+  private computeBlendedTint(
+    assetId: string,
+    biomeWeights: Record<string, number>,
+  ): THREE.Color {
+    let r = 0,
+      g = 0,
+      b = 0,
+      totalWeight = 0;
+    for (const [biomeId, weight] of Object.entries(biomeWeights)) {
+      if (weight <= 0) continue;
+      const cfg = getScatterConfigForBiome(biomeId);
+      let tint: [number, number, number] | undefined;
+      for (const layer of cfg.layers) {
+        if (layer.assets.includes(assetId) && layer.colorTint) {
+          tint = layer.colorTint;
+          break;
+        }
+      }
+      // Only blend biomes that explicitly define a colorTint for this asset.
+      // Biomes with no tint config (e.g. forest) are excluded so they don't
+      // dilute the effect toward white.
+      if (tint) {
+        r += tint[0] * weight;
+        g += tint[1] * weight;
+        b += tint[2] * weight;
+        totalWeight += weight;
+      }
+    }
+    // If no biome defined a tint for this asset, return neutral (no tint).
+    if (totalWeight <= 0) return new THREE.Color(1, 1, 1);
+    // Normalize so the result stays in the expected range regardless of which
+    // biomes contributed.
+    return new THREE.Color(r / totalWeight, g / totalWeight, b / totalWeight);
+  }
+
   /** Get or create a per-asset scatter material. */
   private getOrCreateScatterMaterial(
     assetId: string,
     sourceMat: THREE.Material | THREE.Material[],
-    modelHeight: number,
-    modelBaseY = 0,
   ): GPUVegetationMaterial {
     const existing = this.scatterMaterials.get(assetId);
     if (existing) return existing;
     const src = Array.isArray(sourceMat) ? sourceMat[0] : sourceMat;
     const colorMap = (src as THREE.MeshStandardMaterial).map ?? null;
-    const opts = this.scatterAssetOptions.get(assetId);
     const mat = createGPUVegetationMaterial({
       colorMap,
       vertexColors: !colorMap,
-      modelHeight: Math.max(0.1, modelHeight),
-      modelBaseY,
-      groundColorBlend: opts?.groundColorBlend ?? 0,
-      groundColorBlendHeight: opts?.groundColorBlendHeight ?? 0.5,
     });
     this.scatterMaterials.set(assetId, mat);
     return mat;
@@ -1120,6 +1190,28 @@ export class VegetationSystem extends System {
     // Remove tile-chunk relationships and dispose orphaned chunks
     // This handles actual mesh cleanup, quadtree removal, and imposter disposal
     this.removeTileChunkRelationships(key);
+
+    // Clean up BatchedMesh scatter instances for this tile
+    for (const pool of this.scatterBatchPools.values()) {
+      const instanceKeys = pool.tileInstances.get(key);
+      if (!instanceKeys) continue;
+      for (const instanceKey of instanceKeys) {
+        const inst = pool.instances.get(instanceKey);
+        if (!inst) continue;
+        for (let slot = 0; slot < pool.batches.length; slot++) {
+          const slotId = inst.slotIds[slot];
+          if (slotId !== undefined) {
+            try {
+              pool.batches[slot].deleteInstance(slotId);
+            } catch {
+              // Instance may already be gone
+            }
+          }
+        }
+        pool.instances.delete(instanceKey);
+      }
+      pool.tileInstances.delete(key);
+    }
   }
 
   /**
@@ -1269,6 +1361,28 @@ export class VegetationSystem extends System {
     this.tileChunks.delete(key);
     this.pendingTiles.delete(key);
 
+    // Clean up BatchedMesh scatter instances for this tile
+    for (const pool of this.scatterBatchPools.values()) {
+      const instanceKeys = pool.tileInstances.get(key);
+      if (!instanceKeys) continue;
+      for (const instanceKey of instanceKeys) {
+        const inst = pool.instances.get(instanceKey);
+        if (!inst) continue;
+        for (let slot = 0; slot < pool.batches.length; slot++) {
+          const slotId = inst.slotIds[slot];
+          if (slotId !== undefined) {
+            try {
+              pool.batches[slot].deleteInstance(slotId);
+            } catch {
+              // Instance may already be gone
+            }
+          }
+        }
+        pool.instances.delete(instanceKey);
+      }
+      pool.tileInstances.delete(key);
+    }
+
     // Now regenerate vegetation with updated terrain heights
     await this.onTileGenerated({
       tileX: data.tileX,
@@ -1328,41 +1442,466 @@ export class VegetationSystem extends System {
       getWaterBodyRegistry?: () => unknown;
       getTileSize: () => number;
       CONFIG?: { TILE_SIZE: number };
+      computeBiomeWeightsByPosition?: (
+        x: number,
+        z: number,
+      ) => Record<string, number>;
     };
     const tileSize =
       terrainSystem.getTileSize?.() ?? terrainSystem.CONFIG?.TILE_SIZE ?? 100;
     const tileKey = `${tileX}_${tileZ}`;
 
     for (const scatterLayer of cfg.layers) {
-      const vegLayer: VegetationLayer = {
-        category: "plant",
-        density: scatterLayer.density,
-        assets: scatterLayer.assets,
-        minSpacing: scatterLayer.minSpacing,
-        avoidWater: scatterLayer.avoidWater,
-        avoidSteepSlopes: scatterLayer.maxSlope !== undefined,
-        terrainWeights: scatterLayer.terrainWeights,
-        biomeTint: scatterLayer.biomeTint,
-        biomeTintStrength: scatterLayer.biomeTintStrength,
-        groundColorBlend: scatterLayer.groundColorBlend,
-        groundColorBlendHeight: scatterLayer.groundColorBlendHeight,
-      };
-      await this.generateLayerVegetation(
-        tileKey,
-        tileX * tileSize,
-        tileZ * tileSize,
-        tileSize,
-        vegLayer,
-        terrainSystem as {
-          getHeightAt: (x: number, z: number) => number;
-          getNormalAt?: (x: number, z: number) => THREE.Vector3;
-          getWaterBodyRegistry?: () => {
-            getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
-            getWaterSurfaceAt?: (x: number, z: number) => number;
-          };
-        },
+      // Split assets into batch (multi-variant) vs instanced (single-model)
+      const batchAssets = scatterLayer.assets.filter((id) =>
+        this.scatterBatchAssetIds.has(id),
       );
+      const instAssets = scatterLayer.assets.filter(
+        (id) => !this.scatterBatchAssetIds.has(id),
+      );
+
+      // BatchedMesh path for multi-variant assets (e.g. cactus_group)
+      if (batchAssets.length > 0) {
+        const batchLayer = { ...scatterLayer, assets: batchAssets };
+        await this.generateTileScatterBatched(
+          tileKey,
+          tileX * tileSize,
+          tileZ * tileSize,
+          tileSize,
+          batchLayer,
+          terrainSystem as {
+            getHeightAt: (x: number, z: number) => number;
+            getNormalAt?: (x: number, z: number) => THREE.Vector3;
+            getWaterBodyRegistry?: () => {
+              getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+              getWaterSurfaceAt?: (x: number, z: number) => number;
+            };
+            getTerrainColorAt?: (
+              x: number,
+              z: number,
+            ) => {
+              r: number;
+              g: number;
+              b: number;
+              nx: number;
+              ny: number;
+              nz: number;
+              grassWeight: number;
+            };
+            computeBiomeWeightsByPosition?: (
+              x: number,
+              z: number,
+            ) => Record<string, number>;
+          },
+        );
+      }
+
+      // InstancedMesh path for single-model assets (existing logic)
+      if (instAssets.length > 0) {
+        const vegLayer: VegetationLayer = {
+          category: "plant",
+          density: scatterLayer.density,
+          assets: instAssets,
+          minSpacing: scatterLayer.minSpacing,
+          avoidWater: scatterLayer.avoidWater,
+          avoidSteepSlopes: scatterLayer.maxSlope !== undefined,
+          terrainWeights: scatterLayer.terrainWeights,
+          colorTint: scatterLayer.colorTint,
+        };
+        await this.generateLayerVegetation(
+          tileKey,
+          tileX * tileSize,
+          tileZ * tileSize,
+          tileSize,
+          vegLayer,
+          terrainSystem as {
+            getHeightAt: (x: number, z: number) => number;
+            getNormalAt?: (x: number, z: number) => THREE.Vector3;
+            getWaterBodyRegistry?: () => {
+              getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+              getWaterSurfaceAt?: (x: number, z: number) => number;
+            };
+            computeBiomeWeightsByPosition?: (
+              x: number,
+              z: number,
+            ) => Record<string, number>;
+          },
+        );
+      }
     }
+  }
+
+  /**
+   * Lazily load and build a BatchedMesh pool for a multi-variant scatter asset.
+   * Each material slot of the asset gets its own BatchedMesh that holds all variants.
+   */
+  private async ensureScatterBatchPool(
+    asset: VegetationAsset,
+    layer: BiomeScatterLayer,
+  ): Promise<ScatterBatchPool> {
+    const poolKey = `${layer.biomeId}_${asset.id}`;
+    const existing = this.scatterBatchPools.get(poolKey);
+    if (existing) return existing;
+
+    const pending = this.pendingScatterBatchLoads.get(poolKey);
+    if (pending) return pending;
+
+    const promise = this._buildScatterBatchPool(asset, layer);
+    this.pendingScatterBatchLoads.set(poolKey, promise);
+    try {
+      const pool = await promise;
+      this.scatterBatchPools.set(poolKey, pool);
+      return pool;
+    } finally {
+      this.pendingScatterBatchLoads.delete(poolKey);
+    }
+  }
+
+  private async _buildScatterBatchPool(
+    asset: VegetationAsset,
+    layer: BiomeScatterLayer,
+  ): Promise<ScatterBatchPool> {
+    const variants = asset.variants!;
+    const baseUrl = (this.world.assetsUrl || "").replace(/\/$/, "");
+
+    // Load all variant models in parallel
+    const modelRoots = await Promise.all(
+      variants.map(async (path) => {
+        const url = `${baseUrl}/${path}`;
+        const { scene: s } = await modelCache.loadModel(url, this.world);
+        return s;
+      }),
+    );
+
+    // Extract mesh parts (geometry + material) per variant
+    interface MeshPart {
+      geometry: THREE.BufferGeometry;
+      material: THREE.Material;
+    }
+    const extractParts = (root: THREE.Object3D): MeshPart[] => {
+      const parts: MeshPart[] = [];
+      root.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.geometry) {
+          const mats = Array.isArray(child.material)
+            ? child.material
+            : [child.material];
+          for (const mat of mats) {
+            parts.push({ geometry: child.geometry, material: mat });
+          }
+        }
+      });
+      return parts;
+    };
+    const allParts = modelRoots.map(extractParts);
+    const numSlots = allParts[0].length || 1;
+
+    // Compute total vertex / index budget per slot across all variants
+    const totalVerts = new Array<number>(numSlots).fill(0);
+    const totalIndices = new Array<number>(numSlots).fill(0);
+    for (const varParts of allParts) {
+      for (let slot = 0; slot < numSlots; slot++) {
+        const part = varParts[slot] ?? varParts[0];
+        if (!part) continue;
+        const geo = part.geometry;
+        totalVerts[slot] += geo.getAttribute("position")?.count ?? 0;
+        totalIndices[slot] += geo.index?.count ?? 0;
+      }
+    }
+
+    const batches: THREE.BatchedMesh[] = [];
+    const materials: GPUVegetationMaterial[] = [];
+    // geometryIds[variantIndex][slotIndex]
+    const geometryIds: number[][] = variants.map(() =>
+      new Array<number>(numSlots).fill(-1),
+    );
+
+    for (let slot = 0; slot < numSlots; slot++) {
+      const srcMat = (allParts[0][slot] ?? allParts[0][0]).material;
+      const colorMap = (srcMat as THREE.MeshStandardMaterial).map ?? null;
+
+      const bm = new THREE.BatchedMesh(
+        SCATTER_BATCH_MAX_INSTANCES,
+        totalVerts[slot],
+        totalIndices[slot] > 0 ? totalIndices[slot] : undefined,
+      );
+      bm.frustumCulled = false;
+      bm.perObjectFrustumCulled = false;
+      bm.sortObjects = false;
+      bm.castShadow = asset.castShadow !== false;
+      bm.receiveShadow = false;
+      bm.layers.set(1);
+
+      // Register each variant's geometry in this slot's BatchedMesh
+      for (let v = 0; v < variants.length; v++) {
+        const part = allParts[v][slot] ?? allParts[v][0];
+        if (!part) continue;
+        const geoId = bm.addGeometry(part.geometry);
+        geometryIds[v][slot] = geoId;
+      }
+
+      const gpuMat = createGPUVegetationMaterial({
+        colorMap,
+        vertexColors: !colorMap,
+        fadeStart: FADE_START,
+        fadeEnd: FADE_END,
+      });
+
+      bm.material = gpuMat as unknown as THREE.Material;
+
+      if (this.scene) {
+        this.scene.add(bm);
+      }
+
+      batches.push(bm);
+      materials.push(gpuMat);
+    }
+
+    // Approx model radius from the already-computed bounding box
+    let modelRadius = 2;
+    try {
+      const bbox = new THREE.Box3().setFromObject(modelRoots[0]);
+      const center = bbox.getCenter(new THREE.Vector3());
+      const dx = Math.max(
+        Math.abs(bbox.min.x - center.x),
+        Math.abs(bbox.max.x - center.x),
+      );
+      const dz = Math.max(
+        Math.abs(bbox.min.z - center.z),
+        Math.abs(bbox.max.z - center.z),
+      );
+      modelRadius = Math.max(dx, dz) * (asset.baseScale ?? 1);
+    } catch {
+      // Non-critical — use default
+    }
+
+    const pool: ScatterBatchPool = {
+      assetId: asset.id,
+      batches,
+      materials,
+      geometryIds,
+      instances: new Map(),
+      tileInstances: new Map(),
+      modelRadius,
+    };
+
+    console.log(
+      `[BatchScatter] pool "${asset.id}" built: ${variants.length} variants, ${batches.length} slot(s), modelRadius=${modelRadius.toFixed(2)}`,
+    );
+
+    return pool;
+  }
+
+  /**
+   * Place scatter instances for multi-variant assets (BatchedMesh path).
+   * Called from generateTileScatter when the layer contains batch assets.
+   */
+  private async generateTileScatterBatched(
+    tileKey: string,
+    tileWorldX: number,
+    tileWorldZ: number,
+    tileSize: number,
+    layer: BiomeScatterLayer,
+    terrainSystem: {
+      getHeightAt: (x: number, z: number) => number;
+      getNormalAt?: (x: number, z: number) => THREE.Vector3;
+      getWaterBodyRegistry?: () => {
+        getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
+        getWaterSurfaceAt?: (x: number, z: number) => number;
+      };
+      getTerrainColorAt?: (
+        x: number,
+        z: number,
+      ) => {
+        r: number;
+        g: number;
+        b: number;
+        nx: number;
+        ny: number;
+        nz: number;
+        grassWeight: number;
+      };
+      computeBiomeWeightsByPosition?: (
+        x: number,
+        z: number,
+      ) => Record<string, number>;
+    },
+  ): Promise<void> {
+    const validAssets = layer.assets
+      .map((id) => this.assetDefinitions.get(id))
+      .filter(
+        (a): a is VegetationAsset => a !== undefined && !!a.variants?.length,
+      );
+    if (!validAssets.length) return;
+
+    // Ensure all pools are built
+    const pools = await Promise.all(
+      validAssets.map((asset) => this.ensureScatterBatchPool(asset, layer)),
+    );
+
+    const targetCount = Math.floor(layer.density * (tileSize / 100) ** 2);
+    const rng = this.createTileLayerRng(tileKey, "scatter_batch");
+    const totalWeight = validAssets.reduce((sum, a) => sum + a.weight, 0);
+
+    // Re-use the existing position generator via a VegetationLayer-shaped object
+    const vegLayerForPositions: VegetationLayer = {
+      category: "plant",
+      density: layer.density,
+      assets: layer.assets,
+      minSpacing: layer.minSpacing,
+      avoidWater: layer.avoidWater,
+      avoidSteepSlopes: layer.maxSlope !== undefined,
+      terrainWeights: layer.terrainWeights,
+    };
+    const positions = this.generatePlacementPositions(
+      tileWorldX,
+      tileWorldZ,
+      tileSize,
+      targetCount,
+      vegLayerForPositions,
+      rng,
+    );
+
+    const getHeight = terrainSystem.getHeightAt.bind(terrainSystem);
+    const bodyRegistry = terrainSystem.getWaterBodyRegistry?.();
+    const shouldAvoidWater = layer.avoidWater !== false;
+    const waterThreshold = WATER_LEVEL + WATER_EDGE_BUFFER;
+
+    const _mat = new THREE.Matrix4();
+
+    const BATCH_SIZE = 50;
+    let placedCount = 0;
+    let posIndex = 0;
+
+    while (posIndex < positions.length && placedCount < targetCount) {
+      const batchEnd = Math.min(posIndex + BATCH_SIZE, positions.length);
+
+      for (; posIndex < batchEnd && placedCount < targetCount; posIndex++) {
+        const pos = positions[posIndex];
+        const height = getHeight(pos.x, pos.z);
+
+        if (shouldAvoidWater && height < waterThreshold) continue;
+
+        if (shouldAvoidWater && bodyRegistry) {
+          if (
+            (
+              bodyRegistry as {
+                getWaterSurfaceAt?: (x: number, z: number) => number;
+              }
+            ).getWaterSurfaceAt
+          ) {
+            const waterY = (
+              bodyRegistry as {
+                getWaterSurfaceAt: (x: number, z: number) => number;
+              }
+            ).getWaterSurfaceAt(pos.x, pos.z);
+            if (height < waterY + WATER_EDGE_BUFFER) continue;
+          } else {
+            const body = (
+              bodyRegistry as {
+                getBodyAt: (
+                  x: number,
+                  z: number,
+                ) => { surfaceY: number } | null;
+              }
+            ).getBodyAt(pos.x, pos.z);
+            if (body && height < body.surfaceY + WATER_EDGE_BUFFER) continue;
+          }
+        }
+
+        if (this.roadNetworkSystem?.isOnRoad(pos.x, pos.z)) continue;
+        if (isPositionInsideDuelArenaZone(pos.x, pos.z)) continue;
+
+        if (layer.maxSlope !== undefined) {
+          const slope = this.estimateSlope(pos.x, pos.z, getHeight);
+          if (slope > layer.maxSlope) continue;
+        }
+
+        // Terrain weight filter (grassWeight used for placement rules)
+        if (
+          layer.terrainWeights?.grass !== undefined &&
+          terrainSystem.getTerrainColorAt
+        ) {
+          const tc = terrainSystem.getTerrainColorAt(pos.x, pos.z);
+          if (tc) {
+            const [gMin, gMax] = layer.terrainWeights.grass;
+            if (tc.grassWeight < gMin || tc.grassWeight > gMax) continue;
+          }
+        }
+
+        // Weighted asset selection
+        const asset = this.selectWeightedAsset(validAssets, totalWeight, rng);
+        if (!asset) continue;
+
+        const poolIdx = validAssets.indexOf(asset);
+        const pool = pools[poolIdx];
+        if (!pool) continue;
+
+        // Random variant
+        const variantIndex =
+          Math.floor(rng() * asset.variants!.length) % asset.variants!.length;
+
+        // Transform
+        const scale =
+          asset.baseScale *
+          (asset.scaleVariation[0] +
+            rng() * (asset.scaleVariation[1] - asset.scaleVariation[0]));
+        const rotY = asset.randomRotation ? rng() * Math.PI * 2 : 0;
+
+        this._dummy.position.set(pos.x, height + (asset.yOffset ?? 0), pos.z);
+        this._dummy.rotation.set(0, rotY, 0);
+        this._dummy.scale.set(scale, scale, scale);
+        this._dummy.updateMatrix();
+        _mat.copy(this._dummy.matrix);
+
+        // Add instance to each material slot
+        const slotIds: number[] = [];
+        for (let slot = 0; slot < pool.batches.length; slot++) {
+          const bm = pool.batches[slot];
+          const geoId = pool.geometryIds[variantIndex]?.[slot] ?? -1;
+          if (geoId < 0) continue;
+          const instanceId = bm.addInstance(geoId);
+          bm.setMatrixAt(instanceId, _mat);
+          slotIds.push(instanceId);
+        }
+        if (!slotIds.length) continue;
+
+        // Apply per-instance biome-blended color tint
+        if (layer.colorTint) {
+          const biomeWeights =
+            terrainSystem.computeBiomeWeightsByPosition?.(pos.x, pos.z) ?? {};
+          const tint = this.computeBlendedTint(asset.id, biomeWeights);
+          for (let slot = 0; slot < pool.batches.length; slot++) {
+            const bm = pool.batches[slot];
+            const instanceId = slotIds[slot];
+            if (instanceId === undefined) continue;
+            bm.setColorAt(instanceId, tint);
+          }
+        }
+
+        // Track instance for tile cleanup
+        const instanceKey = `${tileKey}_sb_${placedCount}`;
+        pool.instances.set(instanceKey, {
+          slotIds,
+          position: new THREE.Vector3(pos.x, height, pos.z),
+        });
+        let tileInst = pool.tileInstances.get(tileKey);
+        if (!tileInst) {
+          tileInst = [];
+          pool.tileInstances.set(tileKey, tileInst);
+        }
+        tileInst.push(instanceKey);
+
+        placedCount++;
+      }
+
+      if (posIndex < positions.length && placedCount < targetCount) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    console.log(
+      `[BatchScatter] tile "${tileKey}": placed ${placedCount}/${targetCount} instances for assets [${layer.assets.join(", ")}]`,
+    );
   }
 
   private async generateTileVegetation(
@@ -1680,6 +2219,10 @@ export class VegetationSystem extends System {
         getBodyAt: (x: number, z: number) => { surfaceY: number } | null;
         getWaterSurfaceAt?: (x: number, z: number) => number;
       };
+      computeBiomeWeightsByPosition?: (
+        x: number,
+        z: number,
+      ) => Record<string, number>;
     },
   ): Promise<void> {
     const tileData = this.tileVegetation.get(tileKey);
@@ -1805,42 +2348,22 @@ export class VegetationSystem extends System {
           if (asset.maxSlope !== undefined && slope > asset.maxSlope) continue;
         }
 
-        // Scatter: sample terrain colour + normal, apply terrain weight filter
-        let groundR = 0,
-          groundG = 0,
-          groundB = 0;
-        let terrainNX = 0,
-          terrainNY = 1,
-          terrainNZ = 0;
-        if (this.scatterAssetIds.has(asset.id)) {
+        // Scatter: apply terrain weight filter
+        if (
+          this.scatterAssetIds.has(asset.id) &&
+          layer.terrainWeights?.grass !== undefined
+        ) {
           const tc = (
             terrainSystem as {
               getTerrainColorAt?: (
                 x: number,
                 z: number,
-              ) => {
-                r: number;
-                g: number;
-                b: number;
-                nx: number;
-                ny: number;
-                nz: number;
-                grassWeight: number;
-              };
+              ) => { grassWeight: number };
             }
           ).getTerrainColorAt?.(pos.x, pos.z);
-
           if (tc) {
-            if (layer.terrainWeights?.grass !== undefined) {
-              const [gMin, gMax] = layer.terrainWeights.grass;
-              if (tc.grassWeight < gMin || tc.grassWeight > gMax) continue;
-            }
-            groundR = tc.r;
-            groundG = tc.g;
-            groundB = tc.b;
-            terrainNX = tc.nx ?? 0;
-            terrainNY = tc.ny ?? 1;
-            terrainNZ = tc.nz ?? 0;
+            const [gMin, gMax] = layer.terrainWeights.grass;
+            if (tc.grassWeight < gMin || tc.grassWeight > gMax) continue;
           }
         }
 
@@ -1882,48 +2405,24 @@ export class VegetationSystem extends System {
         // Add instance to tile data
         tileData.instances.set(instance.id, instance);
 
-        // Add to chunked mesh and write scatter attributes if applicable
+        // Add to chunked mesh
         const addedIdx = this.addInstanceToChunk(instance, assetDataRef);
-        if (this.scatterAssetIds.has(asset.id) && addedIdx !== false) {
+
+        // Apply per-instance biome-blended color tint for scatter assets
+        if (
+          addedIdx !== false &&
+          layer.colorTint &&
+          this.scatterAssetIds.has(asset.id)
+        ) {
+          const biomeWeights =
+            terrainSystem.computeBiomeWeightsByPosition?.(pos.x, pos.z) ?? {};
+          const tint = this.computeBlendedTint(asset.id, biomeWeights);
           const chunkKey = this.getChunkKey(pos.x, pos.z, asset.id);
           const chunked = this.chunkedMeshes.get(chunkKey);
           if (chunked) {
-            const gca = chunked.mesh.geometry.getAttribute(
-              "instanceGroundColor",
-            ) as THREE.InstancedBufferAttribute | undefined;
-            const bta = chunked.mesh.geometry.getAttribute(
-              "instanceBiomeTint",
-            ) as THREE.InstancedBufferAttribute | undefined;
-            const tna = chunked.mesh.geometry.getAttribute(
-              "instanceTerrainNormal",
-            ) as THREE.InstancedBufferAttribute | undefined;
-            const bya = chunked.mesh.geometry.getAttribute("instanceBaseY") as
-              | THREE.InstancedBufferAttribute
-              | undefined;
-            if (gca) {
-              gca.array[addedIdx * 3] = groundR;
-              gca.array[addedIdx * 3 + 1] = groundG;
-              gca.array[addedIdx * 3 + 2] = groundB;
-              gca.needsUpdate = true;
-            }
-            if (bta && layer.biomeTint) {
-              const s = layer.biomeTintStrength ?? 0;
-              bta.array[addedIdx * 4] = layer.biomeTint[0];
-              bta.array[addedIdx * 4 + 1] = layer.biomeTint[1];
-              bta.array[addedIdx * 4 + 2] = layer.biomeTint[2];
-              bta.array[addedIdx * 4 + 3] = s;
-              bta.needsUpdate = true;
-            }
-            if (tna) {
-              tna.array[addedIdx * 3] = terrainNX;
-              tna.array[addedIdx * 3 + 1] = terrainNY;
-              tna.array[addedIdx * 3 + 2] = terrainNZ;
-              tna.needsUpdate = true;
-            }
-            if (bya) {
-              (bya.array as Float32Array)[addedIdx] = instance.position.y;
-              bya.needsUpdate = true;
-            }
+            chunked.mesh.setColorAt(addedIdx, tint);
+            if (chunked.mesh.instanceColor)
+              chunked.mesh.instanceColor.needsUpdate = true;
           }
         }
 
@@ -2335,33 +2834,6 @@ export class VegetationSystem extends System {
     geometry.setAttribute("instanceRotationY", rotationAttr);
 
     // Scatter assets get extra per-instance attributes for ground colour blending
-    if (this.scatterAssetIds.has(assetId)) {
-      const groundColorAttr = new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES_PER_CHUNK * 3),
-        3,
-      );
-      const biomeTintAttr = new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES_PER_CHUNK * 4),
-        4,
-      );
-      const terrainNormalAttr = new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES_PER_CHUNK * 3),
-        3,
-      );
-      const baseYAttr = new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES_PER_CHUNK),
-        1,
-      );
-      groundColorAttr.setUsage(THREE.DynamicDrawUsage);
-      biomeTintAttr.setUsage(THREE.DynamicDrawUsage);
-      terrainNormalAttr.setUsage(THREE.DynamicDrawUsage);
-      baseYAttr.setUsage(THREE.DynamicDrawUsage);
-      geometry.setAttribute("instanceGroundColor", groundColorAttr);
-      geometry.setAttribute("instanceBiomeTint", biomeTintAttr);
-      geometry.setAttribute("instanceTerrainNormal", terrainNormalAttr);
-      geometry.setAttribute("instanceBaseY", baseYAttr);
-    }
-
     // Create instanced mesh with shared material
     const mesh = new THREE.InstancedMesh(
       geometry,
@@ -2930,6 +3402,14 @@ export class VegetationSystem extends System {
 
     try {
       const baseUrl = (this.world.assetsUrl || "").replace(/\/$/, "");
+      if (!asset.model) {
+        // Variant assets (BatchedMesh path) don't use loadAssetData
+        console.warn(
+          `[VegetationSystem] loadAssetData called for variant asset "${asset.id}" — skipping`,
+        );
+        this.pendingAssetLoads.delete(asset.id);
+        return null;
+      }
       const modelPath = `${baseUrl}/${asset.model}`;
 
       // Use modelCache which has proper meshopt decoder setup
@@ -2980,15 +3460,7 @@ export class VegetationSystem extends System {
         asset,
         modelBaseOffset,
         gpuMaterial: this.scatterAssetIds.has(asset.id)
-          ? this.getOrCreateScatterMaterial(
-              asset.id,
-              material,
-              validGeometry.boundingBox
-                ? validGeometry.boundingBox.max.y -
-                    validGeometry.boundingBox.min.y
-                : 1.0,
-              validGeometry.boundingBox?.min.y ?? 0,
-            )
+          ? this.getOrCreateScatterMaterial(asset.id, material)
           : this.sharedVegetationMaterial!,
         boundingSize,
         lod1Geometry: null,
@@ -3819,26 +4291,20 @@ export class VegetationSystem extends System {
       );
     }
 
-    // Update scatter materials (per-asset): playerPos, cameraPos + sunDir
+    // Update scatter materials (per-asset): playerPos, cameraPos
     if (this.scatterMaterials.size > 0) {
-      // Resolve sun direction from scene directional light (if available)
-      let sunDirX = 0.5,
-        sunDirY = 0.8,
-        sunDirZ = 0.3;
-      if (this.scene) {
-        this.scene.traverse((obj) => {
-          if (obj instanceof THREE.DirectionalLight && obj.intensity > 0) {
-            sunDirX = obj.position.x;
-            sunDirY = obj.position.y;
-            sunDirZ = obj.position.z;
-          }
-        });
-      }
       for (const mat of this.scatterMaterials.values()) {
         mat.gpuUniforms.playerPos.value.set(playerX, playerY, playerZ);
         mat.gpuUniforms.cameraPos.value.set(cameraX, cameraY, cameraZ);
-        if (mat.gpuUniforms.sunDir) {
-          mat.gpuUniforms.sunDir.value.set(sunDirX, sunDirY, sunDirZ);
+      }
+    }
+
+    // Update batched scatter pool materials
+    if (this.scatterBatchPools.size > 0) {
+      for (const pool of this.scatterBatchPools.values()) {
+        for (const mat of pool.materials) {
+          mat.gpuUniforms.playerPos.value.set(playerX, playerY, playerZ);
+          mat.gpuUniforms.cameraPos.value.set(cameraX, cameraY, cameraZ);
         }
       }
     }
@@ -4605,6 +5071,18 @@ export class VegetationSystem extends System {
       this.sharedVegetationMaterial.dispose();
       this.sharedVegetationMaterial = null;
     }
+
+    // Dispose scatter batch pools (BatchedMesh + materials)
+    for (const pool of this.scatterBatchPools.values()) {
+      for (let slot = 0; slot < pool.batches.length; slot++) {
+        const bm = pool.batches[slot];
+        if (bm.parent) bm.parent.remove(bm);
+        bm.dispose();
+        pool.materials[slot]?.dispose();
+      }
+    }
+    this.scatterBatchPools.clear();
+    this.pendingScatterBatchLoads.clear();
 
     // Dispose octahedral imposters
     for (const imposterData of this.imposters.values()) {

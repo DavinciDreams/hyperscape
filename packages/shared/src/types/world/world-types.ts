@@ -139,8 +139,24 @@ export interface VegetationLODConfig {
 export interface VegetationAsset {
   /** Unique identifier for this asset */
   id: string;
-  /** Path to the GLB model file (relative to assets folder) - LOD0 (full detail) */
-  model: string;
+  /**
+   * Path to the GLB model file (relative to assets folder) - LOD0 (full detail).
+   * Required for single-variant assets. Omit when `variants` is set.
+   */
+  model?: string;
+  /**
+   * Multiple GLB model paths for multi-variant assets.
+   * When set, a single BatchedMesh is used for all variants instead of
+   * individual InstancedMeshes, reducing draw calls significantly.
+   */
+  variants?: string[];
+  /**
+   * Suffix appended to each variant base name to form the LOD1 path.
+   * E.g. "_lod1" → "cactus01_lod1.glb". Only used when `variants` is set.
+   */
+  lod1Suffix?: string;
+  /** Suffix for LOD2 variant GLBs. Only used when `variants` is set. */
+  lod2Suffix?: string;
   /**
    * Path to low-poly GLB model for LOD1 (optional)
    * If not provided, the full model is used until imposter distance
@@ -211,14 +227,8 @@ export interface VegetationLayer {
     dirt?: [number, number];
     cliff?: [number, number];
   };
-  /** RGB biome tint color multiplier */
-  biomeTint?: [number, number, number];
-  /** 0–1 biome tint blend strength */
-  biomeTintStrength?: number;
-  /** 0–1 ground colour blend strength at the root */
-  groundColorBlend?: number;
-  /** 0–1 fraction of model height over which ground blend fades */
-  groundColorBlendHeight?: number;
+  /** Per-biome RGB color tint for scatter assets — blended by biome influence */
+  colorTint?: [number, number, number];
 }
 
 /**
