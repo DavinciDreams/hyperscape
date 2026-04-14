@@ -23,49 +23,64 @@ type EntityCandidate = {
   mesh?: unknown;
 };
 
+function matchesTargetId(
+  candidate: EntityCandidate,
+  targetEntityId: string,
+): boolean {
+  return (
+    candidate.id === targetEntityId ||
+    candidate.characterId === targetEntityId ||
+    candidate.data?.id === targetEntityId ||
+    candidate.data?.characterId === targetEntityId
+  );
+}
+
 /**
- * Resolve the entity backing a spectator camera target. Walks the world's
- * direct id index first, then the players collection (matching by id,
- * characterId, data.id, or data.characterId), then the items collection
- * (matching by direct id).
+ * Resolve the entity backing a spectator camera target. Tries the world's
+ * direct id index first, then walks both the `items` and `players`
+ * collections, matching by direct map key, id, characterId, data.id, or
+ * data.characterId — covering every observed entity-id shape.
  *
- * NOTE: preserves the exact behavior of StreamingMode.tsx's previous local
- * implementation so the extraction is a pure refactor for that call site.
- * EmbeddedGameClient.tsx previously had a wider items-side match; consolidating
- * on this version temporarily narrows that helper. A follow-up commit widens
- * the items branch and readiness check to the union of both prior behaviors.
+ * The previous implementations split coverage between the two collections
+ * (StreamingMode only direct-keyed items; EmbeddedGameClient walked items
+ * fully but duplicated the players logic). This unified lookup is a strict
+ * superset: any entity previously findable remains findable, plus namespaced
+ * items-side keys and characterId aliases are now resolvable from either
+ * collection.
  */
 export function findStreamingTargetEntity(
   world: World,
   targetEntityId: string,
 ): Entity | null {
-  let entity = (world.entities?.get?.(targetEntityId) ?? null) as Entity | null;
+  const entities = world.entities;
+  if (!entities) return null;
 
-  if (!entity && world.entities?.players) {
-    for (const [, player] of world.entities.players) {
-      const candidate = player as EntityCandidate;
+  const direct = (entities.get?.(targetEntityId) ?? null) as Entity | null;
+  if (direct) return direct;
+
+  if (entities.items) {
+    for (const [key, item] of entities.items) {
       if (
-        candidate.id === targetEntityId ||
-        candidate.characterId === targetEntityId ||
-        candidate.data?.id === targetEntityId ||
-        candidate.data?.characterId === targetEntityId
+        key === targetEntityId ||
+        matchesTargetId(item as EntityCandidate, targetEntityId)
       ) {
-        entity = player as Entity;
-        break;
+        return item as Entity;
       }
     }
   }
 
-  if (!entity && world.entities?.items) {
-    for (const [, item] of world.entities.items) {
-      if ((item as EntityCandidate).id === targetEntityId) {
-        entity = item as Entity;
-        break;
+  if (entities.players) {
+    for (const [key, player] of entities.players) {
+      if (
+        key === targetEntityId ||
+        matchesTargetId(player as EntityCandidate, targetEntityId)
+      ) {
+        return player as Entity;
       }
     }
   }
 
-  return entity;
+  return null;
 }
 
 /**
@@ -73,42 +88,29 @@ export function findStreamingTargetEntity(
  * populated — a loaded VRM avatar, a second-phase avatar handle, a fallback
  * avatar root, or a mesh.
  *
- * NOTE: this preserves the exact behavior of StreamingMode.tsx's previous
- * local implementation, which inspects only `world.entities.players`. A
- * follow-up commit widens the check to also traverse `world.entities.items`
- * via `findStreamingTargetEntity`.
+ * Delegates lookup to `findStreamingTargetEntity` so both the `items` and
+ * `players` collections are inspected. Previously this check only walked
+ * `world.entities.players`, which silently masked player entities that the
+ * snapshot pipeline routed exclusively through `items` (for example combat
+ * agents arriving via a spectator snapshot whose entity-manager wiring
+ * inserts them under a namespaced key on the items map). Commit 33dab353f
+ * ("Keep stream readiness source-of-truth strict") removed the grace-expiry
+ * escape hatch that had been masking this gap, so the capture page now sits
+ * in degraded state indefinitely when the target entity is only in items.
  */
 export function isTargetAvatarReady(
   world: World,
   targetEntityId: string,
 ): boolean {
-  const playerDirect = world.entities?.players?.get?.(targetEntityId) as
-    | EntityCandidate
-    | undefined;
-  if (
-    playerDirect?.avatar ||
-    playerDirect?._avatar ||
-    playerDirect?._fallbackAvatarRoot ||
-    playerDirect?.mesh
-  ) {
-    return true;
-  }
-
-  if (world.entities?.players) {
-    for (const [, player] of world.entities.players) {
-      const candidate = player as EntityCandidate;
-      if (
-        (candidate.id === targetEntityId ||
-          candidate.characterId === targetEntityId) &&
-        (candidate.avatar ||
-          candidate._avatar ||
-          candidate._fallbackAvatarRoot ||
-          candidate.mesh)
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  const entity = findStreamingTargetEntity(
+    world,
+    targetEntityId,
+  ) as EntityCandidate | null;
+  if (!entity) return false;
+  return Boolean(
+    entity.avatar ||
+    entity._avatar ||
+    entity._fallbackAvatarRoot ||
+    entity.mesh,
+  );
 }
