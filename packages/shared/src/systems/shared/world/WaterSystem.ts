@@ -77,20 +77,23 @@ const WATER = {
   DIFFUSE_STRENGTH: 0.5,
 
   // Depth-based opacity: op = 1 - pow(sat(1 - depth/scale), falloff)
-  OP_DEPTH_SCALE: 15,
-  OP_DEPTH_FALLOFF: 3,
+  OP_DEPTH_SCALE: 50,
+  OP_DEPTH_FALLOFF: 15,
 
   // Depth-based colour gradient
   COLOR_DEPTH_SCALE: 50,
   COLOR_DEPTH_FALLOFF: 3,
   COLOR_DIST_FADE: 200,
 
-  // Cosine gradient colour parameters — more green, less grey-blue
-  // shallow(t=1) sRGB display: (0.276, 0.541, 0.595)  deep(t=0) sRGB display: (0.196, 0.384, 0.422)
-  COS_PHASES: [0.5, 0.5, 0.5] as const,
-  COS_AMPLITUDES: [0.0311, 0.1374, 0.1692] as const,
+  // Cosine gradient colour parameters — RIME-style, values in **linear light** space
+  // (shader runs in linear; renderer gamma-corrects to sRGB for display)
+  // deep(t=0)    linear: (0.010, 0.100, 0.280)  sRGB display: ~#1B598C (blue-teal)
+  // shallow(t=1) linear: (0.018, 0.380, 0.240)  sRGB display: ~#24A484 (vivid teal-green)
+  // B phase=0.0 so blue peaks in deep water and falls off toward shore
+  COS_PHASES: [0.5, 0.5, 0.0] as const,
+  COS_AMPLITUDES: [0.008, 0.32, 0.08] as const,
   COS_FREQUENCIES: [0.5, 0.5, 0.5] as const,
-  COS_OFFSETS: [-0.4569, -0.3095, -0.2654] as const,
+  COS_OFFSETS: [-0.486, -0.22, -0.22] as const,
 
   // Normal noise strength (xz multiplier for surface normal)
   NORMAL_STRENGTH: 1.5,

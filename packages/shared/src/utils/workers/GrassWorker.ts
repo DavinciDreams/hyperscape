@@ -243,14 +243,14 @@ function buildComputeTerrainColorJS(): string {
   var _TUNDRA_CLIFF = {r:0.570482,g:0.638283,b:0.673860};
   var _TUNDRA_CLIFF_DARK = {r:0.370813,g:0.414884,b:0.438009};
 
-  var _FOREST_GRASS = {r:0.1281,g:0.2393,b:0.0437};
-  var _FOREST_GRASS_DARK = {r:0.0833,g:0.1555,b:0.0284};
-  var _FOREST_GRASS_HIGH = {r:0.24,g:0.45,b:0.18};
-  var _FOREST_VARIATION = {r:0.15,g:0.35,b:0.1};
-  var _FOREST_DIRT = {r:0.2641,g:0.1936,b:0.1068};
-  var _FOREST_DIRT_DARK = {r:0.1717,g:0.1258,b:0.0694};
-  var _FOREST_CLIFF = {r:0.462361,g:0.406448,b:0.318547};
-  var _FOREST_CLIFF_DARK = {r:0.300535,g:0.264191,b:0.207055};
+  var _FOREST_GRASS = {r:0.0380,g:0.4018,b:0.0214};
+  var _FOREST_GRASS_DARK = {r:0.0247,g:0.2612,b:0.0139};
+  var _FOREST_GRASS_HIGH = {r:0.0320,g:0.3200,b:0.0180};
+  var _FOREST_VARIATION = {r:0.0180,g:0.1800,b:0.0100};
+  var _FOREST_DIRT = {r:0.2693,g:0.1964,b:0.1059};
+  var _FOREST_DIRT_DARK = {r:0.1750,g:0.1277,b:0.0689};
+  var _FOREST_CLIFF = {r:0.3905,g:0.3729,b:0.3400};
+  var _FOREST_CLIFF_DARK = {r:0.2538,g:0.2424,b:0.2210};
 
   var _CANYON_SAND = {r:0.223414,g:0.139985,b:0.063724};
   var _CANYON_SAND_DARK = {r:0.145219,g:0.090990,b:0.041420};
@@ -261,7 +261,7 @@ function buildComputeTerrainColorJS(): string {
   var _CANYON_CLIFF = {r:0.252950,g:0.147319,b:0.083535};
   var _CANYON_CLIFF_DARK = {r:0.164418,g:0.095757,b:0.054298};
 
-  var _CLIFF_TINT = {r:0.28,g:0.3,b:0.36};
+  var _CLIFF_TINT = {r:0.20,g:0.25,b:0.15};
   var _SAND_YELLOW = {r:0.7,g:0.6,b:0.38};
   var _DIRT_DARK_CPU = {r:0.22,g:0.15,b:0.08};
   var _MUD_BROWN = {r:0.18,g:0.12,b:0.08};
@@ -311,29 +311,27 @@ function buildComputeTerrainColorJS(): string {
 
     var grassWeight = 1.0;
 
-    var nDirtF = smoothstepCPU(sc.DIRT_THRESHOLD - 0.05, sc.DIRT_THRESHOLD + 0.15, noiseVal) * smoothstepCPU(0.3, 0.05, dSlope);
+    var nDirtF = smoothstepCPU(sc.DIRT_THRESHOLD - 0.02, sc.DIRT_THRESHOLD + 0.04, noiseVal) * smoothstepCPU(0.18, 0.10, dSlope);
     c = mixRGB(c, dirtColor, nDirtF);
     grassWeight -= nDirtF;
 
-    var dirtSlopeF = smoothstepCPU(0.15, 0.4, dSlope) * smoothstepCPU(0.6, 0.3, dSlope) * 0.6;
-    c = mixRGB(c, dirtColor, dirtSlopeF);
-    grassWeight -= dirtSlopeF;
+    // Dirt slope bell removed — mountain areas go grass → cliff directly
 
-    var cliffF = smoothstepCPU(0.3, 0.55, dSlope);
+    var cliffF = smoothstepCPU(0.38, 0.46, dSlope);
     c = mixRGB(c, cliffColor, cliffF);
     grassWeight -= cliffF;
 
-    var sandBlend = smoothstepCPU(18, 12, dHeight) * smoothstepCPU(0.25, 0.0, slope);
+    var sandBlend = smoothstepCPU(15, 12.5, dHeight) * smoothstepCPU(0.15, 0.0, slope);
     var sandStr = 0.6 + (0.9 - 0.6) * dW;
     var sandF = sandBlend * sandStr;
     c = mixRGB(c, _SAND_YELLOW, sandF);
     grassWeight -= sandF;
 
-    var shore1 = smoothstepCPU(22, 14, dHeight) * 0.4;
+    var shore1 = smoothstepCPU(19, 16, dHeight) * 0.4;
     c = mixRGB(c, _DIRT_DARK_CPU, shore1);
     grassWeight -= shore1;
 
-    var shore2 = smoothstepCPU(15, 10, dHeight) * 0.7;
+    var shore2 = smoothstepCPU(14, 12, dHeight) * 0.7;
     c = mixRGB(c, _MUD_BROWN, shore2);
     grassWeight -= shore2;
 

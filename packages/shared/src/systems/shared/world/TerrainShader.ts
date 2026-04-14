@@ -64,7 +64,7 @@ export const TERRAIN_SHADER_CONSTANTS = {
   VARIATION_NOISE_SCALE: 0.0015,
   ROCK_DISTORT_STRENGTH: 0.5,
   HEIGHT_DISTORT_STRENGTH: 8.0,
-  SATURATION_BOOST: 1.35,
+  SATURATION_BOOST: 0.8,
 };
 
 /**
@@ -229,15 +229,15 @@ const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
 const TUNDRA_CLIFF = vec3(0.5, 0.52, 0.56);
 const TUNDRA_CLIFF_DARK = vec3(0.38, 0.4, 0.44);
 
-// --- Forest palette: vibrant energetic greens with warm brown earth ---
-const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
-const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
-const FOREST_GRASS_HIGH = vec3(0.24, 0.45, 0.18);
-const FOREST_VARIATION = vec3(0.15, 0.35, 0.1);
-const FOREST_DIRT = vec3(0.26, 0.19, 0.11);
-const FOREST_DIRT_DARK = vec3(0.17, 0.12, 0.07);
-const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
-const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
+// --- Forest palette: derived from actual grass/dirt/cliff texture averages (linear light space) ---
+const FOREST_GRASS = vec3(0.038, 0.4018, 0.0214);
+const FOREST_GRASS_DARK = vec3(0.0247, 0.2612, 0.0139);
+const FOREST_GRASS_HIGH = vec3(0.032, 0.32, 0.018);
+const FOREST_VARIATION = vec3(0.018, 0.18, 0.01);
+const FOREST_DIRT = vec3(0.2693, 0.1964, 0.1059);
+const FOREST_DIRT_DARK = vec3(0.175, 0.1277, 0.0689);
+const FOREST_CLIFF = vec3(0.3905, 0.3729, 0.34);
+const FOREST_CLIFF_DARK = vec3(0.2538, 0.2424, 0.221);
 
 // --- Canyon palette: red-orange sand with deep crimson rock ---
 const CANYON_SAND = vec3(0.82, 0.52, 0.28);
