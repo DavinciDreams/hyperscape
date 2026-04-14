@@ -134,7 +134,10 @@ function createCycle(
 }
 
 function createStorageBackedWorld() {
-  const rows = new Map<string, { key: string; value: string; updatedAt: number }>();
+  const rows = new Map<
+    string,
+    { key: string; value: string; updatedAt: number }
+  >();
   return {
     rows,
     world: {
@@ -152,7 +155,11 @@ function createStorageBackedWorld() {
               }),
             }),
             insert: () => ({
-              values: (row: { key: string; value: string; updatedAt: number }) => ({
+              values: (row: {
+                key: string;
+                value: string;
+                updatedAt: number;
+              }) => ({
                 onConflictDoUpdate: async () => {
                   rows.set(row.key, row);
                 },
@@ -304,7 +311,8 @@ describe("streaming-betting-routes", () => {
           captureMode: "cdp",
           degradedReason: null,
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: Date.now(),
           lastRenderTickAt: Date.now(),
           lastVisualChangeAt: Date.now(),
@@ -324,7 +332,11 @@ describe("streaming-betting-routes", () => {
     });
     const routes = registerStreamingBettingRoutes(options);
 
-    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(fetchSpy).toHaveBeenCalled();
@@ -354,6 +366,120 @@ describe("streaming-betting-routes", () => {
       playbackReady: true,
       lastError: null,
       manifestStatus: "ok",
+    });
+
+    routes.close();
+    await options.fastify.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("does not mark Cloudflare provider live from local ingest when playback probe is not ready", async () => {
+    stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+    stubEnv("STREAM_DELIVERY_MODE", "external_hls");
+    stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
+    stubEnv(
+      "STREAM_PLAYBACK_LLHLS_URL",
+      "https://customer.example/live.m3u8?protocol=llhls",
+    );
+    stubEnv("STREAM_INGEST_RTMPS_URL", "srt://live.cloudflare.example/input");
+
+    const now = Date.now();
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "streaming-betting-routes-"),
+    );
+    const externalStatusFile = path.join(tempDir, "rtmp-status.json");
+    fs.writeFileSync(
+      externalStatusFile,
+      JSON.stringify({
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        destinations: [
+          {
+            id: "canonical-cloudflare",
+            role: "canonical",
+            provider: "cloudflare_stream",
+            name: "External Delivery",
+            transport: "srt",
+            playbackUrl: "https://customer.example/live.m3u8",
+            connected: true,
+            startedAt: now - 500,
+          },
+        ],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: now,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: now,
+        },
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "cdp",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
+          lastFrameAt: now,
+          lastRenderTickAt: now,
+          lastVisualChangeAt: now,
+          lastRecoveryAt: now - 1_000,
+          recoveryCount: 1,
+          workerHeartbeatAt: now,
+        },
+      }),
+    );
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("", { status: 204 }));
+
+    const options = createRouteOptions({
+      externalStatusFile,
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(fetchSpy).toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    let payload: Record<string, any> | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await options.fastify.inject({
+        method: "GET",
+        url: "/api/internal/bet-sync/state",
+        headers: {
+          authorization: "Bearer bet-secret",
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      payload = response.json();
+      if (payload?.canonicalAuthority?.playbackProbeStatusCode === 204) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(payload).not.toBeNull();
+    expect(payload.canonicalAuthority).toMatchObject({
+      providerLive: false,
+      playbackProbeReady: false,
+      decision: "blocked",
+      reason: "provider_not_live",
+    });
+    expect(payload.channel.publicReadiness).toMatchObject({
+      ready: false,
+      reason: "provider_not_live",
     });
 
     routes.close();
@@ -616,8 +742,8 @@ describe("streaming-betting-routes", () => {
     });
     expect(
       JSON.parse(
-        storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")?.value ??
-          "null",
+        storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")
+          ?.value ?? "null",
       ),
     ).toMatchObject({
       eventType: "stream_live_input.connected",
@@ -662,8 +788,12 @@ describe("streaming-betting-routes", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")).toBeUndefined();
-    expect(storageBackedWorld.rows.get("streaming:cloudflare:lifecycle")).toBeUndefined();
+    expect(
+      storageBackedWorld.rows.get("streaming:cloudflare:last-webhook"),
+    ).toBeUndefined();
+    expect(
+      storageBackedWorld.rows.get("streaming:cloudflare:lifecycle"),
+    ).toBeUndefined();
 
     routes.close();
     await options.fastify.close();
@@ -702,8 +832,12 @@ describe("streaming-betting-routes", () => {
       ignored: true,
       liveInputId: "other-live-input",
     });
-    expect(storageBackedWorld.rows.get("streaming:cloudflare:last-webhook")).toBeUndefined();
-    expect(storageBackedWorld.rows.get("streaming:cloudflare:lifecycle")).toBeUndefined();
+    expect(
+      storageBackedWorld.rows.get("streaming:cloudflare:last-webhook"),
+    ).toBeUndefined();
+    expect(
+      storageBackedWorld.rows.get("streaming:cloudflare:lifecycle"),
+    ).toBeUndefined();
 
     routes.close();
     await options.fastify.close();

@@ -1073,24 +1073,38 @@ export function registerStreamingBettingRoutes(
         )
       : null;
     const probeSnapshot = externalPlaybackProbePoller?.getSnapshot() ?? null;
-    const providerLive =
+    const probeUpdatedAt =
+      probeSnapshot != null
+        ? resolveSnapshotUpdatedAt(probeSnapshot.updatedAt, params.nowMs)
+        : null;
+    const playbackProbeFresh =
+      probeUpdatedAt != null && isSnapshotFresh(probeUpdatedAt, params.nowMs);
+    const localIngestHealthy =
       params.externalSnapshot != null &&
       snapshotUpdatedAt != null &&
       isSnapshotFresh(snapshotUpdatedAt, params.nowMs) &&
       params.externalSnapshot.active === true &&
       params.externalSnapshot.ffmpegRunning === true &&
-      params.externalSnapshot.stats?.healthy !== false &&
-      (params.destination?.connected === true || probeSnapshot?.ready === true);
-    const status: PersistedCloudflareLifecyclePollState["status"] = providerLive
-      ? "connected"
-      : params.destination?.connected === false
-        ? "disconnected"
-        : params.externalSnapshot?.stats?.healthy === false ||
-            (typeof params.destination?.error === "string" &&
-              params.destination.error.trim().length > 0)
-          ? "errored"
-          : "unknown";
-    const receivedAt = snapshotUpdatedAt ?? params.nowMs;
+      params.externalSnapshot.stats?.healthy !== false;
+    const providerLive = playbackProbeFresh && probeSnapshot?.ready === true;
+    let status: PersistedCloudflareLifecyclePollState["status"] = "unknown";
+    if (providerLive) {
+      status = "connected";
+    } else if (playbackProbeFresh && probeSnapshot?.ready === false) {
+      status = "disconnected";
+    } else if (
+      params.externalSnapshot?.stats?.healthy === false ||
+      (typeof params.destination?.error === "string" &&
+        params.destination.error.trim().length > 0)
+    ) {
+      status = "errored";
+    } else if (params.destination?.connected === false) {
+      status = "disconnected";
+    } else if (localIngestHealthy) {
+      status = "unknown";
+    }
+    const receivedAt = Math.max(snapshotUpdatedAt ?? 0, probeUpdatedAt ?? 0, 0);
+    const normalizedReceivedAt = receivedAt > 0 ? receivedAt : params.nowMs;
     const liveInputId =
       cloudflareLiveInputId ??
       persistedAuthority.cloudflareLifecycle?.liveInputId ??
@@ -1113,17 +1127,19 @@ export function registerStreamingBettingRoutes(
       statusSummary:
         status === "connected"
           ? "connected"
-          : typeof params.destination?.error === "string" &&
-              params.destination.error.trim().length > 0
-            ? params.destination.error.trim()
-            : params.externalSnapshot == null
-              ? "delivery_status_unavailable"
-              : !isSnapshotFresh(receivedAt, params.nowMs)
-                ? "delivery_status_stale"
-                : status,
+          : playbackProbeFresh && probeSnapshot?.ready === false
+            ? (probeSnapshot.lastError ?? probeSnapshot.manifestStatus)
+            : typeof params.destination?.error === "string" &&
+                params.destination.error.trim().length > 0
+              ? params.destination.error.trim()
+              : params.externalSnapshot == null
+                ? "delivery_status_unavailable"
+                : !isSnapshotFresh(normalizedReceivedAt, params.nowMs)
+                  ? "delivery_status_stale"
+                  : status,
       playbackUrl: params.playbackUrl,
-      occurredAt: receivedAt,
-      receivedAt,
+      occurredAt: normalizedReceivedAt,
+      receivedAt: normalizedReceivedAt,
     };
   };
 
