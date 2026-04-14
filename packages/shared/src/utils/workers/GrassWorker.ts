@@ -90,6 +90,31 @@ export interface GrassWorkerInput {
     HEIGHT_DISTORT_STRENGTH: number;
     DIRT_THRESHOLD: number;
     SATURATION_BOOST: number;
+    DIRT_NOISE_LO_OFFSET: number;
+    DIRT_NOISE_HI_OFFSET: number;
+    DIRT_FLAT_HI: number;
+    DIRT_FLAT_LO: number;
+    DIRT_BELL_LO: number;
+    DIRT_BELL_MID: number;
+    DIRT_BELL_FALL: number;
+    DIRT_BELL_END: number;
+    DIRT_BELL_STR: number;
+    CLIFF_LO: number;
+    CLIFF_HI: number;
+    SAND_H_HI: number;
+    SAND_H_LO: number;
+    SAND_SLOPE: number;
+    SAND_STR_MIN: number;
+    SAND_STR_MAX: number;
+    SHORE1_HI: number;
+    SHORE1_LO: number;
+    SHORE1_STR: number;
+    SHORE2_HI: number;
+    SHORE2_LO: number;
+    SHORE2_STR: number;
+    SHORE3_HI: number;
+    SHORE3_LO: number;
+    SHORE3_STR: number;
   };
   roadSegments: Array<{
     startX: number;
@@ -311,31 +336,31 @@ function buildComputeTerrainColorJS(): string {
 
     var grassWeight = 1.0;
 
-    var nDirtF = smoothstepCPU(sc.DIRT_THRESHOLD - 0.02, sc.DIRT_THRESHOLD + 0.04, noiseVal) * smoothstepCPU(0.18, 0.10, dSlope);
+    var nDirtF = smoothstepCPU(sc.DIRT_THRESHOLD + sc.DIRT_NOISE_LO_OFFSET, sc.DIRT_THRESHOLD + sc.DIRT_NOISE_HI_OFFSET, noiseVal) * smoothstepCPU(sc.DIRT_FLAT_HI, sc.DIRT_FLAT_LO, dSlope);
     c = mixRGB(c, dirtColor, nDirtF);
     grassWeight -= nDirtF;
 
     // Dirt slope bell removed — mountain areas go grass → cliff directly
 
-    var cliffF = smoothstepCPU(0.38, 0.46, dSlope);
+    var cliffF = smoothstepCPU(sc.CLIFF_LO, sc.CLIFF_HI, dSlope);
     c = mixRGB(c, cliffColor, cliffF);
     grassWeight -= cliffF;
 
-    var sandBlend = smoothstepCPU(15, 12.5, dHeight) * smoothstepCPU(0.15, 0.0, slope);
-    var sandStr = 0.6 + (0.9 - 0.6) * dW;
+    var sandBlend = smoothstepCPU(sc.SAND_H_HI, sc.SAND_H_LO, dHeight) * smoothstepCPU(sc.SAND_SLOPE, 0.0, slope);
+    var sandStr = sc.SAND_STR_MIN + (sc.SAND_STR_MAX - sc.SAND_STR_MIN) * dW;
     var sandF = sandBlend * sandStr;
     c = mixRGB(c, _SAND_YELLOW, sandF);
     grassWeight -= sandF;
 
-    var shore1 = smoothstepCPU(19, 16, dHeight) * 0.4;
+    var shore1 = smoothstepCPU(sc.SHORE1_HI, sc.SHORE1_LO, dHeight) * sc.SHORE1_STR;
     c = mixRGB(c, _DIRT_DARK_CPU, shore1);
     grassWeight -= shore1;
 
-    var shore2 = smoothstepCPU(14, 12, dHeight) * 0.7;
+    var shore2 = smoothstepCPU(sc.SHORE2_HI, sc.SHORE2_LO, dHeight) * sc.SHORE2_STR;
     c = mixRGB(c, _MUD_BROWN, shore2);
     grassWeight -= shore2;
 
-    var shore3 = smoothstepCPU(11, 7, dHeight) * 0.9;
+    var shore3 = smoothstepCPU(sc.SHORE3_HI, sc.SHORE3_LO, dHeight) * sc.SHORE3_STR;
     c = mixRGB(c, _WATER_EDGE, shore3);
     grassWeight -= shore3;
 

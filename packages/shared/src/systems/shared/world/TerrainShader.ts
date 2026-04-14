@@ -65,18 +65,55 @@ export const TERRAIN_SHADER_CONSTANTS = {
   ROCK_DISTORT_STRENGTH: 0.5,
   HEIGHT_DISTORT_STRENGTH: 8.0,
   SATURATION_BOOST: 0.8,
+
+  // ── Blend thresholds (single source of truth for GPU shaders + CPU worker) ──
+
+  // Dirt patch: noise-driven on flat areas
+  DIRT_NOISE_LO_OFFSET: -0.05, // lower noise edge  = DIRT_THRESHOLD + this
+  DIRT_NOISE_HI_OFFSET: 0.15, // upper noise edge  = DIRT_THRESHOLD + this
+  DIRT_FLAT_HI: 0.3, // dSlope at which flatness factor → 0
+  DIRT_FLAT_LO: 0.05, // dSlope at which flatness factor → 1
+
+  // Dirt slope bell (moderate slopes)
+  DIRT_BELL_LO: 0.15,
+  DIRT_BELL_MID: 0.4,
+  DIRT_BELL_FALL: 0.6,
+  DIRT_BELL_END: 0.3,
+  DIRT_BELL_STR: 0.6,
+
+  // Cliff
+  CLIFF_LO: 0.3, // slope where cliff starts
+  CLIFF_HI: 0.55, // slope where cliff is full
+
+  // Sand near water
+  SAND_H_HI: 18.0,
+  SAND_H_LO: 12.0,
+  SAND_SLOPE: 0.25,
+  SAND_STR_MIN: 0.6,
+  SAND_STR_MAX: 0.9,
+
+  // Shoreline transitions
+  SHORE1_HI: 22.0,
+  SHORE1_LO: 14.0,
+  SHORE1_STR: 0.4,
+  SHORE2_HI: 15.0,
+  SHORE2_LO: 10.0,
+  SHORE2_STR: 0.7,
+  SHORE3_HI: 11.0,
+  SHORE3_LO: 7.0,
+  SHORE3_STR: 0.9,
 };
 
 /**
  * Half-lambert anime shade: wraps N·L to [0,1] for soft fill, then
- * tints the shadow side with a cool blue-teal hue shift (Genshin-style).
+ * tints the shadow side with a cool blue-teal hue shift (anime-style).
  * Applied to albedo before PBR so the colour shift survives lighting.
  */
 export const TERRAIN_SHADE = {
   TINT_COLOR: SUN_SHADE.TINT_COLOR,
-  STRENGTH: 0.7,
-  FRESNEL_POWER: 3.0,
-  FRESNEL_INTENSITY: 0.2,
+  STRENGTH: 0.65,
+  FRESNEL_POWER: 30.0,
+  FRESNEL_INTENSITY: 0.05,
 };
 
 /**
@@ -359,47 +396,106 @@ export function computeTerrainBaseColor(
   // Noise-driven dirt patches on flat areas (using distorted slope)
   const nDirtFactor = mul(
     smoothstep(
-      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
-      float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
+      float(
+        TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD +
+          TERRAIN_SHADER_CONSTANTS.DIRT_NOISE_LO_OFFSET,
+      ),
+      float(
+        TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD +
+          TERRAIN_SHADER_CONSTANTS.DIRT_NOISE_HI_OFFSET,
+      ),
       noiseVal,
     ),
-    smoothstep(float(0.3), float(0.05), dSlope),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_FLAT_HI),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_FLAT_LO),
+      dSlope,
+    ),
   );
   c = mix(c, dirtColor, nDirtFactor);
 
   // Dirt on moderate slopes (bell curve, using distorted slope)
   const dirtSlopeF = mul(
-    smoothstep(float(0.15), float(0.4), dSlope),
-    smoothstep(float(0.6), float(0.3), dSlope),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_LO),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_MID),
+      dSlope,
+    ),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_FALL),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_END),
+      dSlope,
+    ),
   );
-  c = mix(c, dirtColor, mul(dirtSlopeF, float(0.6)));
+  c = mix(
+    c,
+    dirtColor,
+    mul(dirtSlopeF, float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_STR)),
+  );
 
   // Cliff on steep slopes (using distorted slope)
-  c = mix(c, cliffColor, smoothstep(float(0.3), float(0.55), dSlope));
+  c = mix(
+    c,
+    cliffColor,
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.CLIFF_LO),
+      float(TERRAIN_SHADER_CONSTANTS.CLIFF_HI),
+      dSlope,
+    ),
+  );
 
   // Sand near water (flat areas, stronger in canyon — using distorted height)
   const sandBlend = mul(
-    smoothstep(float(18.0), float(12.0), dHeight),
-    smoothstep(float(0.25), float(0.0), slope),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.SAND_H_HI),
+      float(TERRAIN_SHADER_CONSTANTS.SAND_H_LO),
+      dHeight,
+    ),
+    smoothstep(float(TERRAIN_SHADER_CONSTANTS.SAND_SLOPE), float(0.0), slope),
   );
-  const sandStrength = mix(float(0.6), float(0.9), dW);
+  const sandStrength = mix(
+    float(TERRAIN_SHADER_CONSTANTS.SAND_STR_MIN),
+    float(TERRAIN_SHADER_CONSTANTS.SAND_STR_MAX),
+    dW,
+  );
   c = mix(c, SAND_YELLOW, mul(sandBlend, sandStrength));
 
   // Shoreline transitions (using distorted height)
   c = mix(
     c,
     DIRT_DARK,
-    mul(smoothstep(float(22.0), float(14.0), dHeight), float(0.4)),
+    mul(
+      smoothstep(
+        float(TERRAIN_SHADER_CONSTANTS.SHORE1_HI),
+        float(TERRAIN_SHADER_CONSTANTS.SHORE1_LO),
+        dHeight,
+      ),
+      float(TERRAIN_SHADER_CONSTANTS.SHORE1_STR),
+    ),
   );
   c = mix(
     c,
     MUD_BROWN,
-    mul(smoothstep(float(15.0), float(10.0), dHeight), float(0.7)),
+    mul(
+      smoothstep(
+        float(TERRAIN_SHADER_CONSTANTS.SHORE2_HI),
+        float(TERRAIN_SHADER_CONSTANTS.SHORE2_LO),
+        dHeight,
+      ),
+      float(TERRAIN_SHADER_CONSTANTS.SHORE2_STR),
+    ),
   );
   c = mix(
     c,
     WATER_EDGE,
-    mul(smoothstep(float(11.0), float(7.0), dHeight), float(0.9)),
+    mul(
+      smoothstep(
+        float(TERRAIN_SHADER_CONSTANTS.SHORE3_HI),
+        float(TERRAIN_SHADER_CONSTANTS.SHORE3_LO),
+        dHeight,
+      ),
+      float(TERRAIN_SHADER_CONSTANTS.SHORE3_STR),
+    ),
   );
 
   // Saturation boost: pull color away from grey
@@ -965,42 +1061,86 @@ export function computeTerrainColorCPU(
   // Dirt patches on flat areas
   const nDirtF =
     smoothstepCPU(
-      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05,
-      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15,
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD +
+        TERRAIN_SHADER_CONSTANTS.DIRT_NOISE_LO_OFFSET,
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD +
+        TERRAIN_SHADER_CONSTANTS.DIRT_NOISE_HI_OFFSET,
       noiseVal,
-    ) * smoothstepCPU(0.3, 0.05, dSlope);
+    ) *
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.DIRT_FLAT_HI,
+      TERRAIN_SHADER_CONSTANTS.DIRT_FLAT_LO,
+      dSlope,
+    );
   c = mixRGB(c, dirtColor, nDirtF);
   grassWeight -= nDirtF;
 
   // Dirt on moderate slopes
   const dirtSlopeF =
-    smoothstepCPU(0.15, 0.4, dSlope) * smoothstepCPU(0.6, 0.3, dSlope) * 0.6;
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.DIRT_BELL_LO,
+      TERRAIN_SHADER_CONSTANTS.DIRT_BELL_MID,
+      dSlope,
+    ) *
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.DIRT_BELL_FALL,
+      TERRAIN_SHADER_CONSTANTS.DIRT_BELL_END,
+      dSlope,
+    ) *
+    TERRAIN_SHADER_CONSTANTS.DIRT_BELL_STR;
   c = mixRGB(c, dirtColor, dirtSlopeF);
   grassWeight -= dirtSlopeF;
 
   // Cliff on steep slopes
-  const cliffF = smoothstepCPU(0.3, 0.55, dSlope);
+  const cliffF = smoothstepCPU(
+    TERRAIN_SHADER_CONSTANTS.CLIFF_LO,
+    TERRAIN_SHADER_CONSTANTS.CLIFF_HI,
+    dSlope,
+  );
   c = mixRGB(c, cliffColor, cliffF);
   grassWeight -= cliffF;
 
   // Sand near water
   const sandBlend =
-    smoothstepCPU(18, 12, dHeight) * smoothstepCPU(0.25, 0.0, slope);
-  const sandStr = 0.6 + (0.9 - 0.6) * dW;
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.SAND_H_HI,
+      TERRAIN_SHADER_CONSTANTS.SAND_H_LO,
+      dHeight,
+    ) * smoothstepCPU(TERRAIN_SHADER_CONSTANTS.SAND_SLOPE, 0.0, slope);
+  const sandStr =
+    TERRAIN_SHADER_CONSTANTS.SAND_STR_MIN +
+    (TERRAIN_SHADER_CONSTANTS.SAND_STR_MAX -
+      TERRAIN_SHADER_CONSTANTS.SAND_STR_MIN) *
+      dW;
   const sandF = sandBlend * sandStr;
   c = mixRGB(c, _SAND_YELLOW, sandF);
   grassWeight -= sandF;
 
   // Shoreline transitions
-  const shore1 = smoothstepCPU(22, 14, dHeight) * 0.4;
+  const shore1 =
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.SHORE1_HI,
+      TERRAIN_SHADER_CONSTANTS.SHORE1_LO,
+      dHeight,
+    ) * TERRAIN_SHADER_CONSTANTS.SHORE1_STR;
   c = mixRGB(c, _DIRT_DARK_CPU, shore1);
   grassWeight -= shore1;
 
-  const shore2 = smoothstepCPU(15, 10, dHeight) * 0.7;
+  const shore2 =
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.SHORE2_HI,
+      TERRAIN_SHADER_CONSTANTS.SHORE2_LO,
+      dHeight,
+    ) * TERRAIN_SHADER_CONSTANTS.SHORE2_STR;
   c = mixRGB(c, _MUD_BROWN, shore2);
   grassWeight -= shore2;
 
-  const shore3 = smoothstepCPU(11, 7, dHeight) * 0.9;
+  const shore3 =
+    smoothstepCPU(
+      TERRAIN_SHADER_CONSTANTS.SHORE3_HI,
+      TERRAIN_SHADER_CONSTANTS.SHORE3_LO,
+      dHeight,
+    ) * TERRAIN_SHADER_CONSTANTS.SHORE3_STR;
   c = mixRGB(c, _WATER_EDGE, shore3);
   grassWeight -= shore3;
 
@@ -1318,50 +1458,105 @@ export function createTerrainMaterial(): THREE.Material & {
 
   // Noise-driven dirt patches on flat areas (using distorted slope)
   const dirtPatchFactor = smoothstep(
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD - 0.05),
-    float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD + 0.15),
+    float(
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD +
+        TERRAIN_SHADER_CONSTANTS.DIRT_NOISE_LO_OFFSET,
+    ),
+    float(
+      TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD +
+        TERRAIN_SHADER_CONSTANTS.DIRT_NOISE_HI_OFFSET,
+    ),
     noiseValue,
   );
-  const flatnessFactor = smoothstep(float(0.3), float(0.05), dSlope);
+  const flatnessFactor = smoothstep(
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_FLAT_HI),
+    float(TERRAIN_SHADER_CONSTANTS.DIRT_FLAT_LO),
+    dSlope,
+  );
   baseColor = mix(baseColor, dirtColor, mul(dirtPatchFactor, flatnessFactor));
 
   // Dirt on moderate slopes (bell curve, using distorted slope)
   const dirtSlopeFactor = mul(
-    smoothstep(float(0.15), float(0.4), dSlope),
-    smoothstep(float(0.6), float(0.3), dSlope),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_LO),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_MID),
+      dSlope,
+    ),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_FALL),
+      float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_END),
+      dSlope,
+    ),
   );
-  baseColor = mix(baseColor, dirtColor, mul(dirtSlopeFactor, float(0.6)));
+  baseColor = mix(
+    baseColor,
+    dirtColor,
+    mul(dirtSlopeFactor, float(TERRAIN_SHADER_CONSTANTS.DIRT_BELL_STR)),
+  );
 
   // Cliff on steep slopes (using distorted slope)
   baseColor = mix(
     baseColor,
     cliffColor,
-    smoothstep(float(0.3), float(0.55), dSlope),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.CLIFF_LO),
+      float(TERRAIN_SHADER_CONSTANTS.CLIFF_HI),
+      dSlope,
+    ),
   );
 
   // Sand near water (flat areas, stronger in canyon — using distorted height)
   const sandBlend = mul(
-    smoothstep(float(18.0), float(12.0), dHeight),
-    smoothstep(float(0.25), float(0.0), slope),
+    smoothstep(
+      float(TERRAIN_SHADER_CONSTANTS.SAND_H_HI),
+      float(TERRAIN_SHADER_CONSTANTS.SAND_H_LO),
+      dHeight,
+    ),
+    smoothstep(float(TERRAIN_SHADER_CONSTANTS.SAND_SLOPE), float(0.0), slope),
   );
-  const sandStrength = mix(float(0.6), float(0.9), dW);
+  const sandStrength = mix(
+    float(TERRAIN_SHADER_CONSTANTS.SAND_STR_MIN),
+    float(TERRAIN_SHADER_CONSTANTS.SAND_STR_MAX),
+    dW,
+  );
   baseColor = mix(baseColor, SAND_YELLOW, mul(sandBlend, sandStrength));
 
   // Shoreline transitions (using distorted height)
   baseColor = mix(
     baseColor,
     DIRT_DARK,
-    mul(smoothstep(float(22.0), float(14.0), dHeight), float(0.4)),
+    mul(
+      smoothstep(
+        float(TERRAIN_SHADER_CONSTANTS.SHORE1_HI),
+        float(TERRAIN_SHADER_CONSTANTS.SHORE1_LO),
+        dHeight,
+      ),
+      float(TERRAIN_SHADER_CONSTANTS.SHORE1_STR),
+    ),
   );
   baseColor = mix(
     baseColor,
     MUD_BROWN,
-    mul(smoothstep(float(15.0), float(10.0), dHeight), float(0.7)),
+    mul(
+      smoothstep(
+        float(TERRAIN_SHADER_CONSTANTS.SHORE2_HI),
+        float(TERRAIN_SHADER_CONSTANTS.SHORE2_LO),
+        dHeight,
+      ),
+      float(TERRAIN_SHADER_CONSTANTS.SHORE2_STR),
+    ),
   );
   baseColor = mix(
     baseColor,
     WATER_EDGE,
-    mul(smoothstep(float(11.0), float(7.0), dHeight), float(0.9)),
+    mul(
+      smoothstep(
+        float(TERRAIN_SHADER_CONSTANTS.SHORE3_HI),
+        float(TERRAIN_SHADER_CONSTANTS.SHORE3_LO),
+        dHeight,
+      ),
+      float(TERRAIN_SHADER_CONSTANTS.SHORE3_STR),
+    ),
   );
 
   // Saturation boost: pull color away from grey

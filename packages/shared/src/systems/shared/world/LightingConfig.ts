@@ -77,7 +77,7 @@ export const SUN_SHADE = {
    * Applied as: tinted = color × TINT_COLOR, then mixed by shade factor.
    * Dynamic behavior comes from the shade factor (sun position), not this color.
    */
-  TINT_COLOR: [0.0, 0.5, 0.7] as readonly [number, number, number],
+  TINT_COLOR: [0.05, 0.35, 0.75] as readonly [number, number, number],
 } as const;
 
 // ============================================================================
