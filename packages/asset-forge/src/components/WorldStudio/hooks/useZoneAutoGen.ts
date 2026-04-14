@@ -1799,7 +1799,11 @@ export function useZoneAutoGen() {
           );
         }
 
-        await vp.refreshVegetation(undefined, { circles, roads, towns });
+        await vp.refreshVegetation(
+          undefined,
+          { circles, roads, towns },
+          state.brushOverlays.vegetationPaints,
+        );
       }
 
       // Navigate camera to the first generated town (where buildings are)
@@ -1829,8 +1833,12 @@ export function useZoneAutoGen() {
   const clearAutogen = useCallback(() => {
     actions.clearAllAutogen();
     // Restore full vegetation (no exclusion zones) since wizard content is gone
-    viewportRef?.current?.refreshVegetation?.();
-  }, [actions, viewportRef]);
+    viewportRef?.current?.refreshVegetation?.(
+      undefined,
+      undefined,
+      state.brushOverlays.vegetationPaints,
+    );
+  }, [actions, viewportRef, state.brushOverlays.vegetationPaints]);
 
   return {
     generate,

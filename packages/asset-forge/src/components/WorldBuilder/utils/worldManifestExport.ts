@@ -91,36 +91,48 @@ export function exportToGameManifest(world: WorldData): {
     }
   };
 
-  // Build town data with buildings
+  // Build town data with buildings (applying overrides from editing layer)
   const towns: GameManifestTown[] = world.foundation.towns.map((town) => {
-    // Find buildings belonging to this town
+    const townOverride = world.layers.townOverrides.get(town.id);
+    const buildingMods = townOverride?.buildingModifications ?? [];
+
+    // Find buildings belonging to this town, applying modifications
     const townBuildings = world.foundation.buildings
       .filter((b) => b.townId === town.id)
-      .map(
-        (building): GameManifestBuilding => ({
+      .filter((b) => {
+        const mod = buildingMods.find((m) => m.buildingId === b.id);
+        return !mod?.disabled; // Exclude disabled buildings
+      })
+      .map((building): GameManifestBuilding => {
+        const mod = buildingMods.find((m) => m.buildingId === building.id);
+        const posX = building.position.x + (mod?.positionOffset?.x ?? 0);
+        const posZ = building.position.z + (mod?.positionOffset?.z ?? 0);
+        return {
           id: building.id,
-          type: building.type,
+          type: mod?.typeOverride || building.type,
           // Position relative to town center for manifest format
           position: {
-            x: building.position.x - town.position.x,
+            x: posX - town.position.x,
             y: building.position.y - town.position.y,
-            z: building.position.z - town.position.z,
+            z: posZ - town.position.z,
           },
-          rotation: building.rotation,
+          rotation: mod?.rotationOverride ?? building.rotation,
           size: {
             width: building.dimensions.width,
             depth: building.dimensions.depth,
           },
-        }),
-      );
+        };
+      });
 
-    // Calculate safe zone radius based on town size
-    const safeZoneRadius =
+    // Calculate safe zone radius (override or default by size)
+    const defaultSafeZone =
       town.size === "hamlet" ? 40 : town.size === "village" ? 60 : 80;
+    const safeZoneRadius =
+      townOverride?.safeZoneRadiusOverride ?? defaultSafeZone;
 
     return {
       id: town.id,
-      name: town.name,
+      name: townOverride?.nameOverride || town.name,
       position: {
         x: town.position.x,
         y: town.position.y,

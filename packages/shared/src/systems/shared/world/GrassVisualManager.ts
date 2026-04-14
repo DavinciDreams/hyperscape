@@ -117,7 +117,7 @@ export const GRASS_CONFIG = {
 // to stay within WebGPU's 8-buffer limit.
 // ---------------------------------------------------------------------------
 
-function setColorTintInterleaved(
+export function setColorTintInterleaved(
   geo: THREE.BufferGeometry,
   groundColors: Float32Array,
   grassTints: Float32Array,
@@ -152,7 +152,7 @@ function setColorTintInterleaved(
 // Seeded PRNG
 // ---------------------------------------------------------------------------
 
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let s = seed | 0;
   return () => {
     s = (s + 0x6d2b79f5) | 0;
@@ -167,7 +167,7 @@ function mulberry32(seed: number): () => number {
 // arc curvature, per-blade rotation/height/width variation.
 // ---------------------------------------------------------------------------
 
-function createClumpGeometry(
+export function createClumpGeometry(
   bladesPerClump = GRASS_CONFIG.BLADES_PER_CLUMP,
   bladeSegments = GRASS_CONFIG.BLADE_SEGMENTS,
 ): THREE.BufferGeometry {

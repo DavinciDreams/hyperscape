@@ -34,6 +34,7 @@ import {
 } from "three/webgpu";
 import { pass } from "three/tsl";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
+import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { useCameraControls } from "./useCameraControls";
 import { ViewHelper } from "three/examples/jsm/helpers/ViewHelper.js";
@@ -77,12 +78,16 @@ import {
   type GameEntityData,
 } from "./GameWorldEntitySync";
 import { SceneResourceManager } from "./SceneResourceManager";
+import { FoliageManager, FOLIAGE_TILE_RADIUS } from "./FoliageRenderer";
 import {
   getGpuLifecycleStats,
   processDeferredFrame,
   processDeferredDisposalOnly,
 } from "../WorldStudio/utils/deferredGpuDisposal";
-import { applySculptStrokesToGeometry } from "../WorldStudio/utils/brushApplication";
+import {
+  applySculptStrokesToGeometry,
+  applyVegetationPaintStrokes,
+} from "../WorldStudio/utils/brushApplication";
 import type {
   WorldCreationConfig,
   GeneratedRoad,
@@ -94,15 +99,33 @@ import {
   type TownFlattenZone,
   createTemplateGeometry,
   createTerrainMaterial,
-  createWaterMaterial,
   generateTileGeometry,
 } from "./terrainHelpers";
+import {
+  createEditorWaterMaterial,
+  type EditorWaterUniforms,
+} from "./EditorWaterMaterial";
+import { EditorGrassManager } from "./EditorGrassManager";
 
 import {
   THREE,
   createWebGPURenderer,
   type AssetForgeRenderer,
 } from "@/utils/webgpu-renderer";
+import {
+  HEMISPHERE_LIGHT,
+  AMBIENT_LIGHT,
+  SUN_LIGHT,
+  DAY_CYCLE,
+  EXPOSURE,
+  FOG_COLORS,
+  StandaloneSky,
+  updateSceneLighting,
+  hourToDayPhase,
+  computeTargetExposure,
+  updateSceneFog,
+} from "@hyperscape/shared";
+import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 
 // Type aliases for clarity (all WebGPU-compatible NodeMaterials)
 const TownBasicMat = MeshBasicNodeMaterial;
@@ -126,6 +149,42 @@ function getTownPillarGeom(): THREE.CylinderGeometry {
     _townPillarGeom = new THREE.CylinderGeometry(3, 3, 30, 8);
   return _townPillarGeom;
 }
+
+// ============== TILE GEOMETRY POOL ==============
+// Instead of disposing tile geometries on eviction and cloning templates on
+// creation, pool them by vertex count for reuse. This eliminates GPU buffer
+// allocation/deallocation churn during steady-state camera movement.
+const _tileGeomPool = new Map<number, THREE.BufferGeometry[]>();
+const MAX_POOLED_PER_SIZE = 32;
+
+function acquirePooledGeometry(
+  vertexCount: number,
+): THREE.BufferGeometry | undefined {
+  const pool = _tileGeomPool.get(vertexCount);
+  return pool && pool.length > 0 ? pool.pop() : undefined;
+}
+
+function releaseToGeomPool(geom: THREE.BufferGeometry): void {
+  const count = geom.attributes.position?.count ?? 0;
+  if (count === 0) return;
+  let pool = _tileGeomPool.get(count);
+  if (!pool) {
+    pool = [];
+    _tileGeomPool.set(count, pool);
+  }
+  if (pool.length < MAX_POOLED_PER_SIZE) {
+    pool.push(geom);
+  } else {
+    geom.dispose(); // Pool full — dispose normally
+  }
+}
+
+// ============== PRE-ALLOCATED MATH OBJECTS (avoid per-click/per-frame GC) ==============
+
+const _clickMatrix = new THREE.Matrix4();
+const _clickPos = new THREE.Vector3();
+const _clickQuat = new THREE.Quaternion();
+const _clickScale = new THREE.Vector3();
 
 // ============== CONSTANTS ==============
 
@@ -192,144 +251,6 @@ function buildTownFlattenZones(
 // LOD distances for buildings
 const BUILDING_LOD_FULL_DISTANCE = 200; // Full detail within this distance
 const BUILDING_LOD_SIMPLE_DISTANCE = 500; // Simple boxes beyond this distance
-
-// ============== TIME-OF-DAY LIGHTING ==============
-
-// Time-of-day color presets (RGB, 0-1 range)
-const TOD_COLORS = {
-  midnight: {
-    sun: { r: 0.1, g: 0.1, b: 0.3 },
-    ambient: { r: 0.05, g: 0.05, b: 0.15 },
-    sky: 0x0a0a2e,
-    fog: 0x0a0a2e,
-  },
-  dawn: {
-    sun: { r: 1.0, g: 0.6, b: 0.3 },
-    ambient: { r: 0.3, g: 0.2, b: 0.15 },
-    sky: 0xff9966,
-    fog: 0xffccaa,
-  },
-  morning: {
-    sun: { r: 1.0, g: 0.9, b: 0.7 },
-    ambient: { r: 0.4, g: 0.35, b: 0.3 },
-    sky: 0x87ceeb,
-    fog: 0x87ceeb,
-  },
-  noon: {
-    sun: { r: 1.0, g: 1.0, b: 1.0 },
-    ambient: { r: 0.5, g: 0.5, b: 0.5 },
-    sky: 0x87ceeb,
-    fog: 0x87ceeb,
-  },
-  afternoon: {
-    sun: { r: 1.0, g: 0.95, b: 0.8 },
-    ambient: { r: 0.45, g: 0.4, b: 0.35 },
-    sky: 0x87ceeb,
-    fog: 0x87ceeb,
-  },
-  dusk: {
-    sun: { r: 1.0, g: 0.4, b: 0.2 },
-    ambient: { r: 0.3, g: 0.15, b: 0.1 },
-    sky: 0xff6633,
-    fog: 0xff9966,
-  },
-  night: {
-    sun: { r: 0.15, g: 0.15, b: 0.4 },
-    ambient: { r: 0.08, g: 0.08, b: 0.2 },
-    sky: 0x0a0a2e,
-    fog: 0x0a0a2e,
-  },
-} as const;
-
-// Time-of-day keyframes: [hour, preset]
-const TOD_KEYFRAMES: Array<[number, keyof typeof TOD_COLORS]> = [
-  [0, "midnight"],
-  [5, "dawn"],
-  [7, "morning"],
-  [12, "noon"],
-  [15, "afternoon"],
-  [19, "dusk"],
-  [21, "night"],
-  [24, "midnight"],
-];
-
-/** Write interpolated color directly to target THREE.Color (no allocation) */
-function lerpColorTo(
-  a: { r: number; g: number; b: number },
-  b: { r: number; g: number; b: number },
-  t: number,
-  out: THREE.Color,
-): void {
-  out.setRGB(
-    a.r + (b.r - a.r) * t,
-    a.g + (b.g - a.g) * t,
-    a.b + (b.b - a.b) * t,
-  );
-}
-
-function lerpHex(a: number, b: number, t: number): number {
-  const ar = (a >> 16) & 0xff,
-    ag = (a >> 8) & 0xff,
-    ab = a & 0xff;
-  const br = (b >> 16) & 0xff,
-    bg = (b >> 8) & 0xff,
-    bb = b & 0xff;
-  const r = Math.round(ar + (br - ar) * t);
-  const g = Math.round(ag + (bg - ag) * t);
-  const bv = Math.round(ab + (bb - ab) * t);
-  return (r << 16) | (g << 8) | bv;
-}
-
-/** Update sun/ambient/fog/sky based on time of day (0-24). */
-function updateTimeOfDayLighting(
-  hour: number,
-  sun: THREE.DirectionalLight,
-  ambient: THREE.AmbientLight,
-  scene: THREE.Scene,
-) {
-  // Wrap to 0-24
-  const h = ((hour % 24) + 24) % 24;
-
-  // Find surrounding keyframes
-  let fromIdx = 0;
-  for (let i = 0; i < TOD_KEYFRAMES.length - 1; i++) {
-    if (h >= TOD_KEYFRAMES[i][0]) fromIdx = i;
-  }
-  const toIdx = Math.min(fromIdx + 1, TOD_KEYFRAMES.length - 1);
-  const [fromHour, fromKey] = TOD_KEYFRAMES[fromIdx];
-  const [toHour, toKey] = TOD_KEYFRAMES[toIdx];
-
-  const range = toHour - fromHour;
-  const t = range > 0 ? (h - fromHour) / range : 0;
-
-  const from = TOD_COLORS[fromKey];
-  const to = TOD_COLORS[toKey];
-
-  // Interpolate colors directly into light.color (no intermediate object)
-  lerpColorTo(from.sun, to.sun, t, sun.color);
-  lerpColorTo(from.ambient, to.ambient, t, ambient.color);
-
-  // Sun intensity — brighter at noon, dim at night
-  const sunElevation = Math.sin(((h - 6) / 12) * Math.PI); // peaks at noon (12)
-  sun.intensity = Math.max(0.1, sunElevation * 1.2);
-  ambient.intensity = 0.3 + Math.max(0, sunElevation) * 0.3;
-
-  // Sun position — orbits from east to west
-  const angle = ((h - 6) / 24) * Math.PI * 2; // 6am = east horizon
-  const elevation = Math.max(0.05, Math.sin(((h - 6) / 12) * Math.PI));
-  sun.position.set(
-    Math.cos(angle) * 2000,
-    elevation * 2000,
-    Math.sin(angle) * 1000,
-  );
-
-  // Sky + fog color
-  const skyHex = lerpHex(from.sky, to.sky, t);
-  (scene.background as THREE.Color).setHex(skyHex);
-  if (scene.fog instanceof THREE.Fog) {
-    scene.fog.color.setHex(lerpHex(from.fog, to.fog, t));
-  }
-}
 
 // Town marker colors by size
 const TOWN_SIZE_COLORS: Record<string, number> = {
@@ -526,6 +447,16 @@ export interface TerrainSceneRefs {
   refreshVegetation: (
     vegConfig?: VegetationConfig,
     exclusions?: VegetationExclusions,
+    vegetationPaints?: Array<{
+      id: string;
+      center: { x: number; z: number };
+      radius: number;
+      strength: number;
+      falloff: "sharp" | "linear" | "smooth";
+      mode: "add" | "remove";
+      speciesFilter: string[];
+      timestamp: number;
+    }>,
   ) => Promise<void>;
   /** Teleport camera to a world position. Pass close=true for entity-level zoom. */
   navigateCamera: (x: number, z: number, close?: boolean) => void;
@@ -646,7 +577,7 @@ export interface TileBasedTerrainProps {
       biomeId?: string;
     }>,
   ) => void;
-  /** Brush overlay strokes (terrain sculpt, biome paint) to re-apply on tile generation */
+  /** Brush overlay strokes (terrain sculpt, biome paint, foliage) to re-apply on tile generation */
   brushOverlays?: {
     terrainSculpts: Array<{
       id: string;
@@ -658,6 +589,16 @@ export interface TileBasedTerrainProps {
       flattenTarget?: number;
       timestamp: number;
     }>;
+    foliagePaints?: Array<{
+      id: string;
+      center: { x: number; z: number };
+      radius: number;
+      strength: number;
+      falloff: "smooth" | "linear" | "sharp";
+      mode: "add" | "remove";
+      foliageTypes: string[];
+      timestamp: number;
+    }>;
   };
   /** Override the terrain querier with an imported heightmap querier */
   importedQuerier?:
@@ -665,6 +606,16 @@ export interface TileBasedTerrainProps {
     | null;
   /** Time of day for lighting (0-24, where 0/24=midnight, 6=dawn, 12=noon, 18=dusk) */
   timeOfDay?: number;
+  /** Enable shadow rendering (Phase 6.1) */
+  enableShadows?: boolean;
+  /** Enable bloom post-processing (Phase 6.2) */
+  enableBloom?: boolean;
+  /** Use game-matching exponential fog (Phase 6.3) */
+  enableGameFog?: boolean;
+  /** Enable procedural sky dome with sun, moon, and clouds */
+  enableSky?: boolean;
+  /** Enable procedural wind-animated grass */
+  enableGrass?: boolean;
 }
 
 export type { GameEntityData };
@@ -697,6 +648,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   brushOverlays,
   importedQuerier,
   timeOfDay = 12,
+  enableShadows = false,
+  enableBloom = false,
+  enableGameFog = false,
+  enableSky = false,
+  enableGrass = false,
 }) => {
   // Terrain querier ref (defined early so camera hook can use it for player mode)
   const terrainQuerierRef = useRef<TerrainQuerier | null>(null);
@@ -748,7 +704,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   } = cam;
 
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
-  const postProcessingRef = useRef<THREE.PostProcessing | null>(null);
+  // THREE.RenderPipeline exists at runtime (r183+) but @types/three 0.182 still
+  // exports it as PostProcessing. Use the runtime name to silence the deprecation
+  // warning, with a type-level cast until types catch up.
+  type RenderPipelineInstance = {
+    outputNode: unknown;
+    render(): void;
+    dispose(): void;
+  };
+  const postProcessingRef = useRef<RenderPipelineInstance | null>(null);
   const gpuRecoveryCountRef = useRef(0);
   const gpuRecoveringRef = useRef(false);
   const [gpuRecovering, setGpuRecovering] = useState(false);
@@ -758,6 +722,22 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
   const timeOfDayRef = useRef(timeOfDay);
   timeOfDayRef.current = timeOfDay;
+  const enableShadowsRef = useRef(enableShadows);
+  enableShadowsRef.current = enableShadows;
+  const enableBloomRef = useRef(enableBloom);
+  enableBloomRef.current = enableBloom;
+  const enableGameFogRef = useRef(enableGameFog);
+  enableGameFogRef.current = enableGameFog;
+  const enableSkyRef = useRef(enableSky);
+  enableSkyRef.current = enableSky;
+  const enableGrassRef = useRef(enableGrass);
+  enableGrassRef.current = enableGrass;
+  const hemiLightRef = useRef<THREE.HemisphereLight | null>(null);
+  const standaloneSkyRef = useRef<StandaloneSky | null>(null);
+  const standaloneGrassRef = useRef<EditorGrassManager | null>(null);
+  const currentExposureRef = useRef(EXPOSURE.DAY);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const csmShadowNodeRef = useRef<any>(null);
   const viewHelperRef = useRef<ViewHelper | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const viewModeRef = useRef<ViewMode>("lit");
@@ -770,6 +750,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const waterTemplateGeometryRef = useRef<THREE.PlaneGeometry | null>(null);
   const terrainMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const waterMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
+  const waterUniformsRef = useRef<EditorWaterUniforms | null>(null);
   const lodObjectsRef = useRef<THREE.LOD[]>([]);
   const terrainContainerRef = useRef<THREE.Group | null>(null);
   const waterContainerRef = useRef<THREE.Group | null>(null);
@@ -781,6 +762,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   );
   const entitySyncRef = useRef<THREE.Group | null>(null);
   const entityOverlayRef = useRef<THREE.Group | null>(null);
+  const foliageContainerRef = useRef<THREE.Group | null>(null);
+  const foliageManagerRef = useRef<FoliageManager | null>(null);
   const wildernessOverlayRef = useRef<THREE.Mesh | null>(null);
   /** Vegetation tree positions in game-space, populated by refreshVegetation(). */
   const vegetationPositionsRef = useRef<Array<{ x: number; z: number }>>([]);
@@ -927,12 +910,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     return createConfigFromPreset("large-island", overrides);
   }, [config]);
 
-  // Get tile key — numeric for fast Map lookups (no string allocations)
-  // Uses a Cantor-like pairing that handles negative coords via offset
-  const getTileKey = useCallback(
-    (tileX: number, tileZ: number) => `${tileX}_${tileZ}`,
-    [],
-  );
+  // Tile key cache — avoids O(farRadius²) template literal string allocations
+  // per camera tile change. The packed numeric key enables fast Map lookups;
+  // the string is computed once per unique tile coordinate.
+  const _tileKeyCache = useRef(new Map<number, string>());
+  const getTileKey = useCallback((tileX: number, tileZ: number): string => {
+    const packed = (tileX + 500) * 1000 + (tileZ + 500);
+    let key = _tileKeyCache.current.get(packed);
+    if (!key) {
+      key = `${tileX}_${tileZ}`;
+      _tileKeyCache.current.set(packed, key);
+    }
+    return key;
+  }, []);
 
   // Track last camera tile position for early-return optimization
   const lastCameraTileRef = useRef({ tileX: -Infinity, tileZ: -Infinity });
@@ -997,6 +987,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         querier,
       );
 
+      // Try to acquire a recycled geometry from the pool (avoids clone + GPU alloc)
+      const templateVertexCount = template.attributes.position.count;
+      const pooledGeom = acquirePooledGeometry(templateVertexCount);
+
       // Generate tile geometry with road influence + town flattening + mine influence
       const roadsForTile = providedRoadsRef.current;
       const minesForTile = runtimeMinesRef.current;
@@ -1012,6 +1006,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         roadsForTile,
         flattenZones,
         minesForTile,
+        pooledGeom, // Reuse pooled geometry if available
       );
 
       // Re-apply any brush sculpt strokes so they persist across tile unload/reload
@@ -1123,6 +1118,29 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Notify heatmap manager of new tile
       heatmapManagerRef.current?.onTileLoaded(tileX, tileZ);
 
+      // Schedule foliage generation for this tile
+      if (terrainQuerierRef.current && foliageManagerRef.current) {
+        foliageManagerRef.current.scheduleTile({
+          tileX,
+          tileZ,
+          tileSize,
+          worldSeed: configSeedRef.current,
+          querier: terrainQuerierRef.current,
+          waterThreshold,
+          foliagePaints: brushOverlaysRef.current?.foliagePaints,
+        });
+      }
+
+      // Add grass for this tile (EditorGrassManager)
+      if (standaloneGrassRef.current) {
+        const halfTile = tileSize / 2;
+        standaloneGrassRef.current.addTile(
+          tileX * tileSize + halfTile,
+          tileZ * tileSize + halfTile,
+          tileSize,
+        );
+      }
+
       setLoadedTiles(tilesRef.current.size);
     },
     [
@@ -1138,33 +1156,51 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   // Unload a tile — remove from scene and queue geometry for deferred disposal.
   // Tile geometries share the terrain material (terrainMaterialRef) so we must
   // NOT dispose the material — only the per-tile geometry buffers.
-  const unloadTile = useCallback((key: string) => {
-    const tileData = tilesRef.current.get(key);
-    if (!tileData) return;
+  const unloadTile = useCallback(
+    (key: string) => {
+      const tileData = tilesRef.current.get(key);
+      if (!tileData) return;
 
-    const terrainContainer = terrainContainerRef.current;
-    const waterContainer = waterContainerRef.current;
+      const terrainContainer = terrainContainerRef.current;
+      const waterContainer = waterContainerRef.current;
 
-    // Remove terrain mesh from scene — defer GPU disposal to prevent
-    // Metal device loss from bulk geometry.dispose() calls (e.g. when
-    // refreshTownMarkers unloads ALL tiles for terrain flattening).
-    if (terrainContainer) {
-      terrainContainer.remove(tileData.mesh);
-    }
-    resourceManager.queueDisposal(tileData.mesh, true);
+      // Remove terrain mesh from scene. Pool the geometry for reuse instead of
+      // disposing — eliminates GPU buffer alloc/dealloc churn during camera pan.
+      // The mesh itself is disposed (cheap — it's just a JS object referencing
+      // the pooled geometry), but the geometry's GPU buffers stay alive in pool.
+      if (terrainContainer) {
+        terrainContainer.remove(tileData.mesh);
+      }
+      // Pool the geometry; dispose only the mesh shell (material is shared)
+      releaseToGeomPool(tileData.mesh.geometry);
+      tileData.mesh.geometry = null!; // Prevent resourceManager from disposing it
 
-    // Remove water mesh
-    if (tileData.water && waterContainer) {
-      waterContainer.remove(tileData.water);
-      resourceManager.queueDisposal(tileData.water, true);
-    }
+      // Remove water mesh
+      if (tileData.water && waterContainer) {
+        waterContainer.remove(tileData.water);
+        resourceManager.queueDisposal(tileData.water, true);
+      }
 
-    // Notify heatmap manager
-    heatmapManagerRef.current?.onTileUnloaded(tileData.tileX, tileData.tileZ);
+      // Notify heatmap manager
+      heatmapManagerRef.current?.onTileUnloaded(tileData.tileX, tileData.tileZ);
 
-    tilesRef.current.delete(key);
-    setLoadedTiles(tilesRef.current.size);
-  }, []);
+      // Unload foliage for this tile
+      foliageManagerRef.current?.unloadTile(tileData.tileX, tileData.tileZ);
+
+      // Remove grass for this tile (EditorGrassManager)
+      if (standaloneGrassRef.current) {
+        const halfTile = tileSize / 2;
+        standaloneGrassRef.current.removeTile(
+          tileData.tileX * tileSize + halfTile,
+          tileData.tileZ * tileSize + halfTile,
+        );
+      }
+
+      tilesRef.current.delete(key);
+      setLoadedTiles(tilesRef.current.size);
+    },
+    [tileSize],
+  );
 
   // Swap a tile's geometry to a target resolution in-place — mesh stays in
   // scene the whole time (no flash). Used for both LOD upgrades/downgrades
@@ -1240,7 +1276,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       if (!sameResolution) {
         const oldGeometry = tile.mesh.geometry;
         tile.mesh.geometry = geometry;
-        oldGeometry.dispose();
+        // Pool old geometry for reuse instead of disposing
+        releaseToGeomPool(oldGeometry);
       }
 
       // Update per-tile water — skip in studio mode (uses single world-sized water plane)
@@ -1293,6 +1330,18 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     [swapTileResolution],
   );
 
+  // Pre-allocated arrays for tile update loop — reused every frame to avoid GC pressure.
+  // Reset via .length = 0 instead of allocating new arrays.
+  const _newEntriesPool = useRef<
+    Array<{
+      tileX: number;
+      tileZ: number;
+      resolution: number;
+      distance: number;
+    }>
+  >([]);
+  const _remainingPool = useRef<typeof tileQueueRef.current>([]);
+
   // Update tiles based on camera position with two-tier LOD:
   //   - Near tiles (within fullDetailRadius): full resolution geometry
   //   - Far tiles (beyond that, up to dynamic farRadius): low-res LOD geometry
@@ -1316,10 +1365,23 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
         const isStudio = isStudioModeRef.current;
 
-        // Full-detail radius stays constant
-        const fullDetailRadius = isStudio
+        // Altitude-dependent full-detail radius: at ground level, use full
+        // radius (3 in studio → 49 full-res tiles). At high altitude, scale
+        // down to 1 (9 full-res tiles) since distant detail isn't visible.
+        // This cuts vertex count by ~80% when zoomed out.
+        const cameraY = camera.position.y;
+        const altitudeScale = isStudio
+          ? Math.max(0, 1 - (cameraY - 200) / 600)
+          : 1;
+        const baseFullDetailRadius = isStudio
           ? TILE_LOAD_RADIUS_STUDIO
           : TILE_LOAD_RADIUS;
+        const fullDetailRadius = Math.max(
+          1,
+          Math.round(
+            baseFullDetailRadius * Math.max(0, Math.min(1, altitudeScale)),
+          ),
+        );
 
         // Far radius scales with camera altitude — covers visible area when zoomed out
         const farRadius = getDynamicLoadRadius(camera.position.y, isStudio);
@@ -1328,13 +1390,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         // In standalone mode, evict tiles beyond farRadius + 2.
         const unloadRadius = isStudio ? Infinity : farRadius + 2;
 
-        // Collect new entries to sort once rather than findIndex + splice per entry
-        const newEntries: Array<{
-          tileX: number;
-          tileZ: number;
-          resolution: number;
-          distance: number;
-        }> = [];
+        // Reuse pooled array to avoid per-frame allocation (Phase 2A GC reduction)
+        const newEntries = _newEntriesPool.current;
+        newEntries.length = 0;
 
         // Queue tiles to load across the full dynamic radius
         for (let dx = -farRadius; dx <= farRadius; dx++) {
@@ -1448,7 +1506,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const lowResCountLimit = duringInitialLoad
         ? MAX_LOW_RES_TILES_PER_FRAME * 4
         : MAX_LOW_RES_TILES_PER_FRAME;
-      const remaining: typeof tileQueueRef.current = [];
+      // Swap pooled array with queue to avoid per-frame allocation (Phase 2A).
+      // CRITICAL: after `tileQueueRef.current = remaining`, the pool and queue
+      // would alias the same array. Swap refs so clearing the pool next frame
+      // doesn't wipe the queue.
+      const remaining = _remainingPool.current;
+      _remainingPool.current = tileQueueRef.current; // old queue becomes next frame's pool
+      remaining.length = 0;
 
       for (const entry of tileQueueRef.current) {
         const isFullRes = entry.resolution > TILE_LOD_LOW_RESOLUTION;
@@ -1492,6 +1556,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         const tile = tilesRef.current.get(entry.key);
         if (tile && tile.resolution <= TILE_LOD_LOW_RESOLUTION) {
           swapTileResolution(entry.key, tileResolution);
+          // Add grass for newly upgraded tile
+          if (standaloneGrassRef.current) {
+            const halfTile = tileSize / 2;
+            standaloneGrassRef.current.addTile(
+              tile.tileX * tileSize + halfTile,
+              tile.tileZ * tileSize + halfTile,
+              tileSize,
+            );
+          }
           lodUpgraded++;
         }
       }
@@ -1641,14 +1714,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             const speciesId = vegetationSpeciesMapRef.current.get(im);
             if (instanceId !== undefined && speciesId) {
               // Extract the instance position from the instance matrix
-              const instanceMatrix = new THREE.Matrix4();
+              // (uses module-scope pre-allocated objects — avoids per-click GC)
+              const instanceMatrix = _clickMatrix;
               im.getMatrixAt(instanceId, instanceMatrix);
-              const instancePos = new THREE.Vector3();
-              instanceMatrix.decompose(
-                instancePos,
-                new THREE.Quaternion(),
-                new THREE.Vector3(),
-              );
+              const instancePos = _clickPos;
+              instanceMatrix.decompose(instancePos, _clickQuat, _clickScale);
               onSelect?.({
                 type: "vegetation",
                 id: `${speciesId}_${instanceId}`,
@@ -1886,8 +1956,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     // Scene (create before async renderer init)
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb); // Sky blue
-    scene.fog = new THREE.Fog(0x87ceeb, 500, 3000);
+    scene.background = new THREE.Color(FOG_COLORS.DAY);
+    scene.fog = new THREE.Fog(FOG_COLORS.DAY, 400, 800); // Game-parity fog distances
     sceneRef.current = scene;
 
     // Camera
@@ -1918,11 +1988,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     // Single world-sized water plane — replaces per-tile water meshes.
     // One draw call instead of potentially hundreds.
+    // Phase 8.2: Use Gerstner wave material for visual parity with game.
     if (isStudioModeRef.current) {
       const worldSizeMeters = worldSize * tileSize;
-      const wg = new THREE.PlaneGeometry(worldSizeMeters, worldSizeMeters);
+      const wg = new THREE.PlaneGeometry(
+        worldSizeMeters,
+        worldSizeMeters,
+        128,
+        128,
+      );
       wg.rotateX(-Math.PI / 2);
-      const wMat = createWaterMaterial();
+      const { material: wMat, uniforms: wUniforms } =
+        createEditorWaterMaterial();
+      waterUniformsRef.current = wUniforms;
       const worldWater = new THREE.Mesh(wg, wMat);
       worldWater.position.set(
         worldSizeMeters / 2,
@@ -1940,6 +2018,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     vegetationContainer.visible = showVegetationRef.current;
     scene.add(vegetationContainer);
     vegetationContainerRef.current = vegetationContainer;
+
+    // Foliage container (grass, flowers, rocks — separate from tree vegetation)
+    const foliageContainer = new THREE.Group();
+    foliageContainer.name = "foliage";
+    scene.add(foliageContainer);
+    foliageContainerRef.current = foliageContainer;
+    foliageManagerRef.current = new FoliageManager(foliageContainer);
 
     // Wilderness zone visual (PVP area in north) - border band + floating skull
     const wildernessStartPercent = 0.3; // Start at 30% from center (north direction)
@@ -2079,27 +2164,49 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       wildernessGroup as THREE.Group & { skullSprite?: THREE.Sprite }
     ).skullSprite = skullSprite;
 
-    // Lighting — positions/colors updated per-frame by time-of-day system
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    // Lighting — game-parity: hemisphere + ambient + directional sun
+    // HemisphereLight provides sky/ground ambient (matches game's Environment.ts)
+    const hemiLight = new THREE.HemisphereLight(
+      HEMISPHERE_LIGHT.INITIAL_SKY_COLOR,
+      HEMISPHERE_LIGHT.INITIAL_GROUND_COLOR,
+      HEMISPHERE_LIGHT.INITIAL_INTENSITY,
+    );
+    hemiLight.name = "StudioHemisphereLight";
+    scene.add(hemiLight);
+    hemiLightRef.current = hemiLight;
+
+    const ambient = new THREE.AmbientLight(
+      AMBIENT_LIGHT.INITIAL_COLOR,
+      AMBIENT_LIGHT.INITIAL_INTENSITY,
+    );
     scene.add(ambient);
     ambientLightRef.current = ambient;
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-    sun.position.set(1000, 2000, 1000);
+    const sun = new THREE.DirectionalLight(
+      0xffffff,
+      SUN_LIGHT.DAY_INTENSITY_MULTIPLIER,
+    );
+    sun.position.set(
+      SUN_LIGHT.DEFAULT_DIRECTION[0] * 2000,
+      SUN_LIGHT.DEFAULT_DIRECTION[1] * 2000,
+      SUN_LIGHT.DEFAULT_DIRECTION[2] * 2000,
+    );
     sunRef.current = sun;
-    // Skip shadow casting entirely in World Studio (shadows disabled on renderer)
-    sun.castShadow = !isStudioModeRef.current;
-    if (sun.castShadow) {
-      sun.shadow.mapSize.width = 2048;
-      sun.shadow.mapSize.height = 2048;
-      sun.shadow.camera.near = 100;
-      sun.shadow.camera.far = 5000;
-      sun.shadow.camera.left = -1000;
-      sun.shadow.camera.right = 1000;
-      sun.shadow.camera.top = 1000;
-      sun.shadow.camera.bottom = -1000;
-    }
+    // Shadows: enabled in game mode always, or in studio when toggle is on
+    sun.castShadow = !isStudioModeRef.current || enableShadowsRef.current;
+    sun.shadow.mapSize.width = 2048; // Reduced from 4096 for editor perf
+    sun.shadow.mapSize.height = 2048;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 400;
+    sun.shadow.camera.left = -200; // Game uses ±200 frustum
+    sun.shadow.camera.right = 200;
+    sun.shadow.camera.top = 200;
+    sun.shadow.camera.bottom = -200;
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.shadow.bias = 0.0002; // Match game bias values
+    sun.shadow.normalBias = 0.01;
     scene.add(sun);
+    scene.add(sun.target); // Required for shadow follow to work
 
     // Create terrain resources (full-res + low-res LOD template)
     templateGeometryRef.current = createTemplateGeometry(
@@ -2114,7 +2221,12 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     waterTemplate.rotateX(-Math.PI / 2);
     waterTemplateGeometryRef.current = waterTemplate;
     terrainMaterialRef.current = createTerrainMaterial();
-    waterMaterialRef.current = createWaterMaterial();
+    const { material: editorWaterMat, uniforms: editorWaterUniforms } =
+      createEditorWaterMaterial();
+    waterMaterialRef.current = editorWaterMat;
+    if (!waterUniformsRef.current) {
+      waterUniformsRef.current = editorWaterUniforms;
+    }
 
     // Create terrain generator and querier
     const generator = new TerrainGenerator(terrainConfigRef.current);
@@ -3057,7 +3169,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       setMinimapTowns(minimapTownData);
     } // end else (procgen pipeline)
 
-    // Generate vegetation if enabled — async to allow GLB model loading
+    // Load vegetation from manifest (source of truth) or fall back to procgen
     const initVegetation = async () => {
       if (!showVegetation || !mounted) return;
 
@@ -3076,14 +3188,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         vegetationSpeciesMapRef.current.clear();
       }
 
-      // ---- Generate trees CLIENT-SIDE using editor's terrain querier ----
-      // The server's GameWorldContext uses a different terrain implementation
-      // that produces different biome/height maps. Generating locally with
-      // terrainQuerierRef guarantees trees match the terrain the user sees.
-      const initQuerier = terrainQuerierRef.current;
-      const initSeed = configSeedRef.current;
+      // ---- MANIFEST-FIRST: Load curated trees from world.json ----
+      // World Studio is the source of truth for tree placement. On initial load,
+      // we fetch the curated trees that were previously exported to world.json
+      // (the same data the game server uses). This gives us ~2K trees that match
+      // the actual game world, not 31K raw procgen candidates.
+      // Procgen is only used as a fallback for new worlds with no manifest,
+      // or when the user explicitly triggers regeneration via refreshVegetation().
       const initGenStart = performance.now();
-      const initTrees: Array<{
+      let filteredTrees: Array<{
         s: string;
         x: number;
         y: number;
@@ -3092,80 +3205,123 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         r: number;
       }> = [];
 
-      if (initQuerier) {
-        const halfT = Math.floor(GAME_WORLD_SIZE / 2);
-        for (let tx = -halfT; tx < halfT; tx++) {
-          for (let tz = -halfT; tz < halfT; tz++) {
-            // Sample biome at tile origin — matches TerrainSystem's
-            // BiomeSystem.getBiomeForTile(tileX * tileSize, tileZ * tileSize)
-            const cx = tx * GAME_TILE_SIZE;
-            const cz = tz * GAME_TILE_SIZE;
-            const tq = initQuerier(cx, cz);
-            // Use getDominantBiome (highest-weight) to match TerrainSystem exactly.
-            // Both sides must use the same biome determination for RNG sync.
-            const tileBiome = tq.biome;
-            const tc = getTreeConfigForBiome(tileBiome);
-            if (!tc.enabled || tc.density <= 0) continue;
-
-            const rCtx: ResourceGenerationContext = {
-              tileX: tx,
-              tileZ: tz,
-              tileKey: `${tx}_${tz}`,
-              tileSize: GAME_TILE_SIZE,
-              waterThreshold: GAME_WATER_THRESHOLD,
-              getHeightAt: (wx: number, wz: number) =>
-                initQuerier(wx, wz).height,
-              getDominantBiome: (wx: number, wz: number) =>
-                initQuerier(wx, wz).biome,
-              createRng: (salt: string) =>
-                _createTileRng(initSeed, tx, tz, salt),
-            };
-
-            const genResult = generateTrees(rCtx, tc);
-
-            // ---- DIAGNOSTIC: Log initial tree generation for comparison ----
-            const isSampleInit =
-              (tx === 0 && tz === 0) ||
-              (tx === 1 && tz === 0) ||
-              (tx === 0 && tz === 1);
-            if (isSampleInit) {
-              const sample = genResult
-                .slice(0, 3)
-                .map((t: { position: unknown; subType?: string }) => {
-                  const pp = t.position as { x: number; y: number; z: number };
-                  return `(${pp.x.toFixed(2)},${pp.y.toFixed(2)},${pp.z.toFixed(2)}) ${t.subType}`;
-                });
-              console.log(
-                `[WS-INIT:TREE_DIAG] tile(${tx},${tz}) seed=${initSeed} biome=${tileBiome} ` +
-                  `count=${genResult.length} sample=[${sample.join("; ")}]`,
-              );
-            }
-
-            for (const node of genResult) {
-              const p = node.position as { x: number; y: number; z: number };
-              initTrees.push({
-                s: node.subType ?? "oak",
-                x: tx * GAME_TILE_SIZE + p.x,
-                y: p.y,
-                z: tz * GAME_TILE_SIZE + p.z,
-                sc: node.scale ?? 1,
-                r: node.rotation ?? 0,
-              });
-            }
+      let treeSource = "procgen";
+      try {
+        const manifestRes = await fetch("/api/world/manifest-trees");
+        if (manifestRes.ok) {
+          const manifestData = (await manifestRes.json()) as {
+            trees: Array<{
+              s: string;
+              x: number;
+              y: number;
+              z: number;
+              sc: number;
+              r: number;
+            }>;
+            source: string;
+            count: number;
+          };
+          if (
+            manifestData.source === "world.json" &&
+            manifestData.trees.length > 0
+          ) {
+            filteredTrees = manifestData.trees;
+            treeSource = "manifest";
           }
         }
+      } catch {
+        // Manifest fetch failed — fall back to procgen below
       }
       if (!mounted) return;
 
+      // ---- FALLBACK: Generate trees via procgen if no manifest trees ----
+      if (filteredTrees.length === 0) {
+        const initQuerier = terrainQuerierRef.current;
+        const initSeed = configSeedRef.current;
+
+        if (initQuerier) {
+          const halfT = Math.floor(GAME_WORLD_SIZE / 2);
+          for (let tx = -halfT; tx < halfT; tx++) {
+            for (let tz = -halfT; tz < halfT; tz++) {
+              const cx = tx * GAME_TILE_SIZE;
+              const cz = tz * GAME_TILE_SIZE;
+              const tq = initQuerier(cx, cz);
+              const tileBiome = tq.biome;
+              const tc = getTreeConfigForBiome(tileBiome);
+              if (!tc.enabled || tc.density <= 0) continue;
+
+              const rCtx: ResourceGenerationContext = {
+                tileX: tx,
+                tileZ: tz,
+                tileKey: `${tx}_${tz}`,
+                tileSize: GAME_TILE_SIZE,
+                waterThreshold: GAME_WATER_THRESHOLD,
+                getHeightAt: (wx: number, wz: number) =>
+                  initQuerier(wx, wz).height,
+                getDominantBiome: (wx: number, wz: number) =>
+                  initQuerier(wx, wz).biome,
+                createRng: (salt: string) =>
+                  _createTileRng(initSeed, tx, tz, salt),
+              };
+
+              const genResult = generateTrees(rCtx, tc);
+
+              for (const node of genResult) {
+                const p = node.position as { x: number; y: number; z: number };
+                filteredTrees.push({
+                  s: node.subType ?? "oak",
+                  x: tx * GAME_TILE_SIZE + p.x,
+                  y: p.y,
+                  z: tz * GAME_TILE_SIZE + p.z,
+                  sc: node.scale ?? 1,
+                  r: node.rotation ?? 0,
+                });
+              }
+            }
+          }
+        }
+        if (!mounted) return;
+
+        // Apply exclusion filtering for procgen trees (towns, roads)
+        const towns = runtimeTownsRef.current;
+        const roads = providedRoadsRef.current;
+        if (
+          filteredTrees.length > 0 &&
+          (towns.length > 0 || (roads && roads.length > 0))
+        ) {
+          const exclusionInput: VegetationExclusionInput = {
+            circles: [],
+            roads: (roads ?? []).map((r) => ({
+              path: r.path.map((p: { x: number; z: number }) => ({
+                x: p.x,
+                z: p.z,
+              })),
+              halfWidth: r.width ? r.width / 2 : 4,
+            })),
+            towns: towns.map((t) => ({
+              x: t.position.x,
+              z: t.position.z,
+              safeZoneRadius: t.safeZoneRadius,
+            })),
+          };
+          const precomputed = precomputeExclusions(exclusionInput);
+          const beforeCount = filteredTrees.length;
+          filteredTrees = filterTreesByExclusions(filteredTrees, precomputed);
+          console.log(
+            `[initVegetation] Exclusion filter: ${beforeCount} → ${filteredTrees.length} trees`,
+          );
+        }
+      }
+
       const initGenElapsed = performance.now() - initGenStart;
       console.log(
-        `[TileBasedTerrain] Generated ${initTrees.length} trees client-side in ${initGenElapsed.toFixed(0)}ms (seed=${initSeed})`,
+        `[initVegetation] Loaded ${filteredTrees.length} trees from ${treeSource} in ${initGenElapsed.toFixed(0)}ms`,
       );
 
       // ---- Set up InstancedMesh per species for GLB models ----
       // Count trees per species first so we allocate exact-size GPU buffers
       const initSpeciesCounts = new Map<string, number>();
-      for (const tree of initTrees) {
+      for (const tree of filteredTrees) {
         const speciesId = `tree_${tree.s}`;
         initSpeciesCounts.set(
           speciesId,
@@ -3217,7 +3373,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Place every tree from client-side generation
       // Trees are in centered world coords; scene uses 0-based coords.
       // Scene offset = worldCenterOffset (= halfWorld = worldSizeMeters / 2)
-      for (const tree of initTrees) {
+      for (const tree of filteredTrees) {
         const speciesId = `tree_${tree.s}`;
         const speciesData = speciesInstanceData.get(speciesId);
         if (!speciesData) continue;
@@ -3255,11 +3411,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
 
       // Track vegetation positions for external consumers (auto-gen, debug panel)
-      vegetationPositionsRef.current = initTrees.map((t) => ({
+      vegetationPositionsRef.current = filteredTrees.map((t) => ({
         x: t.x,
         z: t.z,
       }));
-      vegetationTreesRef.current = initTrees;
+      vegetationTreesRef.current = filteredTrees;
 
       const speciesSummary = [...speciesInstanceData.entries()]
         .filter(([, d]) => d.count > 0)
@@ -3267,7 +3423,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         .join(", ");
 
       // Log species that had NO InstancedMesh (missing GLB model)
-      const missingSpecies = initTrees
+      const missingSpecies = filteredTrees
         .map((t) => `tree_${t.s}`)
         .filter((sid) => !speciesInstanceData.has(sid));
       const uniqueMissing = [...new Set(missingSpecies)];
@@ -3279,14 +3435,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       }
 
       console.log(
-        `%c[initVegetation] Placed ${totalTreeCount}/${initTrees.length} trees (${speciesSummary})`,
+        `%c[initVegetation] Placed ${totalTreeCount}/${filteredTrees.length} trees (${speciesSummary})`,
         "color: #4ade80; font-weight: bold;",
       );
-      if (totalTreeCount === 0 && initTrees.length > 0) {
+      if (totalTreeCount === 0 && filteredTrees.length > 0) {
         console.error(
-          `[initVegetation] Generated ${initTrees.length} trees but placed ZERO! ` +
+          `[initVegetation] Generated ${filteredTrees.length} trees but placed ZERO! ` +
             `Species lookup failed — check species ID format. ` +
-            `Sample tree.s values: ${initTrees
+            `Sample tree.s values: ${filteredTrees
               .slice(0, 5)
               .map((t) => t.s)
               .join(", ")}. ` +
@@ -3384,26 +3540,43 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       const h = container.clientHeight || 1;
       renderer.setSize(w, h);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.shadowMap.enabled = !isStudioModeRef.current;
-      if (renderer.shadowMap.enabled) {
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      }
+      renderer.toneMapping = THREE.ACESFilmicToneMapping; // Game-parity
+      renderer.toneMappingExposure = EXPOSURE.DAY; // Match game's day exposure
+      renderer.shadowMap.enabled =
+        !isStudioModeRef.current || enableShadowsRef.current;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
-      // ---- PostProcessing pipeline (FXAA anti-aliasing via TSL) ----
+      // ---- RenderPipeline (FXAA anti-aliasing via TSL) ----
+      // Runtime: THREE.RenderPipeline (r183+). @types/three 0.182 still calls
+      // it PostProcessing — use bracket access to avoid TS error until types update.
       try {
-        const postProcessing = new THREE.PostProcessing(renderer);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const PipelineCtor = (THREE as Record<string, unknown>)[
+          "RenderPipeline"
+        ] as new (r: unknown) => RenderPipelineInstance;
+        const renderPipeline = new PipelineCtor(renderer);
         const scenePass = pass(scene, camera);
         const sceneColor = scenePass.getTextureNode("output");
-        postProcessing.outputNode = fxaa(sceneColor);
-        postProcessingRef.current = postProcessing;
+        renderPipeline.outputNode = fxaa(sceneColor);
+        postProcessingRef.current = renderPipeline;
       } catch (ppErr) {
         console.warn(
-          "[TileBasedTerrain] PostProcessing init failed, falling back to direct render:",
+          "[TileBasedTerrain] RenderPipeline init failed, falling back to direct render:",
           ppErr,
         );
         postProcessingRef.current = null;
+      }
+
+      // ---- Material pre-compilation ----
+      // Force shader compilation before first render to eliminate ~200-500ms
+      // first-frame stutter. Even though the scene is still mostly empty,
+      // this pre-compiles the terrain/water/post-processing pipelines.
+      try {
+        await renderer.compileAsync(scene, camera);
+      } catch {
+        // Non-fatal — shaders will compile on first use instead
       }
 
       // ---- GPU device loss recovery ----
@@ -3476,20 +3649,23 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           const h = container.clientHeight || 1;
           newRenderer.setSize(w, h);
           newRenderer.outputColorSpace = THREE.SRGBColorSpace;
-          newRenderer.shadowMap.enabled = !isStudioModeRef.current;
-          if (newRenderer.shadowMap.enabled) {
-            newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-          }
+          newRenderer.shadowMap.enabled =
+            !isStudioModeRef.current || enableShadowsRef.current;
+          newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
           container.appendChild(newRenderer.domElement);
           rendererRef.current = newRenderer;
 
-          // Recreate PostProcessing pipeline
+          // Recreate RenderPipeline
           try {
-            const pp = new THREE.PostProcessing(newRenderer);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const PipelineCtor = (THREE as Record<string, unknown>)[
+              "RenderPipeline"
+            ] as new (r: unknown) => RenderPipelineInstance;
+            const rp = new PipelineCtor(newRenderer);
             const sp = pass(scene, camera);
-            pp.outputNode = fxaa(sp.getTextureNode("output"));
-            postProcessingRef.current = pp;
+            rp.outputNode = fxaa(sp.getTextureNode("output"));
+            postProcessingRef.current = rp;
           } catch {
             postProcessingRef.current = null;
           }
@@ -3756,6 +3932,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         refreshVegetation: async (
           vegConfig?: VegetationConfig,
           exclusions?: VegetationExclusions,
+          vegetationPaints?: Array<{
+            id: string;
+            center: { x: number; z: number };
+            radius: number;
+            strength: number;
+            falloff: "sharp" | "linear" | "smooth";
+            mode: "add" | "remove";
+            speciesFilter: string[];
+            timestamp: number;
+          }>,
         ): Promise<void> => {
           const vegContainer = vegetationContainerRef.current;
           if (!vegContainer) return;
@@ -3898,6 +4084,23 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               `[refreshVegetation] Filter: ${precomputed.circles.length} circles, ` +
                 `${precomputed.roadSegs.length} road segs, ${precomputed.towns.length} town gradients → ` +
                 `${beforeCount} → ${trees.length} trees (removed ${beforeCount - trees.length})`,
+            );
+          }
+
+          // Apply vegetation paint strokes (add/remove trees from brush tool)
+          if (vegetationPaints && vegetationPaints.length > 0) {
+            const currentQuerier = terrainQuerierRef.current;
+            const getHeight = currentQuerier
+              ? (wx: number, wz: number) => currentQuerier(wx, wz).height
+              : (_wx: number, _wz: number) => 0;
+            const beforePaint = trees.length;
+            trees = applyVegetationPaintStrokes(
+              trees,
+              vegetationPaints,
+              getHeight,
+            );
+            console.log(
+              `[refreshVegetation] Vegetation paint: ${beforePaint} → ${trees.length} trees (${vegetationPaints.length} strokes)`,
             );
           }
 
@@ -4660,12 +4863,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       let lastRotationUpdate = 0;
       // Pre-allocated vector for label world position query (avoids GC)
       const _labelWorldPos = new THREE.Vector3();
+      // Sun direction for shadow follow — updated when ToD changes, default from initial position
+      const _sunDir = new THREE.Vector3(100, 200, 100).normalize();
       // Phase 2D: Cache last time-of-day value to skip unchanged frames
       let lastToDValue = -1;
       // Phase 2E: Throttle LOD updates — every 10 frames or when camera moves
       let lodFrameCounter = 0;
       let lastLodCameraX = 0;
       let lastLodCameraZ = 0;
+      // Perf monitoring: log draw call stats every ~2 seconds
+      let perfFrameCounter = 0;
 
       const animate = () => {
         if (!mounted) return;
@@ -4697,12 +4904,81 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           ambientLightRef.current
         ) {
           lastToDValue = todValue;
-          updateTimeOfDayLighting(
+          const di = updateSceneLighting(
             todValue,
-            sunRef.current,
-            ambientLightRef.current,
-            scene,
+            {
+              sun: sunRef.current,
+              ambient: ambientLightRef.current,
+              hemisphere: hemiLightRef.current,
+              fog:
+                !enableSkyRef.current && scene.fog instanceof THREE.Fog
+                  ? (scene.fog as THREE.Fog)
+                  : null,
+              background: !enableSkyRef.current
+                ? (scene.background as THREE.Color)
+                : null,
+            },
+            enableSkyRef.current,
           );
+          // Phase 3+6: When gameFog is on, use sky-matching fog color
+          if (enableGameFogRef.current && scene.fog instanceof THREE.Fog) {
+            scene.fog.near = 400;
+            scene.fog.far = 800;
+            // When sky dome is active, sync fog color to time-of-day
+            if (enableSkyRef.current) {
+              updateSceneFog(di, scene.fog as THREE.Fog);
+            }
+          }
+          // Capture ToD sun direction for shadow follow
+          _sunDir.copy(sunRef.current.position).normalize();
+
+          // Phase 8: Auto-exposure — lerp toward target based on dayIntensity
+          const targetExposure = computeTargetExposure(di);
+          currentExposureRef.current +=
+            (targetExposure - currentExposureRef.current) * EXPOSURE.LERP_SPEED;
+          if (rendererRef.current) {
+            rendererRef.current.toneMappingExposure =
+              currentExposureRef.current;
+          }
+
+          // Phase 5: Grass day/night tinting + sun direction
+          if (standaloneGrassRef.current) {
+            standaloneGrassRef.current.setDayIntensity(di);
+            standaloneGrassRef.current.updateSunDirection(_sunDir);
+          }
+
+          // Phase 6: Water day/night shade + night dimming
+          if (waterUniformsRef.current) {
+            waterUniformsRef.current.dayIntensity.value = di;
+            // Game uses sunIntensity = dayIntensity × DAY_INTENSITY_MULTIPLIER (1.8)
+            waterUniformsRef.current.sunIntensity.value = di * 1.8;
+          }
+        }
+
+        // Phase 2: Update standalone sky system
+        if (standaloneSkyRef.current && enableSkyRef.current) {
+          // Convert hour (0-24) to world time seconds for the sky system
+          const dayPhase = hourToDayPhase(todValue);
+          const worldTimeSec = dayPhase * DAY_CYCLE.DURATION_SEC;
+          standaloneSkyRef.current.update(deltaTime, worldTimeSec);
+          standaloneSkyRef.current.lateUpdate(camera.position);
+        }
+
+        // Shadow camera follow: center shadow frustum on camera's ground position
+        // (matches game's Environment.ts shadow anchor). Run every frame since
+        // the ±200 frustum is small and camera moves frequently.
+        if (sunRef.current?.castShadow) {
+          sunRef.current.position.set(
+            camera.position.x + _sunDir.x * 200,
+            200 + _sunDir.y * 200,
+            camera.position.z + _sunDir.z * 200,
+          );
+          sunRef.current.target.position.set(
+            camera.position.x,
+            0,
+            camera.position.z,
+          );
+          sunRef.current.target.updateMatrixWorld();
         }
 
         // GPU resource staging — see SceneResourceManager for invariants.
@@ -4710,12 +4986,63 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         // visibility set correctly (without update(), all 3 levels render).
         resourceManager.processStaging(entitySyncRef.current);
 
-        // Hide entity markers when zoomed far out — invisible at that distance
-        // but still thousands of draw calls. Only override when RM isn't managing
-        // visibility (RM hides during staging; we hide based on altitude).
+        // Phase 7: Process foliage generation queue (1 tile/frame) + visibility culling
+        const foliageMgr = foliageManagerRef.current;
+        if (foliageMgr && foliageMgr.isEnabled()) {
+          foliageMgr.processQueue();
+          // Update foliage visibility every 10 frames to avoid per-frame overhead
+          if (perfFrameCounter % 10 === 0) {
+            foliageMgr.updateVisibility(camera.position.x, camera.position.z);
+          }
+        }
+
+        // Phase 5: Update procedural grass — process queue + camera position
+        if (standaloneGrassRef.current && enableGrassRef.current) {
+          standaloneGrassRef.current.processQueue(1);
+          standaloneGrassRef.current.update(camera.position);
+        }
+
+        // Update water shader uniforms: time + sun direction
+        if (waterUniformsRef.current) {
+          waterUniformsRef.current.time.value = elapsedSeconds;
+          // Sync sun direction so water specular follows the ToD sun
+          if (sunRef.current) {
+            waterUniformsRef.current.sunDirection.value
+              .copy(sunRef.current.position)
+              .normalize();
+          }
+        }
+
+        // Entity marker visibility — progressive distance culling.
+        // At low altitude (<200): all markers visible.
+        // At medium altitude (200-400): markers culled by distance from camera.
+        // At high altitude (>400): all markers hidden (saves thousands of draw calls).
+        // Only override when RM isn't managing visibility during staging.
         if (entitySyncRef.current && !resourceManager.areMarkersHidden) {
-          entitySyncRef.current.visible =
-            camera.position.y < MARKER_HIDE_ALTITUDE;
+          const camAlt = camera.position.y;
+          if (camAlt >= MARKER_HIDE_ALTITUDE) {
+            entitySyncRef.current.visible = false;
+          } else {
+            entitySyncRef.current.visible = true;
+            // Progressive distance culling at medium altitude (every 30 frames)
+            if (camAlt > 200 && perfFrameCounter % 30 === 0) {
+              const cullDist = 300; // world units
+              const cullDistSq = cullDist * cullDist;
+              const cx = camera.position.x;
+              const cz = camera.position.z;
+              for (const subGroup of entitySyncRef.current.children) {
+                for (const marker of subGroup.children) {
+                  if (!marker.userData?.selectable) continue;
+                  // Use first child's world position as proxy (avoids full traverse)
+                  const firstChild = (marker as THREE.Group).children[0];
+                  if (!firstChild) continue;
+                  const dx = firstChild.position.x - cx;
+                  const dz = firstChild.position.z - cz;
+                  marker.visible = dx * dx + dz * dz < cullDistSq;
+                }
+              }
+            }
+          }
         }
 
         // Phase 2E: Throttle LOD updates — every 10 frames or when camera moves > 5 units
@@ -4819,6 +5146,17 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         if (viewHelperRef.current && rendererRef.current) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           viewHelperRef.current.render(rendererRef.current as any);
+        }
+
+        // Perf monitoring — log draw call and triangle counts every ~2s (120 frames)
+        perfFrameCounter++;
+        if (perfFrameCounter >= 120 && rendererRef.current) {
+          perfFrameCounter = 0;
+          const info = rendererRef.current.info;
+          console.log(
+            `[PERF] calls=${info.render.calls} tris=${info.render.triangles} ` +
+              `geoms=${info.memory.geometries} textures=${info.memory.textures}`,
+          );
         }
 
         // GPU resource disposal — runs AFTER rendering every frame.
@@ -4961,6 +5299,28 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         });
       }
 
+      // Dispose foliage system
+      foliageManagerRef.current?.dispose();
+      foliageManagerRef.current = null;
+
+      // Dispose standalone sky system
+      if (standaloneSkyRef.current) {
+        standaloneSkyRef.current.dispose();
+        standaloneSkyRef.current = null;
+      }
+
+      // Dispose standalone grass system
+      if (standaloneGrassRef.current) {
+        standaloneGrassRef.current.dispose();
+        standaloneGrassRef.current = null;
+      }
+
+      // Dispose CSM shadow node
+      if (csmShadowNodeRef.current) {
+        csmShadowNodeRef.current.dispose();
+        csmShadowNodeRef.current = null;
+      }
+
       // Dispose shared resources
       currentTemplateGeometry.current?.dispose();
       lowResTemplateGeometryRef.current?.dispose();
@@ -4975,7 +5335,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         orbitControlsRef.current = null;
       }
 
-      // Dispose PostProcessing and WebGPU renderer
+      // Dispose RenderPipeline and WebGPU renderer
       if (postProcessingRef.current) {
         postProcessingRef.current.dispose();
         postProcessingRef.current = null;
@@ -5005,6 +5365,247 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     tileSize,
     tileResolution,
   ]);
+
+  // Phase 4: Dynamic shadow toggle with CSM (Cascaded Shadow Maps)
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const sun = sunRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !sun) return;
+    const shouldEnable = !isStudioModeRef.current || enableShadows;
+    renderer.shadowMap.enabled = shouldEnable;
+    sun.castShadow = shouldEnable;
+
+    // Dispose existing CSM
+    if (csmShadowNodeRef.current) {
+      csmShadowNodeRef.current.dispose();
+      csmShadowNodeRef.current = null;
+      sun.shadow.shadowNode = undefined;
+    }
+
+    if (shouldEnable && camera) {
+      // CSM with game's "med" preset: 3 cascades, lambda=0.8 log/uniform blend
+      const customSplitCallback = (
+        cascades: number,
+        near: number,
+        far: number,
+        breaks: number[],
+      ) => {
+        const lambda = 0.8;
+        for (let i = 1; i < cascades; i++) {
+          const log = (near * Math.pow(far / near, i / cascades)) / far;
+          const uni = (near + ((far - near) * i) / cascades) / far;
+          breaks.push(lambda * log + (1 - lambda) * uni);
+        }
+        breaks.push(1);
+      };
+
+      try {
+        const csm = new CSMShadowNode(sun, {
+          cascades: 3,
+          maxFar: 300,
+          mode: "custom",
+          customSplitsCallback: customSplitCallback,
+          lightMargin: 150,
+        });
+        csm.fade = true;
+        sun.shadow.shadowNode = csm;
+        csmShadowNodeRef.current = csm;
+      } catch (err) {
+        console.warn(
+          "[TileBasedTerrain] CSM init failed, using basic shadows:",
+          err,
+        );
+      }
+    }
+
+    return () => {
+      if (csmShadowNodeRef.current) {
+        csmShadowNodeRef.current.dispose();
+        csmShadowNodeRef.current = null;
+        if (sun) sun.shadow.shadowNode = undefined;
+      }
+    };
+  }, [enableShadows]);
+
+  // Phase 6: Dynamic bloom toggle — rebuilds RenderPipeline with/without bloom
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !scene || !camera) return;
+
+    // Dispose existing pipeline
+    if (postProcessingRef.current) {
+      postProcessingRef.current.dispose();
+      postProcessingRef.current = null;
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const PipelineCtor = (THREE as Record<string, unknown>)[
+        "RenderPipeline"
+      ] as new (r: unknown) => RenderPipelineInstance;
+      const renderPipeline = new PipelineCtor(renderer);
+      const scenePass = pass(scene, camera);
+      const sceneColor = scenePass.getTextureNode("output");
+
+      if (enableBloom) {
+        // FXAA + bloom: add bloom on top of scene color, then apply FXAA
+        const bloomPass = bloom(sceneColor, 0.5, 0.1);
+        renderPipeline.outputNode = fxaa(sceneColor.add(bloomPass));
+      } else {
+        renderPipeline.outputNode = fxaa(sceneColor);
+      }
+
+      postProcessingRef.current = renderPipeline;
+    } catch (ppErr) {
+      console.warn("[TileBasedTerrain] RenderPipeline rebuild failed:", ppErr);
+      postProcessingRef.current = null;
+    }
+  }, [enableBloom]);
+
+  // Phase 6: Dynamic fog toggle — switch between studio fog and game-matching fog
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (enableGameFog) {
+      // Match game fog: warm sandy color, tight near/far (from FogConfig.ts)
+      scene.fog = new THREE.Fog(FOG_COLORS.DAY, 400, 800);
+    } else {
+      // Default studio fog: sky blue, loose distances
+      scene.fog = new THREE.Fog(0x87ceeb, 500, 3000);
+    }
+  }, [enableGameFog]);
+
+  // Dynamic sky toggle — create/destroy StandaloneSky
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    if (!scene || !renderer || !camera) return;
+
+    if (enableSky) {
+      // Create and initialize sky system
+      const sky = new StandaloneSky(
+        scene,
+        renderer as unknown as THREE.WebGPURenderer,
+        camera,
+        {
+          textureBasePath: "/textures/",
+        },
+      );
+      standaloneSkyRef.current = sky;
+      // Remove flat background color (sky dome replaces it)
+      scene.background = null;
+      // Async init + start
+      sky
+        .init()
+        .then(() => {
+          if (standaloneSkyRef.current === sky) sky.start();
+        })
+        .catch((e: unknown) =>
+          console.warn("[TileBasedTerrain] Sky init failed:", e),
+        );
+    } else {
+      // Dispose sky and restore flat background
+      if (standaloneSkyRef.current) {
+        standaloneSkyRef.current.dispose();
+        standaloneSkyRef.current = null;
+      }
+      scene.background = new THREE.Color(FOG_COLORS.DAY);
+    }
+
+    return () => {
+      if (standaloneSkyRef.current) {
+        standaloneSkyRef.current.dispose();
+        standaloneSkyRef.current = null;
+      }
+    };
+  }, [enableSky]);
+
+  // Phase 5: Game-accurate grass toggle (EditorGrassManager)
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (enableGrass) {
+      const querier = terrainQuerierRef.current;
+      const gen = generatorRef.current;
+      const offset = worldCenterOffsetRef.current;
+
+      // Height callback in scene-space (EditorGrassManager handles offset internally)
+      const getHeight = (sceneX: number, sceneZ: number): number => {
+        if (querier) return querier(sceneX - offset, sceneZ - offset).height;
+        if (gen) return gen.getHeightAt(sceneX - offset, sceneZ - offset);
+        return 0;
+      };
+
+      // Terrain querier (takes world-space coords, without offset)
+      const editorQuerier = (terrainX: number, terrainZ: number) => {
+        if (querier) return querier(terrainX, terrainZ);
+        return {
+          height: gen ? gen.getHeightAt(terrainX, terrainZ) : 0,
+          biomeForestWeight: 0,
+          biomeCanyonWeight: 0,
+        };
+      };
+
+      const grass = new EditorGrassManager(scene, {
+        waterThreshold: GAME_WATER_THRESHOLD,
+      });
+      grass.setTerrainCallbacks(editorQuerier, getHeight, offset);
+
+      // Generate grass for all currently loaded terrain tiles
+      const halfTile = tileSize / 2;
+      for (const [, td] of tilesRef.current) {
+        const cx = td.tileX * tileSize + halfTile;
+        const cz = td.tileZ * tileSize + halfTile;
+        grass.addTile(cx, cz, tileSize);
+      }
+
+      standaloneGrassRef.current = grass;
+
+      // Disable FoliageRenderer to avoid duplicate grass instances
+      foliageManagerRef.current?.setEnabled(false);
+    } else {
+      if (standaloneGrassRef.current) {
+        standaloneGrassRef.current.dispose();
+        standaloneGrassRef.current = null;
+      }
+      // Re-enable FoliageRenderer when StandaloneGrass is off
+      foliageManagerRef.current?.setEnabled(true);
+    }
+
+    return () => {
+      if (standaloneGrassRef.current) {
+        standaloneGrassRef.current.dispose();
+        standaloneGrassRef.current = null;
+      }
+    };
+  }, [enableGrass, tileSize]);
+
+  // Phase 7: Regenerate foliage when foliage paint strokes change
+  const foliagePaintCount = brushOverlays?.foliagePaints?.length ?? 0;
+  useEffect(() => {
+    const mgr = foliageManagerRef.current;
+    const querier = terrainQuerierRef.current;
+    if (!mgr || !querier) return;
+
+    // Clear all foliage and reschedule loaded tiles
+    mgr.clearAll();
+    for (const [, tileData] of tilesRef.current) {
+      mgr.scheduleTile({
+        tileX: tileData.tileX,
+        tileZ: tileData.tileZ,
+        tileSize,
+        worldSeed: configSeedRef.current,
+        querier,
+        waterThreshold,
+        foliagePaints: brushOverlaysRef.current?.foliagePaints,
+      });
+    }
+  }, [foliagePaintCount, tileSize, waterThreshold]);
 
   // Regenerate terrain when config changes — marks existing tiles dirty for
   // incremental in-place regeneration instead of unloading everything.

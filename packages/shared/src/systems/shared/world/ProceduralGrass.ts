@@ -99,6 +99,11 @@ import {
 } from "./RoadInfluenceMask";
 import { applySkyFog } from "./FogConfig";
 import {
+  createGrassLod0Geometry,
+  createGrassLod0Material,
+  type GrassExclusionOptions,
+} from "./GrassMaterialCore";
+import {
   GrassGenerator,
   createGrassClumpGeometry,
   type GrassFieldResult,
@@ -647,87 +652,9 @@ bayerTexture.needsUpdate = true;
 const bayerTextureNode = texture(bayerTexture);
 
 // ============================================================================
-// SIMPLE GRASS LOD0 - Single mesh with mod() wrapping in vertex shader
-// Replaces GrassSsbo (3 compute shaders) + GrassMaterial (SpriteNodeMaterial)
-// Inspired by infinite-world-master and folio-2025-main
+// SIMPLE GRASS LOD0 - Uses shared GrassMaterialCore
+// Same shader as StandaloneGrass (editor) — one codebase, two contexts.
 // ============================================================================
-
-/**
- * Build a non-indexed triangle mesh: one triangle per blade, gridSize^2 blades.
- * Attributes:
- *   position (vec3)      - blade vertex offsets (-halfW,0,0), (0,1,0), (+halfW,0,0) normalised
- *   center   (vec2)      - grid center XZ (same for all 3 verts of a blade)
- *   aHeightRandom (float) - per-blade random 0.6-1.0 (same for all 3 verts)
- */
-function createSimpleGrassGeometry(): THREE.BufferGeometry {
-  const gridSize = config.BLADES_PER_SIDE;
-  const fieldSize = config.TILE_SIZE;
-  const bladeCount = gridSize * gridSize;
-  const vertexCount = bladeCount * 3;
-  const cellSize = fieldSize / gridSize;
-
-  const positions = new Float32Array(vertexCount * 3);
-  const centers = new Float32Array(vertexCount * 2);
-  const heightRandoms = new Float32Array(vertexCount);
-
-  let seed = 12345;
-  const rng = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-
-  const halfField = fieldSize * 0.5;
-  let vi = 0;
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      const cx =
-        (col + 0.5) * cellSize - halfField + (rng() - 0.5) * cellSize * 0.8;
-      const cz =
-        (row + 0.5) * cellSize - halfField + (rng() - 0.5) * cellSize * 0.8;
-      const hRand = 0.6 + rng() * 0.4;
-
-      // Vertex 0 : base-left  (-1, 0, 0)
-      positions[vi * 3] = -1;
-      positions[vi * 3 + 1] = 0;
-      positions[vi * 3 + 2] = 0;
-      centers[vi * 2] = cx;
-      centers[vi * 2 + 1] = cz;
-      heightRandoms[vi] = hRand;
-      vi++;
-
-      // Vertex 1 : tip        ( 0, 1, 0)
-      positions[vi * 3] = 0;
-      positions[vi * 3 + 1] = 1;
-      positions[vi * 3 + 2] = 0;
-      centers[vi * 2] = cx;
-      centers[vi * 2 + 1] = cz;
-      heightRandoms[vi] = hRand;
-      vi++;
-
-      // Vertex 2 : base-right (+1, 0, 0)
-      positions[vi * 3] = 1;
-      positions[vi * 3 + 1] = 0;
-      positions[vi * 3 + 2] = 0;
-      centers[vi * 2] = cx;
-      centers[vi * 2 + 1] = cz;
-      heightRandoms[vi] = hRand;
-      vi++;
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("center", new THREE.BufferAttribute(centers, 2));
-  geometry.setAttribute(
-    "aHeightRandom",
-    new THREE.BufferAttribute(heightRandoms, 1),
-  );
-  geometry.boundingSphere = new THREE.Sphere(
-    new THREE.Vector3(),
-    fieldSize * 2,
-  );
-  return geometry;
-}
 
 const lod0Uniforms = {
   uPlayerCenter: uniform(new THREE.Vector2(0, 0)),
@@ -737,210 +664,66 @@ const lod0Uniforms = {
 };
 
 /**
- * MeshBasicNodeMaterial with TSL positionNode + colorNode.
- * positionNode: mod-wrap around player, heightmap sample, billboard, wind, fade.
- * colorNode:    base/tip gradient, day/night tint.
+ * Create LOD0 grass material using the shared GrassMaterialCore.
+ * Maps ProceduralGrass's module-level uniforms to the core's interface.
+ * This ensures the game and editor use the SAME shader code.
  */
 function createSimpleGrassMaterial(): MeshBasicNodeMaterial {
-  const material = new MeshBasicNodeMaterial();
-  material.side = THREE.DoubleSide;
-  material.transparent = false;
-  material.depthWrite = true;
-  material.fog = false;
+  // Build exclusion options from game-specific textures
+  const exclusionOpts: GrassExclusionOptions = {
+    road: {
+      textureNode: roadInfluenceTextureNode,
+      centerX: uRoadInfluenceCenterX,
+      centerZ: uRoadInfluenceCenterZ,
+      worldSize: uRoadInfluenceWorldSize,
+      threshold: uRoadInfluenceThreshold,
+    },
+    building: {
+      textureNode: exclusionTextureNode,
+      centerX: uExclusionCenterX,
+      centerZ: uExclusionCenterZ,
+      worldSize: uExclusionWorldSize,
+    },
+  };
 
-  // --- positionNode ---
-  material.positionNode = Fn(() => {
-    const localVert = positionLocal.toVar("localVert"); // (-1|0|+1, 0|1, 0)
-    const centerAttr = attribute("center", "vec2");
-    const hRand = attribute("aHeightRandom", "float");
+  // Add grid exclusion if available
+  if (gridExclusionTextureNode && useGridBasedExclusion) {
+    exclusionOpts.grid = {
+      textureNode: gridExclusionTextureNode,
+      centerX: uGridExclusionCenterX,
+      centerZ: uGridExclusionCenterZ,
+      worldSize: uGridExclusionWorldSize,
+    };
+  }
 
-    const tipness = localVert.y; // 0 for base, 1 for tip
-
-    // 1) Toroidal wrapping around player
-    const half = lod0Uniforms.uFieldSize.mul(0.5);
-    const rel = centerAttr.sub(lod0Uniforms.uPlayerCenter).toVar("rel");
-    rel.x.assign(mod(rel.x.add(half), lod0Uniforms.uFieldSize).sub(half));
-    rel.y.assign(mod(rel.y.add(half), lod0Uniforms.uFieldSize).sub(half));
-
-    const worldX = rel.x.add(lod0Uniforms.uPlayerCenter.x).toVar("worldX");
-    const worldZ = rel.y.add(lod0Uniforms.uPlayerCenter.y).toVar("worldZ");
-
-    // 2) Heightmap terrain Y
-    const hmWorldSize = max(uHeightmapWorldSize, float(0.001));
-    const hmHalf = hmWorldSize.mul(0.5);
-    const hmU = worldX
-      .sub(uHeightmapCenterX)
-      .add(hmHalf)
-      .div(hmWorldSize)
-      .clamp(0.001, 0.999);
-    const hmV = worldZ
-      .sub(uHeightmapCenterZ)
-      .add(hmHalf)
-      .div(hmWorldSize)
-      .clamp(0.001, 0.999);
-    const hmUV = vec2(hmU, hmV);
-
-    const hmSample = heightmapTextureNode
-      ? heightmapTextureNode.sample(hmUV)
-      : vec4(0);
-    const hmLoaded = step(float(0.001), hmSample.r);
-    const rawTerrainY = hmSample.r.mul(uHeightmapMax);
-    const terrainY = mix(
-      uniforms.uCameraPosition.y,
-      rawTerrainY,
-      hmLoaded,
-    ).toVar("terrainY");
-
-    // 3) Build blade vertex
-    const bladeH = lod0Uniforms.uBladeHeight.mul(hRand);
-    const bladeHW = lod0Uniforms.uBladeWidth.mul(0.5);
-    const vertexOffset = vec3(
-      localVert.x.mul(bladeHW),
-      localVert.y.mul(bladeH),
-      float(0),
-    ).toVar("vertexOffset");
-
-    // 4) Billboard: rotate blade to face camera
-    const dx = worldX.sub(uniforms.uCameraPosition.x);
-    const dz = worldZ.sub(uniforms.uCameraPosition.z);
-    const angleToCamera = atan(dx, dz);
-    const cosA = cos(angleToCamera);
-    const sinA = sin(angleToCamera);
-    const rotX = vertexOffset.x.mul(cosA).add(vertexOffset.z.mul(sinA));
-    const rotZ = vertexOffset.z.mul(cosA).sub(vertexOffset.x.mul(sinA));
-    vertexOffset.x.assign(rotX);
-    vertexOffset.z.assign(rotZ);
-
-    // 5) World position
-    const worldPos = vec3(worldX, terrainY, worldZ)
-      .add(vertexOffset)
-      .toVar("worldPos");
-
-    // 6) Wind (displace tips only)
-    const windTime = time.mul(uniforms.uWindSpeed);
-    const windUV = vec2(
-      worldX.mul(0.02).add(windTime.mul(0.05)),
-      worldZ.mul(0.02).add(windTime.mul(0.03)),
-    );
-    const windSample = noiseAtlasTexture
-      ? texture(noiseAtlasTexture).sample(windUV)
-      : vec4(0.5);
-    const windStrength = uniforms.uWindStrength;
-    worldPos.x.addAssign(windSample.x.sub(0.5).mul(tipness).mul(windStrength));
-    worldPos.z.addAssign(windSample.y.sub(0.5).mul(tipness).mul(windStrength));
-
-    // 7) Distance fade: collapse toward center point
-    // Use PLAYER distance (not camera) so grass is always visible around the character
-    const distToPlayer = length(
-      vec2(
-        worldX.sub(lod0Uniforms.uPlayerCenter.x),
-        worldZ.sub(lod0Uniforms.uPlayerCenter.y),
-      ),
-    );
-    const distScale = smoothstep(
-      uniforms.uFadeEnd,
-      uniforms.uFadeStart,
-      distToPlayer,
-    );
-    const centerPt = vec3(worldX, terrainY, worldZ);
-    worldPos.assign(mix(centerPt, worldPos, distScale));
-
-    // 8) Water culling: collapse blades below water
-    const waterFade = smoothstep(
-      uWaterHardCutoff.sub(1.0),
-      uWaterHardCutoff,
-      rawTerrainY,
-    );
-    const waterScale = max(waterFade, float(1).sub(hmLoaded));
-    worldPos.assign(mix(centerPt, worldPos, waterScale));
-
-    // Exclusion checks are only meaningful for nearby blades (perf optimization).
-    // Far blades are already fading out, so we blend exclusion to 1.0 (always visible)
-    // beyond 15m to reduce the impact of texture sampling on distant vertices.
-    const nearPlayer = smoothstep(float(16.0), float(14.0), distToPlayer);
-
-    // 9) Road exclusion: collapse blades on roads
-    const roadUV = computeExclusionUV(
-      worldX,
-      worldZ,
-      uRoadInfluenceCenterX,
-      uRoadInfluenceCenterZ,
-      uRoadInfluenceWorldSize,
-    );
-    const roadSample = roadInfluenceTextureNode.sample(roadUV).r;
-    const roadRaw = smoothstep(
-      uRoadInfluenceThreshold.add(0.05),
-      uRoadInfluenceThreshold,
-      roadSample,
-    );
-    const roadVisible = mix(float(1.0), roadRaw, nearPlayer);
-    worldPos.assign(mix(centerPt, worldPos, roadVisible));
-
-    // 10) Legacy exclusion: collapse blades on buildings/arenas
-    const exclUV = computeExclusionUV(
-      worldX,
-      worldZ,
-      uExclusionCenterX,
-      uExclusionCenterZ,
-      uExclusionWorldSize,
-    );
-    const exclSample = exclusionTextureNode.sample(exclUV).r;
-    const exclRaw = smoothstep(float(0.5), float(0.3), exclSample);
-    const exclVisible = mix(float(1.0), exclRaw, nearPlayer);
-    worldPos.assign(mix(centerPt, worldPos, exclVisible));
-
-    // 11) Grid-based exclusion: collapse blades on collision-blocked tiles
-    if (gridExclusionTextureNode && useGridBasedExclusion) {
-      const gridExclUV = computeExclusionUV(
-        worldX,
-        worldZ,
-        uGridExclusionCenterX,
-        uGridExclusionCenterZ,
-        uGridExclusionWorldSize,
-      );
-      const gridExclSample = gridExclusionTextureNode.sample(gridExclUV).r;
-      const gridExclRaw = smoothstep(float(0.5), float(0.3), gridExclSample);
-      const gridExclVisible = mix(float(1.0), gridExclRaw, nearPlayer);
-      worldPos.assign(mix(centerPt, worldPos, gridExclVisible));
-    }
-
-    return worldPos;
-  })();
-
-  // --- colorNode ---
-  material.colorNode = Fn(() => {
-    const localVert = positionLocal;
-    const tipness = localVert.y; // 0 base, 1 tip
-    const centerAttr = attribute("center", "vec2");
-
-    const baseColor = uniforms.uBaseColor;
-    const tipColor = uniforms.uTipColor;
-    const grassColor = mix(
-      baseColor,
-      tipColor,
-      tipness.mul(uniforms.uColorMixFactor),
-    ).toVar("grassColor");
-
-    // Per-blade variation using hash of center position
-    const variation = hash(centerAttr.x.add(centerAttr.y.mul(1234.5)))
-      .mul(0.15)
-      .sub(0.075);
-    grassColor.r.addAssign(variation);
-    grassColor.g.addAssign(variation.mul(0.5));
-
-    // Day/night tinting
-    const dayTint = uniforms.uDayColor;
-    const nightTint = uniforms.uNightColor;
-    const timeTint = mix(nightTint, dayTint, uniforms.uDayNightMix);
-    grassColor.assign(grassColor.mul(timeTint));
-
-    // Light intensity
-    grassColor.assign(grassColor.mul(uniforms.uLightIntensity));
-
-    return grassColor;
-  })();
-
-  return material;
+  return createGrassLod0Material({
+    uniforms: {
+      playerCenter: lod0Uniforms.uPlayerCenter,
+      cameraPosition: uniforms.uCameraPosition,
+      fieldSize: lod0Uniforms.uFieldSize,
+      bladeWidth: lod0Uniforms.uBladeWidth,
+      bladeHeight: lod0Uniforms.uBladeHeight,
+      baseColor: uniforms.uBaseColor,
+      tipColor: uniforms.uTipColor,
+      colorMixFactor: uniforms.uColorMixFactor,
+      dayColor: uniforms.uDayColor,
+      nightColor: uniforms.uNightColor,
+      dayNightMix: uniforms.uDayNightMix,
+      lightIntensity: uniforms.uLightIntensity,
+      windStrength: uniforms.uWindStrength,
+      windSpeed: uniforms.uWindSpeed,
+      fadeStart: uniforms.uFadeStart,
+      fadeEnd: uniforms.uFadeEnd,
+      heightmapCenterX: uHeightmapCenterX,
+      heightmapCenterZ: uHeightmapCenterZ,
+      heightmapWorldSize: uHeightmapWorldSize,
+      heightmapMax: uHeightmapMax,
+      waterHardCutoff: uWaterHardCutoff,
+    },
+    heightmapTexture: heightmapTexture,
+    noiseTexture: noiseAtlasTexture,
+    exclusion: exclusionOpts,
+  });
 }
 
 // ============================================================================
@@ -2694,7 +2477,7 @@ export class ProceduralGrassSystem extends System {
 
       // STEP 2: Create simple grass mesh (no SSBO, no compute shaders)
       if (this.useBladeGrass) {
-        const geometry = createSimpleGrassGeometry();
+        const geometry = createGrassLod0Geometry(config);
         const material = createSimpleGrassMaterial();
 
         this.mesh = new THREE.Mesh(geometry, material);

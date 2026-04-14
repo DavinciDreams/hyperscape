@@ -376,6 +376,63 @@ export function entityReducer(
         gameEntities: action.data,
       };
 
+    // Phase 9.1: Custom Asset CRUD
+    case "ADD_CUSTOM_ASSET":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          customAssets: [...state.extendedLayers.customAssets, action.asset],
+        },
+      };
+    case "UPDATE_CUSTOM_ASSET":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          customAssets: state.extendedLayers.customAssets.map((a) =>
+            a.id === action.id ? { ...a, ...action.updates } : a,
+          ),
+        },
+      };
+    case "REMOVE_CUSTOM_ASSET":
+      return {
+        ...state,
+        extendedLayers: {
+          ...state.extendedLayers,
+          customAssets: state.extendedLayers.customAssets.filter(
+            (a) => a.id !== action.id,
+          ),
+        },
+      };
+
+    // Phase 9.2: Prefab CRUD
+    case "ADD_PREFAB":
+      return {
+        ...state,
+        prefabs: [...state.prefabs, action.prefab],
+      };
+    case "UPDATE_PREFAB":
+      return {
+        ...state,
+        prefabs: state.prefabs.map((p) =>
+          p.id === action.id ? { ...p, ...action.updates } : p,
+        ),
+      };
+    case "REMOVE_PREFAB":
+      return {
+        ...state,
+        prefabs: state.prefabs.filter((p) => p.id !== action.id),
+      };
+
+    // Bulk restore actions (project load persistence)
+    case "RESTORE_EXTENDED_LAYERS":
+      return { ...state, extendedLayers: action.layers };
+    case "RESTORE_AUDIO_LAYERS":
+      return { ...state, audioLayers: action.layers };
+    case "RESTORE_PREFABS":
+      return { ...state, prefabs: action.prefabs };
+
     default:
       return null;
   }

@@ -67,8 +67,65 @@ export {
   sampleNoiseAtPosition,
   getGrassiness,
   calculateSlope,
+  computeTerrainColorCPU,
+  type TerrainMaterialOptions,
   type TerrainUniforms,
 } from "./systems/shared/world/TerrainShader";
+
+// Export lighting/sky/fog config for World Studio visual parity
+export {
+  DAY_CYCLE,
+  SUN_LIGHT,
+  SUN_SHADE,
+  NIGHT,
+  HEMISPHERE_LIGHT,
+  AMBIENT_LIGHT,
+  EXPOSURE,
+  FOG_COLORS,
+  applySunShade,
+  applyCustomLighting,
+} from "./systems/shared/world/LightingConfig";
+export {
+  fogRenderTarget,
+  applySkyFog,
+  FOG_NEAR,
+  FOG_FAR,
+} from "./systems/shared/world/FogConfig";
+export {
+  StandaloneSky,
+  type StandaloneSkyOptions,
+} from "./systems/shared/world/StandaloneSky";
+export {
+  StandaloneGrass,
+  type StandaloneGrassOptions,
+  type GrassTerrainSampler,
+  type GrassTerrainSample,
+} from "./systems/shared/world/StandaloneGrass";
+export {
+  WATER,
+  WAVES,
+  type WaveParams,
+  generateWaterNormalMap,
+  generateWaterFlowMap,
+  generateWaterFoamTexture,
+  createWaterMaterial,
+  type WaterMaterialUniforms,
+  type WaterMaterialOptions,
+} from "./systems/shared/world/WaterMaterialCore";
+export {
+  hourToDayPhase,
+  computeDayIntensity,
+  computeTransitionFade,
+  computeIsDay,
+  isGoldenHour,
+  updateSunLight,
+  updateAmbientLights,
+  updateSceneFog,
+  computeTargetExposure,
+  computeSunPosition,
+  updateSceneLighting,
+  type SceneLightingRefs,
+} from "./systems/shared/world/SceneLightingCore";
 
 // Export core classes
 export * from "./core";
@@ -366,7 +423,12 @@ export { getStoreById } from "./data/banks-stores";
 
 // Export DataManager for server-side hot-reload (deploy routes)
 export { DataManager } from "./data/DataManager";
-export type { WorldJson } from "./data/world-structure";
+export type {
+  WorldJson,
+  BrushOverlaysManifest,
+  BrushOverlayVegetationPaint,
+  BrushOverlayMaterialPaint,
+} from "./data/world-structure";
 
 // Export avatar options for character creation
 export { AVATAR_OPTIONS } from "./data/avatars";

@@ -32,6 +32,7 @@ import type {
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
 import { useManifestCompiler } from "../hooks/useManifestCompiler";
+import { applyVegetationPaintStrokes } from "../utils/brushApplication";
 
 // Category display configuration
 const CATEGORY_LABELS: Record<ManifestCategory, string> = {
@@ -120,6 +121,7 @@ function DiffCategoryGroup({
 function DeploymentHistoryEntry({ record }: { record: DeploymentRecord }) {
   const { actions } = useWorldStudio();
   const [expanded, setExpanded] = useState(false);
+  const [isRollingBack, setIsRollingBack] = useState(false);
 
   const date = new Date(record.deployedAt);
   const timeStr = date.toLocaleTimeString([], {
@@ -130,6 +132,50 @@ function DeploymentHistoryEntry({ record }: { record: DeploymentRecord }) {
     month: "short",
     day: "numeric",
   });
+
+  // Phase 5.2: Wire rollback to game server endpoint
+  const handleRollback = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setIsRollingBack(true);
+
+      const serverUrl =
+        import.meta.env.VITE_API_URL ||
+        import.meta.env.VITE_GAME_SERVER_URL ||
+        "http://localhost:5555";
+      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+
+      try {
+        const resp = await fetch(
+          `${serverUrl}/api/deploy/rollback/${record.id}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-admin-code": adminCode,
+            },
+          },
+        );
+
+        if (resp.ok) {
+          console.log(`[Deploy] Rolled back to deployment ${record.id}`);
+          actions.deployRollback(record.id);
+        } else {
+          const body = (await resp.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          console.error(
+            `[Deploy] Rollback failed: ${body.error ?? resp.status}`,
+          );
+        }
+      } catch {
+        console.error("[Deploy] Rollback failed — server unreachable");
+      } finally {
+        setIsRollingBack(false);
+      }
+    },
+    [record.id, actions],
+  );
 
   return (
     <div className="border-b border-border-primary/30 last:border-0">
@@ -164,14 +210,16 @@ function DeploymentHistoryEntry({ record }: { record: DeploymentRecord }) {
           )}
           {record.status === "success" && record.target === "production" && (
             <button
-              className="flex items-center gap-1 px-2 py-1 text-[10px] text-amber-400 hover:bg-amber-400/10 rounded transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                actions.deployRollback(record.id);
-              }}
+              className="flex items-center gap-1 px-2 py-1 text-[10px] text-amber-400 hover:bg-amber-400/10 rounded transition-colors disabled:opacity-40"
+              disabled={isRollingBack}
+              onClick={handleRollback}
             >
-              <RotateCcw size={10} />
-              Rollback to previous
+              {isRollingBack ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : (
+                <RotateCcw size={10} />
+              )}
+              {isRollingBack ? "Rolling back..." : "Rollback to previous"}
             </button>
           )}
         </div>
@@ -198,7 +246,7 @@ export function DeploymentPanel() {
     null,
   );
 
-  // Fetch staging status on mount and after successful push
+  // Fetch staging status and deployment history on mount and after successful push
   useEffect(() => {
     const serverUrl =
       import.meta.env.VITE_API_URL ||
@@ -216,7 +264,53 @@ export function DeploymentPanel() {
       }
     };
 
+    // Phase 5.1: Load deployment history from game server on mount
+    const fetchHistory = async () => {
+      try {
+        const resp = await fetch(`${serverUrl}/api/deploy/history`);
+        if (resp.ok) {
+          const data = (await resp.json()) as {
+            deployments: Array<{
+              id: string;
+              target: "staging" | "production";
+              deployedBy: string;
+              deployedAt: string;
+              manifestCount: number;
+              status: string;
+              diffSummary: { added: number; modified: number; removed: number };
+            }>;
+          };
+          // Convert game server records to client format
+          if (data.deployments.length > 0 && deployment.history.length === 0) {
+            const records: DeploymentRecord[] = data.deployments.map((d) => ({
+              id: d.id,
+              target: d.target,
+              deployedBy: d.deployedBy,
+              deployedAt: d.deployedAt,
+              worldVersion: "unknown",
+              diff: {
+                manifests: [],
+                assetChanges: [],
+                totalAdded: d.diffSummary?.added ?? 0,
+                totalModified: d.diffSummary?.modified ?? 0,
+                totalRemoved: d.diffSummary?.removed ?? 0,
+              },
+              status:
+                d.status === "active"
+                  ? "success"
+                  : (d.status as DeploymentRecord["status"]),
+              manifestCount: d.manifestCount,
+            }));
+            actions.deployHistoryLoad(records);
+          }
+        }
+      } catch {
+        // Server not reachable — history stays empty
+      }
+    };
+
     void fetchStatus();
+    void fetchHistory();
   }, [deployment.stagingStatus]);
 
   const world = state.builder.editing.world;
@@ -231,14 +325,24 @@ export function DeploymentPanel() {
     actions.deployStagingStart();
 
     try {
-      // Step 1: Compile
+      // Step 1: Compile — apply vegetation paint strokes to trees before export
+      let treesForExport = viewportRef.current?.vegetationTrees;
+      const vegPaints = state.brushOverlays.vegetationPaints;
+      const biomeQuerier = viewportRef.current?.queryBiome;
+      if (treesForExport && vegPaints.length > 0 && biomeQuerier) {
+        treesForExport = applyVegetationPaintStrokes(
+          treesForExport,
+          vegPaints,
+          (wx, wz) => biomeQuerier(wx, wz).height,
+        );
+      }
       const compiled = compile(
         world,
         state.extendedLayers,
         state.audioLayers,
         state.manifests,
         state.brushOverlays,
-        viewportRef.current?.vegetationTrees,
+        treesForExport,
       );
 
       actions.deployStagingStatus("pushing");
@@ -311,6 +415,42 @@ export function DeploymentPanel() {
         `[Deploy] Pushed ${manifestCount} manifests to server staging: ${serverDeploymentId}`,
       );
 
+      // Persist deployment record to Asset Forge database (Phase 5.1)
+      try {
+        const projectId = state.project.currentProjectId;
+        const gameId = state.project.currentGameId;
+        if (projectId && gameId) {
+          await fetch("/api/world/deployments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectId,
+              gameId,
+              target: "staging",
+              version: state.project.projectVersion,
+              deployedBy: state.project.currentTeamId ?? "local",
+              manifestDiff: data.diff,
+            }),
+          });
+
+          // Save manifest snapshot (Phase 5.4)
+          const snapshotObj: Record<string, unknown> = {};
+          for (const [key, value] of compiled.files) {
+            snapshotObj[key] = value;
+          }
+          await fetch(`/api/world/deployments/project/${projectId}/snapshot`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ manifestSnapshot: snapshotObj }),
+          });
+        }
+      } catch {
+        // DB persistence is best-effort — don't fail the deployment
+        console.warn(
+          "[Deploy] Could not persist deployment record to database",
+        );
+      }
+
       // Step 3: Verify staging files are accessible
       actions.deployStagingStatus("reloading");
       try {
@@ -365,39 +505,88 @@ export function DeploymentPanel() {
   const handleRequestPromotion = useCallback(async () => {
     if (!deployment.currentDiff) return;
 
-    // Try server-side promotion
-    const serverUrl =
-      import.meta.env.VITE_API_URL ||
-      import.meta.env.VITE_GAME_SERVER_URL ||
-      "http://localhost:5555";
-    const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
-
-    try {
-      const resp = await fetch(`${serverUrl}/api/deploy/production`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-code": adminCode,
-        },
-        body: JSON.stringify({
-          deployedBy: state.project.currentTeamId ?? "local",
-        }),
-      });
-      if (resp.ok) {
-        console.log("[Deploy] Production promotion succeeded on server");
-      } else {
-        console.warn("[Deploy] Server promotion failed, continuing locally");
-      }
-    } catch {
-      console.warn("[Deploy] Server unreachable for promotion");
-    }
-
+    // Phase 5.3: Production requires approval — enter pending state first
     actions.deployPromotionRequest(
       `promo-${Date.now()}`,
       state.project.currentTeamId ?? "local",
       deployment.currentDiff,
     );
   }, [actions, deployment.currentDiff, state.project.currentTeamId]);
+
+  // Phase 5.3: Handle approval — promotes staging to production on the game server
+  const handleApprovePromotion = useCallback(
+    async (approvedBy: string) => {
+      if (!deployment.pendingPromotion) return;
+
+      const requestedBy = deployment.pendingPromotion.requestedBy;
+      if (approvedBy === requestedBy) {
+        console.warn("[Deploy] Approver must be different from requester");
+        return;
+      }
+
+      actions.deployPromotionApprove(approvedBy);
+
+      const serverUrl =
+        import.meta.env.VITE_API_URL ||
+        import.meta.env.VITE_GAME_SERVER_URL ||
+        "http://localhost:5555";
+      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+
+      try {
+        const resp = await fetch(`${serverUrl}/api/deploy/production`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-code": adminCode,
+          },
+          body: JSON.stringify({ deployedBy: requestedBy }),
+        });
+
+        if (resp.ok) {
+          console.log("[Deploy] Production promotion succeeded on server");
+
+          // Persist to Asset Forge DB (Phase 5.1)
+          const projectId = state.project.currentProjectId;
+          const gameId = state.project.currentGameId;
+          if (projectId && gameId) {
+            await fetch("/api/world/deployments", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                projectId,
+                gameId,
+                target: "production",
+                version: state.project.projectVersion,
+                deployedBy: requestedBy,
+                approvedBy,
+              }),
+            }).catch(() => {
+              console.warn(
+                "[Deploy] Could not persist production deployment to DB",
+              );
+            });
+          }
+
+          const record: DeploymentRecord = {
+            id: deployment.pendingPromotion.id,
+            target: "production",
+            deployedBy: requestedBy,
+            approvedBy,
+            deployedAt: new Date().toISOString(),
+            worldVersion: `v${state.project.projectVersion}`,
+            diff: deployment.pendingPromotion.diff,
+            status: "success",
+          };
+          actions.deployStagingComplete(record);
+        } else {
+          console.warn("[Deploy] Server promotion failed");
+        }
+      } catch {
+        console.warn("[Deploy] Server unreachable for promotion");
+      }
+    },
+    [actions, deployment.pendingPromotion, state.project],
+  );
 
   // Group diff entries by category
   const diffByCategory = deployment.currentDiff?.manifests.reduce(
@@ -598,7 +787,7 @@ export function DeploymentPanel() {
                     <button
                       className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded transition-colors"
                       onClick={() =>
-                        actions.deployPromotionApprove(
+                        handleApprovePromotion(
                           state.project.currentTeamId ?? "local",
                         )
                       }

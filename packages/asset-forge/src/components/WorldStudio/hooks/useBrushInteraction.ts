@@ -17,6 +17,8 @@ import type {
   TerrainSculptStroke,
   BiomePaintStroke,
   VegetationPaintStroke,
+  MaterialPaintStroke,
+  FoliagePaintStroke,
 } from "../types";
 import type { WorldStudioState } from "../WorldStudioContext";
 
@@ -26,6 +28,8 @@ interface BrushInteractionOptions {
   onTerrainSculpt: (stroke: TerrainSculptStroke) => void;
   onBiomePaint: (stroke: BiomePaintStroke) => void;
   onVegetationPaint: (stroke: VegetationPaintStroke) => void;
+  onMaterialPaint: (stroke: MaterialPaintStroke) => void;
+  onFoliagePaint: (stroke: FoliagePaintStroke) => void;
   onTileCollision: (
     tiles: Array<{ tileX: number; tileZ: number; blocked: boolean }>,
   ) => void;
@@ -212,6 +216,10 @@ function getBrushColor(settings: BrushSettings): number {
       return 0x8b5cf6;
     case "vegetation":
       return settings.vegetationPaintMode === "add" ? 0x22c55e : 0xef4444;
+    case "material":
+      return 0xd4a373; // earthy brown
+    case "foliage":
+      return settings.foliagePaintMode === "add" ? 0x4ade80 : 0xfb923c; // green / orange
     case "collision":
       return settings.collisionMode === "block" ? 0xef4444 : 0x22c55e;
     default:
@@ -225,6 +233,8 @@ export function useBrushInteraction({
   onTerrainSculpt,
   onBiomePaint,
   onVegetationPaint,
+  onMaterialPaint,
+  onFoliagePaint,
   onTileCollision,
 }: BrushInteractionOptions) {
   const brushRef = useRef<BrushState>({
@@ -299,6 +309,33 @@ export function useBrushInteraction({
           onVegetationPaint(stroke);
           break;
         }
+        case "material": {
+          const stroke: MaterialPaintStroke = {
+            id,
+            center: { x: worldX, z: worldZ },
+            radius: settings.radius,
+            strength: settings.strength,
+            falloff: settings.falloff,
+            targetMaterial: settings.materialPaintTarget,
+            timestamp,
+          };
+          onMaterialPaint(stroke);
+          break;
+        }
+        case "foliage": {
+          const stroke: FoliagePaintStroke = {
+            id,
+            center: { x: worldX, z: worldZ },
+            radius: settings.radius,
+            strength: settings.strength,
+            falloff: settings.falloff,
+            mode: settings.foliagePaintMode,
+            foliageTypes: [...settings.foliageTypeFilter],
+            timestamp,
+          };
+          onFoliagePaint(stroke);
+          break;
+        }
         case "collision": {
           const blocked = settings.collisionMode === "block";
           const r = Math.ceil(settings.radius);
@@ -328,6 +365,8 @@ export function useBrushInteraction({
       onTerrainSculpt,
       onBiomePaint,
       onVegetationPaint,
+      onMaterialPaint,
+      onFoliagePaint,
       onTileCollision,
     ],
   );

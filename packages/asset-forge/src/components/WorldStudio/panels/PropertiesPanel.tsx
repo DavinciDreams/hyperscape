@@ -35,6 +35,7 @@ import { WaterBodyProperties } from "./properties/WaterBodyProperties";
 import { MusicZoneProperties } from "./properties/MusicZoneProperties";
 import { AmbientZoneProperties } from "./properties/AmbientZoneProperties";
 import { SFXTriggerProperties } from "./properties/SFXTriggerProperties";
+import { CustomAssetProperties } from "./properties/CustomAssetProperties";
 import { GameNPCProperties } from "./properties/GameNPCProperties";
 import { GameStationProperties } from "./properties/GameStationProperties";
 import { GameResourceProperties } from "./properties/GameResourceProperties";
@@ -130,23 +131,53 @@ export function PropertiesPanel() {
             (b) => b.id === selection.id,
           );
           if (building) {
+            // Find any existing modification for this building
+            const townOverride = world.layers.townOverrides.get(
+              building.townId,
+            );
+            const mod = townOverride?.buildingModifications?.find(
+              (m) => m.buildingId === building.id,
+            );
+            const effectiveX =
+              building.position.x + (mod?.positionOffset?.x ?? 0);
+            const effectiveZ =
+              building.position.z + (mod?.positionOffset?.z ?? 0);
             return (
               <>
                 <PropertySection title="Building">
-                  <InfoRow label="Name" value={building.name} />
-                  <InfoRow label="Type" value={building.type} />
+                  <InfoRow
+                    label="Name"
+                    value={mod?.nameOverride || building.name}
+                  />
+                  <InfoRow
+                    label="Type"
+                    value={mod?.typeOverride || building.type}
+                  />
                   <InfoRow label="Town" value={building.townId} />
+                  {mod?.disabled && <InfoRow label="Status" value="Disabled" />}
                 </PropertySection>
                 <PropertySection title="Transform">
                   <TransformSection
-                    position={{
-                      x: building.position.x,
-                      y: 0,
-                      z: building.position.z,
-                    }}
+                    position={{ x: effectiveX, y: 0, z: effectiveZ }}
                     readOnly
                   />
+                  <InfoRow
+                    label="Rotation"
+                    value={`${Math.round(((mod?.rotationOverride ?? building.rotation) * 180) / Math.PI)}°`}
+                  />
                 </PropertySection>
+                <PropertySection title="Dimensions">
+                  <InfoRow
+                    label="Size"
+                    value={`${building.dimensions.width}×${building.dimensions.depth}`}
+                  />
+                  <InfoRow label="Floors" value={building.dimensions.floors} />
+                </PropertySection>
+                <div className="px-2 py-1">
+                  <div className="text-[10px] text-text-tertiary italic">
+                    Edit properties via Town → Buildings section.
+                  </div>
+                </div>
               </>
             );
           }
@@ -223,7 +254,8 @@ export function PropertiesPanel() {
         break;
       }
 
-      case "road": {
+      case "road":
+      case "customRoad": {
         if (world)
           return <RoadProperties roadId={selection.id} world={world} />;
         break;
@@ -259,6 +291,15 @@ export function PropertiesPanel() {
       case "sfxTrigger": {
         const sfx = audioLayers.sfxTriggers.find((s) => s.id === selection.id);
         if (sfx) return <SFXTriggerProperties sfxTrigger={sfx} />;
+        break;
+      }
+
+      // Phase 9.1: Custom assets
+      case "customAsset": {
+        const ca = extendedLayers.customAssets.find(
+          (a) => a.id === selection.id,
+        );
+        if (ca) return <CustomAssetProperties asset={ca} />;
         break;
       }
 

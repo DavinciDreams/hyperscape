@@ -69,6 +69,12 @@ export function uiReducer(
         tools: { ...state.tools, transformSpace: action.space },
       };
 
+    case "SET_ADDING_WATER_VERTICES":
+      return {
+        ...state,
+        tools: { ...state.tools, isAddingWaterVertices: action.enabled },
+      };
+
     case "CAMERA_TELEPORT":
       return {
         ...state,
@@ -178,6 +184,27 @@ export function uiReducer(
         },
       };
 
+    case "ADD_MATERIAL_PAINT":
+      return {
+        ...state,
+        brushOverlays: {
+          ...state.brushOverlays,
+          materialPaints: [
+            ...state.brushOverlays.materialPaints,
+            action.stroke,
+          ],
+        },
+      };
+
+    case "ADD_FOLIAGE_PAINT":
+      return {
+        ...state,
+        brushOverlays: {
+          ...state.brushOverlays,
+          foliagePaints: [...state.brushOverlays.foliagePaints, action.stroke],
+        },
+      };
+
     case "SET_TILE_COLLISION": {
       // Upsert tile collision overrides by (tileX, tileZ) key
       const existing = [...state.brushOverlays.tileCollisions];
@@ -210,6 +237,12 @@ export function uiReducer(
         case "vegetation":
           overlays.vegetationPaints = overlays.vegetationPaints.slice(0, -1);
           break;
+        case "material":
+          overlays.materialPaints = overlays.materialPaints.slice(0, -1);
+          break;
+        case "foliage":
+          overlays.foliagePaints = overlays.foliagePaints.slice(0, -1);
+          break;
         case "collision":
           // Remove last N tile collision entries (batch)
           overlays.tileCollisions = overlays.tileCollisions.slice(0, -1);
@@ -221,7 +254,15 @@ export function uiReducer(
     }
 
     case "RESTORE_BRUSH_OVERLAYS":
-      return { ...state, brushOverlays: action.overlays };
+      return {
+        ...state,
+        brushOverlays: {
+          ...action.overlays,
+          // Ensure new fields exist when loading old projects
+          materialPaints: action.overlays.materialPaints ?? [],
+          foliagePaints: action.overlays.foliagePaints ?? [],
+        },
+      };
 
     case "CLEAR_BRUSH_OVERLAYS": {
       if (action.brushType) {
@@ -236,6 +277,12 @@ export function uiReducer(
             break;
           case "vegetation":
             cleared.vegetationPaints = [];
+            break;
+          case "material":
+            cleared.materialPaints = [];
+            break;
+          case "foliage":
+            cleared.foliagePaints = [];
             break;
           case "collision":
             cleared.tileCollisions = [];
@@ -261,6 +308,28 @@ export function uiReducer(
 
     case "CLEAR_WIZARD_PREVIEW":
       return { ...state, wizardPreview: null };
+
+    // Phase 4: Play-In-Editor
+    case "PIE_START":
+      return {
+        ...state,
+        pie: { active: false, loading: true, error: null },
+      };
+    case "PIE_STARTED":
+      return {
+        ...state,
+        pie: { active: true, loading: false, error: null },
+      };
+    case "PIE_STOP":
+      return {
+        ...state,
+        pie: { active: false, loading: false, error: null },
+      };
+    case "PIE_ERROR":
+      return {
+        ...state,
+        pie: { active: false, loading: false, error: action.error },
+      };
 
     default:
       return null;

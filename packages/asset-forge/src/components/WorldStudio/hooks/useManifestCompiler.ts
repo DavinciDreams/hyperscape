@@ -536,6 +536,83 @@ function compileDangerSources(
 }
 
 /**
+ * Compile brush-overlays.json from terrain sculpt and biome paint strokes.
+ * These strokes are replayed at runtime by TerrainSystem to bake designer
+ * edits into procedurally generated tiles.
+ */
+function compileBrushOverlays(
+  brushOverlays: BrushOverlays,
+): Record<string, unknown> | null {
+  const hasSculpts = brushOverlays.terrainSculpts.length > 0;
+  const hasPaints = brushOverlays.biomePaints.length > 0;
+  const hasCollisions = brushOverlays.tileCollisions.length > 0;
+  const hasVegetation = brushOverlays.vegetationPaints.length > 0;
+  const hasMaterials = brushOverlays.materialPaints.length > 0;
+
+  if (
+    !hasSculpts &&
+    !hasPaints &&
+    !hasCollisions &&
+    !hasVegetation &&
+    !hasMaterials
+  )
+    return null;
+
+  return {
+    version: 1,
+    terrainSculpts: brushOverlays.terrainSculpts.map((s) => ({
+      id: s.id,
+      center: { x: s.center.x, z: s.center.z },
+      radius: s.radius,
+      strength: s.strength,
+      falloff: s.falloff,
+      mode: s.mode,
+      ...(s.flattenTarget != null ? { flattenTarget: s.flattenTarget } : {}),
+    })),
+    biomePaints: brushOverlays.biomePaints.map((p) => ({
+      id: p.id,
+      center: { x: p.center.x, z: p.center.z },
+      radius: p.radius,
+      strength: p.strength,
+      falloff: p.falloff,
+      targetBiome: p.targetBiome,
+    })),
+    vegetationPaints: brushOverlays.vegetationPaints.map((v) => ({
+      id: v.id,
+      center: { x: v.center.x, z: v.center.z },
+      radius: v.radius,
+      strength: v.strength,
+      falloff: v.falloff,
+      mode: v.mode,
+      speciesFilter: v.speciesFilter,
+      timestamp: v.timestamp,
+    })),
+    materialPaints: brushOverlays.materialPaints.map((m) => ({
+      id: m.id,
+      center: { x: m.center.x, z: m.center.z },
+      radius: m.radius,
+      strength: m.strength,
+      falloff: m.falloff,
+      targetMaterial: m.targetMaterial,
+      timestamp: m.timestamp,
+    })),
+    tileCollisions: brushOverlays.tileCollisions.map((c) => ({
+      tileX: c.tileX,
+      tileZ: c.tileZ,
+      blocked: c.blocked,
+      ...(c.edges ? { edges: c.edges } : {}),
+    })),
+    metadata: {
+      sculptCount: brushOverlays.terrainSculpts.length,
+      paintCount: brushOverlays.biomePaints.length,
+      vegetationCount: brushOverlays.vegetationPaints.length,
+      materialPaintCount: brushOverlays.materialPaints.length,
+      collisionCount: brushOverlays.tileCollisions.length,
+    },
+  };
+}
+
+/**
  * Compile wilderness-boundary.json from wilderness boundary polyline.
  */
 function compileWildernessBoundary(
@@ -762,6 +839,33 @@ function compileBuildings(world: WorldData): Record<string, unknown> {
 /**
  * Compute a diff between compiled manifests and currently deployed manifests.
  */
+/** Phase 5.5: Human-readable entity labels per manifest file */
+const MANIFEST_ENTITY_LABELS: Record<string, string> = {
+  "npcs.json": "NPCs",
+  "world-areas.json": "areas",
+  "biomes.json": "biomes",
+  "items.json": "items",
+  "quests.json": "quests",
+  "dialogue.json": "dialogue trees",
+  "mobs.json": "mobs",
+  "mob-spawns.json": "mob spawns",
+  "stores.json": "stores",
+  "prayers.json": "prayers",
+  "skills.json": "skills",
+  "recipes.json": "recipes",
+  "gathering.json": "gathering nodes",
+  "fishing.json": "fishing spots",
+  "music.json": "music tracks",
+  "roads.json": "roads",
+  "vegetation.json": "vegetation types",
+  "buildings.json": "buildings",
+  "regions.json": "regions",
+  "danger-sources.json": "danger sources",
+  "equipment.json": "equipment",
+  "loot-tables.json": "loot tables",
+  "world-config.json": "config",
+};
+
 function computeDiff(
   compiled: CompiledManifests,
   deployed: Record<string, unknown>,
@@ -810,10 +914,14 @@ function computeDiff(
       totalModified += entriesModified;
       totalRemoved += entriesRemoved;
 
+      // Phase 5.5: Entity-level diff summaries
+      const entityLabel = MANIFEST_ENTITY_LABELS[entry.filename] ?? "entries";
       const parts: string[] = [];
-      if (entriesAdded > 0) parts.push(`${entriesAdded} added`);
-      if (entriesModified > 0) parts.push(`${entriesModified} modified`);
-      if (entriesRemoved > 0) parts.push(`${entriesRemoved} removed`);
+      if (entriesAdded > 0) parts.push(`${entriesAdded} ${entityLabel} added`);
+      if (entriesModified > 0)
+        parts.push(`${entriesModified} ${entityLabel} modified`);
+      if (entriesRemoved > 0)
+        parts.push(`${entriesRemoved} ${entityLabel} removed`);
 
       manifests.push({
         filename: entry.filename,
@@ -841,7 +949,8 @@ function computeDiff(
  * When present, RoadNetworkSystem uses these instead of regenerating via BFS.
  */
 function compileRoads(world: WorldData): unknown[] {
-  return world.foundation.roads.map((road) => ({
+  // Merge generated roads with user-authored custom roads
+  const generated = world.foundation.roads.map((road) => ({
     id: road.id,
     path: road.path.map((p) => ({ x: p.x, y: p.y, z: p.z })),
     width: road.width,
@@ -849,6 +958,19 @@ function compileRoads(world: WorldData): unknown[] {
     toTownId: road.connectedTowns[1],
     isMainRoad: road.isMainRoad,
   }));
+
+  const custom = world.layers.customRoads.map((road) => ({
+    id: road.id,
+    path: road.path.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+    width: road.width,
+    fromTownId: null,
+    toTownId: null,
+    isMainRoad: false,
+    isCustom: true,
+    name: road.name,
+  }));
+
+  return [...generated, ...custom];
 }
 
 export function useManifestCompiler() {
@@ -861,7 +983,7 @@ export function useManifestCompiler() {
       extendedLayers: ExtendedWorldLayers,
       audioLayers: AudioLayers,
       manifests: ManifestData,
-      _brushOverlays: BrushOverlays,
+      brushOverlays: BrushOverlays,
       vegetationTrees?: Array<{
         s: string;
         x: number;
@@ -894,8 +1016,11 @@ export function useManifestCompiler() {
         files.set("buildings.json", compileBuildings(world));
       }
 
-      // roads.json — pre-computed road network
-      if (world.foundation.roads.length > 0) {
+      // roads.json — pre-computed road network + custom roads
+      if (
+        world.foundation.roads.length > 0 ||
+        world.layers.customRoads.length > 0
+      ) {
         files.set("roads.json", compileRoads(world));
       }
 
@@ -916,6 +1041,12 @@ export function useManifestCompiler() {
       const wb = compileWildernessBoundary(extendedLayers);
       if (wb) {
         files.set("wilderness-boundary.json", wb);
+      }
+
+      // brush-overlays.json — terrain sculpt + biome paint strokes for runtime replay
+      const bo = compileBrushOverlays(brushOverlays);
+      if (bo) {
+        files.set("brush-overlays.json", bo);
       }
 
       // Pass through manifest data that was loaded from server

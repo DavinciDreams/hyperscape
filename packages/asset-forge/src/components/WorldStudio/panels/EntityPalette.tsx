@@ -24,14 +24,18 @@ import {
   List,
   Loader2,
   MapPin,
+  Music,
   Navigation,
+  Package,
   Search,
   Shield,
   Skull,
+  Speaker,
   Star,
   TreePine,
   User,
   AlertTriangle,
+  Volume2,
   Zap,
 } from "lucide-react";
 import React, { useMemo, useState, useCallback } from "react";
@@ -198,6 +202,58 @@ const CATEGORIES: CategoryConfig[] = [
       bgHover: "hover:bg-rose-500/10",
       border: "border-l-rose-500/60",
       count: "bg-rose-500/15 text-rose-400",
+    },
+  },
+  {
+    id: "music-zones",
+    label: "Music Zones",
+    icon: <Music size={13} />,
+    description: "Background music regions",
+    color: {
+      icon: "text-violet-400",
+      bg: "bg-violet-500/5",
+      bgHover: "hover:bg-violet-500/10",
+      border: "border-l-violet-500/60",
+      count: "bg-violet-500/15 text-violet-400",
+    },
+  },
+  {
+    id: "ambient-zones",
+    label: "Ambient Zones",
+    icon: <Volume2 size={13} />,
+    description: "Environmental ambient sound areas",
+    color: {
+      icon: "text-indigo-400",
+      bg: "bg-indigo-500/5",
+      bgHover: "hover:bg-indigo-500/10",
+      border: "border-l-indigo-500/60",
+      count: "bg-indigo-500/15 text-indigo-400",
+    },
+  },
+  {
+    id: "sfx-triggers",
+    label: "SFX Triggers",
+    icon: <Speaker size={13} />,
+    description: "Point-source sound effect triggers",
+    color: {
+      icon: "text-fuchsia-400",
+      bg: "bg-fuchsia-500/5",
+      bgHover: "hover:bg-fuchsia-500/10",
+      border: "border-l-fuchsia-500/60",
+      count: "bg-fuchsia-500/15 text-fuchsia-400",
+    },
+  },
+  {
+    id: "custom-assets",
+    label: "Custom Assets",
+    icon: <Package size={13} />,
+    description: "Imported models from Asset Forge",
+    color: {
+      icon: "text-teal-400",
+      bg: "bg-teal-500/5",
+      bgHover: "hover:bg-teal-500/10",
+      border: "border-l-teal-500/60",
+      count: "bg-teal-500/15 text-teal-400",
     },
   },
 ];
@@ -482,6 +538,112 @@ export const EntityPalette = React.memo(function EntityPalette() {
         manifestData: { intensity: 3, radius: 50, falloffCurve: 1.2 },
       },
     ]);
+
+    // Phase 9.3: Audio zone templates
+    map.set("music-zones", [
+      {
+        id: "music-zone-default",
+        name: "Music Zone",
+        category: "music-zones" as PaletteCategory,
+        description: "Background music region with polygon boundary",
+        manifestData: { priority: 0, blendDistance: 10 },
+      },
+      {
+        id: "music-zone-combat",
+        name: "Combat Music Zone",
+        category: "music-zones" as PaletteCategory,
+        description: "Zone with combat music override",
+        manifestData: { priority: 1, blendDistance: 5 },
+      },
+    ]);
+
+    map.set("ambient-zones", [
+      {
+        id: "ambient-forest",
+        name: "Forest Ambience",
+        category: "ambient-zones" as PaletteCategory,
+        description: "Birds, rustling leaves, wind through trees",
+        manifestData: {
+          ambientType: "forest",
+          volume: 0.7,
+          falloffDistance: 15,
+        },
+      },
+      {
+        id: "ambient-cave",
+        name: "Cave Ambience",
+        category: "ambient-zones" as PaletteCategory,
+        description: "Dripping water, echoes, distant rumbles",
+        manifestData: { ambientType: "cave", volume: 0.8, falloffDistance: 10 },
+      },
+      {
+        id: "ambient-ocean",
+        name: "Ocean Ambience",
+        category: "ambient-zones" as PaletteCategory,
+        description: "Waves, seagulls, wind",
+        manifestData: {
+          ambientType: "ocean",
+          volume: 0.6,
+          falloffDistance: 20,
+        },
+      },
+      {
+        id: "ambient-town",
+        name: "Town Ambience",
+        category: "ambient-zones" as PaletteCategory,
+        description: "Crowd chatter, merchants, activity",
+        manifestData: { ambientType: "town", volume: 0.5, falloffDistance: 10 },
+      },
+      {
+        id: "ambient-desert",
+        name: "Desert Ambience",
+        category: "ambient-zones" as PaletteCategory,
+        description: "Wind, sand, distant heat shimmer",
+        manifestData: {
+          ambientType: "desert",
+          volume: 0.4,
+          falloffDistance: 25,
+        },
+      },
+      {
+        id: "ambient-swamp",
+        name: "Swamp Ambience",
+        category: "ambient-zones" as PaletteCategory,
+        description: "Frogs, insects, bubbling mud",
+        manifestData: {
+          ambientType: "swamp",
+          volume: 0.7,
+          falloffDistance: 12,
+        },
+      },
+    ]);
+
+    map.set("sfx-triggers", [
+      {
+        id: "sfx-waterfall",
+        name: "Waterfall SFX",
+        category: "sfx-triggers" as PaletteCategory,
+        description: "Looping waterfall sound at a point",
+        manifestData: { radius: 30, volume: 0.8, looping: true },
+      },
+      {
+        id: "sfx-campfire",
+        name: "Campfire SFX",
+        category: "sfx-triggers" as PaletteCategory,
+        description: "Crackling fire sound",
+        manifestData: { radius: 10, volume: 0.6, looping: true },
+      },
+      {
+        id: "sfx-bell",
+        name: "Bell Chime SFX",
+        category: "sfx-triggers" as PaletteCategory,
+        description: "One-shot bell chime trigger",
+        manifestData: { radius: 50, volume: 0.9, looping: false },
+      },
+    ]);
+
+    // Phase 9.1: Custom assets (populated from state)
+    map.set("custom-assets", []);
 
     return map;
   }, [manifests]);

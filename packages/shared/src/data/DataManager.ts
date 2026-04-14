@@ -39,6 +39,7 @@ import {
   type WorldJsonTree,
   type DangerSourceManifest,
   type WildernessBoundaryManifest,
+  type BrushOverlaysManifest,
 } from "./world-structure";
 import { loadSkillUnlocks, type SkillUnlocksManifest } from "./skill-unlocks";
 import {
@@ -422,6 +423,7 @@ export class DataManager {
   private static worldJsonIndex: WorldJsonSpatialIndex | null = null;
   private static dangerSources: DangerSourceManifest[] | null = null;
   private static wildernessBoundary: WildernessBoundaryManifest | null = null;
+  private static brushOverlays: BrushOverlaysManifest | null = null;
 
   private constructor() {
     // Private constructor for singleton pattern
@@ -547,6 +549,24 @@ export class DataManager {
   /** Get wilderness boundary from World Studio (wilderness-boundary.json) */
   public static getWildernessBoundary(): WildernessBoundaryManifest | null {
     return DataManager.wildernessBoundary;
+  }
+
+  /** Get brush overlays from World Studio (brush-overlays.json) */
+  public static getBrushOverlays(): BrushOverlaysManifest | null {
+    return DataManager.brushOverlays;
+  }
+
+  /**
+   * Set/hot-reload brush overlays (terrain sculpt + biome paint strokes).
+   * Called by deploy route on staging push for live reload.
+   */
+  public static setBrushOverlays(overlays: BrushOverlaysManifest | null): void {
+    DataManager.brushOverlays = overlays;
+    if (overlays) {
+      console.log(
+        `[DataManager] Loaded brush overlays: ${overlays.terrainSculpts?.length ?? 0} sculpts, ${overlays.biomePaints?.length ?? 0} biome paints`,
+      );
+    }
   }
 
   /**
@@ -873,6 +893,25 @@ export class DataManager {
             }
           } catch {
             // wilderness-boundary.json is optional
+          }
+        })(),
+
+        // brush-overlays.json — terrain sculpt + biome paint strokes (optional)
+        (async () => {
+          DataManager.brushOverlays = null;
+          try {
+            const overlays = await fetchOptionalJson<BrushOverlaysManifest>(
+              `${baseUrl}/brush-overlays.json`,
+              "brush-overlays.json",
+            );
+            if (overlays?.terrainSculpts || overlays?.biomePaints) {
+              DataManager.brushOverlays = overlays;
+              console.log(
+                `[DataManager] Loaded brush overlays: ${overlays.terrainSculpts?.length ?? 0} sculpts, ${overlays.biomePaints?.length ?? 0} biome paints`,
+              );
+            }
+          } catch {
+            // brush-overlays.json is optional — terrain uses pure procgen if absent
           }
         })(),
 
@@ -1254,6 +1293,23 @@ export class DataManager {
         }
       } catch {
         // wilderness-boundary.json is optional
+      }
+
+      // Load brush-overlays.json (optional) — terrain sculpt + biome paint strokes
+      DataManager.brushOverlays = null;
+      try {
+        const boPath = path.join(manifestsDir, "brush-overlays.json");
+        const overlays = JSON.parse(
+          await fs.readFile(boPath, "utf-8"),
+        ) as BrushOverlaysManifest;
+        if (overlays?.terrainSculpts || overlays?.biomePaints) {
+          DataManager.brushOverlays = overlays;
+          console.log(
+            `[DataManager] Loaded brush overlays: ${overlays.terrainSculpts?.length ?? 0} sculpts, ${overlays.biomePaints?.length ?? 0} biome paints`,
+          );
+        }
+      } catch {
+        // brush-overlays.json is optional — terrain uses pure procgen if absent
       }
 
       // Load stores

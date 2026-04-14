@@ -347,6 +347,77 @@ export { buttons, propToLabel } from "./extras/ui/buttons";
 
 // NOTE: CSM (WebGL) removed - use CSMShadowNode from three/addons/csm/CSMShadowNode.js for WebGPU
 
+// Export lighting/sky/fog config for World Studio visual parity
+export {
+  DAY_CYCLE,
+  SUN_LIGHT,
+  SUN_SHADE,
+  NIGHT,
+  HEMISPHERE_LIGHT,
+  AMBIENT_LIGHT,
+  EXPOSURE,
+  FOG_COLORS,
+  applySunShade,
+  applyCustomLighting,
+} from "./systems/shared/world/LightingConfig";
+export {
+  fogRenderTarget,
+  applySkyFog,
+  FOG_NEAR,
+  FOG_FAR,
+} from "./systems/shared/world/FogConfig";
+export {
+  StandaloneSky,
+  type StandaloneSkyOptions,
+} from "./systems/shared/world/StandaloneSky";
+export {
+  StandaloneGrass,
+  type StandaloneGrassOptions,
+  type GrassTerrainSampler,
+  type GrassTerrainSample,
+} from "./systems/shared/world/StandaloneGrass";
+
+// Terrain shader — used by World Studio for game-accurate terrain rendering
+export {
+  createTerrainMaterial,
+  generateNoiseTexture,
+  getNoiseTexture,
+  sampleNoiseAtPosition,
+  getGrassiness,
+  calculateSlope,
+  applyAnimeShade,
+  TERRAIN_SHADER_CONSTANTS,
+  TERRAIN_SHADE,
+  computeTerrainColorCPU,
+  type TerrainMaterialOptions,
+  type TerrainUniforms,
+} from "./systems/shared/world/TerrainShader";
+export {
+  WATER,
+  WAVES,
+  type WaveParams,
+  generateWaterNormalMap,
+  generateWaterFlowMap,
+  generateWaterFoamTexture,
+  createWaterMaterial,
+  type WaterMaterialUniforms,
+  type WaterMaterialOptions,
+} from "./systems/shared/world/WaterMaterialCore";
+export {
+  hourToDayPhase,
+  computeDayIntensity,
+  computeTransitionFade,
+  computeIsDay,
+  isGoldenHour,
+  updateSunLight,
+  updateAmbientLights,
+  updateSceneFog,
+  computeTargetExposure,
+  computeSunPosition,
+  updateSceneLighting,
+  type SceneLightingRefs,
+} from "./systems/shared/world/SceneLightingCore";
+
 // PhysX asset path helper function
 export function getPhysXAssetPath(assetName: string): string {
   // In the browser, serve assets from CDN /web/ directory

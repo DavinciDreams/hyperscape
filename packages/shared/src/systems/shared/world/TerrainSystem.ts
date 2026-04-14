@@ -3024,6 +3024,29 @@ export class TerrainSystem extends System {
     // Carve terrain triangles inside building flat zones to avoid overdraw
     this.applyFlatZoneCarve(geometry, tileX, tileZ);
 
+    // Apply terrain sculpt strokes from brush-overlays.json (raise/lower/flatten/smooth)
+    // These are designer-painted terrain modifications that must be baked into the
+    // heightmap so the game terrain matches what was designed in World Studio.
+    const brushOverlays = DataManager.getBrushOverlays();
+    if (
+      brushOverlays?.terrainSculpts &&
+      brushOverlays.terrainSculpts.length > 0
+    ) {
+      this.applyBrushSculptStrokes(
+        positionsArray,
+        positions.count,
+        tileX,
+        tileZ,
+        brushOverlays.terrainSculpts,
+      );
+      // CRITICAL: Rebuild heightData from modified positions so storeHeightData()
+      // and getHeightAt() return sculpted heights matching the visual mesh.
+      // Without this, collision queries use pre-sculpt heights.
+      for (let i = 0; i < positions.count; i++) {
+        heightData[i] = positionsArray[i * 3 + 1];
+      }
+    }
+
     // Attach heightData to geometry so the caller can store it AFTER the tile
     // is added to terrainTiles (storeHeightData requires the tile to exist).
     geometry.userData.heightData = heightData;
@@ -3064,6 +3087,33 @@ export class TerrainSystem extends System {
     const forestWeights = new Float32Array(positions.count);
     const canyonWeights = new Float32Array(positions.count);
 
+    // Pre-filter biome paint strokes to those overlapping this tile (AABB culling).
+    // Avoids iterating all strokes for every vertex — O(strokes) → O(relevant_strokes).
+    const tileHalfSize = this.CONFIG.TILE_SIZE / 2;
+    const tileCenterX = tileX * this.CONFIG.TILE_SIZE;
+    const tileCenterZ = tileZ * this.CONFIG.TILE_SIZE;
+    const tileAABB = {
+      minX: tileCenterX - tileHalfSize,
+      maxX: tileCenterX + tileHalfSize,
+      minZ: tileCenterZ - tileHalfSize,
+      maxZ: tileCenterZ + tileHalfSize,
+    };
+    const relevantPaints =
+      brushOverlays?.biomePaints?.filter((p) => {
+        const nearX = Math.max(
+          tileAABB.minX,
+          Math.min(p.center.x, tileAABB.maxX),
+        );
+        const nearZ = Math.max(
+          tileAABB.minZ,
+          Math.min(p.center.z, tileAABB.maxZ),
+        );
+        return (
+          (nearX - p.center.x) ** 2 + (nearZ - p.center.z) ** 2 <=
+          p.radius * p.radius
+        );
+      }) ?? [];
+
     for (let i = 0; i < positions.count; i++) {
       const i3 = i * 3;
       const x = positionsArray[i3] + tileX * this.CONFIG.TILE_SIZE;
@@ -3087,6 +3137,15 @@ export class TerrainSystem extends System {
         forestWeights[i] = (biomeWeightMap.get(BiomeType.Forest) || 0) * invW;
         canyonWeights[i] = (biomeWeightMap.get(BiomeType.Canyon) || 0) * invW;
       }
+      // Override biome from brush-overlays.json biome paint strokes.
+      // Painted biome overrides the procedurally computed dominant biome.
+      if (relevantPaints.length > 0) {
+        const painted = this.getBrushBiomeOverride(x, z, relevantPaints);
+        if (painted !== null) {
+          dominantBiome = painted;
+        }
+      }
+
       biomeIds[i] = this.getBiomeId(dominantBiome);
 
       roadInfluences[i] = this.calculateRoadInfluenceAtVertex(
@@ -3169,6 +3228,153 @@ export class TerrainSystem extends System {
     this.storeHeightData(tileX, tileZ, heightData);
 
     return geometry;
+  }
+
+  // ============== BRUSH OVERLAY APPLICATION ==============
+
+  /** Height step for sculpt strokes (meters per full-strength application) */
+  private static readonly SCULPT_HEIGHT_STEP = 2.0;
+
+  /**
+   * Apply terrain sculpt strokes from brush-overlays.json to vertex positions.
+   * Matches the World Studio brushApplication.ts logic exactly so terrain
+   * in-game matches what the designer saw in the editor.
+   */
+  private applyBrushSculptStrokes(
+    positionsArray: Float32Array,
+    vertexCount: number,
+    tileX: number,
+    tileZ: number,
+    strokes: Array<{
+      center: { x: number; z: number };
+      radius: number;
+      strength: number;
+      falloff: "sharp" | "linear" | "smooth";
+      mode: "raise" | "lower" | "flatten" | "smooth";
+      flattenTarget?: number;
+    }>,
+  ): void {
+    const tileSize = this.CONFIG.TILE_SIZE;
+    const tileMinX = tileX * tileSize - tileSize / 2;
+    const tileMaxX = tileX * tileSize + tileSize / 2;
+    const tileMinZ = tileZ * tileSize - tileSize / 2;
+    const tileMaxZ = tileZ * tileSize + tileSize / 2;
+
+    for (const stroke of strokes) {
+      const { center, radius, strength, falloff, mode, flattenTarget } = stroke;
+
+      // Quick AABB culling — skip strokes that don't overlap this tile
+      const nearX = Math.max(tileMinX, Math.min(center.x, tileMaxX));
+      const nearZ = Math.max(tileMinZ, Math.min(center.z, tileMaxZ));
+      if ((nearX - center.x) ** 2 + (nearZ - center.z) ** 2 > radius * radius)
+        continue;
+
+      for (let i = 0; i < vertexCount; i++) {
+        const i3 = i * 3;
+        const worldX = positionsArray[i3] + tileX * tileSize;
+        const worldZ = positionsArray[i3 + 2] + tileZ * tileSize;
+
+        const dx = worldX - center.x;
+        const dz = worldZ - center.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist >= radius) continue;
+
+        const inf = this.brushInfluence(dist, radius, falloff) * strength;
+        const y = positionsArray[i3 + 1];
+
+        switch (mode) {
+          case "raise":
+            positionsArray[i3 + 1] = y + inf * TerrainSystem.SCULPT_HEIGHT_STEP;
+            break;
+          case "lower":
+            positionsArray[i3 + 1] = y - inf * TerrainSystem.SCULPT_HEIGHT_STEP;
+            break;
+          case "flatten": {
+            const target = flattenTarget ?? y;
+            positionsArray[i3 + 1] = y + (target - y) * inf;
+            break;
+          }
+          case "smooth": {
+            const stride = Math.round(Math.sqrt(vertexCount));
+            let sum = 0;
+            let cnt = 0;
+            for (const di of [-1, 0, 1]) {
+              for (const dj of [-1, 0, 1]) {
+                if (di === 0 && dj === 0) continue;
+                const ni = i + di + dj * stride;
+                if (ni >= 0 && ni < vertexCount) {
+                  sum += positionsArray[ni * 3 + 1];
+                  cnt++;
+                }
+              }
+            }
+            if (cnt > 0) {
+              positionsArray[i3 + 1] = y + (sum / cnt - y) * inf * 0.5;
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  /** Brush influence falloff — matches World Studio brushApplication.ts exactly */
+  private brushInfluence(
+    dist: number,
+    radius: number,
+    falloff: "sharp" | "linear" | "smooth",
+  ): number {
+    if (dist >= radius) return 0;
+    const t = dist / radius;
+    switch (falloff) {
+      case "sharp":
+        return t < 0.7 ? 1.0 : Math.max(0, (1 - t) / 0.3);
+      case "linear":
+        return 1 - t;
+      case "smooth":
+      default:
+        return 1 - t * t * (3 - 2 * t);
+    }
+  }
+
+  /**
+   * Check if a world position is covered by a biome paint stroke.
+   * Returns the target biome string if painted, null if no override.
+   * Last-painted stroke wins (strokes are timestamp-ordered in the manifest).
+   */
+  private getBrushBiomeOverride(
+    worldX: number,
+    worldZ: number,
+    paints: Array<{
+      center: { x: number; z: number };
+      radius: number;
+      strength: number;
+      falloff: "sharp" | "linear" | "smooth";
+      targetBiome: string;
+    }>,
+  ): string | null {
+    let result: string | null = null;
+    let bestInfluence = 0;
+
+    for (const paint of paints) {
+      const dx = worldX - paint.center.x;
+      const dz = worldZ - paint.center.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist >= paint.radius) continue;
+
+      const influence =
+        this.brushInfluence(dist, paint.radius, paint.falloff) * paint.strength;
+      // Accumulate — stronger paints override weaker ones.
+      // With equal strength, later paints (later in array) win.
+      if (influence >= bestInfluence) {
+        bestInfluence = influence;
+        result = paint.targetBiome;
+      }
+    }
+
+    // Only override if the paint influence exceeds a minimum threshold
+    // to avoid single-pixel overrides at brush edges
+    return bestInfluence > 0.1 ? result : null;
   }
 
   // Track which tiles we've logged road segment info for (to avoid spam)

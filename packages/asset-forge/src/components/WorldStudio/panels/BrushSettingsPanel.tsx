@@ -6,7 +6,16 @@
  * biome paint target, vegetation add/remove).
  */
 
-import { Mountain, TreePine, Leaf, Grid3X3, Undo2, Trash2 } from "lucide-react";
+import {
+  Mountain,
+  TreePine,
+  Leaf,
+  Grid3X3,
+  Paintbrush,
+  Undo2,
+  Trash2,
+  Sprout,
+} from "lucide-react";
 import React, { useCallback } from "react";
 
 import type {
@@ -29,6 +38,8 @@ const BRUSH_TYPE_OPTIONS: Array<{ value: BrushType; label: string }> = [
   { value: "terrain", label: "Terrain" },
   { value: "biome", label: "Biome" },
   { value: "vegetation", label: "Vegetation" },
+  { value: "foliage", label: "Foliage" },
+  { value: "material", label: "Material" },
   { value: "collision", label: "Collision" },
 ];
 
@@ -87,10 +98,16 @@ const VEGETATION_SPECIES = [
   "grass",
 ];
 
+import { MATERIAL_LAYER_DEFINITIONS } from "@hyperscape/procgen/terrain";
+
+const FOLIAGE_TYPES = ["grass", "flower", "rock"];
+
 const BRUSH_ICONS: Record<BrushType, React.ReactNode> = {
   terrain: <Mountain size={10} />,
   biome: <TreePine size={10} />,
   vegetation: <Leaf size={10} />,
+  foliage: <Sprout size={10} />,
+  material: <Paintbrush size={10} />,
   collision: <Grid3X3 size={10} />,
 };
 
@@ -111,9 +128,13 @@ export function BrushSettingsPanel() {
       ? overlays.terrainSculpts.length
       : settings.brushType === "biome"
         ? overlays.biomePaints.length
-        : settings.brushType === "collision"
-          ? overlays.tileCollisions.length
-          : overlays.vegetationPaints.length;
+        : settings.brushType === "foliage"
+          ? overlays.foliagePaints.length
+          : settings.brushType === "material"
+            ? overlays.materialPaints.length
+            : settings.brushType === "collision"
+              ? overlays.tileCollisions.length
+              : overlays.vegetationPaints.length;
 
   return (
     <div className="flex flex-col h-full">
@@ -284,8 +305,98 @@ export function BrushSettingsPanel() {
               ))}
             </div>
             <div className="text-[10px] text-text-tertiary italic pt-1">
-              Plants are currently disabled in the generator.
+              Trees are applied on regenerate or deploy.
             </div>
+          </PropertySection>
+        )}
+
+        {/* Foliage-specific settings */}
+        {settings.brushType === "foliage" && (
+          <PropertySection title="Foliage Paint" icon={<Sprout size={10} />}>
+            <SelectInput
+              label="Mode"
+              value={settings.foliagePaintMode}
+              onChange={(mode) => updateSetting({ foliagePaintMode: mode })}
+              options={VEG_PAINT_MODE_OPTIONS}
+            />
+            <div className="text-[10px] text-text-tertiary pt-1">
+              Type Filter:
+            </div>
+            <div className="space-y-0.5">
+              {FOLIAGE_TYPES.map((ft) => (
+                <Toggle
+                  key={ft}
+                  label={ft.charAt(0).toUpperCase() + ft.slice(1)}
+                  value={
+                    settings.foliageTypeFilter.length === 0 ||
+                    settings.foliageTypeFilter.includes(ft)
+                  }
+                  onChange={(enabled) => {
+                    const current = settings.foliageTypeFilter;
+                    if (enabled) {
+                      const newFilter = [...current, ft];
+                      if (newFilter.length >= FOLIAGE_TYPES.length) {
+                        updateSetting({ foliageTypeFilter: [] });
+                      } else {
+                        updateSetting({ foliageTypeFilter: newFilter });
+                      }
+                    } else {
+                      const newFilter =
+                        current.length === 0
+                          ? FOLIAGE_TYPES.filter((t) => t !== ft)
+                          : current.filter((t) => t !== ft);
+                      updateSetting({ foliageTypeFilter: newFilter });
+                    }
+                  }}
+                />
+              ))}
+            </div>
+            <div className="text-[10px] text-text-tertiary italic pt-1">
+              Paint ground cover density. Add increases, remove suppresses
+              foliage.
+            </div>
+            <InfoRow
+              label="Foliage Strokes"
+              value={overlays.foliagePaints.length}
+            />
+          </PropertySection>
+        )}
+
+        {/* Material-specific settings */}
+        {settings.brushType === "material" && (
+          <PropertySection
+            title="Material Layer"
+            icon={<Paintbrush size={10} />}
+          >
+            <div className="grid grid-cols-2 gap-1">
+              {MATERIAL_LAYER_DEFINITIONS.map((layer) => (
+                <button
+                  key={layer.id}
+                  className={`flex items-center gap-1.5 px-2 py-1.5 text-[10px] rounded border transition-colors ${
+                    settings.materialPaintTarget === layer.id
+                      ? "bg-primary/20 border-primary/50 text-primary"
+                      : "bg-bg-tertiary border-border-primary text-text-tertiary hover:text-text-secondary"
+                  }`}
+                  onClick={() =>
+                    updateSetting({ materialPaintTarget: layer.id })
+                  }
+                >
+                  <span
+                    className="w-3 h-3 rounded-sm flex-shrink-0 border border-border-primary/30"
+                    style={{ backgroundColor: layer.uiColor }}
+                  />
+                  {layer.name}
+                </button>
+              ))}
+            </div>
+            <div className="text-[10px] text-text-tertiary italic pt-1">
+              Paint material layers onto terrain. Overrides biome-based
+              auto-material.
+            </div>
+            <InfoRow
+              label="Material Strokes"
+              value={overlays.materialPaints.length}
+            />
           </PropertySection>
         )}
 

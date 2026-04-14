@@ -240,14 +240,83 @@ export function TownProperties({ townId, world }: Props) {
                       }
                       placeholder={building.type}
                     />
+                    <div className="flex gap-1">
+                      <div className="flex-1">
+                        <label className="text-[9px] text-text-tertiary">
+                          Offset X
+                        </label>
+                        <input
+                          type="number"
+                          step={1}
+                          value={mod?.positionOffset?.x ?? 0}
+                          onChange={(e) =>
+                            updateBuildingMod(building.id, {
+                              positionOffset: {
+                                x: Number(e.target.value),
+                                z: mod?.positionOffset?.z ?? 0,
+                              },
+                            })
+                          }
+                          className="w-full px-1 py-0.5 rounded bg-bg-tertiary border border-border-primary text-[10px] text-text-primary focus:border-primary focus:outline-none"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-[9px] text-text-tertiary">
+                          Offset Z
+                        </label>
+                        <input
+                          type="number"
+                          step={1}
+                          value={mod?.positionOffset?.z ?? 0}
+                          onChange={(e) =>
+                            updateBuildingMod(building.id, {
+                              positionOffset: {
+                                x: mod?.positionOffset?.x ?? 0,
+                                z: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full px-1 py-0.5 rounded bg-bg-tertiary border border-border-primary text-[10px] text-text-primary focus:border-primary focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <SliderInput
+                      label="Rotation"
+                      value={Math.round(
+                        ((mod?.rotationOverride ?? building.rotation) * 180) /
+                          Math.PI,
+                      )}
+                      onChange={(deg) =>
+                        updateBuildingMod(building.id, {
+                          rotationOverride: (deg * Math.PI) / 180,
+                        })
+                      }
+                      min={0}
+                      max={360}
+                      step={15}
+                      unit="°"
+                    />
                     <InfoRow
-                      label="Position"
+                      label="Base Position"
                       value={`(${Math.round(building.position.x)}, ${Math.round(building.position.z)})`}
                     />
                     <InfoRow
                       label="Dimensions"
                       value={`${building.dimensions.width}×${building.dimensions.depth}, ${building.dimensions.floors}F`}
                     />
+                    {(mod?.positionOffset || mod?.rotationOverride != null) && (
+                      <button
+                        className="text-[10px] text-primary hover:text-primary/80 mt-0.5"
+                        onClick={() =>
+                          updateBuildingMod(building.id, {
+                            positionOffset: undefined,
+                            rotationOverride: undefined,
+                          })
+                        }
+                      >
+                        Reset transform
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

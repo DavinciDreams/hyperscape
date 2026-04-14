@@ -636,6 +636,43 @@ export class ModifyPropertyCommand<T> implements Command {
   }
 }
 
+// ============== PLACE PREFAB COMMAND ==============
+
+export interface PlacePrefabEntry {
+  entityId: string;
+  entityType: string;
+  entityData: Record<string, unknown>;
+  onPlace: (data: Record<string, unknown>) => void;
+  onRemove: (id: string) => void;
+}
+
+/**
+ * Undoable command for placing a prefab (multiple entities at once).
+ * Undo removes all placed entities; redo re-places them.
+ */
+export class PlacePrefabCommand implements Command {
+  readonly type = "PlacePrefab";
+  readonly channel = "entities" as const;
+  private entries: PlacePrefabEntry[];
+
+  constructor(entries: PlacePrefabEntry[]) {
+    this.entries = entries;
+  }
+
+  execute(): void {
+    for (const entry of this.entries) {
+      entry.onPlace(entry.entityData);
+    }
+  }
+
+  undo(): void {
+    // Remove in reverse order
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      this.entries[i].onRemove(this.entries[i].entityId);
+    }
+  }
+}
+
 // ============== SINGLETON ==============
 
 /** Global command history instance for the editor */

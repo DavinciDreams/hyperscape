@@ -335,6 +335,76 @@ function studioReducer(
       };
     }
 
+    case "ADD_CUSTOM_ROAD": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            hasUnsavedChanges: true,
+            world: {
+              ...world,
+              layers: {
+                ...world.layers,
+                customRoads: [...world.layers.customRoads, action.road],
+              },
+            },
+          },
+        },
+      };
+    }
+
+    case "UPDATE_CUSTOM_ROAD": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            hasUnsavedChanges: true,
+            world: {
+              ...world,
+              layers: {
+                ...world.layers,
+                customRoads: world.layers.customRoads.map((r) =>
+                  r.id === action.roadId ? { ...r, ...action.updates } : r,
+                ),
+              },
+            },
+          },
+        },
+      };
+    }
+
+    case "REMOVE_CUSTOM_ROAD": {
+      const world = state.builder.editing.world;
+      if (!world) return state;
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: {
+            ...state.builder.editing,
+            hasUnsavedChanges: true,
+            world: {
+              ...world,
+              layers: {
+                ...world.layers,
+                customRoads: world.layers.customRoads.filter(
+                  (r) => r.id !== action.roadId,
+                ),
+              },
+            },
+          },
+        },
+      };
+    }
+
     case "SET_FOUNDATION_TOWNS": {
       const world = state.builder.editing.world;
       if (!world) return state;
@@ -414,9 +484,14 @@ function studioReducer(
       };
 
     // Manifest editing — update raw manifest in local state
+    // All MANIFEST_UPDATE_* cases set hasUnsavedChanges so the save indicator triggers.
     case "MANIFEST_UPDATE_RAW":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: {
           ...state.manifests,
           rawManifests: {
@@ -429,58 +504,102 @@ function studioReducer(
     case "MANIFEST_UPDATE_ITEMS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, items: action.items },
       };
 
     case "MANIFEST_UPDATE_QUESTS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, quests: action.quests },
       };
 
     case "MANIFEST_UPDATE_STORES":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, stores: action.stores },
       };
     case "MANIFEST_UPDATE_NPCS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, npcs: action.npcs },
       };
     case "MANIFEST_UPDATE_COMBAT_SPELLS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, combatSpells: action.combatSpells },
       };
     case "MANIFEST_UPDATE_PRAYERS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, prayers: action.prayers },
       };
     case "MANIFEST_UPDATE_RECIPES":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, recipes: action.recipes },
       };
     case "MANIFEST_UPDATE_AMMUNITION":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, ammunition: action.ammunition },
       };
     case "MANIFEST_UPDATE_RUNES":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, runes: action.runes },
       };
     case "MANIFEST_UPDATE_SKILL_UNLOCKS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, skillUnlocks: action.skillUnlocks },
       };
     case "MANIFEST_UPDATE_TIER_REQUIREMENTS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: {
           ...state.manifests,
           tierRequirements: action.tierRequirements,
@@ -489,13 +608,21 @@ function studioReducer(
     case "MANIFEST_UPDATE_DUEL_ARENAS":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifests: { ...state.manifests, duelArenas: action.duelArenas },
       };
 
-    // Phase 7: Audio zone CRUD
+    // Phase 7: Audio zone CRUD — all set hasUnsavedChanges for save indicator
     case "ADD_MUSIC_ZONE":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           musicZones: [...state.audioLayers.musicZones, action.zone],
@@ -504,6 +631,10 @@ function studioReducer(
     case "UPDATE_MUSIC_ZONE":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           musicZones: state.audioLayers.musicZones.map((z) =>
@@ -514,6 +645,10 @@ function studioReducer(
     case "REMOVE_MUSIC_ZONE":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           musicZones: state.audioLayers.musicZones.filter(
@@ -524,6 +659,10 @@ function studioReducer(
     case "ADD_AMBIENT_ZONE":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           ambientZones: [...state.audioLayers.ambientZones, action.zone],
@@ -532,6 +671,10 @@ function studioReducer(
     case "UPDATE_AMBIENT_ZONE":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           ambientZones: state.audioLayers.ambientZones.map((z) =>
@@ -542,6 +685,10 @@ function studioReducer(
     case "REMOVE_AMBIENT_ZONE":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           ambientZones: state.audioLayers.ambientZones.filter(
@@ -552,6 +699,10 @@ function studioReducer(
     case "ADD_SFX_TRIGGER":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           sfxTriggers: [...state.audioLayers.sfxTriggers, action.trigger],
@@ -560,6 +711,10 @@ function studioReducer(
     case "UPDATE_SFX_TRIGGER":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           sfxTriggers: state.audioLayers.sfxTriggers.map((t) =>
@@ -570,6 +725,10 @@ function studioReducer(
     case "REMOVE_SFX_TRIGGER":
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         audioLayers: {
           ...state.audioLayers,
           sfxTriggers: state.audioLayers.sfxTriggers.filter(
@@ -840,6 +999,10 @@ function studioReducer(
       } as never);
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifestOverrides: {
           ...state.manifestOverrides,
           [action.overrideType]: mapClone,
@@ -852,6 +1015,10 @@ function studioReducer(
       mapClone.delete(action.entityId);
       return {
         ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
         manifestOverrides: {
           ...state.manifestOverrides,
           [action.overrideType]: mapClone,

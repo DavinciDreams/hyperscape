@@ -13,6 +13,7 @@ import {
   AlertCircle,
   ChefHat,
   ChevronRight,
+  Crosshair,
   ExternalLink,
   Grid3x3,
   List,
@@ -23,11 +24,11 @@ import {
   Pickaxe,
   Search,
   Settings,
+  Sparkles,
   Swords,
   TrendingUp,
   Users,
   X,
-  Crosshair,
 } from "lucide-react";
 import React, { useState, useCallback, useMemo } from "react";
 
@@ -172,6 +173,15 @@ const CATEGORY_TREE: CategoryNode[] = [
     icon: <Music size={11} />,
     children: [{ key: "audio/music", label: "Music", leaf: true }],
   },
+  {
+    key: "custom",
+    label: "Custom Assets",
+    icon: <Sparkles size={11} />,
+    children: [
+      { key: "custom/placed", label: "Placed", leaf: true },
+      { key: "custom/prefabs", label: "Prefabs", leaf: true },
+    ],
+  },
 ];
 
 // ============== TYPE FILTER CHIPS ==============
@@ -231,6 +241,8 @@ const DOT_COLORS: Record<string, string> = {
   building: "bg-stone-400",
   lod: "bg-zinc-400",
   music: "bg-fuchsia-400",
+  "custom-asset": "bg-teal-400",
+  prefab: "bg-pink-400",
 };
 
 // ============== BUILD ALL ENTRIES ==============
@@ -426,7 +438,7 @@ function buildAllEntries(manifests: ManifestData): ContentEntry[] {
     const catKey = `recipes/${r.skill}`;
     entries.push({
       id: `recipe:${r.id}`,
-      name: r.output,
+      name: r.output ?? r.id,
       categoryKey: catKey,
       typeLabel: "recipe",
       dotColor: DOT_COLORS.recipe,
@@ -585,11 +597,41 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedEntry, setSelectedEntry] = useState<ContentEntry | null>(null);
 
+  const customAssets = state.extendedLayers.customAssets;
+  const prefabs = state.prefabs;
+
   // Build all content entries
-  const allEntries = useMemo(
-    () => (manifests.loaded ? buildAllEntries(manifests) : []),
-    [manifests],
-  );
+  const allEntries = useMemo(() => {
+    const entries = manifests.loaded ? buildAllEntries(manifests) : [];
+
+    // Add placed custom assets
+    for (const ca of customAssets) {
+      entries.push({
+        id: `custom-asset:${ca.id}`,
+        name: ca.name,
+        categoryKey: "custom/placed",
+        typeLabel: "custom-asset",
+        dotColor: DOT_COLORS["custom-asset"],
+        info: ca.assetName || ca.assetId,
+        entityId: ca.id,
+      });
+    }
+
+    // Add prefabs
+    for (const pf of prefabs) {
+      entries.push({
+        id: `prefab:${pf.id}`,
+        name: pf.name,
+        categoryKey: "custom/prefabs",
+        typeLabel: "prefab",
+        dotColor: DOT_COLORS.prefab,
+        info: `${pf.entries.length} entities`,
+        entityId: pf.id,
+      });
+    }
+
+    return entries;
+  }, [manifests, customAssets, prefabs]);
 
   const categoryCounts = useMemo(
     () => countByCategory(allEntries),
@@ -703,6 +745,10 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
         );
       } else if (categoryKey === "gathering/fishing") {
         actions.startPlacement("resources-fishing", entry.entityId, entry.name);
+      } else if (categoryKey === "custom/placed") {
+        actions.startPlacement("custom-assets", entry.entityId, entry.name);
+      } else if (categoryKey === "custom/prefabs") {
+        actions.startPlacement("prefabs", entry.entityId, entry.name);
       }
     },
     [actions],
@@ -1037,7 +1083,7 @@ function ContentGridCard({
       {/* Icon placeholder */}
       <div className="w-full aspect-square rounded bg-bg-tertiary flex items-center justify-center mb-1 relative">
         <span className="text-sm text-text-tertiary/40 font-medium">
-          {entry.name.charAt(0).toUpperCase()}
+          {(entry.name || "?").charAt(0).toUpperCase()}
         </span>
         {/* Type indicator dot */}
         <span
@@ -1085,7 +1131,7 @@ function ContentListRow({
       {/* Icon placeholder */}
       <div className="w-5 h-5 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0">
         <span className="text-[9px] text-text-tertiary/50 font-medium">
-          {entry.name.charAt(0).toUpperCase()}
+          {(entry.name || "?").charAt(0).toUpperCase()}
         </span>
       </div>
       {/* Name + info */}
@@ -1127,6 +1173,8 @@ function ContentDetailPreview({
     "gathering/mining",
     "gathering/woodcutting",
     "gathering/fishing",
+    "custom/placed",
+    "custom/prefabs",
   ].includes(entry.categoryKey);
 
   return (
@@ -1135,7 +1183,7 @@ function ContentDetailPreview({
         {/* Type dot + icon */}
         <div className="w-8 h-8 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0 relative">
           <span className="text-xs text-text-tertiary/50 font-medium">
-            {entry.name.charAt(0).toUpperCase()}
+            {(entry.name || "?").charAt(0).toUpperCase()}
           </span>
           <span
             className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-bg-secondary ${entry.dotColor}`}

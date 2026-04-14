@@ -88,6 +88,7 @@ export function migrateWorldData(
     lore: data.layers?.lore ?? [],
     difficultyZones: data.layers?.difficultyZones ?? [],
     customPlacements: data.layers?.customPlacements ?? [],
+    customRoads: data.layers?.customRoads ?? [],
   };
 
   if (migrated.version < 1) migrated.version = 1;

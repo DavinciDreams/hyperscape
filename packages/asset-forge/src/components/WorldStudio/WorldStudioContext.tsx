@@ -50,6 +50,7 @@ import type {
   GeneratedRoad,
   GeneratedTown,
   GeneratedBuilding,
+  CustomRoad,
 } from "../WorldBuilder/types";
 
 import type {
@@ -76,13 +77,17 @@ import type {
   PlacedWaterBody,
   PlacedRegion,
   PlacedDangerSource,
+  PlacedCustomAsset,
   WildernessBoundary,
+  Prefab,
   PaletteCategory,
   BrushSettings,
   BrushType,
   TerrainSculptStroke,
   BiomePaintStroke,
   VegetationPaintStroke,
+  MaterialPaintStroke,
+  FoliagePaintStroke,
   BrushOverlays,
   MusicZone,
   AmbientZone,
@@ -90,6 +95,7 @@ import type {
   DeploymentState,
   DeploymentDiff,
   DeploymentRecord,
+  AudioLayers,
 } from "./types";
 import type { ManifestOverrides } from "./types";
 
@@ -288,6 +294,7 @@ interface WorldStudioContextValue {
     setTool: (tool: StudioToolMode) => void;
     setTransformMode: (mode: GizmoTransformMode) => void;
     setTransformSpace: (space: GizmoTransformSpace) => void;
+    setAddingWaterVertices: (enabled: boolean) => void;
     cameraTeleport: (target: {
       x: number;
       y: number;
@@ -301,12 +308,17 @@ interface WorldStudioContextValue {
     addTerrainSculpt: (stroke: TerrainSculptStroke) => void;
     addBiomePaint: (stroke: BiomePaintStroke) => void;
     addVegetationPaint: (stroke: VegetationPaintStroke) => void;
+    addMaterialPaint: (stroke: MaterialPaintStroke) => void;
+    addFoliagePaint: (stroke: FoliagePaintStroke) => void;
     setTileCollision: (
       tiles: Array<{ tileX: number; tileZ: number; blocked: boolean }>,
     ) => void;
     undoLastBrushStroke: (brushType: BrushType) => void;
     clearBrushOverlays: (brushType?: BrushType) => void;
     restoreBrushOverlays: (overlays: BrushOverlays) => void;
+    restoreExtendedLayers: (layers: ExtendedWorldLayers) => void;
+    restoreAudioLayers: (layers: AudioLayers) => void;
+    restorePrefabs: (prefabs: Prefab[]) => void;
 
     // Studio-specific: Placement
     startPlacement: (
@@ -409,6 +421,9 @@ interface WorldStudioContextValue {
       }>,
     ) => void;
     setFoundationRoads: (roads: GeneratedRoad[]) => void;
+    addCustomRoad: (road: CustomRoad) => void;
+    updateCustomRoad: (roadId: string, updates: Partial<CustomRoad>) => void;
+    removeCustomRoad: (roadId: string) => void;
     setFoundationTowns: (
       towns: GeneratedTown[],
       buildings: GeneratedBuilding[],
@@ -458,6 +473,19 @@ interface WorldStudioContextValue {
     addSFXTrigger: (trigger: SFXTrigger) => void;
     updateSFXTrigger: (id: string, updates: Partial<SFXTrigger>) => void;
     removeSFXTrigger: (id: string) => void;
+
+    // Phase 9.1: Custom assets
+    addCustomAsset: (asset: PlacedCustomAsset) => void;
+    updateCustomAsset: (
+      id: string,
+      updates: Partial<PlacedCustomAsset>,
+    ) => void;
+    removeCustomAsset: (id: string) => void;
+
+    // Phase 9.2: Prefabs
+    addPrefab: (prefab: Prefab) => void;
+    updatePrefab: (id: string, updates: Partial<Prefab>) => void;
+    removePrefab: (id: string) => void;
 
     // Phase 7: AI generation
     startAIGeneration: (
@@ -528,6 +556,11 @@ interface WorldStudioContextValue {
     ) => void;
     loadManifestOverrides: (overrides: ManifestOverrides) => void;
     clearAllManifestOverrides: () => void;
+    // Phase 4: Play-In-Editor
+    pieStart: () => void;
+    pieStarted: () => void;
+    pieStop: () => void;
+    pieError: (error: string) => void;
   };
 
   /** Computed values */
@@ -734,6 +767,8 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "SET_TRANSFORM_MODE", mode }),
       setTransformSpace: (space: GizmoTransformSpace) =>
         dispatch({ type: "SET_TRANSFORM_SPACE", space }),
+      setAddingWaterVertices: (enabled: boolean) =>
+        dispatch({ type: "SET_ADDING_WATER_VERTICES", enabled }),
       cameraTeleport: (target: {
         x: number;
         y: number;
@@ -752,6 +787,10 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "ADD_BIOME_PAINT", stroke }),
       addVegetationPaint: (stroke: VegetationPaintStroke) =>
         dispatch({ type: "ADD_VEGETATION_PAINT", stroke }),
+      addMaterialPaint: (stroke: MaterialPaintStroke) =>
+        dispatch({ type: "ADD_MATERIAL_PAINT", stroke }),
+      addFoliagePaint: (stroke: FoliagePaintStroke) =>
+        dispatch({ type: "ADD_FOLIAGE_PAINT", stroke }),
       setTileCollision: (
         tiles: Array<{ tileX: number; tileZ: number; blocked: boolean }>,
       ) => dispatch({ type: "SET_TILE_COLLISION", tiles }),
@@ -761,6 +800,12 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "CLEAR_BRUSH_OVERLAYS", brushType }),
       restoreBrushOverlays: (overlays: BrushOverlays) =>
         dispatch({ type: "RESTORE_BRUSH_OVERLAYS", overlays }),
+      restoreExtendedLayers: (layers: ExtendedWorldLayers) =>
+        dispatch({ type: "RESTORE_EXTENDED_LAYERS", layers }),
+      restoreAudioLayers: (layers: AudioLayers) =>
+        dispatch({ type: "RESTORE_AUDIO_LAYERS", layers }),
+      restorePrefabs: (prefabs: Prefab[]) =>
+        dispatch({ type: "RESTORE_PREFABS", prefabs }),
 
       // Studio-specific: Placement
       startPlacement: (
@@ -893,6 +938,13 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       // Foundation roads
       setFoundationRoads: (roads: GeneratedRoad[]) =>
         dispatch({ type: "SET_FOUNDATION_ROADS", roads }),
+      // Custom road CRUD
+      addCustomRoad: (road: CustomRoad) =>
+        dispatch({ type: "ADD_CUSTOM_ROAD", road }),
+      updateCustomRoad: (roadId: string, updates: Partial<CustomRoad>) =>
+        dispatch({ type: "UPDATE_CUSTOM_ROAD", roadId, updates }),
+      removeCustomRoad: (roadId: string) =>
+        dispatch({ type: "REMOVE_CUSTOM_ROAD", roadId }),
       setFoundationTowns: (
         towns: GeneratedTown[],
         buildings: GeneratedBuilding[],
@@ -970,6 +1022,20 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "UPDATE_SFX_TRIGGER", id, updates }),
       removeSFXTrigger: (id: string) =>
         dispatch({ type: "REMOVE_SFX_TRIGGER", id }),
+
+      // Phase 9.1: Custom assets
+      addCustomAsset: (asset: PlacedCustomAsset) =>
+        dispatch({ type: "ADD_CUSTOM_ASSET", asset }),
+      updateCustomAsset: (id: string, updates: Partial<PlacedCustomAsset>) =>
+        dispatch({ type: "UPDATE_CUSTOM_ASSET", id, updates }),
+      removeCustomAsset: (id: string) =>
+        dispatch({ type: "REMOVE_CUSTOM_ASSET", id }),
+
+      // Phase 9.2: Prefabs
+      addPrefab: (prefab: Prefab) => dispatch({ type: "ADD_PREFAB", prefab }),
+      updatePrefab: (id: string, updates: Partial<Prefab>) =>
+        dispatch({ type: "UPDATE_PREFAB", id, updates }),
+      removePrefab: (id: string) => dispatch({ type: "REMOVE_PREFAB", id }),
 
       // Phase 7: AI generation
       startAIGeneration: (
@@ -1075,6 +1141,11 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "LOAD_MANIFEST_OVERRIDES", overrides }),
       clearAllManifestOverrides: () =>
         dispatch({ type: "CLEAR_ALL_MANIFEST_OVERRIDES" }),
+      // Phase 4: Play-In-Editor
+      pieStart: () => dispatch({ type: "PIE_START" }),
+      pieStarted: () => dispatch({ type: "PIE_STARTED" }),
+      pieStop: () => dispatch({ type: "PIE_STOP" }),
+      pieError: (error: string) => dispatch({ type: "PIE_ERROR", error }),
     }),
     [],
   );
@@ -1275,6 +1346,22 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         })),
         badge: ext.dangerSources.length,
         expandable: ext.dangerSources.length > 0,
+      },
+      {
+        id: "layer-custom-assets",
+        label: "Custom Assets",
+        type: "customAssets",
+        children: ext.customAssets.map((ca) => ({
+          id: `asset-${ca.id}`,
+          label: ca.name,
+          type: "customAsset" as const,
+          children: [],
+          dataId: ca.id,
+          expandable: false,
+          metadata: { assetId: ca.assetId, scale: ca.scale },
+        })),
+        badge: ext.customAssets.length,
+        expandable: ext.customAssets.length > 0,
       },
       ...(ext.wildernessBoundary
         ? [

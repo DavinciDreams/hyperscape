@@ -52,67 +52,12 @@ import type { TerrainTile } from "../../../types/world/terrain";
 import type { Wind } from "./Wind";
 import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 import { SUN_SHADE, NIGHT, applySunShade } from "./LightingConfig";
+import { WATER, WAVES, type WaveParams } from "./WaterMaterialCore";
 import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
-
-const GRAVITY = 9.81;
-const PI = Math.PI;
-const TWO_PI = PI * 2;
-
-// ---- Water visual tuning ----
-const WATER = {
-  REFLECTION_INTENSITY: 0.4,
-  WAVE_DAMP_DISTANCE: 6,
-  MAX_DEPTH: 30,
-
-  // Fresnel (Schlick approximation, rf0 = 0.3)
-  RF0: 0.3,
-
-  // Phong sun lighting
-  SPECULAR_SHININESS: 100,
-  SPECULAR_STRENGTH: 5.0,
-  DIFFUSE_STRENGTH: 0.5,
-
-  // Depth-based opacity: op = 1 - pow(sat(1 - depth/scale), falloff)
-  OP_DEPTH_SCALE: 15,
-  OP_DEPTH_FALLOFF: 3,
-
-  // Depth-based colour gradient
-  COLOR_DEPTH_SCALE: 50,
-  COLOR_DEPTH_FALLOFF: 3,
-  COLOR_DIST_FADE: 200,
-
-  // Cosine gradient colour parameters — more green, less grey-blue
-  // shallow(t=1) sRGB display: (0.276, 0.541, 0.595)  deep(t=0) sRGB display: (0.196, 0.384, 0.422)
-  COS_PHASES: [0.5, 0.5, 0.5] as const,
-  COS_AMPLITUDES: [0.0311, 0.1374, 0.1692] as const,
-  COS_FREQUENCIES: [0.5, 0.5, 0.5] as const,
-  COS_OFFSETS: [-0.4569, -0.3095, -0.2654] as const,
-
-  // Normal noise strength (xz multiplier for surface normal)
-  NORMAL_STRENGTH: 1.5,
-
-  // Foam
-  FOAM_SHORE_DISTANCE: 2.5,
-  FOAM_CREST_MIN: 0.15,
-  FOAM_CREST_MAX: 0.4,
-  FOAM_CREST_MULTIPLIER: 0.6,
-  FOAM_COLOR: { r: 0.85, g: 0.92, b: 0.96 },
-  FOAM_MAX_OPACITY: 0.85,
-  FOAM_SCROLL_X: 0.02,
-  FOAM_SCROLL_Y: 0.015,
-  FOAM_SCALE: 0.1,
-
-  // Flow mapping (two-phase crossfade, ported from cloud-sea FlowUVW)
-  FLOW_SPEED: 0.05,
-  FLOW_STRENGTH: 1.0,
-  FLOW_OFFSET: -0.1,
-  FLOW_JUMP: [0.5, -0.25] as const,
-  FLOW_UV_SCALE: 0.001,
-};
 
 // LOD configuration for water mesh resolution
 const WATER_LOD = {
@@ -122,41 +67,6 @@ const WATER_LOD = {
   HIGH_DISTANCE: 100, // Distance threshold for high->medium LOD
   MEDIUM_DISTANCE: 200, // Distance threshold for medium->low LOD
 };
-
-type WaveParams = {
-  w: number;
-  phi: number;
-  QADx: number;
-  QADz: number;
-  wADx: number;
-  wADz: number;
-  Dx: number;
-  Dz: number;
-  A: number;
-};
-
-// 5 Gerstner waves for realistic water motion (performance optimized)
-const WAVES: WaveParams[] = [
-  { A: 0.07, wavelength: 20, Q: 0.3, Dx: 0.7, Dz: 0.71 },
-  { A: 0.05, wavelength: 14, Q: 0.25, Dx: -0.5, Dz: 0.87 },
-  { A: 0.035, wavelength: 8, Q: 0.22, Dx: 0.9, Dz: -0.44 },
-  { A: 0.025, wavelength: 5, Q: 0.2, Dx: 0.26, Dz: 0.97 },
-  { A: 0.015, wavelength: 2.5, Q: 0.15, Dx: -0.8, Dz: 0.6 },
-].map(({ A, wavelength, Q, Dx, Dz }) => {
-  const w = TWO_PI / wavelength;
-  const phi = Math.sqrt(GRAVITY * w);
-  return {
-    w,
-    phi,
-    QADx: Q * A * Dx,
-    QADz: Q * A * Dz,
-    wADx: w * A * Dx,
-    wADz: w * A * Dz,
-    Dx,
-    Dz,
-    A,
-  };
-});
 
 // ============================================================================
 // TYPES

@@ -407,7 +407,11 @@ export const ProcgenPanel = React.memo(function ProcgenPanel() {
     try {
       // Invalidate server cache first, then refresh with current vegetation config
       await fetch("/api/world/trees/invalidate", { method: "POST" });
-      await viewportRef.current.refreshVegetation?.(vegetationConfig);
+      await viewportRef.current.refreshVegetation?.(
+        vegetationConfig,
+        undefined,
+        state.brushOverlays.vegetationPaints,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Tree regeneration failed");
     } finally {

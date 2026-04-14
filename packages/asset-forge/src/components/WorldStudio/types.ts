@@ -579,6 +579,79 @@ export interface WildernessBoundary {
   maxLevel: number;
 }
 
+// ============== CUSTOM ASSET TYPES (Phase 9.1) ==============
+
+/** An imported/generated asset placed in the world */
+export interface PlacedCustomAsset {
+  id: string;
+  name: string;
+  /** Asset Forge asset ID (maps to /api/assets/:id) */
+  assetId: string;
+  /** Display name from the asset database */
+  assetName: string;
+  /** Position in world */
+  position: WorldPosition;
+  /** Y-axis rotation in radians */
+  rotation: number;
+  /** Uniform scale */
+  scale: number;
+  /** Optional model file path override */
+  modelPath?: string;
+  /** How this entity was created */
+  source?: EntitySource;
+  /** Region that generated this entity (for procgen cleanup) */
+  sourceRegionId?: string;
+  /** Custom metadata for extension */
+  properties: Record<string, unknown>;
+}
+
+// ============== PREFAB TYPES (Phase 9.2) ==============
+
+/** A saved template of multiple entities with relative positions */
+export interface Prefab {
+  id: string;
+  name: string;
+  /** Description for Content Browser */
+  description?: string;
+  /** The entities in this prefab, stored with positions relative to the prefab origin */
+  entries: PrefabEntry[];
+  /** Timestamp of creation */
+  createdAt: number;
+}
+
+/** Valid entity types that can be stored in a prefab */
+export type PrefabEntityType =
+  | "npc"
+  | "spawnPoint"
+  | "teleport"
+  | "mobSpawn"
+  | "resource"
+  | "station"
+  | "poi"
+  | "waterBody"
+  | "musicZone"
+  | "ambientZone"
+  | "sfxTrigger"
+  | "region"
+  | "dangerSource"
+  | "customAsset";
+
+/** A single entity within a prefab, with position relative to the prefab origin */
+export interface PrefabEntry {
+  /** Selection type */
+  entityType: PrefabEntityType;
+  /** Template/manifest ID */
+  templateId: string;
+  /** Display name */
+  name: string;
+  /** Offset from prefab origin */
+  offset: WorldPosition;
+  /** Y-axis rotation */
+  rotation: number;
+  /** Extra data needed to recreate (e.g., npcTypeId, stationType, resourceType) */
+  data: Record<string, unknown>;
+}
+
 // ============== EXTENDED WORLD LAYERS ==============
 
 /** Additional layers for Phase 3+ entity types */
@@ -595,6 +668,8 @@ export interface ExtendedWorldLayers {
   dangerSources: PlacedDangerSource[];
   wildernessBoundary: WildernessBoundary | null;
   mines: PlacedMine[];
+  /** Phase 9.1: Imported/generated custom assets */
+  customAssets: PlacedCustomAsset[];
 }
 
 /** Default empty extended layers */
@@ -611,6 +686,7 @@ export const EMPTY_EXTENDED_LAYERS: ExtendedWorldLayers = {
   dangerSources: [],
   wildernessBoundary: null,
   mines: [],
+  customAssets: [],
 };
 
 // ============== ENTITY PALETTE TYPES ==============
@@ -627,7 +703,12 @@ export type PaletteCategory =
   | "teleports"
   | "pois"
   | "water-bodies"
-  | "danger-sources";
+  | "danger-sources"
+  | "music-zones"
+  | "ambient-zones"
+  | "sfx-triggers"
+  | "custom-assets"
+  | "prefabs";
 
 /** Template item from a manifest */
 export interface PaletteItem {
@@ -678,7 +759,13 @@ export type VegetationPaintMode = "add" | "remove";
 export type BrushFalloff = "sharp" | "linear" | "smooth";
 
 /** Active brush type */
-export type BrushType = "terrain" | "biome" | "vegetation" | "collision";
+export type BrushType =
+  | "terrain"
+  | "biome"
+  | "vegetation"
+  | "collision"
+  | "material"
+  | "foliage";
 
 /** Brush settings for all brush types */
 export interface BrushSettings {
@@ -704,6 +791,12 @@ export interface BrushSettings {
   vegetationSpeciesFilter: string[];
   /** Collision-specific: block or unblock tiles */
   collisionMode: "block" | "unblock";
+  /** Material-specific: target material layer */
+  materialPaintTarget: import("@hyperscape/procgen/terrain").MaterialLayerId;
+  /** Foliage-specific: add/remove mode */
+  foliagePaintMode: VegetationPaintMode;
+  /** Foliage-specific: type filter (empty = all) */
+  foliageTypeFilter: string[];
 }
 
 export const DEFAULT_BRUSH_SETTINGS: BrushSettings = {
@@ -718,6 +811,9 @@ export const DEFAULT_BRUSH_SETTINGS: BrushSettings = {
   vegetationPaintMode: "add",
   vegetationSpeciesFilter: [],
   collisionMode: "block",
+  materialPaintTarget: "grass",
+  foliagePaintMode: "add",
+  foliageTypeFilter: [],
 };
 
 /** A single terrain sculpt stroke (non-destructive overlay on procgen) */
@@ -765,6 +861,32 @@ export interface VegetationPaintStroke {
   timestamp: number;
 }
 
+/** A single material paint stroke — sets material layer weight on terrain */
+export interface MaterialPaintStroke {
+  id: string;
+  center: { x: number; z: number };
+  radius: number;
+  strength: number;
+  falloff: BrushFalloff;
+  /** Target material layer to paint */
+  targetMaterial: import("@hyperscape/procgen/terrain").MaterialLayerId;
+  timestamp: number;
+}
+
+/** A single foliage paint stroke — density override for ground cover */
+export interface FoliagePaintStroke {
+  id: string;
+  center: { x: number; z: number };
+  radius: number;
+  strength: number;
+  falloff: BrushFalloff;
+  /** Add increases density, remove suppresses foliage */
+  mode: VegetationPaintMode;
+  /** Which foliage types affected (empty = all). "grass", "flower", "rock" */
+  foliageTypes: string[];
+  timestamp: number;
+}
+
 /** Tile collision override — marks a 1m tile as blocked or unblocked */
 export interface TileCollisionOverride {
   /** Tile X coordinate (world X / tileSize, floored) */
@@ -787,6 +909,8 @@ export interface BrushOverlays {
   terrainSculpts: TerrainSculptStroke[];
   biomePaints: BiomePaintStroke[];
   vegetationPaints: VegetationPaintStroke[];
+  materialPaints: MaterialPaintStroke[];
+  foliagePaints: FoliagePaintStroke[];
   tileCollisions: TileCollisionOverride[];
 }
 
@@ -794,6 +918,8 @@ export const EMPTY_BRUSH_OVERLAYS: BrushOverlays = {
   terrainSculpts: [],
   biomePaints: [],
   vegetationPaints: [],
+  materialPaints: [],
+  foliagePaints: [],
   tileCollisions: [],
 };
 
@@ -1161,6 +1287,15 @@ export const MANIFEST_REGISTRY: ManifestFileInfo[] = [
     filename: "wilderness-boundary.json",
     category: "world",
     description: "PvP wilderness boundary polyline",
+    editable: false,
+  },
+  {
+    name: "brush-overlays",
+    displayName: "Brush Overlays",
+    filename: "brush-overlays.json",
+    category: "world",
+    description:
+      "Terrain sculpt strokes and biome paint strokes from the brush tool",
     editable: false,
   },
   // Entities

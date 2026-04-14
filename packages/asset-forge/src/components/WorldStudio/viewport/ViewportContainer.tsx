@@ -39,7 +39,9 @@ import { useBrushInteraction } from "../hooks/useBrushInteraction";
 import { usePlacementConfirmation } from "../hooks/usePlacementConfirmation";
 import { useBrushOverlaySync } from "../hooks/useBrushOverlaySync";
 import { useAreaBoundaryOverlay } from "../hooks/useAreaBoundaryOverlay";
+import { useAudioZoneOverlay } from "../hooks/useAudioZoneOverlay";
 import { useWizardPreviewOverlay } from "../hooks/useWizardPreviewOverlay";
+import { useWaterBodyEditor } from "../hooks/useWaterBodyEditor";
 import { useZoneProcgen } from "../hooks/useZoneProcgen";
 import { commandHistory } from "../../../editor/commands";
 import { useSelectionOutline } from "../hooks/useSelectionOutline";
@@ -47,10 +49,15 @@ import { useTransformGizmo } from "../hooks/useTransformGizmo";
 import { useCameraBookmarks } from "../hooks/useCameraBookmarks";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { useContextMenu } from "../layout/useContextMenu";
-import { executeDuplicate, executeDelete } from "../utils/entityActions";
+import {
+  executeDuplicate,
+  executeDelete,
+  executeCreatePrefab,
+} from "../utils/entityActions";
 import { ViewModeDropdown } from "./ViewModeDropdown";
 import { ViewportOverlayBar } from "../toolbar/ViewportOverlayBar";
 import { ViewportOverlay } from "./ViewportOverlay";
+import { usePIESession } from "../hooks/usePIESession";
 import { GenerateTownDialog } from "../panels/GenerateTownDialog";
 import {
   getTownSafeRadius,
@@ -229,6 +236,12 @@ export function ViewportContainer() {
   const [playerMode, setPlayerMode] = useState(false);
   // Time of day: driven by the overlay bar's time slider (context), default 12
   const timeOfDay = state.overlays.timeOfDay ?? 12;
+  // Phase 6: Visual parity toggles from overlay bar
+  const enableShadows = state.overlays.shadows;
+  const enableBloom = state.overlays.bloom;
+  const enableGameFog = state.overlays.gameFog;
+  const enableSky = state.overlays.sky;
+  const enableGrass = state.overlays.grass;
 
   const handleTogglePlayerMode = useCallback(() => {
     const refs = sceneRefsRef.current;
@@ -278,6 +291,50 @@ export function ViewportContainer() {
   // ----- Camera bookmarks -----
   const projectId = state.project.currentProjectId ?? "";
   const { bookmarks, addBookmark } = useCameraBookmarks(projectId);
+
+  // ----- Play-In-Editor (PIE) -----
+  const { startPIE, stopPIE } = usePIESession({
+    sceneRefs: sceneRefsRef.current,
+    state,
+    onExit: () => actions.pieStop(),
+  });
+
+  // React to PIE state changes from toolbar
+  const prevPieRef = useRef(state.pie);
+  useEffect(() => {
+    const prev = prevPieRef.current;
+    const curr = state.pie;
+    prevPieRef.current = curr;
+
+    // PIE_START → start the session
+    if (curr.loading && !prev.loading) {
+      try {
+        startPIE();
+        actions.pieStarted();
+      } catch (err) {
+        actions.pieError(
+          err instanceof Error ? err.message : "Failed to start PIE",
+        );
+      }
+    }
+
+    // PIE_STOP → stop the session
+    if (!curr.active && prev.active) {
+      stopPIE();
+    }
+  }, [state.pie, startPIE, stopPIE, actions]);
+
+  // When player mode exits (ESC key in viewport), sync PIE state
+  const handlePlayerModeChange = useCallback(
+    (enabled: boolean) => {
+      setPlayerMode(enabled);
+      // If player mode was exited while PIE is active, stop PIE
+      if (!enabled && state.pie.active) {
+        actions.pieStop();
+      }
+    },
+    [state.pie.active, actions],
+  );
 
   // ----- Transform gizmo state -----
   const transformMode = state.tools.transformMode;
@@ -815,11 +872,15 @@ export function ViewportContainer() {
             safeZoneRadius: getTownSafeRadius(t),
           }));
 
-          refs.refreshVegetation(undefined, {
-            circles,
-            roads: roadExclusions,
-            towns: townCenters,
-          });
+          refs.refreshVegetation(
+            undefined,
+            {
+              circles,
+              roads: roadExclusions,
+              towns: townCenters,
+            },
+            state.brushOverlays.vegetationPaints,
+          );
         }
 
         console.log(
@@ -1225,6 +1286,14 @@ export function ViewportContainer() {
       (stroke) => actions.addVegetationPaint(stroke),
       [actions],
     ),
+    onMaterialPaint: useCallback(
+      (stroke) => actions.addMaterialPaint(stroke),
+      [actions],
+    ),
+    onFoliagePaint: useCallback(
+      (stroke) => actions.addFoliagePaint(stroke),
+      [actions],
+    ),
     onTileCollision: useCallback(
       (tiles) => actions.setTileCollision(tiles),
       [actions],
@@ -1240,8 +1309,39 @@ export function ViewportContainer() {
   // Area boundary overlays (difficulty zones, town boundaries, biome regions)
   useAreaBoundaryOverlay(activeSceneRefs);
 
+  // Audio zone overlays (music zones, ambient zones, SFX triggers)
+  useAudioZoneOverlay(activeSceneRefs);
+
   // Wizard generation preview overlay (ghost towns, roads, zones, entities)
   useWizardPreviewOverlay(activeSceneRefs);
+
+  // Phase 8.1: Water body polygon/waypoint editor
+  const selectedWaterBody = useMemo(() => {
+    const sel = state.builder.editing.selection;
+    if (sel?.type !== "waterBody") return null;
+    return (
+      state.extendedLayers?.waterBodies?.find((wb) => wb.id === sel.id) ?? null
+    );
+  }, [state.builder.editing.selection, state.extendedLayers?.waterBodies]);
+
+  // Reset water vertex mode when selection moves away from a water body
+  useEffect(() => {
+    if (!selectedWaterBody && state.tools.isAddingWaterVertices) {
+      actions.setAddingWaterVertices(false);
+    }
+  }, [selectedWaterBody, state.tools.isAddingWaterVertices, actions]);
+
+  useWaterBodyEditor({
+    sceneRefs: activeSceneRefs,
+    selectedWaterBody,
+    onUpdateWaterBody: useCallback(
+      (id: string, updates: Partial<import("../types").PlacedWaterBody>) =>
+        actions.updateWaterBody(id, updates),
+      [actions],
+    ),
+    isAddingVertices:
+      state.tools.isAddingWaterVertices && selectedWaterBody !== null,
+  });
 
   // Zone procgen — populate all regions from toolbar button
   const { generateAll: procgenGenerateAll } = useZoneProcgen();
@@ -1555,6 +1655,18 @@ export function ViewportContainer() {
             hideContextMenu();
           },
         },
+        {
+          label: "Create Prefab",
+          onClick: () => {
+            const name = executeCreatePrefab(state, actions, [
+              { type: selType, id: selId },
+            ]);
+            if (!name) {
+              console.warn("[Viewport] Failed to create prefab from selection");
+            }
+            hideContextMenu();
+          },
+        },
         { label: "", separator: true },
       );
 
@@ -1761,7 +1873,7 @@ export function ViewportContainer() {
         onGameEntitiesLoaded={handleGameEntitiesLoaded}
         onViewportContextMenu={handleViewportContextMenu}
         onFlyModeChange={setFlyMode}
-        onPlayerModeChange={setPlayerMode}
+        onPlayerModeChange={handlePlayerModeChange}
         onMoveSpeedChange={setCameraMoveSpeed}
         showDifficultyHeatmap={showDifficultyHeatmap}
         dangerSources={heatmapDangerSources}
@@ -1771,6 +1883,11 @@ export function ViewportContainer() {
         brushOverlays={state.brushOverlays}
         importedQuerier={importedQuerier}
         timeOfDay={timeOfDay}
+        enableShadows={enableShadows}
+        enableBloom={enableBloom}
+        enableGameFog={enableGameFog}
+        enableSky={enableSky}
+        enableGrass={enableGrass}
       />
       {/* Viewport info overlay (UE5-style corner HUD) */}
       {isEditing && (
@@ -1825,10 +1942,32 @@ export function ViewportContainer() {
         </div>
       )}
 
-      {/* Player preview overlay indicator */}
+      {/* Player preview / PIE overlay indicator */}
       {playerMode && (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-[rgba(99,102,241,0.85)] backdrop-blur-sm text-white text-xs font-medium rounded-[4px] border border-primary/30 shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
-          Player Preview — Escape to exit
+        <div
+          className="absolute top-10 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 backdrop-blur-sm text-white text-xs font-medium rounded-[4px] border shadow-[0_4px_16px_rgba(0,0,0,0.5)]"
+          style={{
+            backgroundColor: state.pie.active
+              ? "rgba(16, 185, 129, 0.85)"
+              : "rgba(99, 102, 241, 0.85)",
+            borderColor: state.pie.active
+              ? "rgba(16, 185, 129, 0.3)"
+              : "rgba(99, 102, 241, 0.3)",
+          }}
+        >
+          {state.pie.active
+            ? "Play-In-Editor — WASD to move, Shift to sprint, Escape to exit"
+            : "Player Preview — Escape to exit"}
+        </div>
+      )}
+
+      {/* PIE crosshair */}
+      {state.pie.active && playerMode && (
+        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
+          <div className="w-4 h-4 relative opacity-40">
+            <div className="absolute left-1/2 top-0 w-px h-full bg-white -translate-x-1/2" />
+            <div className="absolute top-1/2 left-0 w-full h-px bg-white -translate-y-1/2" />
+          </div>
         </div>
       )}
 

@@ -69,6 +69,7 @@ import { createAuthRoutes } from "./routes/auth";
 import { createTeamRoutes, createInviteAcceptRoute } from "./routes/teams";
 import { createGameRoutes } from "./routes/games";
 import { createWorldProjectRoutes } from "./routes/world-projects";
+import { createDeploymentRoutes } from "./routes/deployments";
 
 // Database initialization (auto-Docker when USE_LOCAL_POSTGRES=true)
 import { initializeDatabase } from "./db/db";
@@ -393,6 +394,14 @@ const app = new Elysia()
     }),
   )
 
+  // Static file serving - game terrain biome textures (for textured terrain in World Studio)
+  .use(
+    staticPlugin({
+      assets: path.resolve(ROOT_DIR, "../server/world/assets/textures"),
+      prefix: "/game-textures",
+    }),
+  )
+
   // Static file serving - public assets (emotes, rigs, etc.)
   .use(
     staticPlugin({
@@ -432,6 +441,9 @@ const app = new Elysia()
   .use(createGameRoutes(teamService, auditLogService))
   .use(
     createWorldProjectRoutes(teamService, worldProjectService, auditLogService),
+  )
+  .use(
+    createDeploymentRoutes(teamService, worldProjectService, auditLogService),
   )
   // Armor pipeline (POC-2: shell texturing)
   .use(createArmorPipelineRoutes(shellTextureService))

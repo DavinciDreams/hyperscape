@@ -126,6 +126,8 @@ const NODE_ICONS: Record<HierarchyNode["type"], React.ReactNode> = {
   dangerSources: <Zap className="w-4 h-4 text-red-400" />,
   dangerSource: <Zap className="w-4 h-4 text-red-300" />,
   wildernessBoundary: <AlertTriangle className="w-4 h-4 text-red-400" />,
+  customAssets: <Package className="w-4 h-4 text-teal-400" />,
+  customAsset: <Package className="w-4 h-4 text-teal-300" />,
   folder: <Folder className="w-4 h-4 text-yellow-400" />,
 };
 

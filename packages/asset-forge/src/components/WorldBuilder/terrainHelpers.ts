@@ -8,7 +8,7 @@
 import {
   createTerrainMaterial as createGameTerrainMaterial,
   type TerrainUniforms,
-} from "@hyperscape/procgen/terrain";
+} from "@hyperscape/shared";
 import {
   getRoadHeightAndInfluence,
   computeRoadBounds,
@@ -98,6 +98,110 @@ const BIOME_NAME_TO_ID: Record<string, number> = {
   canyon: 8,
 };
 
+// ============== AUTO-MATERIAL FROM BIOME ==============
+
+/**
+ * Compute default material layer weights for a vertex based on biome, slope, and altitude.
+ * Returns 8 weights (indices 0-7: grass, dirt, rock, sand, snow, gravel, mud, volcanic).
+ * Weights are normalized to sum to 1.0.
+ */
+function computeAutoMaterialWeights(
+  biome: string,
+  slope: number,
+  height: number,
+  waterThreshold: number,
+): [number, number, number, number, number, number, number, number] {
+  // Accumulate raw weights, normalize at end
+  let grass = 0,
+    dirt = 0,
+    rock = 0,
+    sand = 0;
+  let snow = 0,
+    gravel = 0,
+    mud = 0,
+    volcanic = 0;
+
+  const snowLine = 45; // height threshold for snow
+  const nearWater = height < waterThreshold + 5;
+
+  // Base from biome
+  switch (biome) {
+    case "desert":
+    case "canyon":
+      sand = 0.7;
+      rock = 0.2;
+      gravel = 0.1;
+      break;
+    case "swamp":
+      mud = 0.6;
+      grass = 0.3;
+      dirt = 0.1;
+      break;
+    case "tundra":
+      snow = 0.5;
+      rock = 0.3;
+      gravel = 0.2;
+      break;
+    case "mountains":
+      rock = 0.5;
+      gravel = 0.3;
+      dirt = 0.2;
+      break;
+    default: // plains, forest, valley, lakes
+      grass = 0.7;
+      dirt = 0.3;
+      break;
+  }
+
+  // Slope overrides — steep slopes push toward rock/gravel
+  if (slope > 0.15) {
+    const slopeFactor = Math.min(1, (slope - 0.15) / 0.4); // 0 at 0.15, 1 at 0.55
+    const slopeBlend = slopeFactor * slopeFactor * (3 - 2 * slopeFactor); // smoothstep
+    // Blend toward rock
+    grass *= 1 - slopeBlend * 0.9;
+    sand *= 1 - slopeBlend * 0.7;
+    mud *= 1 - slopeBlend * 0.8;
+    snow *= 1 - slopeBlend * 0.5;
+    rock += slopeBlend * 0.6;
+    gravel += slopeBlend * 0.2;
+    dirt += slopeBlend * 0.1;
+  }
+
+  // Near water → push toward sand
+  if (nearWater) {
+    const waterBlend = Math.max(0, 1 - (height - waterThreshold) / 5);
+    grass *= 1 - waterBlend * 0.8;
+    dirt *= 1 - waterBlend * 0.6;
+    sand += waterBlend * 0.7;
+  }
+
+  // High altitude → push toward snow
+  if (height > snowLine - 5) {
+    const snowBlend = Math.min(1, Math.max(0, (height - (snowLine - 5)) / 10));
+    grass *= 1 - snowBlend * 0.9;
+    dirt *= 1 - snowBlend * 0.7;
+    sand *= 1 - snowBlend * 0.5;
+    snow += snowBlend * 0.8;
+  }
+
+  // Normalize
+  const total = grass + dirt + rock + sand + snow + gravel + mud + volcanic;
+  if (total > 0) {
+    const inv = 1 / total;
+    return [
+      grass * inv,
+      dirt * inv,
+      rock * inv,
+      sand * inv,
+      snow * inv,
+      gravel * inv,
+      mud * inv,
+      volcanic * inv,
+    ];
+  }
+  return [1, 0, 0, 0, 0, 0, 0, 0]; // default: grass
+}
+
 // ============== HELPER FUNCTIONS ==============
 
 /**
@@ -129,17 +233,15 @@ export function createTemplateGeometry(
 export function createTerrainMaterial(): THREE.Material & {
   terrainUniforms: TerrainUniforms;
 } {
-  // Use the game's terrain shader for unified rendering.
-  // Disable fog — the World Studio camera is at altitude 200m+
-  // where the game's 150-350m fog range makes everything invisible.
+  // Use the ACTUAL game terrain shader — same code that renders in Hyperscape.
+  // "One system, two contexts" — packedAttributes + disabled game-only features.
   const material = createGameTerrainMaterial({
-    fogEnabled: false,
-    fogNear: 5000,
-    fogFar: 10000,
+    packedAttributes: true, // Editor packs biome weights into vec4+vec2
+    includeVertexLighting: false, // No lamppost/torch data in editor
+    includeRiverProximity: false, // No riverProximity attribute in editor
+    fogEnabled: false, // Editor camera at altitude — fog not useful
+    textureBaseUrl: `${window.location.protocol}//${window.location.hostname}:3401/game-textures/terrain-biomes`,
   });
-  console.log(
-    "[TileBasedTerrain] Created terrain material (fog disabled for World Studio)",
-  );
   return material;
 }
 
@@ -262,36 +364,32 @@ export function generateTileGeometry(
   const colors = colorAttr
     ? (colorAttr.array as Float32Array)
     : new Float32Array(positions.count * 3);
-  const roadInfluences =
-    canReuse && geometry.getAttribute("roadInfluence")
-      ? ((geometry.getAttribute("roadInfluence") as THREE.BufferAttribute)
+  // Packed vertex attributes to stay within WebGPU's 8-buffer limit.
+  // terrainBlend (vec4): .x=forestWeight, .y=canyonWeight, .z=roadInfluence, .w=mineInfluence
+  // biomeData   (vec2): .x=biomeId, .y=mineBiomeId
+  const terrainBlend =
+    canReuse && geometry.getAttribute("terrainBlend")
+      ? ((geometry.getAttribute("terrainBlend") as THREE.BufferAttribute)
           .array as Float32Array)
-      : new Float32Array(positions.count);
-  const mineInfluences =
-    canReuse && geometry.getAttribute("mineInfluence")
-      ? ((geometry.getAttribute("mineInfluence") as THREE.BufferAttribute)
+      : new Float32Array(positions.count * 4);
+  const biomeData =
+    canReuse && geometry.getAttribute("biomeData")
+      ? ((geometry.getAttribute("biomeData") as THREE.BufferAttribute)
           .array as Float32Array)
-      : new Float32Array(positions.count);
-  const mineBiomeIds =
-    canReuse && geometry.getAttribute("mineBiomeId")
-      ? ((geometry.getAttribute("mineBiomeId") as THREE.BufferAttribute)
+      : new Float32Array(positions.count * 2);
+
+  // Material layer splatmap weights (8 channels across 2 vec4 attributes)
+  // Initialized to 0 = biome fallback in shader (no material layers painted)
+  const matWeights0 =
+    canReuse && geometry.getAttribute("materialWeights0")
+      ? ((geometry.getAttribute("materialWeights0") as THREE.BufferAttribute)
           .array as Float32Array)
-      : new Float32Array(positions.count);
-  const biomeIds =
-    canReuse && geometry.getAttribute("biomeId")
-      ? ((geometry.getAttribute("biomeId") as THREE.BufferAttribute)
+      : new Float32Array(positions.count * 4);
+  const matWeights1 =
+    canReuse && geometry.getAttribute("materialWeights1")
+      ? ((geometry.getAttribute("materialWeights1") as THREE.BufferAttribute)
           .array as Float32Array)
-      : new Float32Array(positions.count);
-  const forestWeights =
-    canReuse && geometry.getAttribute("biomeForestWeight")
-      ? ((geometry.getAttribute("biomeForestWeight") as THREE.BufferAttribute)
-          .array as Float32Array)
-      : new Float32Array(positions.count);
-  const canyonWeights =
-    canReuse && geometry.getAttribute("biomeCanyonWeight")
-      ? ((geometry.getAttribute("biomeCanyonWeight") as THREE.BufferAttribute)
-          .array as Float32Array)
-      : new Float32Array(positions.count);
+      : new Float32Array(positions.count * 4);
 
   let hasWater = false;
   const shorelineThreshold = waterThreshold / maxHeight + 0.1; // Normalized
@@ -530,21 +628,39 @@ export function generateTileGeometry(
     colors[i * 3 + 1] = g;
     colors[i * 3 + 2] = b;
 
-    // Store biome ID and per-biome weights for shader
-    biomeIds[i] = BIOME_NAME_TO_ID[query.biome] ?? 0;
-    forestWeights[i] = query.biomeForestWeight ?? 0;
-    canyonWeights[i] = query.biomeCanyonWeight ?? 0;
-
-    // Road influence already computed in merged pass above
-    roadInfluences[i] = roadInfluenceValue;
+    // Store packed biome data and terrain blend weights for shader
+    const i2 = i * 2;
+    const i4blend = i * 4;
+    biomeData[i2] = BIOME_NAME_TO_ID[query.biome] ?? 0;
+    terrainBlend[i4blend] = query.biomeForestWeight ?? 0; // .x = forestWeight
+    terrainBlend[i4blend + 1] = query.biomeCanyonWeight ?? 0; // .y = canyonWeight
+    terrainBlend[i4blend + 2] = roadInfluenceValue; // .z = roadInfluence
+    // .w = mineInfluence (set below if mines exist)
 
     // Mine influence for terrain shader — rocky floor color overlay.
     // Skip function call overhead when no mines exist (common case for most tiles).
     if (precomputedMines) {
       const mineResult = calculateMineInfluenceAtPoint(worldX, worldZ, mines);
-      mineInfluences[i] = mineResult.influence;
-      mineBiomeIds[i] = mineResult.biomeIndex;
+      terrainBlend[i4blend + 3] = mineResult.influence; // .w = mineInfluence
+      biomeData[i2 + 1] = mineResult.biomeIndex; // .y = mineBiomeId
     }
+
+    // Auto-material weights from biome + height (slope handled by shader)
+    const mw = computeAutoMaterialWeights(
+      query.biome,
+      0,
+      height,
+      waterThreshold,
+    );
+    const i4 = i * 4;
+    matWeights0[i4] = mw[0]; // grass
+    matWeights0[i4 + 1] = mw[1]; // dirt
+    matWeights0[i4 + 2] = mw[2]; // rock
+    matWeights0[i4 + 3] = mw[3]; // sand
+    matWeights1[i4] = mw[4]; // snow
+    matWeights1[i4 + 1] = mw[5]; // gravel
+    matWeights1[i4 + 2] = mw[6]; // mud
+    matWeights1[i4 + 3] = mw[7]; // volcanic
   }
 
   if (canReuse) {
@@ -552,53 +668,37 @@ export function generateTileGeometry(
     // No new BufferAttribute objects — reuses the same GPU buffers.
     positions.needsUpdate = true;
     if (colorAttr) colorAttr.needsUpdate = true;
-    const riAttr = geometry.getAttribute(
-      "roadInfluence",
+    const tbAttr = geometry.getAttribute(
+      "terrainBlend",
     ) as THREE.BufferAttribute | null;
-    if (riAttr) riAttr.needsUpdate = true;
-    const miAttr = geometry.getAttribute(
-      "mineInfluence",
+    if (tbAttr) tbAttr.needsUpdate = true;
+    const bdAttr = geometry.getAttribute(
+      "biomeData",
     ) as THREE.BufferAttribute | null;
-    if (miAttr) miAttr.needsUpdate = true;
-    const mbAttr = geometry.getAttribute(
-      "mineBiomeId",
+    if (bdAttr) bdAttr.needsUpdate = true;
+    const mw0Attr = geometry.getAttribute(
+      "materialWeights0",
     ) as THREE.BufferAttribute | null;
-    if (mbAttr) mbAttr.needsUpdate = true;
-    const biAttr = geometry.getAttribute(
-      "biomeId",
+    if (mw0Attr) mw0Attr.needsUpdate = true;
+    const mw1Attr = geometry.getAttribute(
+      "materialWeights1",
     ) as THREE.BufferAttribute | null;
-    if (biAttr) biAttr.needsUpdate = true;
-    const fwAttr = geometry.getAttribute(
-      "biomeForestWeight",
-    ) as THREE.BufferAttribute | null;
-    if (fwAttr) fwAttr.needsUpdate = true;
-    const cwAttr = geometry.getAttribute(
-      "biomeCanyonWeight",
-    ) as THREE.BufferAttribute | null;
-    if (cwAttr) cwAttr.needsUpdate = true;
+    if (mw1Attr) mw1Attr.needsUpdate = true;
   } else {
     // New geometry: create fresh BufferAttribute objects
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute("biomeId", new THREE.BufferAttribute(biomeIds, 1));
     geometry.setAttribute(
-      "biomeForestWeight",
-      new THREE.BufferAttribute(forestWeights, 1),
+      "terrainBlend",
+      new THREE.BufferAttribute(terrainBlend, 4),
+    );
+    geometry.setAttribute("biomeData", new THREE.BufferAttribute(biomeData, 2));
+    geometry.setAttribute(
+      "materialWeights0",
+      new THREE.BufferAttribute(matWeights0, 4),
     );
     geometry.setAttribute(
-      "biomeCanyonWeight",
-      new THREE.BufferAttribute(canyonWeights, 1),
-    );
-    geometry.setAttribute(
-      "roadInfluence",
-      new THREE.BufferAttribute(roadInfluences, 1),
-    );
-    geometry.setAttribute(
-      "mineInfluence",
-      new THREE.BufferAttribute(mineInfluences, 1),
-    );
-    geometry.setAttribute(
-      "mineBiomeId",
-      new THREE.BufferAttribute(mineBiomeIds, 1),
+      "materialWeights1",
+      new THREE.BufferAttribute(matWeights1, 4),
     );
     positions.needsUpdate = true;
   }

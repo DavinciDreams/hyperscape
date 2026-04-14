@@ -31,6 +31,8 @@ import {
   ChevronDown,
   Users,
   Trash2,
+  Play,
+  Square,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 
@@ -329,8 +331,41 @@ export function MainToolbar({
           )}
         </div>
 
+        {/* Play-In-Editor button */}
+        <Divider />
+        {state.pie.active ? (
+          <button
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-500/15 text-red-400 border border-red-400/30 hover:bg-red-500/25 transition-all"
+            onClick={() => actions.pieStop()}
+            title="Stop Play Test (Escape)"
+          >
+            <Square size={12} />
+            <span className="hidden sm:inline">Stop</span>
+          </button>
+        ) : (
+          <button
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
+              !computed.hasLoadedWorld
+                ? "text-text-tertiary/30 cursor-not-allowed"
+                : state.pie.loading
+                  ? "text-text-tertiary cursor-wait"
+                  : "bg-emerald-500/15 text-emerald-400 border border-emerald-400/30 hover:bg-emerald-500/25"
+            }`}
+            onClick={() => actions.pieStart()}
+            disabled={!computed.hasLoadedWorld || state.pie.loading}
+            title="Play In Editor — walk the world with live entities"
+          >
+            {state.pie.loading ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Play size={12} />
+            )}
+            <span className="hidden sm:inline">Play</span>
+          </button>
+        )}
+
         {/* Transform mode buttons — only when select tool active */}
-        {isSelectTool && (
+        {isSelectTool && !state.pie.active && (
           <>
             <Divider />
             <ToolButton

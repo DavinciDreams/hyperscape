@@ -13,6 +13,13 @@ export {
   type EditorWorldOptions,
 } from "./createEditorWorld";
 
+export {
+  createPlayTestWorld,
+  PlayTestWorld,
+  type PlayTestWorldOptions,
+  type PIEEntity,
+} from "./createPlayTestWorld";
+
 // Re-export editor systems and types
 export {
   EditorCameraSystem,

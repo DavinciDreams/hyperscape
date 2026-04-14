@@ -97,10 +97,13 @@ export type {
 export type {
   TerrainUniforms,
   TerrainMaterialOptions,
+  MaterialLayerId,
+  MaterialLayerDef,
 } from "./TerrainShaderTSL";
 
 export {
   TERRAIN_CONSTANTS,
+  MATERIAL_LAYER_DEFINITIONS,
   generateNoiseTexture,
   getNoiseTexture,
   sampleNoiseAtPosition,

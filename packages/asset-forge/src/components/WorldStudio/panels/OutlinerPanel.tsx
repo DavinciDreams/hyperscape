@@ -72,7 +72,11 @@ import { useSelectionStore } from "../../../editor/stores/useSelectionStore";
 import { useManifestValidation } from "../hooks/useManifestValidation";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { useContextMenu } from "../layout/useContextMenu";
-import { executeDuplicate, executeDelete } from "../utils/entityActions";
+import {
+  executeDuplicate,
+  executeDelete,
+  executeCreatePrefab,
+} from "../utils/entityActions";
 
 // ============== CONSTANTS ==============
 
@@ -111,6 +115,7 @@ const SELECTABLE_NODE_TYPES: Record<string, Selection["type"] | undefined> = {
   region: "region" as Selection["type"],
   dangerSource: "dangerSource" as Selection["type"],
   wildernessBoundary: "wilderness",
+  customAsset: "customAsset" as Selection["type"],
 };
 
 const TYPE_ICONS: Record<string, typeof Globe> = {
@@ -191,6 +196,8 @@ const TYPE_ICONS: Record<string, typeof Globe> = {
   dangerSource: Zap,
   dangerSources: Zap,
   wildernessBoundary: AlertTriangle,
+  customAsset: Package,
+  customAssets: Package,
   folder: Folder,
 };
 
@@ -273,6 +280,8 @@ const TYPE_ICON_COLORS: Record<string, string> = {
   dangerSource: "#e54545",
   dangerSources: "#e54545",
   wildernessBoundary: "#d45b5b",
+  customAsset: "#2dd4bf",
+  customAssets: "#2dd4bf",
   folder: "#c4a24e",
 };
 
@@ -411,6 +420,12 @@ const LAYERS: LayerDef[] = [
     label: "Vegetation",
     icon: TreePine,
     types: ["vegetation", "customPlacement"],
+  },
+  {
+    id: "customAssets",
+    label: "Custom Assets",
+    icon: Package,
+    types: ["customAsset"],
   },
 ];
 
@@ -1072,6 +1087,19 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
             hideContextMenu();
           },
         },
+        {
+          label: "Create Prefab",
+          icon: Package,
+          onClick: () => {
+            const name = executeCreatePrefab(state, actions, [
+              { type: nodeType, id: nodeId },
+            ]);
+            if (!name) {
+              console.warn("[Outliner] Failed to create prefab from selection");
+            }
+            hideContextMenu();
+          },
+        },
       );
     }
 
@@ -1238,7 +1266,8 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
       (ext.resources?.length ?? 0) +
       (ext.stations?.length ?? 0) +
       (ext.pois?.length ?? 0) +
-      (ext.waterBodies?.length ?? 0)
+      (ext.waterBodies?.length ?? 0) +
+      (ext.customAssets?.length ?? 0)
     );
   }, [state.extendedLayers]);
 
@@ -1533,6 +1562,7 @@ function findEntityPosition(
     resource: ext.resources as (HasId & HasPosition)[],
     station: ext.stations as (HasId & HasPosition)[],
     poi: ext.pois as (HasId & HasPosition)[],
+    customAsset: ext.customAssets as (HasId & HasPosition)[],
   };
 
   const list = lists[type];

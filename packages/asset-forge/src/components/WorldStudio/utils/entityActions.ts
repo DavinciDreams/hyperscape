@@ -6,6 +6,8 @@
  */
 
 import type { useWorldStudio } from "../WorldStudioContext";
+import type { Prefab, PrefabEntry, PrefabEntityType } from "../types";
+import type { WorldPosition } from "../../WorldBuilder/types";
 import {
   commandHistory,
   DuplicateEntityCommand,
@@ -41,6 +43,8 @@ const ENTITY_ACTIONS: Record<string, { remove: string; add: string }> = {
   sfxTrigger: { remove: "removeSFXTrigger", add: "addSFXTrigger" },
   region: { remove: "removeRegion", add: "addRegion" },
   dangerSource: { remove: "removeDangerSource", add: "addDangerSource" },
+  customAsset: { remove: "removeCustomAsset", add: "addCustomAsset" },
+  prefab: { remove: "removePrefab", add: "addPrefab" },
 };
 
 // ---------------------------------------------------------------------------
@@ -136,6 +140,18 @@ function findEntityData(
           | Record<string, unknown>
           | undefined) ?? null
       );
+    case "customAsset":
+      return (
+        (ext.customAssets.find((e) => e.id === id) as
+          | Record<string, unknown>
+          | undefined) ?? null
+      );
+    case "prefab":
+      return (
+        (state.prefabs.find((e) => e.id === id) as
+          | Record<string, unknown>
+          | undefined) ?? null
+      );
     case "npc":
       return (
         (world?.layers.npcs.find((e) => e.id === id) as
@@ -228,4 +244,120 @@ export function executeDelete(
   commandHistory.execute(new DeleteEntityCommand(entityId, target));
   actions.setSelection(null);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Create prefab from selected entities
+// ---------------------------------------------------------------------------
+
+/** Valid entity types that can be stored in prefabs (mirrors PrefabEntityType). */
+const PREFAB_ENTITY_TYPES = new Set<string>([
+  "npc",
+  "spawnPoint",
+  "teleport",
+  "mobSpawn",
+  "resource",
+  "station",
+  "poi",
+  "waterBody",
+  "musicZone",
+  "ambientZone",
+  "sfxTrigger",
+  "region",
+  "dangerSource",
+  "customAsset",
+]);
+
+/** Validate a position has finite numeric coordinates. */
+function isValidPosition(pos: unknown): pos is WorldPosition {
+  if (!pos || typeof pos !== "object") return false;
+  const p = pos as Record<string, unknown>;
+  return (
+    typeof p.x === "number" &&
+    isFinite(p.x) &&
+    typeof p.z === "number" &&
+    isFinite(p.z)
+  );
+}
+
+/**
+ * Create a prefab from one or more selected entities.
+ * Entities are stored with positions relative to the group centroid.
+ * Returns the created prefab name on success, or null on failure.
+ */
+export function executeCreatePrefab(
+  state: StudioState,
+  actions: StudioActions,
+  selections: Array<{ type: string; id: string }>,
+): string | null {
+  if (selections.length === 0) return null;
+
+  // Collect entity data for all selections
+  const collected: Array<{
+    type: PrefabEntityType;
+    id: string;
+    data: Record<string, unknown>;
+  }> = [];
+
+  for (const sel of selections) {
+    if (!ENTITY_ACTIONS[sel.type] || !PREFAB_ENTITY_TYPES.has(sel.type)) {
+      console.warn(`[Prefab] Unsupported entity type: "${sel.type}"`);
+      continue;
+    }
+    const data = findEntityData(state, sel.type, sel.id);
+    if (!data) {
+      console.warn(`[Prefab] Entity not found: ${sel.type}/${sel.id}`);
+      continue;
+    }
+    collected.push({ type: sel.type as PrefabEntityType, id: sel.id, data });
+  }
+
+  if (collected.length === 0) return null;
+
+  // Compute centroid from entity positions
+  let cx = 0;
+  let cz = 0;
+  let posCount = 0;
+  for (const c of collected) {
+    const pos = c.data.position;
+    if (isValidPosition(pos)) {
+      cx += pos.x;
+      cz += pos.z;
+      posCount++;
+    }
+  }
+  if (posCount > 0) {
+    cx /= posCount;
+    cz /= posCount;
+  }
+
+  // Build prefab entries with relative offsets
+  const entries: PrefabEntry[] = collected.map((c) => {
+    const pos = isValidPosition(c.data.position)
+      ? (c.data.position as WorldPosition)
+      : null;
+    return {
+      entityType: c.type,
+      templateId: (c.data.templateId as string) ?? c.id,
+      name: (c.data.name as string) ?? c.type,
+      offset: {
+        x: pos ? pos.x - cx : 0,
+        y: (pos as WorldPosition | null)?.y ?? 0,
+        z: pos ? pos.z - cz : 0,
+      },
+      rotation: (c.data.rotation as number) ?? 0,
+      data: structuredClone(c.data),
+    };
+  });
+
+  const prefab: Prefab = {
+    id: `prefab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: `Prefab (${entries.length} entities)`,
+    description: entries.map((e) => e.name).join(", "),
+    entries,
+    createdAt: Date.now(),
+  };
+
+  actions.addPrefab(prefab);
+  return prefab.name;
 }

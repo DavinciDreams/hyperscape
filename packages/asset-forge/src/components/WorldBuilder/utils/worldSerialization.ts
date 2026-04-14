@@ -19,6 +19,7 @@ import type {
   PlacedLore,
   DifficultyZone,
   CustomPlacement,
+  CustomRoad,
 } from "../types";
 
 import { migrateWorldData, validateWorldData } from "./worldValidation";
@@ -56,6 +57,7 @@ export interface SerializedWorldLayers {
   lore: PlacedLore[];
   difficultyZones: DifficultyZone[];
   customPlacements: CustomPlacement[];
+  customRoads?: CustomRoad[];
 }
 
 export function serializeWorld(world: WorldData): SerializedWorldData {
@@ -86,6 +88,7 @@ export function serializeWorld(world: WorldData): SerializedWorldData {
       lore: world.layers.lore,
       difficultyZones: world.layers.difficultyZones,
       customPlacements: world.layers.customPlacements,
+      customRoads: world.layers.customRoads,
     },
   };
 }
@@ -119,6 +122,7 @@ export function deserializeWorld(data: SerializedWorldData): WorldData {
       lore: data.layers.lore || [],
       difficultyZones: data.layers.difficultyZones || [],
       customPlacements: data.layers.customPlacements || [],
+      customRoads: data.layers.customRoads || [],
     },
   };
 }
@@ -241,6 +245,7 @@ export function createNewWorld(
       lore: [],
       difficultyZones: [],
       customPlacements: [],
+      customRoads: [],
     },
   };
 }

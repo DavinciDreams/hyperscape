@@ -63,7 +63,10 @@ import type {
   PlacedWaterBody,
   PlacedRegion,
   PlacedDangerSource,
+  PlacedCustomAsset,
   WildernessBoundary,
+  Prefab,
+  PrefabEntry,
   PaletteCategory,
   BrushSettings,
   BrushOverlays,
@@ -71,6 +74,8 @@ import type {
   TerrainSculptStroke,
   BiomePaintStroke,
   VegetationPaintStroke,
+  MaterialPaintStroke,
+  FoliagePaintStroke,
   AudioLayers,
   MusicZone,
   AmbientZone,
@@ -167,6 +172,8 @@ export interface StudioToolState {
   transformSpace: GizmoTransformSpace;
   /** Zone tile painting state (when zonePaint tool is active) */
   zonePaint: ZonePaintState | null;
+  /** Water body editor: vertex/waypoint adding mode (Phase 8.1) */
+  isAddingWaterVertices: boolean;
 }
 
 /** State for painting zone tiles */
@@ -191,6 +198,16 @@ export interface StudioViewportOverlays {
   zoneOverlay: boolean;
   /** Day/night time-of-day (0-24 hours, null = default lighting) */
   timeOfDay: number | null;
+  /** Enable shadow rendering (CSM cascaded shadows) */
+  shadows: boolean;
+  /** Enable bloom + tone mapping post-processing */
+  bloom: boolean;
+  /** Use game-matching exponential fog instead of simple linear fog */
+  gameFog: boolean;
+  /** Enable procedural sky dome with sun, moon, and clouds */
+  sky: boolean;
+  /** Enable procedural wind-animated grass */
+  grass: boolean;
 }
 
 export const DEFAULT_VIEWPORT_OVERLAYS: StudioViewportOverlays = {
@@ -198,9 +215,30 @@ export const DEFAULT_VIEWPORT_OVERLAYS: StudioViewportOverlays = {
   difficultyOverlay: false,
   zoneOverlay: true,
   timeOfDay: null,
+  shadows: false,
+  bloom: false,
+  gameFog: true,
+  sky: true,
+  grass: true,
 };
 
 // ============== COMBINED STATE ==============
+
+/** Play-In-Editor state */
+export interface PIEState {
+  /** Whether PIE mode is active */
+  active: boolean;
+  /** Loading state during PIE initialization */
+  loading: boolean;
+  /** Error message if PIE failed to start */
+  error: string | null;
+}
+
+export const EMPTY_PIE_STATE: PIEState = {
+  active: false,
+  loading: false,
+  error: null,
+};
 
 export interface WorldStudioState {
   /** All world builder state (creation, editing, viewport, history) */
@@ -233,6 +271,10 @@ export interface WorldStudioState {
   wizardPreview: WizardPreviewData | null;
   /** Live terrain config for real-time slider updates (Phase 1) */
   liveTerrainConfig: WorldCreationConfig | null;
+  /** Phase 4: Play-In-Editor state */
+  pie: PIEState;
+  /** Phase 9.2: Saved prefab templates */
+  prefabs: Prefab[];
 }
 
 // ============== ACTION TYPES ==============
@@ -296,6 +338,7 @@ export type StudioSpecificAction =
   | { type: "SET_ZONE_PAINT_MODE"; mode: "paint" | "erase" }
   | { type: "STOP_ZONE_PAINT" }
   | { type: "SWITCH_ZONE_PAINT_REGION"; regionId: string }
+  | { type: "SET_ADDING_WATER_VERTICES"; enabled: boolean }
 
   // Extended layer entity actions — Spawn Points
   | { type: "ADD_SPAWN_POINT"; spawnPoint: PlacedSpawnPoint }
@@ -331,6 +374,8 @@ export type StudioSpecificAction =
   | { type: "ADD_TERRAIN_SCULPT"; stroke: TerrainSculptStroke }
   | { type: "ADD_BIOME_PAINT"; stroke: BiomePaintStroke }
   | { type: "ADD_VEGETATION_PAINT"; stroke: VegetationPaintStroke }
+  | { type: "ADD_MATERIAL_PAINT"; stroke: MaterialPaintStroke }
+  | { type: "ADD_FOLIAGE_PAINT"; stroke: FoliagePaintStroke }
   | {
       type: "SET_TILE_COLLISION";
       tiles: Array<{ tileX: number; tileZ: number; blocked: boolean }>;
@@ -408,6 +453,25 @@ export type StudioSpecificAction =
   | { type: "ADD_SFX_TRIGGER"; trigger: SFXTrigger }
   | { type: "UPDATE_SFX_TRIGGER"; id: string; updates: Partial<SFXTrigger> }
   | { type: "REMOVE_SFX_TRIGGER"; id: string }
+
+  // Phase 9.1: Custom asset actions
+  | { type: "ADD_CUSTOM_ASSET"; asset: PlacedCustomAsset }
+  | {
+      type: "UPDATE_CUSTOM_ASSET";
+      id: string;
+      updates: Partial<PlacedCustomAsset>;
+    }
+  | { type: "REMOVE_CUSTOM_ASSET"; id: string }
+
+  // Phase 9.2: Prefab actions
+  | { type: "ADD_PREFAB"; prefab: Prefab }
+  | { type: "UPDATE_PREFAB"; id: string; updates: Partial<Prefab> }
+  | { type: "REMOVE_PREFAB"; id: string }
+
+  // Bulk restore actions (for project load persistence)
+  | { type: "RESTORE_EXTENDED_LAYERS"; layers: ExtendedWorldLayers }
+  | { type: "RESTORE_AUDIO_LAYERS"; layers: AudioLayers }
+  | { type: "RESTORE_PREFABS"; prefabs: Prefab[] }
 
   // Phase 7: AI generation actions
   | {
@@ -534,12 +598,28 @@ export type StudioSpecificAction =
       type: "SET_FOUNDATION_CONFIG";
       config: WorldCreationConfig;
     }
+  // Custom road CRUD (user-authored roads from path tool)
+  | {
+      type: "ADD_CUSTOM_ROAD";
+      road: import("../WorldBuilder/types").CustomRoad;
+    }
+  | {
+      type: "UPDATE_CUSTOM_ROAD";
+      roadId: string;
+      updates: Partial<import("../WorldBuilder/types").CustomRoad>;
+    }
+  | { type: "REMOVE_CUSTOM_ROAD"; roadId: string }
   // Wizard preview overlay
   | { type: "SET_WIZARD_PREVIEW"; preview: WizardPreviewData }
   // Live terrain config for real-time slider updates (Phase 1)
   | { type: "SET_LIVE_TERRAIN_CONFIG"; config: WorldCreationConfig }
   | { type: "CLEAR_LIVE_TERRAIN_CONFIG" }
-  | { type: "CLEAR_WIZARD_PREVIEW" };
+  | { type: "CLEAR_WIZARD_PREVIEW" }
+  // Phase 4: Play-In-Editor
+  | { type: "PIE_START" }
+  | { type: "PIE_STARTED" }
+  | { type: "PIE_STOP" }
+  | { type: "PIE_ERROR"; error: string };
 
 /** Union of all world builder + studio-specific actions */
 export type WorldStudioAction = WorldBuilderAction | StudioSpecificAction;
@@ -552,6 +632,16 @@ export interface ViewportCallbacks {
   refreshVegetation?: (
     vegConfig?: VegetationConfig,
     exclusions?: import("../WorldBuilder/TileBasedTerrain").VegetationExclusions,
+    vegetationPaints?: Array<{
+      id: string;
+      center: { x: number; z: number };
+      radius: number;
+      strength: number;
+      falloff: "sharp" | "linear" | "smooth";
+      mode: "add" | "remove";
+      speciesFilter: string[];
+      timestamp: number;
+    }>,
   ) => Promise<void>;
   navigateCamera?: (x: number, z: number, close?: boolean) => void;
   /** Query biome + height at world coordinates (game space). Used by auto-gen pipeline. */
@@ -644,6 +734,7 @@ export const initialToolState: StudioToolState = {
   transformMode: "translate",
   transformSpace: "world",
   zonePaint: null,
+  isAddingWaterVertices: false,
 };
 
 export const worldStudioInitialState: WorldStudioState = {
@@ -662,6 +753,8 @@ export const worldStudioInitialState: WorldStudioState = {
   gameEntities: null,
   wizardPreview: null,
   liveTerrainConfig: null,
+  pie: EMPTY_PIE_STATE,
+  prefabs: [],
 };
 
 // Re-export commonly-used types from WorldBuilder for convenience
@@ -704,7 +797,10 @@ export type {
   PlacedWaterBody,
   PlacedRegion,
   PlacedDangerSource,
+  PlacedCustomAsset,
   WildernessBoundary,
+  Prefab,
+  PrefabEntry,
   PaletteCategory,
   BrushSettings,
   BrushOverlays,
@@ -712,6 +808,8 @@ export type {
   TerrainSculptStroke,
   BiomePaintStroke,
   VegetationPaintStroke,
+  MaterialPaintStroke,
+  FoliagePaintStroke,
   AudioLayers,
   MusicZone,
   AmbientZone,

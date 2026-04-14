@@ -22,20 +22,19 @@ import * as THREE from "three/webgpu";
 // ============== Configuration ==============
 
 /** GPU resources disposed per frame (normal operation) */
-const DISPOSAL_BATCH_NORMAL = 4;
+const DISPOSAL_BATCH_NORMAL = 8;
 
 /**
  * GPU resources disposed per frame when the queue is large.
- * After a wizard apply, thousands of resources queue up. At 4/frame it takes
- * ~13 seconds to drain, during which Metal can reclaim backing memory for
- * buffers that were removed from the scene graph but not yet .dispose()'d,
- * causing "setIndexBuffer: parameter 1 is not of type 'GPUBuffer'" crashes.
- * Draining faster (32/frame) keeps the backlog under ~3 seconds.
+ * After a wizard apply, thousands of resources queue up. At 8/frame it takes
+ * ~7 seconds to drain at normal rate. Burst mode (64/frame) kicks in earlier
+ * (threshold 50) to keep the backlog under ~1 second, preventing Metal from
+ * reclaiming backing memory before .dispose() runs.
  */
-const DISPOSAL_BATCH_BURST = 32;
+const DISPOSAL_BATCH_BURST = 64;
 
 /** Threshold above which we switch to burst disposal rate */
-const DISPOSAL_BURST_THRESHOLD = 100;
+const DISPOSAL_BURST_THRESHOLD = 50;
 
 /**
  * Scene objects added to parents per frame.

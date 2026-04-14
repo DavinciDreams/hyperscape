@@ -444,7 +444,9 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
               />
               {/* Tab content */}
               <div className="flex-1 overflow-hidden flex flex-col">
-                <ErrorBoundary fallback={<PanelError label="Right panel" />}>
+                <ErrorBoundary
+                  resetKey={`${layout.rightTab}-${state.builder.editing.selection?.id ?? "none"}`}
+                >
                   {renderRightContent()}
                 </ErrorBoundary>
               </div>

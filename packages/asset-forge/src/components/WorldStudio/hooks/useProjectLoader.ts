@@ -33,6 +33,11 @@ import {
 import {
   deserializeManifestOverrides,
   type SerializedManifestOverrides,
+  type ExtendedWorldLayers,
+  type AudioLayers,
+  type Prefab,
+  EMPTY_EXTENDED_LAYERS,
+  EMPTY_AUDIO_LAYERS,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
 
@@ -122,6 +127,80 @@ function repairBiomes(world: WorldData): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Restore validation — guard against corrupted or malformed save data
+// ---------------------------------------------------------------------------
+
+/** Validate an array field from save data; returns empty array + warns if invalid. */
+function validateArrayField<T extends { id: string }>(
+  data: unknown,
+  fieldName: string,
+): T[] {
+  if (!Array.isArray(data)) {
+    if (data !== undefined && data !== null) {
+      console.warn(
+        `[ProjectLoader] Expected array for ${fieldName}, got ${typeof data}. Using empty array.`,
+      );
+    }
+    return [];
+  }
+  return data.filter((item) => {
+    if (!item || typeof item !== "object" || !("id" in item)) {
+      console.warn(
+        `[ProjectLoader] Skipping malformed entry in ${fieldName}:`,
+        item,
+      );
+      return false;
+    }
+    return true;
+  }) as T[];
+}
+
+function validateExtendedLayers(
+  saved: ExtendedWorldLayers,
+): ExtendedWorldLayers {
+  // Cast to unknown-indexed for defensive field access — save data may be malformed
+  const raw = saved as unknown as Record<string, unknown>;
+  return {
+    ...EMPTY_EXTENDED_LAYERS,
+    spawnPoints: validateArrayField(
+      raw.spawnPoints,
+      "extendedLayers.spawnPoints",
+    ),
+    teleports: validateArrayField(raw.teleports, "extendedLayers.teleports"),
+    mobSpawns: validateArrayField(raw.mobSpawns, "extendedLayers.mobSpawns"),
+    resources: validateArrayField(raw.resources, "extendedLayers.resources"),
+    stations: validateArrayField(raw.stations, "extendedLayers.stations"),
+    pois: validateArrayField(raw.pois, "extendedLayers.pois"),
+    waterBodies: validateArrayField(
+      raw.waterBodies,
+      "extendedLayers.waterBodies",
+    ),
+    regions: validateArrayField(raw.regions, "extendedLayers.regions"),
+    dangerSources: validateArrayField(
+      raw.dangerSources,
+      "extendedLayers.dangerSources",
+    ),
+    customAssets: validateArrayField(
+      raw.customAssets,
+      "extendedLayers.customAssets",
+    ),
+  };
+}
+
+function validateAudioLayers(saved: AudioLayers): AudioLayers {
+  const raw = saved as unknown as Record<string, unknown>;
+  return {
+    ...EMPTY_AUDIO_LAYERS,
+    musicZones: validateArrayField(raw.musicZones, "audioLayers.musicZones"),
+    ambientZones: validateArrayField(
+      raw.ambientZones,
+      "audioLayers.ambientZones",
+    ),
+    sfxTriggers: validateArrayField(raw.sfxTriggers, "audioLayers.sfxTriggers"),
+  };
+}
+
 export function useProjectLoader(projectId: string) {
   const { actions } = useWorldStudio();
   const lockAcquiredRef = useRef(false);
@@ -207,6 +286,42 @@ export function useProjectLoader(projectId: string) {
               typeof actions.restoreBrushOverlays
             >[0],
           );
+        }
+
+        // Restore extended layers (spawn points, teleports, resources, etc.)
+        const savedExtendedLayers = (rawData as Record<string, unknown>)
+          ?.extendedLayers as ExtendedWorldLayers | undefined;
+        if (savedExtendedLayers && typeof savedExtendedLayers === "object") {
+          const validated = validateExtendedLayers(savedExtendedLayers);
+          actions.restoreExtendedLayers(validated);
+        }
+
+        // Restore audio layers (music zones, ambient zones, SFX triggers)
+        const savedAudioLayers = (rawData as Record<string, unknown>)
+          ?.audioLayers as AudioLayers | undefined;
+        if (savedAudioLayers && typeof savedAudioLayers === "object") {
+          const validated = validateAudioLayers(savedAudioLayers);
+          actions.restoreAudioLayers(validated);
+        }
+
+        // Restore prefabs
+        const savedPrefabs = (rawData as Record<string, unknown>)?.prefabs as
+          | Prefab[]
+          | undefined;
+        if (Array.isArray(savedPrefabs)) {
+          const validated = savedPrefabs.filter((p) => {
+            if (
+              !p ||
+              typeof p !== "object" ||
+              !p.id ||
+              !Array.isArray(p.entries)
+            ) {
+              console.warn("[ProjectLoader] Skipping malformed prefab:", p);
+              return false;
+            }
+            return true;
+          });
+          actions.restorePrefabs(validated);
         }
 
         // Restore manifest overrides from snapshot

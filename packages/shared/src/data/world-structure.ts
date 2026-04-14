@@ -228,6 +228,75 @@ export interface WildernessBoundaryManifest {
   maxLevel: number;
 }
 
+/** Brush overlays from brush-overlays.json — terrain sculpts + biome paints + vegetation from World Studio */
+export interface BrushOverlaysManifest {
+  version: number;
+  terrainSculpts: BrushOverlaySculptStroke[];
+  biomePaints: BrushOverlayBiomePaint[];
+  vegetationPaints?: BrushOverlayVegetationPaint[];
+  materialPaints?: BrushOverlayMaterialPaint[];
+  tileCollisions: BrushOverlayTileCollision[];
+  metadata: {
+    sculptCount: number;
+    paintCount: number;
+    vegetationCount?: number;
+    materialPaintCount?: number;
+    collisionCount: number;
+  };
+}
+
+export interface BrushOverlaySculptStroke {
+  id: string;
+  center: { x: number; z: number };
+  radius: number;
+  strength: number;
+  falloff: "sharp" | "linear" | "smooth";
+  mode: "raise" | "lower" | "flatten" | "smooth";
+  flattenTarget?: number;
+}
+
+export interface BrushOverlayBiomePaint {
+  id: string;
+  center: { x: number; z: number };
+  radius: number;
+  strength: number;
+  falloff: "sharp" | "linear" | "smooth";
+  targetBiome: string;
+}
+
+export interface BrushOverlayVegetationPaint {
+  id: string;
+  center: { x: number; z: number };
+  radius: number;
+  strength: number;
+  falloff: "sharp" | "linear" | "smooth";
+  mode: "add" | "remove";
+  speciesFilter: string[];
+  timestamp: number;
+}
+
+export interface BrushOverlayMaterialPaint {
+  id: string;
+  center: { x: number; z: number };
+  radius: number;
+  strength: number;
+  falloff: "sharp" | "linear" | "smooth";
+  targetMaterial: string;
+  timestamp: number;
+}
+
+export interface BrushOverlayTileCollision {
+  tileX: number;
+  tileZ: number;
+  blocked: boolean;
+  edges?: {
+    north?: boolean;
+    south?: boolean;
+    east?: boolean;
+    west?: boolean;
+  };
+}
+
 // ============================================================================
 // WORLD.JSON — Spatial Index
 // ============================================================================

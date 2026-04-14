@@ -23,7 +23,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerConfig } from "../config.js";
 import type { World } from "@hyperscape/shared";
 import { DataManager } from "@hyperscape/shared";
-import type { WorldJson } from "@hyperscape/shared";
+import type { WorldJson, BrushOverlaysManifest } from "@hyperscape/shared";
 import path from "path";
 import fs from "fs-extra";
 import crypto from "crypto";
@@ -157,12 +157,10 @@ function checkAdminAuth(request: FastifyRequest, reply: FastifyReply): boolean {
   const provided = request.headers["x-admin-code"] as string | undefined;
 
   if (!provided || provided !== resolvedAdminCode) {
-    reply
-      .status(401)
-      .send({
-        error:
-          "Unauthorized — x-admin-code header does not match server ADMIN_CODE",
-      });
+    reply.status(401).send({
+      error:
+        "Unauthorized — x-admin-code header does not match server ADMIN_CODE",
+    });
     return false;
   }
   return true;
@@ -254,6 +252,11 @@ export function registerDeployRoutes(
           await fs.writeJson(filePath, content, { spaces: 2 });
         }
 
+        // Hot-reload manifest data into memory so the running server picks up
+        // changes immediately. Load ALL data first, then trigger a single
+        // terrain regeneration at the end to avoid wasteful double-regen.
+        let needsTerrainRegen = false;
+
         // Write world.json (entity spawns) alongside manifests if provided
         if (body.worldJson) {
           await fs.writeJson(
@@ -262,10 +265,6 @@ export function registerDeployRoutes(
             { spaces: 2 },
           );
 
-          // Hot-reload world.json into DataManager so the server uses
-          // the staged entity placements (trees, ores, mobs) immediately.
-          // Without this, the server continues using procgen positions
-          // because it only reads from the production manifests dir.
           const wj = body.worldJson as unknown as WorldJson;
           const trees = (wj.entities as { trees?: { s: string }[] })?.trees;
           const treeCount = Array.isArray(trees) ? trees.length : 0;
@@ -273,7 +272,6 @@ export function registerDeployRoutes(
             `[Deploy] Received world.json — trees: ${treeCount || "none"}`,
           );
 
-          // Validate tree species at deploy time
           if (Array.isArray(trees) && trees.length > 0) {
             const species = [...new Set(trees.map((t) => t.s))];
             console.log(
@@ -285,26 +283,34 @@ export function registerDeployRoutes(
           console.log(
             `[Deploy] DataManager.hasManifestTrees() = ${DataManager.hasManifestTrees()}`,
           );
+          needsTerrainRegen = true;
+        }
 
-          // Signal TerrainSystem to regenerate all tiles with the new
-          // manifest data — this unloads old tiles (destroying stale
-          // ResourceEntity instances) and regenerates them.
-          if (world) {
-            const terrainSystem = world.getSystem("terrain") as {
-              reloadManifestAndRegenerateTiles?: () => void;
-            } | null;
+        // Hot-reload brush overlays (terrain sculpts + biome paints)
+        const brushOverlaysData = body.manifests["brush-overlays.json"] as
+          | BrushOverlaysManifest
+          | undefined;
+        if (brushOverlaysData) {
+          DataManager.setBrushOverlays(brushOverlaysData);
+          needsTerrainRegen = true;
+        }
+
+        // Single terrain regeneration after all data is loaded
+        if (needsTerrainRegen && world) {
+          const terrainSystem = world.getSystem("terrain") as {
+            reloadManifestAndRegenerateTiles?: () => void;
+          } | null;
+          console.log(
+            `[Deploy] TerrainSystem found: ${!!terrainSystem}, has reload method: ${!!terrainSystem?.reloadManifestAndRegenerateTiles}`,
+          );
+          if (terrainSystem?.reloadManifestAndRegenerateTiles) {
+            terrainSystem.reloadManifestAndRegenerateTiles();
             console.log(
-              `[Deploy] TerrainSystem found: ${!!terrainSystem}, has reload method: ${!!terrainSystem?.reloadManifestAndRegenerateTiles}`,
+              "[Deploy] Hot-reloaded manifests + regenerated terrain tiles",
             );
-            if (terrainSystem?.reloadManifestAndRegenerateTiles) {
-              terrainSystem.reloadManifestAndRegenerateTiles();
-              console.log(
-                "[Deploy] Hot-reloaded world.json + regenerated terrain tiles",
-              );
-            }
-          } else {
-            console.warn("[Deploy] No world instance — cannot reload terrain");
           }
+        } else if (needsTerrainRegen) {
+          console.warn("[Deploy] No world instance — cannot reload terrain");
         }
 
         // Compute diff against production

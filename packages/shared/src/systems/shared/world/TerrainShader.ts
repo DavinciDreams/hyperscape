@@ -1039,10 +1039,10 @@ export type TerrainUniforms = {
   time: { value: number };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
   dayIntensity: { value: number }; // 0 = night, 1 = day
-  // Vertex lighting uniforms (lampposts, etc.)
-  vertexLightPositions: { value: THREE.Vector3 }[]; // Array of 8 light positions
-  vertexLightColors: { value: THREE.Vector3 }[]; // Array of 8 light colors
-  vertexLightParams: { value: THREE.Vector2 }[]; // Array of 8 (intensity, range) pairs
+  // Vertex lighting uniforms (lampposts, etc.) — absent when includeVertexLighting=false
+  vertexLightPositions?: { value: THREE.Vector3 }[]; // Array of 8 light positions
+  vertexLightColors?: { value: THREE.Vector3 }[]; // Array of 8 light colors
+  vertexLightParams?: { value: THREE.Vector2 }[]; // Array of 8 (intensity, range) pairs
 };
 
 /**
@@ -1063,32 +1063,62 @@ export function updateTerrainVertexLights(
   uniforms: TerrainUniforms,
   lights: VertexLight[],
 ): void {
+  if (!uniforms.vertexLightPositions) return; // No vertex lighting (editor mode)
   const count = Math.min(lights.length, MAX_VERTEX_LIGHTS);
 
   for (let i = 0; i < MAX_VERTEX_LIGHTS; i++) {
     if (i < count) {
       const light = lights[i];
       uniforms.vertexLightPositions[i].value.copy(light.position);
-      uniforms.vertexLightColors[i].value.set(
+      uniforms.vertexLightColors![i].value.set(
         light.color.r,
         light.color.g,
         light.color.b,
       );
-      uniforms.vertexLightParams[i].value.set(light.intensity, light.range);
+      uniforms.vertexLightParams![i].value.set(light.intensity, light.range);
     } else {
       // Disable unused lights by setting intensity to 0
-      uniforms.vertexLightParams[i].value.set(0, 1);
+      uniforms.vertexLightParams![i].value.set(0, 1);
     }
   }
+}
+
+/**
+ * Options for createTerrainMaterial — "one system, two contexts."
+ * The game uses defaults. The editor overrides attribute format and disables
+ * game-specific features (vertex lighting, river proximity) it doesn't have.
+ */
+export interface TerrainMaterialOptions {
+  /** Read biome weights from packed terrainBlend (vec4) + biomeData (vec2)
+   *  instead of separate float attributes. Used by World Studio editor. */
+  packedAttributes?: boolean;
+  /** Include 8-light vertex lighting for lampposts/torches (default: true) */
+  includeVertexLighting?: boolean;
+  /** Include river bed/bank coloring from riverProximity attribute (default: true) */
+  includeRiverProximity?: boolean;
+  /** Enable distance fog (default: true). Disable for editor at altitude. */
+  fogEnabled?: boolean;
+  /** Override texture base URL (default: CDN). Editor serves from asset-forge API. */
+  textureBaseUrl?: string;
 }
 
 /**
  * Stylized terrain material with biome texture sampling
  * Grass/dirt textures use top-down projection; cliff textures use triplanar mapping
  */
-export function createTerrainMaterial(): THREE.Material & {
+export function createTerrainMaterial(
+  options: TerrainMaterialOptions = {},
+): THREE.Material & {
   terrainUniforms: TerrainUniforms;
 } {
+  const {
+    packedAttributes = false,
+    includeVertexLighting = true,
+    includeRiverProximity = true,
+    fogEnabled = true,
+    textureBaseUrl,
+  } = options;
+
   // Ensure noise texture is generated (still used for dirt patch variation)
   const noiseTex = generateNoiseTexture();
 
@@ -1098,8 +1128,11 @@ export function createTerrainMaterial(): THREE.Material & {
   const noiseScale = uniform(float(TERRAIN_SHADER_CONSTANTS.NOISE_SCALE));
 
   // Sky-color fog: uses the shared render target texture (updated in-place by SkySystem)
-  const fogTexNode = texture(fogRenderTarget.texture, screenUV);
-  const fogEnabledUniform = uniform(float(1.0));
+  // When fogEnabled=false (editor), skip fog texture entirely — editor has no SkySystem.
+  const fogTexNode = fogEnabled
+    ? texture(fogRenderTarget.texture, screenUV)
+    : null;
+  const fogEnabledUniform = uniform(float(fogEnabled ? 1.0 : 0.0));
 
   // ============================================================================
   // VERTEX LIGHTING UNIFORMS (for lampposts, torches, etc.)
@@ -1109,10 +1142,12 @@ export function createTerrainMaterial(): THREE.Material & {
   const vertexLightColorUniforms: ReturnType<typeof uniform>[] = [];
   const vertexLightParamUniforms: ReturnType<typeof uniform>[] = []; // (intensity, range)
 
-  for (let i = 0; i < MAX_VERTEX_LIGHTS; i++) {
-    vertexLightPositionUniforms.push(uniform(vec3(0, 0, 0)));
-    vertexLightColorUniforms.push(uniform(vec3(1, 0.9, 0.6))); // Warm lamplight default
-    vertexLightParamUniforms.push(uniform(vec2(0, 15))); // intensity=0 (off), range=15m
+  if (includeVertexLighting) {
+    for (let i = 0; i < MAX_VERTEX_LIGHTS; i++) {
+      vertexLightPositionUniforms.push(uniform(vec3(0, 0, 0)));
+      vertexLightColorUniforms.push(uniform(vec3(1, 0.9, 0.6))); // Warm lamplight default
+      vertexLightParamUniforms.push(uniform(vec2(0, 15))); // intensity=0 (off), range=15m
+    }
   }
 
   const worldPos = positionWorld;
@@ -1159,15 +1194,20 @@ export function createTerrainMaterial(): THREE.Material & {
     float(0.5),
   );
 
-  // Biome weight attributes (computed per-vertex by QuadChunkWorker)
-  const biomeForestW = attribute("biomeForestWeight", "float");
-  const biomeCanyonW = attribute("biomeCanyonWeight", "float");
-  const fW = biomeForestW;
-  const dW = biomeCanyonW;
+  // Biome weight attributes — packed (editor) or separate (game)
+  let fW: any, dW: any;
+  if (packedAttributes) {
+    const terrainBlend = attribute("terrainBlend", "vec4");
+    fW = terrainBlend.x;
+    dW = terrainBlend.y;
+  } else {
+    fW = attribute("biomeForestWeight", "float");
+    dW = attribute("biomeCanyonWeight", "float");
+  }
   const tW = sub(float(1.0), add(fW, dW));
 
   // --- TERRAIN BIOME TEXTURES ---
-  const texBase = `${getCdnUrl()}/${TERRAIN_TEX_DIR}`;
+  const texBase = textureBaseUrl || `${getCdnUrl()}/${TERRAIN_TEX_DIR}`;
   const loadBiomeTex = (key: keyof typeof TERRAIN_BIOME_TEXTURES) => {
     const cfg = TERRAIN_BIOME_TEXTURES[key];
     return createTerrainBiomeTex(`${texBase}/${cfg.file}`, ...cfg.fallback);
@@ -1376,14 +1416,16 @@ export function createTerrainMaterial(): THREE.Material & {
   );
 
   // === RIVER BED / BANK COLORING ===
-  // riverProximity: 1.0 = in channel (muddy brown), smoothstep to 0.0 at bank edge
-  const riverProx = attribute("riverProximity", "float");
-  const riverbedColor = vec3(0.32, 0.22, 0.12); // dark muddy brown
-  const riverBankColor = vec3(0.45, 0.35, 0.22); // sandy bank brown
-  // In channel (proximity > 0.7): full riverbed, bank zone: blend sandy brown → natural
-  const riverBedBlend = smoothstep(float(0.5), float(0.8), riverProx);
-  const riverColor = mix(riverBankColor, riverbedColor, riverBedBlend);
-  baseColor = mix(baseColor, riverColor, riverProx);
+  if (includeRiverProximity) {
+    // riverProximity: 1.0 = in channel (muddy brown), smoothstep to 0.0 at bank edge
+    const riverProx = attribute("riverProximity", "float");
+    const riverbedColor = vec3(0.32, 0.22, 0.12); // dark muddy brown
+    const riverBankColor = vec3(0.45, 0.35, 0.22); // sandy bank brown
+    // In channel (proximity > 0.7): full riverbed, bank zone: blend sandy brown → natural
+    const riverBedBlend = smoothstep(float(0.5), float(0.8), riverProx);
+    const riverColor = mix(riverBankColor, riverbedColor, riverBedBlend);
+    baseColor = mix(baseColor, riverColor, riverProx);
+  }
 
   // Anti-dithering noise variation (±4% brightness, ±2% color shift)
   const brightnessVar = mul(sub(fineNoise, float(0.5)), float(0.08));
@@ -1402,7 +1444,9 @@ export function createTerrainMaterial(): THREE.Material & {
   // noise-distorted edges, multi-layer composition, height-based blending,
   // edge border darkening. Uses GPU road mask when available, falls back
   // to per-vertex attribute.
-  const roadInfluenceAttr = attribute("roadInfluence", "float");
+  const roadInfluenceAttr = packedAttributes
+    ? attribute("terrainBlend", "vec4").z
+    : attribute("roadInfluence", "float");
   const roadMaskState = getRoadInfluenceTextureState();
   const roadHalfWorld = roadMaskState.uWorldSize.mul(0.5);
   const roadUvX = worldPos.x
@@ -1518,8 +1562,12 @@ export function createTerrainMaterial(): THREE.Material & {
   // AAA multi-layered rocky quarry floor matching Asset Forge shader quality.
   // Exposed bedrock, gravel scatter, dirt accumulation, radial gradient,
   // height-based edge blending with surrounding terrain.
-  const mineInfluenceAttr = attribute("mineInfluence", "float");
-  const mineBiomeIdAttr = attribute("mineBiomeId", "float");
+  const mineInfluenceAttr = packedAttributes
+    ? attribute("terrainBlend", "vec4").w
+    : attribute("mineInfluence", "float");
+  const mineBiomeIdAttr = packedAttributes
+    ? attribute("biomeData", "vec2").y
+    : attribute("mineBiomeId", "float");
 
   // Mine-specific noise at scales appropriate for 15-25m mine areas
   const mineUV = vec2(worldPos.x, worldPos.z);
@@ -1665,149 +1713,78 @@ export function createTerrainMaterial(): THREE.Material & {
   // ============================================================================
   // VERTEX LIGHTING (lampposts, torches, etc.)
   // Simple additive point lights with smooth attenuation
+  // Skipped in editor mode (no lamppost data available)
   // ============================================================================
 
-  // Helper to calculate single light contribution
-  // Returns additive light color contribution
-  const calculateLightContribution = (
-    lightPos: ReturnType<typeof uniform>,
-    lightColor: ReturnType<typeof uniform>,
-    lightParams: ReturnType<typeof uniform>, // x=intensity, y=range
-  ) => {
-    // Vector from world position to light
-    const toLightVec = sub(lightPos, worldPos);
-    const distToLight = add(
-      add(mul(toLightVec.x, toLightVec.x), mul(toLightVec.y, toLightVec.y)),
-      mul(toLightVec.z, toLightVec.z),
+  let litTerrain: ShaderNode = animeBase;
+
+  if (includeVertexLighting) {
+    // Helper to calculate single light contribution
+    const calculateLightContribution = (
+      lightPos: ReturnType<typeof uniform>,
+      lightColor: ReturnType<typeof uniform>,
+      lightParams: ReturnType<typeof uniform>, // x=intensity, y=range
+    ) => {
+      const toLightVec = sub(lightPos, worldPos);
+      const distToLight = add(
+        add(mul(toLightVec.x, toLightVec.x), mul(toLightVec.y, toLightVec.y)),
+        mul(toLightVec.z, toLightVec.z),
+      );
+      const dist = mul(distToLight, float(1));
+      const rangeSq = mul(lightParams.y, lightParams.y);
+      const attenuation = mul(
+        smoothstep(rangeSq, float(0), dist),
+        lightParams.x,
+      );
+      return mul(lightColor, attenuation);
+    };
+
+    let lightAccum: ShaderNode = vec3(0, 0, 0);
+    for (let i = 0; i < MAX_VERTEX_LIGHTS; i++) {
+      lightAccum = add(
+        lightAccum,
+        calculateLightContribution(
+          vertexLightPositionUniforms[i],
+          vertexLightColorUniforms[i],
+          vertexLightParamUniforms[i],
+        ),
+      );
+    }
+
+    // Lamppost light mask (baked, night-only)
+    const lampMaskState = getLamppostLightTextureState();
+    const lampHalfWorld = lampMaskState.uWorldSize.mul(0.5);
+    const lampUvX = worldPos.x
+      .sub(lampMaskState.uCenterX)
+      .add(lampHalfWorld)
+      .div(lampMaskState.uWorldSize);
+    const lampUvZ = worldPos.z
+      .sub(lampMaskState.uCenterZ)
+      .add(lampHalfWorld)
+      .div(lampMaskState.uWorldSize);
+    const lampUV = vec2(
+      lampUvX.clamp(0.001, 0.999),
+      lampUvZ.clamp(0.001, 0.999),
     );
-    const dist = mul(distToLight, float(1)); // Keep as squared for now
-
-    // Range squared for comparison
-    const rangeSq = mul(lightParams.y, lightParams.y);
-
-    // Smooth attenuation: 1 at center, 0 at range (using squared distances)
-    const attenuation = mul(
-      smoothstep(rangeSq, float(0), dist),
-      lightParams.x, // intensity
+    const lampMask = lampMaskState.textureNode.sample(lampUV).r;
+    const hasLampMask = smoothstep(
+      float(1.0),
+      float(2.0),
+      lampMaskState.uWorldSize,
     );
+    const lampDx = abs(worldPos.x.sub(lampMaskState.uCenterX));
+    const lampDz = abs(worldPos.z.sub(lampMaskState.uCenterZ));
+    const lampInside = step(lampDx, lampHalfWorld).mul(
+      step(lampDz, lampHalfWorld),
+    );
+    const lampUse = hasLampMask.mul(lampInside);
+    const lampIntensity = lampMask.mul(lampUse).mul(lampMaskState.uNightMix);
+    const lampColor = vec3(1.0, 0.9, 0.6);
+    lightAccum = add(lightAccum, mul(lampColor, lampIntensity));
 
-    // Light contribution = color * attenuation
-    return mul(lightColor, attenuation);
-  };
-
-  // Accumulate light contributions from all 8 lights
-  // Start with zero (no extra light)
-  // Use ShaderNode type to allow reassignment from add() operations
-  let lightAccum: ShaderNode = vec3(0, 0, 0);
-
-  // Unroll loop for all 8 lights (TSL doesn't support dynamic loops well)
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[0],
-      vertexLightColorUniforms[0],
-      vertexLightParamUniforms[0],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[1],
-      vertexLightColorUniforms[1],
-      vertexLightParamUniforms[1],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[2],
-      vertexLightColorUniforms[2],
-      vertexLightParamUniforms[2],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[3],
-      vertexLightColorUniforms[3],
-      vertexLightParamUniforms[3],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[4],
-      vertexLightColorUniforms[4],
-      vertexLightParamUniforms[4],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[5],
-      vertexLightColorUniforms[5],
-      vertexLightParamUniforms[5],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[6],
-      vertexLightColorUniforms[6],
-      vertexLightParamUniforms[6],
-    ),
-  );
-  lightAccum = add(
-    lightAccum,
-    calculateLightContribution(
-      vertexLightPositionUniforms[7],
-      vertexLightColorUniforms[7],
-      vertexLightParamUniforms[7],
-    ),
-  );
-
-  // ============================================================================
-  // LAMPPOST LIGHT MASK (baked, night-only)
-  // ============================================================================
-  const lampMaskState = getLamppostLightTextureState();
-  const lampHalfWorld = lampMaskState.uWorldSize.mul(0.5);
-  const lampUvX = worldPos.x
-    .sub(lampMaskState.uCenterX)
-    .add(lampHalfWorld)
-    .div(lampMaskState.uWorldSize);
-  const lampUvZ = worldPos.z
-    .sub(lampMaskState.uCenterZ)
-    .add(lampHalfWorld)
-    .div(lampMaskState.uWorldSize);
-  const lampUV = vec2(lampUvX.clamp(0.001, 0.999), lampUvZ.clamp(0.001, 0.999));
-  const lampMask = lampMaskState.textureNode.sample(lampUV).r;
-  const hasLampMask = smoothstep(
-    float(1.0),
-    float(2.0),
-    lampMaskState.uWorldSize,
-  );
-  const lampDx = abs(worldPos.x.sub(lampMaskState.uCenterX));
-  const lampDz = abs(worldPos.z.sub(lampMaskState.uCenterZ));
-  const lampInside = step(lampDx, lampHalfWorld).mul(
-    step(lampDz, lampHalfWorld),
-  );
-  const lampUse = hasLampMask.mul(lampInside);
-  const lampIntensity = lampMask.mul(lampUse).mul(lampMaskState.uNightMix);
-  const lampColor = vec3(1.0, 0.9, 0.6);
-  lightAccum = add(lightAccum, mul(lampColor, lampIntensity));
-
-  // Apply vertex lighting additively (multiply base by (1 + lightAccum))
-  // This brightens terrain near lights without washing out colors
-  const litTerrain = mul(animeBase, add(vec3(1, 1, 1), lightAccum));
-
-  // === DISTANCE FOG (smoothstep with squared distances — avoids per-fragment sqrt) ===
-  const baseFogFactor = smoothstep(
-    float(FOG_NEAR_SQ),
-    float(FOG_FAR_SQ),
-    distSq,
-  );
-  const fogFactor = mul(baseFogFactor, fogEnabledUniform);
-  const fogColor = fogTexNode.rgb;
+    // Apply vertex lighting additively
+    litTerrain = mul(animeBase, add(vec3(1, 1, 1), lightAccum));
+  }
 
   // === CREATE MATERIAL ===
   // Base color + vertex lights only.  PBR handles Lambert N·L + shadow.
@@ -1820,9 +1797,20 @@ export function createTerrainMaterial(): THREE.Material & {
   material.side = THREE.FrontSide;
   material.fog = false;
 
-  material.outputNode = Fn(() => {
-    return vec4(mix(output.rgb, fogColor, fogFactor), output.a);
-  })();
+  // === DISTANCE FOG (smoothstep with squared distances — avoids per-fragment sqrt) ===
+  // Skipped entirely in editor mode (fogEnabled=false) — editor has no SkySystem fog target.
+  if (fogEnabled && fogTexNode) {
+    const baseFogFactor = smoothstep(
+      float(FOG_NEAR_SQ),
+      float(FOG_FAR_SQ),
+      distSq,
+    );
+    const fogFactor = mul(baseFogFactor, fogEnabledUniform);
+    const fogColor = fogTexNode.rgb;
+    material.outputNode = Fn(() => {
+      return vec4(mix(output.rgb, fogColor, fogFactor), output.a);
+    })();
+  }
 
   const terrainUniforms: TerrainUniforms = {
     sunPosition: sunPositionUniform,
@@ -1830,16 +1818,20 @@ export function createTerrainMaterial(): THREE.Material & {
     time: timeUniform,
     fogEnabled: fogEnabledUniform,
     dayIntensity: dayIntensityUniform as unknown as { value: number },
-    // Vertex lighting arrays
-    vertexLightPositions: vertexLightPositionUniforms.map(
-      (u) => u as unknown as { value: THREE.Vector3 },
-    ),
-    vertexLightColors: vertexLightColorUniforms.map(
-      (u) => u as unknown as { value: THREE.Vector3 },
-    ),
-    vertexLightParams: vertexLightParamUniforms.map(
-      (u) => u as unknown as { value: THREE.Vector2 },
-    ),
+    // Vertex lighting arrays — only populated when includeVertexLighting=true
+    ...(includeVertexLighting
+      ? {
+          vertexLightPositions: vertexLightPositionUniforms.map(
+            (u) => u as unknown as { value: THREE.Vector3 },
+          ),
+          vertexLightColors: vertexLightColorUniforms.map(
+            (u) => u as unknown as { value: THREE.Vector3 },
+          ),
+          vertexLightParams: vertexLightParamUniforms.map(
+            (u) => u as unknown as { value: THREE.Vector2 },
+          ),
+        }
+      : {}),
   };
   const result = material as typeof material & {
     terrainUniforms: TerrainUniforms;

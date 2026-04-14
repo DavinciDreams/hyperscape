@@ -21,6 +21,7 @@ import type { VegetationPaintStroke, TileCollisionOverride } from "../types";
 import {
   applyTerrainSculptToTiles,
   applyBiomePaintToTiles,
+  applyMaterialPaintToTiles,
   flushDirtyNormals,
 } from "../utils/brushApplication";
 
@@ -266,6 +267,7 @@ function buildCollisionOverlay(
 interface SyncState {
   appliedSculpts: Set<string>;
   appliedPaints: Set<string>;
+  appliedMaterials: Set<string>;
   vegetationOverlay: THREE.Group | null;
   collisionOverlay: THREE.Group | null;
   disposed: boolean;
@@ -281,6 +283,7 @@ export function useBrushOverlaySync({
   const syncRef = useRef<SyncState>({
     appliedSculpts: new Set(),
     appliedPaints: new Set(),
+    appliedMaterials: new Set(),
     vegetationOverlay: null,
     collisionOverlay: null,
     disposed: false,
@@ -319,6 +322,21 @@ export function useBrushOverlaySync({
       applyBiomePaintToTiles(sceneRefs.terrainContainer, stroke);
     }
   }, [sceneRefs, studioState.brushOverlays.biomePaints]);
+
+  // Apply material paint strokes incrementally
+  useEffect(() => {
+    if (!sceneRefs) return;
+    const sync = syncRef.current;
+    if (sync.disposed) return;
+
+    const strokes = studioState.brushOverlays.materialPaints;
+
+    for (const stroke of strokes) {
+      if (sync.appliedMaterials.has(stroke.id)) continue;
+      sync.appliedMaterials.add(stroke.id);
+      applyMaterialPaintToTiles(sceneRefs.terrainContainer, stroke);
+    }
+  }, [sceneRefs, studioState.brushOverlays.materialPaints]);
 
   // Rebuild vegetation overlay when vegetation strokes change
   useEffect(() => {

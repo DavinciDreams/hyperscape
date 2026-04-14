@@ -5,7 +5,7 @@
  * lakes (polygon, surface height), and ponds.
  */
 
-import { Droplets } from "lucide-react";
+import { Droplets, Plus, X } from "lucide-react";
 import React, { useCallback } from "react";
 
 import type { PlacedWaterBody, RiverWaypoint } from "../../types";
@@ -31,7 +31,8 @@ const BODY_TYPES: Array<{ value: PlacedWaterBody["bodyType"]; label: string }> =
   ];
 
 export function WaterBodyProperties({ waterBody }: Props) {
-  const { actions } = useWorldStudio();
+  const { state, actions } = useWorldStudio();
+  const isAddingVertices = state.tools.isAddingWaterVertices;
 
   const update = useCallback(
     (updates: Partial<PlacedWaterBody>) => {
@@ -84,6 +85,27 @@ export function WaterBodyProperties({ waterBody }: Props) {
             step={0.5}
             unit="m"
           />
+        )}
+        <button
+          className={`w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] rounded border transition-colors ${
+            isAddingVertices
+              ? "bg-primary/20 border-primary/50 text-primary"
+              : "bg-bg-tertiary border-border-primary text-text-tertiary hover:text-text-secondary hover:border-border-primary/80"
+          }`}
+          onClick={() => actions.setAddingWaterVertices(!isAddingVertices)}
+        >
+          {isAddingVertices ? <X size={10} /> : <Plus size={10} />}
+          {isAddingVertices
+            ? "Stop Adding"
+            : waterBody.bodyType === "river"
+              ? "Add Waypoints"
+              : "Add Vertices"}
+        </button>
+        {isAddingVertices && (
+          <div className="text-[10px] text-primary/70 italic">
+            Click on terrain to place{" "}
+            {waterBody.bodyType === "river" ? "waypoints" : "polygon vertices"}.
+          </div>
         )}
       </PropertySection>
 

@@ -299,6 +299,21 @@ export interface GeneratedRoad {
 }
 
 /**
+ * A user-authored road created in World Studio's path tool.
+ * Merged with generated roads on deploy.
+ */
+export interface CustomRoad {
+  /** Unique identifier */
+  id: string;
+  /** Display name */
+  name: string;
+  /** Path waypoints in world coordinates */
+  path: WorldPosition[];
+  /** Road width in meters */
+  width: number;
+}
+
+/**
  * The procedurally generated world foundation
  * This data is immutable after world creation
  */
@@ -478,6 +493,10 @@ export interface BuildingModification {
   nameOverride?: string;
   /** Whether the building is disabled/removed */
   disabled?: boolean;
+  /** Position offset (delta from original) */
+  positionOffset?: { x: number; z: number };
+  /** Rotation override in radians */
+  rotationOverride?: number;
 }
 
 /**
@@ -757,6 +776,8 @@ export interface WorldLayers {
   difficultyZones: DifficultyZone[];
   /** Custom object placements */
   customPlacements: CustomPlacement[];
+  /** User-authored roads from path tool */
+  customRoads: CustomRoad[];
 }
 
 // ============== COMPLETE WORLD DATA ==============
@@ -813,6 +834,7 @@ export interface Selection {
     | "resource"
     | "station"
     | "road"
+    | "customRoad"
     | "poi"
     | "waterBody"
     | "musicZone"
@@ -828,7 +850,9 @@ export interface Selection {
     // Region/zone entity
     | "region"
     // Danger source
-    | "dangerSource";
+    | "dangerSource"
+    // Custom imported/generated assets
+    | "customAsset";
   /** ID of selected element */
   id: string;
   /** Breadcrumb path to selection (for nested elements) */
@@ -971,6 +995,8 @@ export interface HierarchyNode {
     | "dangerSources"
     | "dangerSource"
     | "wildernessBoundary"
+    | "customAssets"
+    | "customAsset"
     | "folder";
   /** Child nodes */
   children: HierarchyNode[];
