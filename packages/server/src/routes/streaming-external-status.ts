@@ -85,6 +85,7 @@ export interface ExternalRendererIngestBlob {
   transport?: string | null;
   audioSampleRate?: number | null;
   gopFrames?: number | null;
+  targetFps?: number | null;
   probeOnly?: boolean | null;
 }
 
@@ -169,7 +170,11 @@ function parseExternalDestinations(value: unknown): ExternalRtmpDestination[] {
   if (!Array.isArray(value)) return [];
   const destinations: ExternalRtmpDestination[] = [];
   for (const candidate of value) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
       continue;
     }
     const record = candidate as Record<string, unknown>;
@@ -203,7 +208,8 @@ function parseExternalDestinations(value: unknown): ExternalRtmpDestination[] {
       ingestUrl: asNonEmptyString(record.ingestUrl),
       url: asNonEmptyString(record.url) ?? undefined,
       status: asNonEmptyString(record.status) ?? undefined,
-      connected: typeof record.connected === "boolean" ? record.connected : undefined,
+      connected:
+        typeof record.connected === "boolean" ? record.connected : undefined,
       bytesWritten: asFiniteNumber(record.bytesWritten) ?? undefined,
       startedAt: asFiniteNumber(record.startedAt) ?? undefined,
       error: asNonEmptyString(record.error) ?? undefined,

@@ -19,7 +19,8 @@ import type {
 const RENDER_TICK_STALE_MS = 10_000;
 const VISUAL_CHANGE_STALE_MS = 5_000;
 const VISUAL_CHANGE_GRACE_MS = 8_000;
-const MIN_ENCODE_FPS = 24;
+const DEFAULT_MIN_ENCODE_FPS = 24;
+const MIN_ENCODE_FPS_TARGET_RATIO = 0.8;
 
 type NormalizedRendererMetrics = {
   captureFps: number | null;
@@ -77,6 +78,30 @@ function normalizeHlsManifest(
     updatedAt: asFiniteNumber(value.updatedAt),
     mediaSequence: asFiniteNumber(value.mediaSequence),
   };
+}
+
+function resolveTargetEncodeFps(
+  externalSnapshot: ExternalRtmpStatusSnapshot | null,
+): number | null {
+  return (
+    asFiniteNumber(externalSnapshot?.ingest?.targetFps) ??
+    asFiniteNumber(externalSnapshot?.smoke?.ingest?.targetFps) ??
+    null
+  );
+}
+
+function resolveMinEncodeFps(targetEncodeFps: number | null): number {
+  const explicit = Number.parseInt(process.env.STREAM_MIN_ENCODE_FPS || "", 10);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+  if (targetEncodeFps != null && targetEncodeFps > 0) {
+    return Math.max(
+      1,
+      Math.floor(targetEncodeFps * MIN_ENCODE_FPS_TARGET_RATIO),
+    );
+  }
+  return DEFAULT_MIN_ENCODE_FPS;
 }
 
 function isFreshHlsManifest(params: {
@@ -149,8 +174,16 @@ function deriveMetricsDegradedReason(params: {
   hlsManifest: NormalizedHlsManifest | null;
   nowMs: number;
   externalStatusMaxAgeMs: number;
+  minEncodeFps: number;
 }): string | null {
-  const { cycle, metrics, hlsManifest, nowMs, externalStatusMaxAgeMs } = params;
+  const {
+    cycle,
+    metrics,
+    hlsManifest,
+    nowMs,
+    externalStatusMaxAgeMs,
+    minEncodeFps,
+  } = params;
   if (!phaseNeedsLiveRender(cycle)) {
     return null;
   }
@@ -184,7 +217,7 @@ function deriveMetricsDegradedReason(params: {
     // captureFps is raw browser compositor ingress. In CDP mode we intentionally
     // throttle source frames and repeat the latest valid frame to keep encoder
     // cadence stable, so content freshness and encodeFps are the hard gates.
-    if (metrics.encodeFps != null && metrics.encodeFps < MIN_ENCODE_FPS) {
+    if (metrics.encodeFps != null && metrics.encodeFps < minEncodeFps) {
       return "encoder_fps_low";
     }
 
@@ -237,12 +270,16 @@ export function deriveBettingRendererHealth(
   const externalHlsManifest =
     normalizeHlsManifest(externalSnapshot?.hlsManifest) ??
     normalizeHlsManifest(options?.localHlsManifest);
+  const minEncodeFps = resolveMinEncodeFps(
+    resolveTargetEncodeFps(externalSnapshot),
+  );
   const metricsReason = deriveMetricsDegradedReason({
     cycle,
     metrics: externalRendererMetrics,
     hlsManifest: externalHlsManifest,
     nowMs: updatedAt,
     externalStatusMaxAgeMs,
+    minEncodeFps,
   });
 
   if (externalRendererHealth) {

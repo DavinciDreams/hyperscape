@@ -677,6 +677,7 @@ function buildRendererSmokeSnapshot(
       transport: ingest.transport,
       audioSampleRate: ingest.audioSampleRate,
       gopFrames: ingest.gopFrames,
+      targetFps: TARGET_FPS,
       probeOnly: ingest.probeOnly,
     },
   };
@@ -912,6 +913,7 @@ function writeExternalStatusSnapshot(
       transport: ingest.transport,
       audioSampleRate: ingest.audioSampleRate,
       gopFrames: ingest.gopFrames,
+      targetFps: TARGET_FPS,
       probeOnly: ingest.probeOnly,
     },
     smoke,

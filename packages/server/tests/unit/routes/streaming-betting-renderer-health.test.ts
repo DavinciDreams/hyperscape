@@ -537,6 +537,51 @@ describe("deriveBettingRendererHealth", () => {
     });
   });
 
+  it("uses the external source target fps for conservative staging profiles", () => {
+    const now = Date.now();
+    const health = deriveBettingRendererHealth(createCycle(), {
+      externalStatusSnapshot: {
+        destinations: [],
+        stats: {},
+        updatedAt: now,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: now,
+        },
+        metrics: {
+          captureFps: 4,
+          encodeFps: 13,
+          latestRenderTickAt: now,
+          latestVisualChangeAt: now,
+          visualChangeAgeMs: 200,
+        },
+        hlsManifest: {
+          updatedAt: now,
+          mediaSequence: 42,
+        },
+        ingest: {
+          profile: "cloudflare_live",
+          transport: "srt",
+          audioSampleRate: 48000,
+          gopFrames: 30,
+          targetFps: 15,
+          probeOnly: false,
+        },
+      },
+      externalStatusMaxAgeMs: 15_000,
+      captureStats: {
+        clientConnected: true,
+        ffmpegRunning: true,
+      },
+    });
+
+    expect(health).toMatchObject({
+      ready: true,
+      degradedReason: null,
+    });
+  });
+
   it("keeps renderer health ready when fresh render metrics are present but the local manifest is stale", () => {
     const now = Date.now();
     const health = deriveBettingRendererHealth(createCycle(), {
