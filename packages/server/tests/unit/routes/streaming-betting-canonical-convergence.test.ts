@@ -117,7 +117,8 @@ describe("streaming-betting canonical convergence", () => {
           captureMode: "cdp",
           degradedReason: null,
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: now,
           lastRenderTickAt: now,
           lastVisualChangeAt: now,
@@ -137,7 +138,11 @@ describe("streaming-betting canonical convergence", () => {
     });
     const routes = registerStreamingBettingRoutes(options);
 
-    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(fetchSpy).toHaveBeenCalled();
@@ -233,7 +238,8 @@ describe("streaming-betting canonical convergence", () => {
             captureMode: "cdp",
             degradedReason: null,
             currentSceneUrl: "https://staging.example/stream",
-            activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+            activeBundle:
+              "https://staging.example/assets/StreamingMode-abc123.js",
             lastFrameAt: updatedAt,
             lastRenderTickAt: updatedAt,
             lastVisualChangeAt: updatedAt,
@@ -256,7 +262,11 @@ describe("streaming-betting canonical convergence", () => {
     });
     const routes = registerStreamingBettingRoutes(options);
 
-    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(fetchSpy).toHaveBeenCalled();
@@ -307,7 +317,7 @@ describe("streaming-betting canonical convergence", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("prefers self-hls as canonical when provider priority ranks it first", async () => {
+  it("keeps Cloudflare canonical in external mode even when automatic failover prefers self-hls", async () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
@@ -382,7 +392,11 @@ describe("streaming-betting canonical convergence", () => {
     });
     const routes = registerStreamingBettingRoutes(options);
 
-    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
@@ -396,16 +410,13 @@ describe("streaming-betting canonical convergence", () => {
 
     expect(response.statusCode).toBe(200);
     const payload = response.json();
-    expect(payload.channel.canonicalDestinationId).toBe("canonical-self-hls");
-    expect(payload.channel.fallbackDestinationId).toBe("fallback-cloudflare-stream");
+    expect(payload.channel.canonicalDestinationId).toBe("canonical-cloudflare");
+    expect(payload.channel.fallbackDestinationId).toBeNull();
     expect(payload.canonicalDestination).toMatchObject({
-      provider: "self_hls",
-      playbackReady: true,
-    });
-    expect(payload.fallbackDestination).toMatchObject({
       provider: "cloudflare_stream",
       playbackReady: true,
     });
+    expect(payload.fallbackDestination).toBeNull();
 
     routes.close();
     await options.fastify.close();
@@ -486,7 +497,11 @@ describe("streaming-betting canonical convergence", () => {
     });
     const routes = registerStreamingBettingRoutes(options);
 
-    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
@@ -501,21 +516,19 @@ describe("streaming-betting canonical convergence", () => {
     expect(response.statusCode).toBe(200);
     const payload = response.json();
     expect(payload.channel.canonicalDestinationId).toBe("canonical-cloudflare");
+    expect(payload.channel.fallbackDestinationId).toBeNull();
     expect(payload.canonicalDestination).toMatchObject({
       provider: "cloudflare_stream",
       playbackReady: true,
     });
-    expect(payload.fallbackDestination).toMatchObject({
-      provider: "self_hls",
-      playbackReady: true,
-    });
+    expect(payload.fallbackDestination).toBeNull();
 
     routes.close();
     await options.fastify.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("fails back to the primary provider only after the soak window", async () => {
+  it("does not fail over to self-hls while Cloudflare is disconnected in external mode", async () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
@@ -591,14 +604,20 @@ describe("streaming-betting canonical convergence", () => {
 
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => new Response("", { status: probeStatus }));
+      .mockImplementation(
+        async () => new Response("", { status: probeStatus }),
+      );
 
     const options = createRouteOptions({
       externalStatusFile,
     });
     const routes = registerStreamingBettingRoutes(options);
 
-    for (let attempt = 0; attempt < 20 && fetchSpy.mock.calls.length === 0; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && fetchSpy.mock.calls.length === 0;
+      attempt += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
@@ -610,8 +629,10 @@ describe("streaming-betting canonical convergence", () => {
       },
     });
     expect(response.json().canonicalDestination).toMatchObject({
-      provider: "self_hls",
+      provider: "cloudflare_stream",
+      playbackReady: false,
     });
+    expect(response.json().fallbackDestination).toBeNull();
 
     probeStatus = 200;
     writeStatus(true, now + 50);
@@ -625,8 +646,10 @@ describe("streaming-betting canonical convergence", () => {
       },
     });
     expect(response.json().canonicalDestination).toMatchObject({
-      provider: "self_hls",
+      provider: "cloudflare_stream",
+      playbackReady: true,
     });
+    expect(response.json().fallbackDestination).toBeNull();
 
     await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -639,7 +662,9 @@ describe("streaming-betting canonical convergence", () => {
     });
     expect(response.json().canonicalDestination).toMatchObject({
       provider: "cloudflare_stream",
+      playbackReady: true,
     });
+    expect(response.json().fallbackDestination).toBeNull();
 
     routes.close();
     await options.fastify.close();

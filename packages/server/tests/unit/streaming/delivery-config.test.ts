@@ -13,12 +13,12 @@ describe("resolveStreamDeliveryInfo", () => {
     });
 
     expect(delivery).toEqual({
-      mode: "self_hls",
-      provider: null,
+      mode: "external_hls",
+      provider: "cloudflare_stream",
       playbackUrl: null,
       hlsUrl: null,
       llhlsUrl: null,
-      ingestUrl: null,
+      ingestUrl: "rtmps://live.cloudflare.com:443/live",
     });
   });
 

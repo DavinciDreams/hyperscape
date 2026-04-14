@@ -89,7 +89,7 @@ function normalizeDeliveryMode(
   },
 ): StreamDeliveryMode {
   const normalized = (rawValue || "").trim().toLowerCase();
-  if (normalized === "external_hls" && options.hasExternalPlayback) {
+  if (normalized === "external_hls") {
     return "external_hls";
   }
   if (normalized === "self_hls") {
@@ -117,8 +117,10 @@ export function resolveStreamDeliveryInfo(
     playbackUrl:
       mode === "external_hls"
         ? external.playbackUrl
-        : playbackUrl ??
-          (hasExternalPlayback ? null : external.hlsUrl ?? external.llhlsUrl),
+        : (playbackUrl ??
+          (hasExternalPlayback
+            ? null
+            : (external.hlsUrl ?? external.llhlsUrl))),
     hlsUrl: mode === "external_hls" ? external.hlsUrl : null,
     llhlsUrl: mode === "external_hls" ? external.llhlsUrl : null,
     ingestUrl: mode === "external_hls" ? external.ingestUrl : null,
@@ -266,9 +268,7 @@ export function resolveStreamCanonicalProviderPriority(
   if (explicit) {
     const parsed = explicit
       .split(",")
-      .map((value) =>
-        normalizeStreamDestinationProvider(value, value),
-      )
+      .map((value) => normalizeStreamDestinationProvider(value, value))
       .filter(isCanonicalProvider);
     if (parsed.length > 0) {
       return [...new Set(parsed)];
