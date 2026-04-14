@@ -234,7 +234,7 @@ export class RTMPBridge {
         process.env.STREAM_VIDEO_BITRATE_KBPS ||
           process.env.STREAM_VIDEO_BITRATE,
         DEFAULT_STREAMING_CONFIG.videoBitrate,
-        250,
+        96,
       ),
       audioBitrate: parseEnvInt(
         process.env.STREAM_AUDIO_BITRATE_KBPS ||
