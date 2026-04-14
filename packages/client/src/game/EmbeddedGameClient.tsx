@@ -14,6 +14,10 @@ import { cloneEmbeddedConfig } from "../lib/embedded-entry";
 import type { World } from "@hyperscape/shared";
 import { EventType } from "@hyperscape/shared";
 import { logger } from "../lib/logger";
+import {
+  findStreamingTargetEntity,
+  isTargetAvatarReady,
+} from "../lib/streamingReadiness";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
 /** API base URL derived from WebSocket URL */
@@ -83,85 +87,10 @@ type PrefsSystem = {
   setWaterReflections?: (value: boolean) => void;
 };
 
-function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
-  const playerDirect = world.entities?.players?.get(targetEntityId) as
-    | { avatar?: unknown }
-    | undefined;
-  if (playerDirect?.avatar) {
-    return true;
-  }
-
-  if (world.entities?.players) {
-    for (const [, player] of world.entities.players) {
-      const candidate = player as {
-        id?: string;
-        characterId?: string;
-        avatar?: unknown;
-      };
-      if (
-        (candidate.id === targetEntityId ||
-          candidate.characterId === targetEntityId) &&
-        candidate.avatar
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function findEntityBySpectatorTarget(
-  world: World,
-  targetEntityId: string,
-): unknown | null {
-  const directMatch =
-    world.entities?.items?.get(targetEntityId) ||
-    world.entities?.players?.get(targetEntityId);
-  if (directMatch) {
-    return directMatch;
-  }
-
-  if (world.entities?.items) {
-    for (const [id, entity] of world.entities.items) {
-      const candidate = entity as {
-        id?: string;
-        characterId?: string;
-        data?: { id?: string; characterId?: string };
-      };
-      if (
-        id === targetEntityId ||
-        candidate.id === targetEntityId ||
-        candidate.characterId === targetEntityId ||
-        candidate.data?.id === targetEntityId ||
-        candidate.data?.characterId === targetEntityId
-      ) {
-        return entity;
-      }
-    }
-  }
-
-  if (world.entities?.players) {
-    for (const [id, player] of world.entities.players) {
-      const candidate = player as {
-        id?: string;
-        characterId?: string;
-        data?: { id?: string; characterId?: string };
-      };
-      if (
-        id === targetEntityId ||
-        candidate.id === targetEntityId ||
-        candidate.characterId === targetEntityId ||
-        candidate.data?.id === targetEntityId ||
-        candidate.data?.characterId === targetEntityId
-      ) {
-        return player;
-      }
-    }
-  }
-
-  return null;
-}
+// `isTargetAvatarReady` and the spectator target lookup moved to
+// `../lib/streamingReadiness` so EmbeddedGameClient and StreamingMode share a
+// single source of truth. The local lookup used to be named
+// `findEntityBySpectatorTarget`; call sites now use `findStreamingTargetEntity`.
 
 /**
  * Disable all player input controls (spectator mode)
@@ -256,7 +185,7 @@ function setupSpectatorCamera(
    */
   const findLiveEntity = (entityId: string) => {
     // Resolve by both entity-id and character-id aliases.
-    const fromCollections = findEntityBySpectatorTarget(world, entityId);
+    const fromCollections = findStreamingTargetEntity(world, entityId);
     if (fromCollections) return fromCollections;
 
     // Try entity-manager as fallback
@@ -819,7 +748,7 @@ export function EmbeddedGameClient() {
             return;
           }
 
-          const targetEntity = findEntityBySpectatorTarget(world, targetId);
+          const targetEntity = findStreamingTargetEntity(world, targetId);
           const targetPosition = (
             targetEntity as
               | {

@@ -21,7 +21,6 @@ import { LoadingScreen } from "./LoadingScreen";
 import { StreamingOverlay } from "../components/streaming/StreamingOverlay";
 import type {
   World,
-  Entity,
   StreamingGuardrailAgentSnapshot,
   StreamingGuardrailPhase,
 } from "@hyperscape/shared";
@@ -33,6 +32,10 @@ import type {
   StreamingWindowHeartbeat,
 } from "@/lib/streamingWindow";
 import { buildCaptureControlStatus } from "@/lib/captureStatus";
+import {
+  findStreamingTargetEntity,
+  isTargetAvatarReady,
+} from "@/lib/streamingReadiness";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
@@ -141,86 +144,9 @@ function createCaptureSessionGeneration(): string {
   return `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function findStreamingTargetEntity(
-  world: World,
-  targetEntityId: string,
-): Entity | null {
-  let entity = world.entities?.get(targetEntityId) ?? null;
-
-  if (!entity && world.entities?.players) {
-    for (const [, player] of world.entities.players) {
-      const playerAny = player as {
-        id?: string;
-        characterId?: string;
-        data?: { id?: string; characterId?: string };
-      };
-      if (
-        playerAny.id === targetEntityId ||
-        playerAny.characterId === targetEntityId ||
-        playerAny.data?.id === targetEntityId ||
-        playerAny.data?.characterId === targetEntityId
-      ) {
-        entity = player as Entity;
-        break;
-      }
-    }
-  }
-
-  if (!entity && world.entities?.items) {
-    for (const [, item] of world.entities.items) {
-      if (item.id === targetEntityId) {
-        entity = item;
-        break;
-      }
-    }
-  }
-
-  return entity;
-}
-
-function isTargetAvatarReady(world: World, targetEntityId: string): boolean {
-  const playerDirect = world.entities?.players?.get(targetEntityId) as
-    | {
-        avatar?: unknown;
-        _avatar?: unknown;
-        mesh?: { visible?: boolean } | null;
-        _fallbackAvatarRoot?: { visible?: boolean } | null;
-      }
-    | undefined;
-  if (
-    playerDirect?.avatar ||
-    playerDirect?._avatar ||
-    playerDirect?._fallbackAvatarRoot ||
-    playerDirect?.mesh
-  ) {
-    return true;
-  }
-
-  if (world.entities?.players) {
-    for (const [, player] of world.entities.players) {
-      const candidate = player as {
-        id?: string;
-        characterId?: string;
-        avatar?: unknown;
-        _avatar?: unknown;
-        mesh?: { visible?: boolean } | null;
-        _fallbackAvatarRoot?: { visible?: boolean } | null;
-      };
-      if (
-        (candidate.id === targetEntityId ||
-          candidate.characterId === targetEntityId) &&
-        (candidate.avatar ||
-          candidate._avatar ||
-          candidate._fallbackAvatarRoot ||
-          candidate.mesh)
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
+// `findStreamingTargetEntity` and `isTargetAvatarReady` moved to
+// `@/lib/streamingReadiness` so that EmbeddedGameClient can share the same
+// implementation instead of maintaining a parallel copy.
 
 function readNumericCollectionSize(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
