@@ -180,6 +180,10 @@ export class RTMPBridge {
   private firstFatalWriteError: FatalWriteDiagnostic | null = null;
   /** Most recent fatal FFmpeg write error observed in the current worker process */
   private lastFatalWriteError: FatalWriteDiagnostic | null = null;
+  /** Pending recovery for an FFmpeg process that lost its delivery output */
+  private fatalWriteRestartTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** Guard against overlapping fatal-write restarts */
+  private fatalWriteRecoveryInFlight = false;
   /** Last seen CDP timestamp for monotonicity checks */
   private lastCdpTimestamp: number | null = null;
   /** Number of non-monotonic CDP timestamps observed */
@@ -668,6 +672,95 @@ export class RTMPBridge {
       this.firstFatalWriteError = snapshot;
     }
     this.lastFatalWriteError = snapshot;
+  }
+
+  private scheduleFatalWriteRestart(
+    message: string,
+    targetProcess: ChildProcess | null = this.ffmpeg,
+  ): void {
+    if (!targetProcess || this.ffmpeg !== targetProcess) return;
+    if (this.fatalWriteRecoveryInFlight || this.fatalWriteRestartTimeout) {
+      return;
+    }
+
+    const sanitizedMessage = RTMPBridge.redactSensitiveFfmpegText(
+      message.trim(),
+    );
+    if (this.ffmpegRestartAttempts >= RTMPBridge.MAX_RESTART_ATTEMPTS) {
+      console.error(
+        `[RTMPBridge] Fatal FFmpeg output write persisted after ${this.ffmpegRestartAttempts} restart attempts. Manual intervention required: ${sanitizedMessage}`,
+      );
+      return;
+    }
+
+    const nextAttempt = this.ffmpegRestartAttempts + 1;
+    const baseDelay =
+      RTMPBridge.BASE_RESTART_DELAY * Math.pow(2, nextAttempt - 1);
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(baseDelay + jitter, RTMPBridge.MAX_RESTART_DELAY);
+
+    console.warn(
+      `[RTMPBridge] Fatal FFmpeg output write detected; restarting encoder in ${Math.round(delay)}ms: ${sanitizedMessage}`,
+    );
+
+    this.fatalWriteRestartTimeout = setTimeout(() => {
+      this.fatalWriteRestartTimeout = null;
+      void this.restartAfterFatalWrite(targetProcess);
+    }, delay);
+  }
+
+  private async restartAfterFatalWrite(
+    targetProcess: ChildProcess,
+  ): Promise<void> {
+    if (this.fatalWriteRecoveryInFlight) return;
+    if (this.ffmpeg !== targetProcess) return;
+
+    const wasCdpDirectMode = this.cdpDirectMode;
+    const wasWebCodecsMode = Boolean(
+      this.client &&
+      (this.client as unknown as { _isWebCodecs?: boolean })._isWebCodecs,
+    );
+    const hadClient = Boolean(this.client);
+
+    this.fatalWriteRecoveryInFlight = true;
+    try {
+      this.ffmpegRestartAttempts++;
+      await this.stopFFmpeg();
+
+      if (wasCdpDirectMode) {
+        this.startFFmpegDirect();
+      } else if (hadClient && wasWebCodecsMode) {
+        this.startFFmpegWebCodecs();
+      } else if (hadClient) {
+        this.startFFmpeg();
+      } else {
+        console.log(
+          "[RTMPBridge] No active capture client after fatal write; skipping FFmpeg restart",
+        );
+        this.ffmpegRestartAttempts = 0;
+        return;
+      }
+
+      setTimeout(() => {
+        if (this.ffmpeg && this.status.ffmpegRunning) {
+          console.log(
+            "[RTMPBridge] FFmpeg fatal-write recovery appears successful",
+          );
+          this.ffmpegRestartAttempts = Math.max(
+            0,
+            this.ffmpegRestartAttempts - 1,
+          );
+        }
+      }, 5000).unref?.();
+    } catch (error) {
+      console.error(
+        "[RTMPBridge] Failed to recover FFmpeg after fatal output write:",
+        errMsg(error),
+      );
+      this.handleFFmpegCrash(-1);
+    } finally {
+      this.fatalWriteRecoveryInFlight = false;
+    }
   }
 
   /**
@@ -2263,6 +2356,7 @@ export class RTMPBridge {
     ) {
       this.recordFatalWriteError(msg);
       this.markDestinationsFromMessage(msg);
+      this.scheduleFatalWriteRestart(msg);
     }
 
     // Check for RTMP connection errors
@@ -2286,6 +2380,10 @@ export class RTMPBridge {
     if (!this.ffmpeg) return;
 
     console.log("[RTMPBridge] Stopping FFmpeg");
+    if (this.fatalWriteRestartTimeout) {
+      clearTimeout(this.fatalWriteRestartTimeout);
+      this.fatalWriteRestartTimeout = null;
+    }
     this.stopHealthMonitoring();
     this.stopPlaceholderMode();
     this.cdpDirectMode = false;

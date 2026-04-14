@@ -304,6 +304,57 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     expect((bridge as any).status.destinations[0]?.error).toBeUndefined();
   });
 
+  it("restarts FFmpeg after Cloudflare invalidates the RTMPS session", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const bridge = new RTMPBridge();
+    const proc = createFakeFfmpegProcess();
+    (bridge as any).ffmpeg = proc;
+    (bridge as any).cdpDirectMode = true;
+    (bridge as any).status.ffmpegRunning = true;
+    (bridge as any).status.destinations = [
+      {
+        id: "canonical-cloudflare",
+        name: "External Delivery",
+        role: "canonical",
+        provider: "cloudflare_stream",
+        transport: "rtmps",
+        playbackUrl: "https://videodelivery.net/test/manifest/video.m3u8",
+        ingestUrl: "rtmps://live.cloudflare.com:443/live",
+        connected: true,
+        bytesWritten: 0,
+        startedAt: 123,
+      },
+    ];
+    const startDirect = vi
+      .spyOn(bridge as any, "startFFmpegDirect")
+      .mockImplementation(() => {
+        (bridge as any).ffmpeg = createFakeFfmpegProcess();
+        (bridge as any).status.ffmpegRunning = true;
+      });
+
+    (bridge as any).parseFFmpegOutput(
+      "[tls] The specified session has been invalidated for some reason.",
+    );
+
+    expect((bridge as any).status.destinations[0]?.connected).toBe(false);
+    expect((bridge as any).status.destinations[0]?.error).toContain(
+      "session has been invalidated",
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(proc.stdin.end).toHaveBeenCalledOnce();
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+
+    proc.emit("close", 0, null);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(startDirect).toHaveBeenCalledOnce();
+    expect((bridge as any).status.ffmpegRunning).toBe(true);
+  });
+
   it("omits global headers for SRT transport", () => {
     process.env.STREAM_INGEST_PROFILE = "cloudflare_live";
     process.env.STREAM_INGEST_TRANSPORT = "srt";
