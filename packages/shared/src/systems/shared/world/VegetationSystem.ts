@@ -1229,7 +1229,7 @@ export class VegetationSystem extends System {
         if (!inst) continue;
         for (let slot = 0; slot < pool.batches.length; slot++) {
           const slotId = inst.slotIds[slot];
-          if (slotId !== undefined) {
+          if (slotId !== undefined && slotId >= 0) {
             try {
               pool.batches[slot].deleteInstance(slotId);
             } catch {
@@ -1240,7 +1240,7 @@ export class VegetationSystem extends System {
         if (inst.lod1SlotIds) {
           for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
             const slotId = inst.lod1SlotIds[slot];
-            if (slotId !== undefined) {
+            if (slotId !== undefined && slotId >= 0) {
               try {
                 pool.lod1Batches[slot].deleteInstance(slotId);
               } catch {
@@ -1252,7 +1252,7 @@ export class VegetationSystem extends System {
         if (inst.lod2SlotIds) {
           for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
             const slotId = inst.lod2SlotIds[slot];
-            if (slotId !== undefined) {
+            if (slotId !== undefined && slotId >= 0) {
               try {
                 pool.lod2Batches[slot].deleteInstance(slotId);
               } catch {
@@ -1423,7 +1423,7 @@ export class VegetationSystem extends System {
         if (!inst) continue;
         for (let slot = 0; slot < pool.batches.length; slot++) {
           const slotId = inst.slotIds[slot];
-          if (slotId !== undefined) {
+          if (slotId !== undefined && slotId >= 0) {
             try {
               pool.batches[slot].deleteInstance(slotId);
             } catch {
@@ -1434,7 +1434,7 @@ export class VegetationSystem extends System {
         if (inst.lod1SlotIds) {
           for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
             const slotId = inst.lod1SlotIds[slot];
-            if (slotId !== undefined) {
+            if (slotId !== undefined && slotId >= 0) {
               try {
                 pool.lod1Batches[slot].deleteInstance(slotId);
               } catch {
@@ -1446,7 +1446,7 @@ export class VegetationSystem extends System {
         if (inst.lod2SlotIds) {
           for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
             const slotId = inst.lod2SlotIds[slot];
-            if (slotId !== undefined) {
+            if (slotId !== undefined && slotId >= 0) {
               try {
                 pool.lod2Batches[slot].deleteInstance(slotId);
               } catch {
@@ -1939,6 +1939,7 @@ export class VegetationSystem extends System {
     const waterThreshold = WATER_LEVEL + WATER_EDGE_BUFFER;
 
     const _mat = new THREE.Matrix4();
+    const spawnCameraPos = this.getPlayerPosition();
 
     const BATCH_SIZE = 50;
     let placedCount = 0;
@@ -2027,20 +2028,23 @@ export class VegetationSystem extends System {
         this._dummy.updateMatrix();
         _mat.copy(this._dummy.matrix);
 
-        // Add instance to each LOD0 material slot
-        const slotIds: number[] = [];
+        // Add instance to each LOD0 material slot.
+        // Fixed-size array (index = slot index) so that slotIds[s] always maps to pool.batches[s].
+        const slotIds: number[] = new Array(pool.batches.length).fill(-1);
         for (let slot = 0; slot < pool.batches.length; slot++) {
           const bm = pool.batches[slot];
           const geoId = pool.geometryIds[variantIndex]?.[slot] ?? -1;
           if (geoId < 0) continue;
           const instanceId = bm.addInstance(geoId);
           bm.setMatrixAt(instanceId, _mat);
-          slotIds.push(instanceId);
+          slotIds[slot] = instanceId;
         }
-        if (!slotIds.length) continue;
+        if (slotIds.every((id) => id < 0)) continue;
 
         // Add instance to LOD1 slots (hidden initially — shown when player moves away)
-        const lod1SlotIds: number[] = [];
+        const lod1SlotIds: number[] = new Array(pool.lod1Batches.length).fill(
+          -1,
+        );
         if (pool.hasLOD1) {
           for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
             const bm = pool.lod1Batches[slot];
@@ -2049,12 +2053,14 @@ export class VegetationSystem extends System {
             const instanceId = bm.addInstance(geoId);
             bm.setMatrixAt(instanceId, _mat);
             bm.setVisibleAt(instanceId, false);
-            lod1SlotIds.push(instanceId);
+            lod1SlotIds[slot] = instanceId;
           }
         }
 
         // Add instance to LOD2 slots (hidden initially)
-        const lod2SlotIds: number[] = [];
+        const lod2SlotIds: number[] = new Array(pool.lod2Batches.length).fill(
+          -1,
+        );
         if (pool.hasLOD2) {
           for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
             const bm = pool.lod2Batches[slot];
@@ -2063,40 +2069,77 @@ export class VegetationSystem extends System {
             const instanceId = bm.addInstance(geoId);
             bm.setMatrixAt(instanceId, _mat);
             bm.setVisibleAt(instanceId, false);
-            lod2SlotIds.push(instanceId);
+            lod2SlotIds[slot] = instanceId;
           }
         }
 
-        // Apply per-instance biome-blended color tint to all LOD levels
+        // Apply per-instance biome-blended color tint to all LOD levels.
+        // Iterate by batches.length so index s always corresponds to the correct BatchedMesh.
         if (layer.colorTint) {
           const biomeWeights =
             terrainSystem.computeBiomeWeightsByPosition?.(pos.x, pos.z) ?? {};
           const tint = this.computeBlendedTint(asset.id, biomeWeights);
           for (let slot = 0; slot < pool.batches.length; slot++) {
             const instanceId = slotIds[slot];
-            if (instanceId !== undefined)
+            if (instanceId >= 0)
               pool.batches[slot].setColorAt(instanceId, tint);
           }
-          for (let slot = 0; slot < lod1SlotIds.length; slot++) {
+          for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
             const instanceId = lod1SlotIds[slot];
-            if (instanceId !== undefined)
+            if (instanceId >= 0)
               pool.lod1Batches[slot].setColorAt(instanceId, tint);
           }
-          for (let slot = 0; slot < lod2SlotIds.length; slot++) {
+          for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
             const instanceId = lod2SlotIds[slot];
-            if (instanceId !== undefined)
+            if (instanceId >= 0)
               pool.lod2Batches[slot].setColorAt(instanceId, tint);
           }
         }
 
-        // Track instance for tile cleanup and LOD switching
+        // Track instance for tile cleanup and LOD switching.
+        // Compute the correct initial LOD level based on current camera distance.
+        const spawnDx = spawnCameraPos ? spawnCameraPos.x - pos.x : 0;
+        const spawnDz = spawnCameraPos ? spawnCameraPos.z - pos.z : 0;
+        const spawnDistSq = spawnDx * spawnDx + spawnDz * spawnDz;
+        let initialLOD: 0 | 1 | 2 = 0;
+        if (pool.hasLOD2 && spawnDistSq >= pool.lodDistances.lod2DistanceSq) {
+          initialLOD = 2;
+        } else if (
+          pool.hasLOD1 &&
+          spawnDistSq >= pool.lodDistances.lod1DistanceSq
+        ) {
+          initialLOD = 1;
+        }
+        // Apply initial visibility — hide LOD0 and show the correct level if not LOD0
+        if (initialLOD > 0) {
+          for (let slot = 0; slot < pool.batches.length; slot++) {
+            const id = slotIds[slot];
+            if (id >= 0) pool.batches[slot].setVisibleAt(id, false);
+          }
+          if (initialLOD === 1) {
+            for (let slot = 0; slot < pool.lod1Batches.length; slot++) {
+              const id = lod1SlotIds[slot];
+              if (id >= 0) pool.lod1Batches[slot].setVisibleAt(id, true);
+            }
+          } else {
+            for (let slot = 0; slot < pool.lod2Batches.length; slot++) {
+              const id = lod2SlotIds[slot];
+              if (id >= 0) pool.lod2Batches[slot].setVisibleAt(id, true);
+            }
+          }
+        }
+
         const instanceKey = `${tileKey}_sb_${placedCount}`;
         pool.instances.set(instanceKey, {
           slotIds,
-          lod1SlotIds: lod1SlotIds.length ? lod1SlotIds : undefined,
-          lod2SlotIds: lod2SlotIds.length ? lod2SlotIds : undefined,
+          lod1SlotIds: lod1SlotIds.some((id) => id >= 0)
+            ? lod1SlotIds
+            : undefined,
+          lod2SlotIds: lod2SlotIds.some((id) => id >= 0)
+            ? lod2SlotIds
+            : undefined,
           position: new THREE.Vector3(pos.x, height, pos.z),
-          currentLOD: 0,
+          currentLOD: initialLOD,
         });
         let tileInst = pool.tileInstances.get(tileKey);
         if (!tileInst) {
@@ -4652,27 +4695,29 @@ export class VegetationSystem extends System {
 
             if (targetLOD === inst.currentLOD) continue;
 
-            // Hide old LOD, show new LOD
+            // Show new LOD first, then hide old — prevents a 1-frame invisible gap
             const show = (
               ids: number[] | undefined,
               batches: THREE.BatchedMesh[],
               visible: boolean,
             ) => {
               if (!ids) return;
-              for (let s = 0; s < ids.length; s++) {
-                batches[s]?.setVisibleAt(ids[s], visible);
+              for (let s = 0; s < batches.length; s++) {
+                const id = ids[s];
+                if (id !== undefined && id >= 0)
+                  batches[s].setVisibleAt(id, visible);
               }
             };
-
-            if (inst.currentLOD === 0) show(inst.slotIds, pool.batches, false);
-            else if (inst.currentLOD === 1)
-              show(inst.lod1SlotIds, pool.lod1Batches, false);
-            else show(inst.lod2SlotIds, pool.lod2Batches, false);
 
             if (targetLOD === 0) show(inst.slotIds, pool.batches, true);
             else if (targetLOD === 1)
               show(inst.lod1SlotIds, pool.lod1Batches, true);
             else show(inst.lod2SlotIds, pool.lod2Batches, true);
+
+            if (inst.currentLOD === 0) show(inst.slotIds, pool.batches, false);
+            else if (inst.currentLOD === 1)
+              show(inst.lod1SlotIds, pool.lod1Batches, false);
+            else show(inst.lod2SlotIds, pool.lod2Batches, false);
 
             inst.currentLOD = targetLOD;
           }
