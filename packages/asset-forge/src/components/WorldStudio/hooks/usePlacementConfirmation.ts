@@ -14,7 +14,7 @@ import {
   PlacePrefabCommand,
   type PlacePrefabEntry,
 } from "../../../editor/commands";
-import { useWorldStudio } from "../WorldStudioContext";
+import { useWorldStudio, useEntityTypeRegistry } from "../WorldStudioContext";
 import { getPlacementYOffset } from "./useEditorWorldSync";
 
 let nextEntityId = 1;
@@ -115,7 +115,8 @@ function resolveRemoveAction(
 }
 
 export function usePlacementConfirmation() {
-  const { state, actions } = useWorldStudio();
+  const { state, actions, dispatch } = useWorldStudio();
+  const registry = useEntityTypeRegistry();
   const activePlacement = state.tools.activePlacement;
   const processedRef = useRef(false);
 
@@ -463,6 +464,43 @@ export function usePlacementConfirmation() {
         }
         break;
       }
+
+      // Generic game module entity placement — driven entirely by schema
+      default: {
+        // Try to find a schema where paletteCategory matches the placement category.
+        // The templateId may be a schema template ID or the entity type ID itself.
+        const allTypes = registry.getAll();
+        const schema = allTypes.find(
+          (s) => s.paletteCategory === category || s.id === category,
+        );
+        if (schema) {
+          entityId = generateId(schema.id);
+          // Start from schema defaults, then overlay any template-specific overrides
+          entityData = { ...schema.defaults, id: entityId, name: templateName };
+          if (schema.spatial) {
+            entityData.position = { ...position };
+            if (rotation !== undefined) entityData.rotation = rotation;
+          }
+          // Look for a matching template and merge its defaults
+          const template = schema.templates?.find((t) => t.id === templateId);
+          if (template) {
+            entityData = { ...entityData, ...template.defaults };
+          }
+          // Wire add/remove through generic dispatch
+          const stateKey = schema.storage.stateKey;
+          const stateRoot = schema.storage.stateRoot;
+          addFn = (d) =>
+            dispatch({
+              type: "ENTITY_ADD",
+              stateKey,
+              stateRoot,
+              entity: d as { id: string } & Record<string, unknown>,
+            });
+          removeFn = (id) =>
+            dispatch({ type: "ENTITY_REMOVE", stateKey, stateRoot, id });
+        }
+        break;
+      }
     }
 
     // Execute through command history for undo support
@@ -479,7 +517,7 @@ export function usePlacementConfirmation() {
     // Restart placement with the same template for rapid placement
     // (UE5-style: place one, immediately ready to place another)
     actions.startPlacement(category, templateId, templateName);
-  }, [activePlacement, actions, state.prefabs]);
+  }, [activePlacement, actions, dispatch, registry, state.prefabs]);
 
   // Reset processed flag when placement changes
   useEffect(() => {

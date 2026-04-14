@@ -12,3 +12,13 @@ export type {
 } from "./GameModule";
 export { EntityTypeRegistry } from "./EntityTypeRegistry";
 export { HyperscapeModule } from "./hyperscape";
+export {
+  loadGameModule,
+  loadGameModuleFromUrl,
+  ModuleValidationError,
+} from "./GameModuleLoader";
+export {
+  buildModulePalette,
+  type ModulePaletteItem,
+  type ModulePaletteCategory,
+} from "./utils/buildModulePalette";
