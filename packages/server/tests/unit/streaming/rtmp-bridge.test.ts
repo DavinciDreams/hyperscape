@@ -205,6 +205,9 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     (bridge as any).initOutputs();
     const outputString = (bridge as any).buildOutputString() as string;
 
+    expect(outputString).toContain(
+      "passphrase=stream-passphrase&streamid=stream-id",
+    );
     expect(outputString).toContain("streamid=stream-id");
     expect(outputString).toContain("passphrase=stream-passphrase");
     expect(outputString).not.toContain("pkt_size=");

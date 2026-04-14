@@ -420,8 +420,8 @@ export class RTMPBridge {
   ): string {
     const separator = baseUrl.includes("?") ? "&" : "?";
     const query = new URLSearchParams({
-      streamid: streamId,
       passphrase,
+      streamid: streamId,
     });
     return `${baseUrl}${separator}${query.toString()}`;
   }
