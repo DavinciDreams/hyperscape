@@ -233,6 +233,9 @@ export interface BiomeScatterLayer {
   noiseScale?: number;
   /** Noise cutoff 0–1, positions below this are skipped (default 0.3) */
   noiseThreshold?: number;
+  /** Override scale variation [min, max] for this biome layer.
+   *  Falls back to the asset's own scaleVariation if omitted. */
+  scaleVariation?: [number, number];
   /** Per-instance RGB color multiplier blended with adjacent biome tints by weight.
    *  [1,1,1] (default) = no tint. Values > 1 boost, < 1 darken that channel. */
   colorTint?: [number, number, number];
@@ -247,7 +250,7 @@ const TUNDRA_SCATTER_CONFIG: BiomeScatterConfig = {
   layers: [
     {
       biomeId: "tundra",
-      assets: ["cactus_group"],
+      assets: ["cactus"],
       density: 4,
       minSpacing: 8,
       maxSlope: 0.5,
@@ -261,12 +264,15 @@ const CANYON_SCATTER_CONFIG: BiomeScatterConfig = {
   layers: [
     {
       biomeId: "canyon",
-      assets: ["cactus_group"],
-      density: 4,
+      assets: ["cactus"],
+      density: 1,
       minSpacing: 8,
       maxSlope: 0.5,
       avoidWater: true,
       colorTint: [10.15, 0.1, 0.1],
+      clustering: true,
+      clusterSize: 10,
+      scaleVariation: [0.8, 1.0],
     },
   ],
 };

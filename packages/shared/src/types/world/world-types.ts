@@ -223,6 +223,9 @@ export interface VegetationLayer {
   };
   /** Per-biome RGB color tint for scatter assets — blended by biome influence */
   colorTint?: [number, number, number];
+  /** Override scale variation [min, max] multiplier for this layer.
+   *  Falls back to the asset's own scaleVariation if omitted. */
+  scaleVariation?: [number, number];
 }
 
 /**

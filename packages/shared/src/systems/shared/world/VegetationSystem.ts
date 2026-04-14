@@ -162,7 +162,7 @@ interface ScatterBatchInstance {
   currentLOD: 0 | 1 | 2;
 }
 
-/** Global BatchedMesh pool for a multi-variant scatter asset (e.g. cactus_group) */
+/** Global BatchedMesh pool for a multi-variant scatter asset (e.g. cactus) */
 interface ScatterBatchPool {
   assetId: string;
   /** LOD0 — one BatchedMesh per material slot (full detail) */
@@ -509,7 +509,7 @@ export class VegetationSystem extends System {
   // SCATTER SYSTEM — biome-aware rocks/cacti/flowers via BiomeScatterConfig
   private scatterAssetIds = new Set<string>();
   private scatterMaterials = new Map<string, GPUVegetationMaterial>();
-  // BATCH SCATTER SYSTEM — multi-variant assets (cactus_group etc.) via BatchedMesh
+  // BATCH SCATTER SYSTEM — multi-variant assets (cactus etc.) via BatchedMesh
   private scatterBatchAssetIds = new Set<string>();
   private scatterBatchPools = new Map<string, ScatterBatchPool>();
   private pendingScatterBatchLoads = new Map<
@@ -1536,7 +1536,7 @@ export class VegetationSystem extends System {
         (id) => !this.scatterBatchAssetIds.has(id),
       );
 
-      // BatchedMesh path for multi-variant assets (e.g. cactus_group)
+      // BatchedMesh path for multi-variant assets (e.g. cactus)
       if (batchAssets.length > 0) {
         const batchLayer = { ...scatterLayer, assets: batchAssets };
         await this.generateTileScatterBatched(
@@ -1589,6 +1589,7 @@ export class VegetationSystem extends System {
           clusterSize: scatterLayer.clusterSize,
           noiseScale: scatterLayer.noiseScale,
           noiseThreshold: scatterLayer.noiseThreshold,
+          scaleVariation: scatterLayer.scaleVariation,
         };
         await this.generateLayerVegetation(
           tileKey,
@@ -1916,6 +1917,7 @@ export class VegetationSystem extends System {
       clusterSize: layer.clusterSize,
       noiseScale: layer.noiseScale,
       noiseThreshold: layer.noiseThreshold,
+      scaleVariation: layer.scaleVariation,
     };
     const positions = this.generatePlacementPositions(
       tileWorldX,
@@ -2009,10 +2011,9 @@ export class VegetationSystem extends System {
           Math.floor(rng() * asset.variants!.length) % asset.variants!.length;
 
         // Transform
+        const scaleVar = layer.scaleVariation ?? asset.scaleVariation;
         const scale =
-          asset.baseScale *
-          (asset.scaleVariation[0] +
-            rng() * (asset.scaleVariation[1] - asset.scaleVariation[0]));
+          asset.baseScale * (scaleVar[0] + rng() * (scaleVar[1] - scaleVar[0]));
         const rotY = asset.randomRotation ? rng() * Math.PI * 2 : 0;
 
         this._dummy.position.set(pos.x, height + (asset.yOffset ?? 0), pos.z);
@@ -2576,10 +2577,9 @@ export class VegetationSystem extends System {
         }
 
         // Calculate instance transform
+        const scaleVar = layer.scaleVariation ?? asset.scaleVariation;
         const scale =
-          asset.baseScale *
-          (asset.scaleVariation[0] +
-            rng() * (asset.scaleVariation[1] - asset.scaleVariation[0]));
+          asset.baseScale * (scaleVar[0] + rng() * (scaleVar[1] - scaleVar[0]));
 
         const rotationY = asset.randomRotation ? rng() * Math.PI * 2 : 0;
         let rotationX = 0;
