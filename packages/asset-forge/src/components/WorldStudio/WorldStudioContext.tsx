@@ -99,6 +99,8 @@ import type {
 } from "./types";
 import type { ManifestOverrides } from "./types";
 
+import { EntityTypeRegistry } from "../../gameModules/EntityTypeRegistry";
+import { HyperscapeModule } from "../../gameModules/hyperscape";
 import { useStoreSync } from "../../editor/stores/useStoreSync";
 
 // Import from extracted modules
@@ -179,6 +181,8 @@ interface WorldStudioContextValue {
   dispatch: React.Dispatch<WorldStudioAction>;
   /** Ref to viewport callbacks — does not trigger re-renders when mutated */
   viewportRef: React.MutableRefObject<ViewportCallbacks>;
+  /** Entity type registry for the active game module */
+  registry: EntityTypeRegistry;
 
   /** Convenience action creators matching WorldBuilderContext pattern */
   actions: {
@@ -602,6 +606,9 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
     worldStudioInitialState,
   );
   const viewportRef = useRef<ViewportCallbacks>({});
+
+  // Build entity type registry for the active game module (currently Hyperscape)
+  const registry = useMemo(() => new EntityTypeRegistry(HyperscapeModule), []);
 
   // Sync context state → Zustand stores for incremental migration
   useStoreSync(state);
@@ -2200,8 +2207,8 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
   );
 
   const contextValue = useMemo(
-    () => ({ state, dispatch, actions, computed, viewportRef }),
-    [state, actions, computed],
+    () => ({ state, dispatch, actions, computed, viewportRef, registry }),
+    [state, actions, computed, registry],
   );
 
   return (
@@ -2221,6 +2228,15 @@ export function useWorldStudio(): WorldStudioContextValue {
     throw new Error("useWorldStudio must be used within a WorldStudioProvider");
   }
   return context;
+}
+
+/**
+ * Convenience hook to get the entity type registry from context.
+ * Returns the EntityTypeRegistry for the active game module.
+ */
+export function useEntityTypeRegistry(): EntityTypeRegistry {
+  const { registry } = useWorldStudio();
+  return registry;
 }
 
 /**

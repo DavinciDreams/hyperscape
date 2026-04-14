@@ -619,7 +619,29 @@ export type StudioSpecificAction =
   | { type: "PIE_START" }
   | { type: "PIE_STARTED" }
   | { type: "PIE_STOP" }
-  | { type: "PIE_ERROR"; error: string };
+  | { type: "PIE_ERROR"; error: string }
+
+  // Generic entity CRUD — schema-driven GameModule actions
+  | {
+      type: "ENTITY_ADD";
+      stateKey: string;
+      stateRoot?: "extendedLayers" | "audioLayers";
+      entity: { id: string } & Record<string, unknown>;
+    }
+  | {
+      type: "ENTITY_UPDATE";
+      stateKey: string;
+      stateRoot?: "extendedLayers" | "audioLayers";
+      id: string;
+      updates: Record<string, unknown>;
+      trackSource?: boolean;
+    }
+  | {
+      type: "ENTITY_REMOVE";
+      stateKey: string;
+      stateRoot?: "extendedLayers" | "audioLayers";
+      id: string;
+    };
 
 /** Union of all world builder + studio-specific actions */
 export type WorldStudioAction = WorldBuilderAction | StudioSpecificAction;

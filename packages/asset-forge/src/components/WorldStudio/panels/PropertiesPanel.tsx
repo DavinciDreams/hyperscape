@@ -16,7 +16,8 @@
 import { Info, Settings, Search } from "lucide-react";
 import React, { useState, useMemo, createContext, useContext } from "react";
 
-import { useWorldStudio } from "../WorldStudioContext";
+import { useWorldStudio, useEntityTypeRegistry } from "../WorldStudioContext";
+import { SchemaPropertyEditor } from "../../../gameModules/components/SchemaPropertyEditor";
 import { ErrorBoundary } from "../../common/ErrorBoundary";
 import { InfoRow, PropertySection } from "./properties/PropertyControls";
 import { TransformSection } from "./properties/TransformSection";
@@ -66,6 +67,7 @@ function SearchableSection({
 export function PropertiesPanel() {
   const [searchText, setSearchText] = useState("");
   const { state } = useWorldStudio();
+  const registry = useEntityTypeRegistry();
   const selection = state.builder.editing.selection;
   const world = state.builder.editing.world;
   const extendedLayers = state.extendedLayers;
@@ -369,6 +371,33 @@ export function PropertiesPanel() {
       case "wilderness": {
         const wb = extendedLayers.wildernessBoundary;
         if (wb) return <WildernessBoundaryProperties boundary={wb} />;
+        break;
+      }
+
+      default: {
+        // Schema-driven fallback: look up the selection type in the game module registry
+        const schema = registry.getBySelectionType(selection.type);
+        if (schema) {
+          const root =
+            schema.storage.stateRoot === "audioLayers"
+              ? state.audioLayers
+              : state.extendedLayers;
+          const entities = root[schema.storage.stateKey as keyof typeof root];
+          if (Array.isArray(entities)) {
+            const entity = (entities as Array<{ id: string }>).find(
+              (e) => e.id === selection.id,
+            );
+            if (entity) {
+              return (
+                <SchemaPropertyEditor
+                  schema={schema}
+                  entityId={selection.id}
+                  entityData={entity as Record<string, unknown>}
+                />
+              );
+            }
+          }
+        }
         break;
       }
     }

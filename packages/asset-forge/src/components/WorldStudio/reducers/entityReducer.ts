@@ -90,6 +90,86 @@ function removeEntity<K extends keyof WorldStudioState["extendedLayers"]>(
 }
 
 // ---------------------------------------------------------------------------
+// Generic (untyped) CRUD helpers — for schema-driven GameModule entity actions
+// where the stateKey is a runtime string rather than a statically-known key.
+// Supports both extendedLayers and audioLayers via stateRoot parameter.
+// ---------------------------------------------------------------------------
+
+type StateRoot = "extendedLayers" | "audioLayers";
+
+/** Get the array from the correct state root. */
+function getGenericArray(
+  state: WorldStudioState,
+  key: string,
+  root: StateRoot = "extendedLayers",
+): unknown[] | null {
+  const container =
+    root === "audioLayers" ? state.audioLayers : state.extendedLayers;
+  const arr = container[key as keyof typeof container] as unknown;
+  return Array.isArray(arr) ? arr : null;
+}
+
+/** Return state with the array replaced in the correct root. */
+function setGenericArray(
+  state: WorldStudioState,
+  key: string,
+  root: StateRoot = "extendedLayers",
+  arr: unknown[],
+): WorldStudioState {
+  if (root === "audioLayers") {
+    return { ...state, audioLayers: { ...state.audioLayers, [key]: arr } };
+  }
+  return { ...state, extendedLayers: { ...state.extendedLayers, [key]: arr } };
+}
+
+/** Append an entity to a dynamically-keyed array. */
+function addEntityGeneric(
+  state: WorldStudioState,
+  key: string,
+  entity: HasId,
+  root?: StateRoot,
+): WorldStudioState {
+  const arr = getGenericArray(state, key, root);
+  if (!arr) return state;
+  return setGenericArray(state, key, root, [...arr, entity]);
+}
+
+/** Update an entity by id in a dynamically-keyed array. */
+function updateEntityGeneric(
+  state: WorldStudioState,
+  key: string,
+  id: string,
+  updates: Record<string, unknown>,
+  root?: StateRoot,
+): WorldStudioState {
+  const arr = getGenericArray(state, key, root);
+  if (!arr) return state;
+  return setGenericArray(
+    state,
+    key,
+    root,
+    (arr as HasId[]).map((e) => (e.id === id ? { ...e, ...updates } : e)),
+  );
+}
+
+/** Remove an entity by id from a dynamically-keyed array. */
+function removeEntityGeneric(
+  state: WorldStudioState,
+  key: string,
+  id: string,
+  root?: StateRoot,
+): WorldStudioState {
+  const arr = getGenericArray(state, key, root);
+  if (!arr) return state;
+  return setGenericArray(
+    state,
+    key,
+    root,
+    (arr as HasId[]).filter((e) => e.id !== id),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
 
@@ -99,6 +179,43 @@ export function entityReducer(
   action: WorldStudioAction,
 ): WorldStudioState | null {
   switch (action.type) {
+    // --- Generic schema-driven entity CRUD (GameModule abstraction) ---
+    case "ENTITY_ADD":
+      return addEntityGeneric(
+        state,
+        action.stateKey,
+        action.entity,
+        action.stateRoot,
+      );
+
+    case "ENTITY_UPDATE":
+      if (
+        action.trackSource &&
+        (!action.stateRoot || action.stateRoot === "extendedLayers")
+      ) {
+        return updateEntityWithSource(
+          state,
+          action.stateKey as keyof WorldStudioState["extendedLayers"],
+          action.id,
+          action.updates,
+        );
+      }
+      return updateEntityGeneric(
+        state,
+        action.stateKey,
+        action.id,
+        action.updates,
+        action.stateRoot,
+      );
+
+    case "ENTITY_REMOVE":
+      return removeEntityGeneric(
+        state,
+        action.stateKey,
+        action.id,
+        action.stateRoot,
+      );
+
     // --- Simple CRUD: NPCs ---
     case "ADD_NPC":
       return addEntity(state, "npcs", action.npc);
