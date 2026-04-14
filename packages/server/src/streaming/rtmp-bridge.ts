@@ -14,6 +14,7 @@
 import { spawn, exec, execSync, type ChildProcess } from "child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type {
   RTMPDestination,
@@ -1916,6 +1917,7 @@ export class RTMPBridge {
     const ingestSettings = this.resolveIngestSettings();
     const hlsOutputPath = process.env.HLS_OUTPUT_PATH?.trim();
     if (hlsOutputPath && !ingestSettings.probeOnly) {
+      this.cleanupHlsOutputArtifacts(hlsOutputPath);
       const hlsTime = parseEnvInt(process.env.HLS_TIME_SECONDS, 1, 1);
       const hlsListSize = parseEnvInt(process.env.HLS_LIST_SIZE, 6, 2);
       const hlsDeleteThreshold = parseEnvInt(
@@ -1957,6 +1959,32 @@ export class RTMPBridge {
     }
 
     return outputs.join("|");
+  }
+
+  private cleanupHlsOutputArtifacts(hlsOutputPath: string): void {
+    const outputDir = path.dirname(hlsOutputPath);
+    const manifestName = path.basename(hlsOutputPath);
+    const defaultSegmentPattern = `${hlsOutputPath.replace(/\.[^./]+$/, "") || "stream"}-%09d.ts`;
+    const segmentPattern =
+      process.env.HLS_SEGMENT_PATTERN?.trim() || defaultSegmentPattern;
+    const segmentPrefix = path.basename(segmentPattern).split("%", 1)[0] ?? "";
+    if (!segmentPrefix) return;
+
+    try {
+      if (!fs.existsSync(outputDir)) return;
+      for (const fileName of fs.readdirSync(outputDir)) {
+        const isManifest = fileName === manifestName;
+        const isSegment =
+          fileName.startsWith(segmentPrefix) &&
+          (fileName.endsWith(".ts") || fileName.endsWith(".tmp"));
+        if (!isManifest && !isSegment) continue;
+        fs.rmSync(path.join(outputDir, fileName), { force: true });
+      }
+    } catch (error) {
+      console.warn(
+        `[RTMPBridge] Unable to clean HLS output artifacts in ${outputDir}: ${errMsg(error)}`,
+      );
+    }
   }
 
   private buildDirectOutputArgs(): string[] | null {

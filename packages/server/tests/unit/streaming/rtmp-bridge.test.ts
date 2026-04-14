@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTMPBridge } from "../../../src/streaming/rtmp-bridge.js";
 
@@ -27,6 +30,9 @@ const ENV_KEYS = [
   "STREAM_INGEST_SRT_PASSPHRASE",
   "HLS_OUTPUT_PATH",
   "HLS_SEGMENT_PATTERN",
+  "HLS_TIME_SECONDS",
+  "HLS_LIST_SIZE",
+  "HLS_DELETE_THRESHOLD",
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -331,6 +337,32 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
         }),
       ]),
     );
+  });
+
+  it("cleans stale local HLS artifacts before starting a new output", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rtmp-hls-"));
+    try {
+      process.env.HLS_OUTPUT_PATH = path.join(tempDir, "stream.m3u8");
+      fs.writeFileSync(process.env.HLS_OUTPUT_PATH, "#EXTM3U\n");
+      fs.writeFileSync(path.join(tempDir, "stream-000000001.ts"), "old");
+      fs.writeFileSync(path.join(tempDir, "stream-000000002.ts.tmp"), "old");
+      fs.writeFileSync(path.join(tempDir, "unrelated.ts"), "keep");
+
+      const bridge = new RTMPBridge();
+      const outputString = (bridge as any).buildOutputString() as string;
+
+      expect(outputString).toContain("f=hls");
+      expect(fs.existsSync(process.env.HLS_OUTPUT_PATH)).toBe(false);
+      expect(fs.existsSync(path.join(tempDir, "stream-000000001.ts"))).toBe(
+        false,
+      );
+      expect(fs.existsSync(path.join(tempDir, "stream-000000002.ts.tmp"))).toBe(
+        false,
+      );
+      expect(fs.existsSync(path.join(tempDir, "unrelated.ts"))).toBe(true);
+    } finally {
+      fs.rmSync(tempDir, { force: true, recursive: true });
+    }
   });
 
   it("waits for FFmpeg process close during stopProcessing", async () => {
