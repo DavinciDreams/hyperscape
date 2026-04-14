@@ -476,6 +476,7 @@ export function StreamingMode() {
   const duelStateTickRef = useRef(0);
   const latestRenderTickAtRef = useRef<number | null>(null);
   const latestDuelStateTickAtRef = useRef<number | null>(null);
+  const avatarLoadEventCountRef = useRef(0);
   const [streamAccessToken] = useState<string | null>(() =>
     getStreamingAccessToken(),
   );
@@ -669,6 +670,7 @@ export function StreamingMode() {
       duelStateTickRef.current = 0;
       latestRenderTickAtRef.current = null;
       latestDuelStateTickAtRef.current = null;
+      avatarLoadEventCountRef.current = 0;
       win.__HYPERSCAPE_STREAM_HEARTBEAT__ = {
         renderTick: 0,
         latestRenderTickAt: null,
@@ -1274,6 +1276,7 @@ export function StreamingMode() {
 
   useEffect(() => {
     clearAvatarPolling();
+    avatarLoadEventCountRef.current = 0;
 
     if (!needsTargetAvatar) {
       setTargetAvatarReady(true);
@@ -1307,13 +1310,24 @@ export function StreamingMode() {
 
     const handleAvatarLoadComplete = (payload: unknown) => {
       const data = payload as { playerId?: string; success?: boolean };
-      if (data.playerId === targetEntityId || checkAvatarReady()) {
-        if (checkAvatarReady()) {
-          setTargetAvatarReady(true);
-          setTargetAvatarGraceExpired(false);
-          clearAvatarPolling();
-        }
+      if (data.playerId !== targetEntityId) return;
+      avatarLoadEventCountRef.current += 1;
+      if (data.success === true) {
+        // Authoritative success for the current target — accept it without
+        // a second field-based re-check. `PlayerRemote.applyAvatar` assigns
+        // `this.avatar` before emitting the event in its `finally` block, so
+        // by the time we observe `success === true` the entity is already in
+        // a truthy readiness state. Previously we re-ran `checkAvatarReady`
+        // and bailed if it still returned false, which masked real successes
+        // when the probe was looking at the wrong collection.
+        setTargetAvatarReady(true);
+        setTargetAvatarGraceExpired(false);
+        clearAvatarPolling();
+        return;
       }
+      // Non-success event — still trust the poll to catch a fallback avatar
+      // install, but do not set ready on the event alone.
+      checkAvatarReady();
     };
 
     world.on(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
