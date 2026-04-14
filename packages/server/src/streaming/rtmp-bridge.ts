@@ -38,6 +38,7 @@ import {
   isStreamDestinationEnabled,
   resolveEnabledStreamDestinations,
 } from "./stream-destinations.js";
+import { probePlaybackUrl } from "./destination-probe.js";
 import { errMsg } from "../shared/errMsg.js";
 
 const require = createRequire(import.meta.url);
@@ -184,6 +185,12 @@ export class RTMPBridge {
   private fatalWriteRestartTimeout: ReturnType<typeof setTimeout> | null = null;
   /** Guard against overlapping fatal-write restarts */
   private fatalWriteRecoveryInFlight = false;
+  /** Prevent overlapping playback delivery probes */
+  private deliveryRecoveryProbeInFlight = false;
+  /** Consecutive canonical playback probe failures while FFmpeg is healthy */
+  private deliveryRecoveryProbeFailures = 0;
+  /** Last time delivery-health recovery requested an FFmpeg restart */
+  private lastDeliveryRecoveryRestartAt = 0;
   /** Last seen CDP timestamp for monotonicity checks */
   private lastCdpTimestamp: number | null = null;
   /** Number of non-monotonic CDP timestamps observed */
@@ -381,6 +388,34 @@ export class RTMPBridge {
   ): boolean {
     if (raw == null || raw === "") return defaultValue;
     return !["0", "false", "no", "off"].includes(raw.trim().toLowerCase());
+  }
+
+  private static deliveryRecoveryGraceMs(): number {
+    return parseEnvInt(
+      process.env.STREAM_DELIVERY_RECOVERY_GRACE_MS,
+      45_000,
+      0,
+    );
+  }
+
+  private static deliveryRecoveryFailureThreshold(): number {
+    return parseEnvInt(process.env.STREAM_DELIVERY_RECOVERY_FAILURES, 3, 1);
+  }
+
+  private static deliveryRecoveryProbeTimeoutMs(): number {
+    return parseEnvInt(
+      process.env.STREAM_DELIVERY_RECOVERY_PROBE_TIMEOUT_MS,
+      2_500,
+      500,
+    );
+  }
+
+  private static deliveryRecoveryRestartCooldownMs(): number {
+    return parseEnvInt(
+      process.env.STREAM_DELIVERY_RECOVERY_RESTART_COOLDOWN_MS,
+      30_000,
+      5_000,
+    );
   }
 
   private static toRtmpUrl(input: string): string {
@@ -677,6 +712,7 @@ export class RTMPBridge {
   private scheduleFatalWriteRestart(
     message: string,
     targetProcess: ChildProcess | null = this.ffmpeg,
+    label = "Fatal FFmpeg output write",
   ): void {
     if (!targetProcess || this.ffmpeg !== targetProcess) return;
     if (this.fatalWriteRecoveryInFlight || this.fatalWriteRestartTimeout) {
@@ -688,7 +724,7 @@ export class RTMPBridge {
     );
     if (this.ffmpegRestartAttempts >= RTMPBridge.MAX_RESTART_ATTEMPTS) {
       console.error(
-        `[RTMPBridge] Fatal FFmpeg output write persisted after ${this.ffmpegRestartAttempts} restart attempts. Manual intervention required: ${sanitizedMessage}`,
+        `[RTMPBridge] ${label} persisted after ${this.ffmpegRestartAttempts} restart attempts. Manual intervention required: ${sanitizedMessage}`,
       );
       return;
     }
@@ -700,7 +736,7 @@ export class RTMPBridge {
     const delay = Math.min(baseDelay + jitter, RTMPBridge.MAX_RESTART_DELAY);
 
     console.warn(
-      `[RTMPBridge] Fatal FFmpeg output write detected; restarting encoder in ${Math.round(delay)}ms: ${sanitizedMessage}`,
+      `[RTMPBridge] ${label} detected; restarting encoder in ${Math.round(delay)}ms: ${sanitizedMessage}`,
     );
 
     this.fatalWriteRestartTimeout = setTimeout(() => {
@@ -761,6 +797,129 @@ export class RTMPBridge {
     } finally {
       this.fatalWriteRecoveryInFlight = false;
     }
+  }
+
+  private resolveCanonicalDeliveryDestination(): DestinationStatus | null {
+    const destinations = this.status.destinations.filter((destination) => {
+      if (!destination.playbackUrl) return false;
+      const provider = normalizeStreamDestinationProvider(
+        destination.provider ?? null,
+        destination.name,
+      );
+      return provider === "cloudflare_stream";
+    });
+    return (
+      destinations.find((destination) => destination.role === "canonical") ??
+      destinations[0] ??
+      null
+    );
+  }
+
+  private shouldRunDeliveryRecoveryProbe(
+    now: number,
+    stats: ReturnType<RTMPBridge["getStats"]>,
+    destination: DestinationStatus | null,
+  ): destination is DestinationStatus & { playbackUrl: string } {
+    if (!destination?.playbackUrl) return false;
+    if (
+      !RTMPBridge.parseEnvBool(
+        process.env.STREAM_DELIVERY_RECOVERY_ENABLED,
+        true,
+      )
+    ) {
+      return false;
+    }
+    if (!this.ffmpeg || !this.status.ffmpegRunning || !stats.healthy) {
+      this.deliveryRecoveryProbeFailures = 0;
+      return false;
+    }
+    if (this.deliveryRecoveryProbeInFlight) return false;
+    if (this.fatalWriteRecoveryInFlight || this.fatalWriteRestartTimeout) {
+      return false;
+    }
+    if (
+      this.startTime > 0 &&
+      now - this.startTime < RTMPBridge.deliveryRecoveryGraceMs()
+    ) {
+      return false;
+    }
+    if (
+      this.lastDeliveryRecoveryRestartAt > 0 &&
+      now - this.lastDeliveryRecoveryRestartAt <
+        RTMPBridge.deliveryRecoveryRestartCooldownMs()
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private checkCanonicalDeliveryRecovery(
+    now: number,
+    stats: ReturnType<RTMPBridge["getStats"]>,
+  ): void {
+    const destination = this.resolveCanonicalDeliveryDestination();
+    if (!this.shouldRunDeliveryRecoveryProbe(now, stats, destination)) {
+      return;
+    }
+
+    const targetProcess = this.ffmpeg;
+    const playbackUrl = destination.playbackUrl;
+    this.deliveryRecoveryProbeInFlight = true;
+
+    void probePlaybackUrl(
+      playbackUrl,
+      RTMPBridge.deliveryRecoveryProbeTimeoutMs(),
+    )
+      .then((result) => {
+        if (!targetProcess || this.ffmpeg !== targetProcess) return;
+
+        if (result.ready) {
+          this.deliveryRecoveryProbeFailures = 0;
+          destination.connected = true;
+          if (
+            destination.error === "delivery_disconnected" ||
+            destination.error?.startsWith("playback_probe_")
+          ) {
+            delete destination.error;
+          }
+          return;
+        }
+
+        this.deliveryRecoveryProbeFailures += 1;
+        destination.connected = false;
+        const failureLabel =
+          result.lastError ??
+          `playback_probe_${result.manifestStatus}_${result.statusCode ?? "no_status"}`;
+        destination.error = failureLabel;
+
+        console.warn(
+          `[RTMPBridge] Canonical Cloudflare playback probe failed (${this.deliveryRecoveryProbeFailures}/${RTMPBridge.deliveryRecoveryFailureThreshold()}): ${failureLabel}`,
+        );
+
+        if (
+          this.deliveryRecoveryProbeFailures <
+          RTMPBridge.deliveryRecoveryFailureThreshold()
+        ) {
+          return;
+        }
+
+        this.deliveryRecoveryProbeFailures = 0;
+        this.lastDeliveryRecoveryRestartAt = Date.now();
+        this.scheduleFatalWriteRestart(
+          `canonical delivery unavailable after healthy FFmpeg output: ${failureLabel}`,
+          targetProcess,
+          "Canonical delivery probe failure",
+        );
+      })
+      .catch((error) => {
+        if (!targetProcess || this.ffmpeg !== targetProcess) return;
+        this.deliveryRecoveryProbeFailures += 1;
+        destination.connected = false;
+        destination.error = errMsg(error);
+      })
+      .finally(() => {
+        this.deliveryRecoveryProbeInFlight = false;
+      });
   }
 
   /**
@@ -2671,6 +2830,7 @@ export class RTMPBridge {
         );
       }
     }
+    this.checkCanonicalDeliveryRecovery(now, stats);
 
     // Log periodic health status (every 5 health checks = ~50s)
     if (Math.random() < 0.2) {

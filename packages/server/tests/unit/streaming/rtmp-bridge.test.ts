@@ -33,6 +33,11 @@ const ENV_KEYS = [
   "HLS_TIME_SECONDS",
   "HLS_LIST_SIZE",
   "HLS_DELETE_THRESHOLD",
+  "STREAM_DELIVERY_RECOVERY_ENABLED",
+  "STREAM_DELIVERY_RECOVERY_GRACE_MS",
+  "STREAM_DELIVERY_RECOVERY_FAILURES",
+  "STREAM_DELIVERY_RECOVERY_PROBE_TIMEOUT_MS",
+  "STREAM_DELIVERY_RECOVERY_RESTART_COOLDOWN_MS",
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -52,6 +57,7 @@ function restoreEnv(): void {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   restoreEnv();
 });
 
@@ -65,6 +71,15 @@ function createFakeFfmpegProcess() {
   proc.stdin.end = vi.fn();
   proc.kill = vi.fn(() => true);
   return proc;
+}
+
+function mockProbeResponse(status: number) {
+  return {
+    status,
+    body: {
+      cancel: vi.fn().mockResolvedValue(undefined),
+    },
+  } as unknown as Response;
 }
 
 describe("RTMPBridge Cloudflare ingest profile", () => {
@@ -341,6 +356,68 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     expect((bridge as any).status.destinations[0]?.connected).toBe(false);
     expect((bridge as any).status.destinations[0]?.error).toContain(
       "session has been invalidated",
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(proc.stdin.end).toHaveBeenCalledOnce();
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+
+    proc.emit("close", 0, null);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(startDirect).toHaveBeenCalledOnce();
+    expect((bridge as any).status.ffmpegRunning).toBe(true);
+  });
+
+  it("restarts FFmpeg when Cloudflare playback stays unavailable while capture is healthy", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(mockProbeResponse(404));
+    process.env.STREAM_DELIVERY_RECOVERY_GRACE_MS = "0";
+    process.env.STREAM_DELIVERY_RECOVERY_FAILURES = "1";
+    process.env.STREAM_DELIVERY_RECOVERY_RESTART_COOLDOWN_MS = "5000";
+
+    const bridge = new RTMPBridge();
+    const proc = createFakeFfmpegProcess();
+    const now = Date.now();
+    (bridge as any).ffmpeg = proc;
+    (bridge as any).cdpDirectMode = true;
+    (bridge as any).status.ffmpegRunning = true;
+    (bridge as any).status.clientConnected = true;
+    (bridge as any).startTime = now - 60_000;
+    (bridge as any).lastDataReceived = now;
+    (bridge as any).status.destinations = [
+      {
+        id: "canonical-cloudflare",
+        name: "External Delivery",
+        role: "canonical",
+        provider: "cloudflare_stream",
+        transport: "rtmps",
+        playbackUrl:
+          "https://videodelivery.net/test/manifest/video.m3u8?protocol=llhls",
+        ingestUrl: "rtmps://live.cloudflare.com:443/live",
+        connected: true,
+        bytesWritten: 0,
+        startedAt: now - 60_000,
+      },
+    ];
+    const startDirect = vi
+      .spyOn(bridge as any, "startFFmpegDirect")
+      .mockImplementation(() => {
+        (bridge as any).ffmpeg = createFakeFfmpegProcess();
+        (bridge as any).status.ffmpegRunning = true;
+      });
+
+    (bridge as any).checkHealth();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect((bridge as any).status.destinations[0]?.connected).toBe(false);
+    expect((bridge as any).status.destinations[0]?.error).toContain(
+      "playback_probe_missing",
     );
 
     await vi.advanceTimersByTimeAsync(1_000);
