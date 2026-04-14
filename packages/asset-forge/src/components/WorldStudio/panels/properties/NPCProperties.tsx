@@ -33,7 +33,7 @@ interface Props {
   npc: PlacedNPC;
 }
 
-export function NPCProperties({ npc }: Props) {
+export const NPCProperties = React.memo(function NPCProperties({ npc }: Props) {
   const { actions, state } = useWorldStudio();
   const ai = useAIGeneration();
 
@@ -316,4 +316,4 @@ export function NPCProperties({ npc }: Props) {
       )}
     </>
   );
-}
+});

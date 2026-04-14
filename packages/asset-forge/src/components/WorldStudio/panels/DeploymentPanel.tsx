@@ -248,6 +248,7 @@ export function DeploymentPanel() {
 
   // Fetch staging status and deployment history on mount and after successful push
   useEffect(() => {
+    const controller = new AbortController();
     const serverUrl =
       import.meta.env.VITE_API_URL ||
       import.meta.env.VITE_GAME_SERVER_URL ||
@@ -255,19 +256,25 @@ export function DeploymentPanel() {
 
     const fetchStatus = async () => {
       try {
-        const resp = await fetch(`${serverUrl}/api/deploy/staging/status`);
+        const resp = await fetch(`${serverUrl}/api/deploy/staging/status`, {
+          signal: controller.signal,
+        });
         if (resp.ok) {
           setStagingStatus((await resp.json()) as StagingStatus);
         }
-      } catch {
-        // Server not reachable — leave status null
+      } catch (err) {
+        if (err instanceof Error && err.name !== "AbortError") {
+          // Server not reachable — leave status null
+        }
       }
     };
 
     // Phase 5.1: Load deployment history from game server on mount
     const fetchHistory = async () => {
       try {
-        const resp = await fetch(`${serverUrl}/api/deploy/history`);
+        const resp = await fetch(`${serverUrl}/api/deploy/history`, {
+          signal: controller.signal,
+        });
         if (resp.ok) {
           const data = (await resp.json()) as {
             deployments: Array<{
@@ -304,13 +311,17 @@ export function DeploymentPanel() {
             actions.deployHistoryLoad(records);
           }
         }
-      } catch {
-        // Server not reachable — history stays empty
+      } catch (err) {
+        if (err instanceof Error && err.name !== "AbortError") {
+          // Server not reachable — history stays empty
+        }
       }
     };
 
     void fetchStatus();
     void fetchHistory();
+
+    return () => controller.abort();
   }, [deployment.stagingStatus]);
 
   const world = state.builder.editing.world;

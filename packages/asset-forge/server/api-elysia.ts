@@ -166,11 +166,13 @@ const app = new Elysia()
       // Skip rate limiting for read-only data endpoints
       skip: (req) => {
         const path = new URL(req.url).pathname;
-        return (
-          path === "/api/health" ||
-          path.startsWith("/api/manifests") ||
-          path.startsWith("/api/world/")
-        );
+        const method = req.method;
+        // Always exempt health checks and manifest reads
+        if (path === "/api/health" || path.startsWith("/api/manifests"))
+          return true;
+        // Only skip rate limiting for READ operations on world data
+        if (path.startsWith("/api/world/") && method === "GET") return true;
+        return false;
       },
     }),
   )

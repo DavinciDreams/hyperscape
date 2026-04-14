@@ -208,13 +208,14 @@ export function useProjectLoader(projectId: string) {
   projectIdRef.current = projectId;
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
 
     async function load() {
       actions.loadStart();
       try {
         const project = await getWorldProject(projectId);
-        if (cancelled) return;
+        if (cancelled || controller.signal.aborted) return;
 
         // Check if this is a placeholder project (created at signup, no world data yet)
         const rawData = project.worldData as Record<string, unknown>;
@@ -359,10 +360,15 @@ export function useProjectLoader(projectId: string) {
       }
     }
 
-    load();
+    load().catch((err) => {
+      if (err instanceof Error && err.name !== "AbortError") {
+        console.error("[ProjectLoader] Unexpected error:", err);
+      }
+    });
 
     return () => {
       cancelled = true;
+      controller.abort();
       // Release lock on unmount
       if (lockAcquiredRef.current) {
         lockAcquiredRef.current = false;

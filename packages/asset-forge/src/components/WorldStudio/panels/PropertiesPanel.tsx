@@ -17,6 +17,7 @@ import { Info, Settings, Search } from "lucide-react";
 import React, { useState, useMemo, createContext, useContext } from "react";
 
 import { useWorldStudio } from "../WorldStudioContext";
+import { ErrorBoundary } from "../../common/ErrorBoundary";
 import { InfoRow, PropertySection } from "./properties/PropertyControls";
 import { TransformSection } from "./properties/TransformSection";
 import { TerrainProperties } from "./properties/TerrainProperties";
@@ -429,7 +430,19 @@ export function PropertiesPanel() {
               </SearchableSection>
 
               {/* Per-type editor */}
-              {renderSelectionEditor()}
+              <ErrorBoundary
+                resetKey={selection.id}
+                fallback={
+                  <PropertySection title="Error">
+                    <p style={{ padding: 8, color: "#e88" }}>
+                      Failed to render properties. Select a different entity to
+                      recover.
+                    </p>
+                  </PropertySection>
+                }
+              >
+                {renderSelectionEditor()}
+              </ErrorBoundary>
 
               {/* World summary when available */}
               {world && (

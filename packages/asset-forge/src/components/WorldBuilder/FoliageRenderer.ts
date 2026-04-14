@@ -270,10 +270,35 @@ function getRockGeometry(): THREE.BufferGeometry {
   return geom;
 }
 
-// ============== MATERIALS ==============
+// ============== MATERIALS (LRU-evicted cache) ==============
 
-/** Material cache — one per foliage type per color */
+const MAX_CACHED_MATERIALS = 32;
 const _materialCache = new Map<string, THREE.Material>();
+/** Access order: most-recently-used at end */
+const _materialAccessOrder: string[] = [];
+
+/** Record a cache hit/insert and evict if over limit. */
+function touchMaterial(key: string): void {
+  const idx = _materialAccessOrder.indexOf(key);
+  if (idx !== -1) _materialAccessOrder.splice(idx, 1);
+  _materialAccessOrder.push(key);
+  // Evict oldest when over limit
+  while (_materialAccessOrder.length > MAX_CACHED_MATERIALS) {
+    const oldest = _materialAccessOrder.shift()!;
+    const mat = _materialCache.get(oldest);
+    if (mat) {
+      mat.dispose();
+      _materialCache.delete(oldest);
+    }
+  }
+}
+
+/** Dispose all cached materials. Call on renderer teardown. */
+export function clearFoliageMaterialCache(): void {
+  for (const mat of _materialCache.values()) mat.dispose();
+  _materialCache.clear();
+  _materialAccessOrder.length = 0;
+}
 
 function getGrassMaterial(color: number): THREE.Material {
   const key = `grass_${color}`;
@@ -287,6 +312,7 @@ function getGrassMaterial(color: number): THREE.Material {
     });
     _materialCache.set(key, mat);
   }
+  touchMaterial(key);
   return mat;
 }
 
@@ -300,6 +326,7 @@ function getFlowerMaterial(color: number): THREE.Material {
     });
     _materialCache.set(key, mat);
   }
+  touchMaterial(key);
   return mat;
 }
 
@@ -314,6 +341,7 @@ function getRockMaterial(): THREE.Material {
     });
     _materialCache.set(key, mat);
   }
+  touchMaterial(key);
   return mat;
 }
 
@@ -833,6 +861,7 @@ export class FoliageManager {
     }
     this.tiles.clear();
     this.generateQueue = [];
+    clearFoliageMaterialCache();
   }
 
   /**

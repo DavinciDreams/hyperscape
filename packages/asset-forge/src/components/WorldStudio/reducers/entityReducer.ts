@@ -1,13 +1,97 @@
 /**
  * Entity sub-reducer — handles all entity CRUD actions on extendedLayers.
  *
- * Extracted from WorldStudioContext.tsx to reduce file size.
- * Covers: NPCs, spawn points, teleports, mob spawns, resources, stations,
- * POIs, water bodies, mines, wilderness boundary, batch entity ops, and
- * game entity data.
+ * Uses a factory pattern for the repetitive ADD/UPDATE/REMOVE triplets,
+ * with explicit handling for special cases (source tracking, batch ops, etc.).
  */
 
 import type { WorldStudioState, WorldStudioAction } from "../worldStudioTypes";
+
+// ---------------------------------------------------------------------------
+// Generic CRUD helpers
+// ---------------------------------------------------------------------------
+
+type HasId = { id: string };
+
+/** Immutable append to an extendedLayers array. */
+function addEntity<K extends keyof WorldStudioState["extendedLayers"]>(
+  state: WorldStudioState,
+  key: K,
+  entity: WorldStudioState["extendedLayers"][K] extends Array<infer T>
+    ? T
+    : never,
+): WorldStudioState {
+  const arr = state.extendedLayers[key] as unknown[];
+  return {
+    ...state,
+    extendedLayers: { ...state.extendedLayers, [key]: [...arr, entity] },
+  };
+}
+
+/** Immutable update by id within an extendedLayers array. */
+function updateEntity<K extends keyof WorldStudioState["extendedLayers"]>(
+  state: WorldStudioState,
+  key: K,
+  id: string,
+  updates: Record<string, unknown>,
+): WorldStudioState {
+  const arr = state.extendedLayers[key] as HasId[];
+  return {
+    ...state,
+    extendedLayers: {
+      ...state.extendedLayers,
+      [key]: arr.map((e) => (e.id === id ? { ...e, ...updates } : e)),
+    },
+  };
+}
+
+/** Immutable update that also promotes procgen→hand-placed source. */
+function updateEntityWithSource<
+  K extends keyof WorldStudioState["extendedLayers"],
+>(
+  state: WorldStudioState,
+  key: K,
+  id: string,
+  updates: Record<string, unknown>,
+): WorldStudioState {
+  const arr = state.extendedLayers[key] as Array<HasId & { source?: string }>;
+  return {
+    ...state,
+    extendedLayers: {
+      ...state.extendedLayers,
+      [key]: arr.map((e) =>
+        e.id === id
+          ? {
+              ...e,
+              ...updates,
+              source:
+                e.source === "procgen" ? ("hand-placed" as const) : e.source,
+            }
+          : e,
+      ),
+    },
+  };
+}
+
+/** Immutable remove by id from an extendedLayers array. */
+function removeEntity<K extends keyof WorldStudioState["extendedLayers"]>(
+  state: WorldStudioState,
+  key: K,
+  id: string,
+): WorldStudioState {
+  const arr = state.extendedLayers[key] as HasId[];
+  return {
+    ...state,
+    extendedLayers: {
+      ...state.extendedLayers,
+      [key]: arr.filter((e) => e.id !== id),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
 
 /** Handle entity-related actions. Returns the new state, or null if unhandled. */
 export function entityReducer(
@@ -15,309 +99,90 @@ export function entityReducer(
   action: WorldStudioAction,
 ): WorldStudioState | null {
   switch (action.type) {
-    // Extended layer entity actions — NPCs
+    // --- Simple CRUD: NPCs ---
     case "ADD_NPC":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          npcs: [...state.extendedLayers.npcs, action.npc],
-        },
-      };
-
+      return addEntity(state, "npcs", action.npc);
     case "UPDATE_NPC":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          npcs: state.extendedLayers.npcs.map((n) =>
-            n.id === action.npcId ? { ...n, ...action.updates } : n,
-          ),
-        },
-      };
-
+      return updateEntity(state, "npcs", action.npcId, action.updates);
     case "REMOVE_NPC":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          npcs: state.extendedLayers.npcs.filter((n) => n.id !== action.npcId),
-        },
-      };
+      return removeEntity(state, "npcs", action.npcId);
 
-    // Extended layer entity actions — Spawn Points
+    // --- Simple CRUD: Spawn Points ---
     case "ADD_SPAWN_POINT":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          spawnPoints: [...state.extendedLayers.spawnPoints, action.spawnPoint],
-        },
-      };
-
+      return addEntity(state, "spawnPoints", action.spawnPoint);
     case "UPDATE_SPAWN_POINT":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          spawnPoints: state.extendedLayers.spawnPoints.map((sp) =>
-            sp.id === action.id ? { ...sp, ...action.updates } : sp,
-          ),
-        },
-      };
-
+      return updateEntity(state, "spawnPoints", action.id, action.updates);
     case "REMOVE_SPAWN_POINT":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          spawnPoints: state.extendedLayers.spawnPoints.filter(
-            (sp) => sp.id !== action.id,
-          ),
-        },
-      };
+      return removeEntity(state, "spawnPoints", action.id);
 
-    // Extended layer entity actions — Teleports
+    // --- Simple CRUD: Teleports ---
     case "ADD_TELEPORT":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          teleports: [...state.extendedLayers.teleports, action.teleport],
-        },
-      };
-
+      return addEntity(state, "teleports", action.teleport);
     case "UPDATE_TELEPORT":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          teleports: state.extendedLayers.teleports.map((tp) =>
-            tp.id === action.id ? { ...tp, ...action.updates } : tp,
-          ),
-        },
-      };
-
+      return updateEntity(state, "teleports", action.id, action.updates);
     case "REMOVE_TELEPORT":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          teleports: state.extendedLayers.teleports.filter(
-            (tp) => tp.id !== action.id,
-          ),
-        },
-      };
+      return removeEntity(state, "teleports", action.id);
 
-    // Extended layer entity actions — Mob Spawns
+    // --- Source-tracking CRUD: Mob Spawns ---
     case "ADD_MOB_SPAWN":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          mobSpawns: [...state.extendedLayers.mobSpawns, action.mobSpawn],
-        },
-      };
-
+      return addEntity(state, "mobSpawns", action.mobSpawn);
     case "UPDATE_MOB_SPAWN":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          mobSpawns: state.extendedLayers.mobSpawns.map((ms) =>
-            ms.id === action.id
-              ? {
-                  ...ms,
-                  ...action.updates,
-                  source:
-                    ms.source === "procgen"
-                      ? ("hand-placed" as const)
-                      : ms.source,
-                }
-              : ms,
-          ),
-        },
-      };
-
+      return updateEntityWithSource(
+        state,
+        "mobSpawns",
+        action.id,
+        action.updates,
+      );
     case "REMOVE_MOB_SPAWN":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          mobSpawns: state.extendedLayers.mobSpawns.filter(
-            (ms) => ms.id !== action.id,
-          ),
-        },
-      };
+      return removeEntity(state, "mobSpawns", action.id);
 
-    // Extended layer entity actions — Resources
+    // --- Source-tracking CRUD: Resources ---
     case "ADD_RESOURCE":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          resources: [...state.extendedLayers.resources, action.resource],
-        },
-      };
-
+      return addEntity(state, "resources", action.resource);
     case "UPDATE_RESOURCE":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          resources: state.extendedLayers.resources.map((r) =>
-            r.id === action.id
-              ? {
-                  ...r,
-                  ...action.updates,
-                  source:
-                    r.source === "procgen"
-                      ? ("hand-placed" as const)
-                      : r.source,
-                }
-              : r,
-          ),
-        },
-      };
-
+      return updateEntityWithSource(
+        state,
+        "resources",
+        action.id,
+        action.updates,
+      );
     case "REMOVE_RESOURCE":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          resources: state.extendedLayers.resources.filter(
-            (r) => r.id !== action.id,
-          ),
-        },
-      };
+      return removeEntity(state, "resources", action.id);
 
-    // Extended layer entity actions — Stations
+    // --- Source-tracking CRUD: Stations ---
     case "ADD_STATION":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          stations: [...state.extendedLayers.stations, action.station],
-        },
-      };
-
+      return addEntity(state, "stations", action.station);
     case "UPDATE_STATION":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          stations: state.extendedLayers.stations.map((s) =>
-            s.id === action.id
-              ? {
-                  ...s,
-                  ...action.updates,
-                  source:
-                    s.source === "procgen"
-                      ? ("hand-placed" as const)
-                      : s.source,
-                }
-              : s,
-          ),
-        },
-      };
-
+      return updateEntityWithSource(
+        state,
+        "stations",
+        action.id,
+        action.updates,
+      );
     case "REMOVE_STATION":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          stations: state.extendedLayers.stations.filter(
-            (s) => s.id !== action.id,
-          ),
-        },
-      };
+      return removeEntity(state, "stations", action.id);
 
-    // Extended layer entity actions — POIs
+    // --- Simple CRUD: POIs ---
     case "ADD_POI":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          pois: [...state.extendedLayers.pois, action.poi],
-        },
-      };
-
+      return addEntity(state, "pois", action.poi);
     case "UPDATE_POI":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          pois: state.extendedLayers.pois.map((p) =>
-            p.id === action.id ? { ...p, ...action.updates } : p,
-          ),
-        },
-      };
-
+      return updateEntity(state, "pois", action.id, action.updates);
     case "REMOVE_POI":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          pois: state.extendedLayers.pois.filter((p) => p.id !== action.id),
-        },
-      };
+      return removeEntity(state, "pois", action.id);
 
-    // Extended layer entity actions — Water Bodies
+    // --- Simple CRUD: Water Bodies ---
     case "ADD_WATER_BODY":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          waterBodies: [...state.extendedLayers.waterBodies, action.waterBody],
-        },
-      };
-
+      return addEntity(state, "waterBodies", action.waterBody);
     case "UPDATE_WATER_BODY":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          waterBodies: state.extendedLayers.waterBodies.map((w) =>
-            w.id === action.id ? { ...w, ...action.updates } : w,
-          ),
-        },
-      };
-
+      return updateEntity(state, "waterBodies", action.id, action.updates);
     case "REMOVE_WATER_BODY":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          waterBodies: state.extendedLayers.waterBodies.filter(
-            (w) => w.id !== action.id,
-          ),
-        },
-      };
+      return removeEntity(state, "waterBodies", action.id);
 
-    // Wilderness Boundary
-    case "SET_WILDERNESS_BOUNDARY":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          wildernessBoundary: action.boundary,
-        },
-      };
-
-    // Batch actions for auto-generation — entities
-    case "BATCH_ADD_ENTITIES": {
-      const newMobs = [...state.extendedLayers.mobSpawns, ...action.mobSpawns];
-      const newRes = [...state.extendedLayers.resources, ...action.resources];
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          mobSpawns: newMobs,
-          resources: newRes,
-        },
-      };
-    }
-
+    // --- Mines (ADD + REMOVE + batch) ---
+    case "ADD_MINE":
+      return addEntity(state, "mines", action.mine);
+    case "REMOVE_MINE":
+      return removeEntity(state, "mines", action.id);
     case "BATCH_ADD_MINES":
       return {
         ...state,
@@ -327,21 +192,32 @@ export function entityReducer(
         },
       };
 
-    case "ADD_MINE":
+    // --- Custom Assets ---
+    case "ADD_CUSTOM_ASSET":
+      return addEntity(state, "customAssets", action.asset);
+    case "UPDATE_CUSTOM_ASSET":
+      return updateEntity(state, "customAssets", action.id, action.updates);
+    case "REMOVE_CUSTOM_ASSET":
+      return removeEntity(state, "customAssets", action.id);
+
+    // --- Wilderness Boundary (scalar, not array CRUD) ---
+    case "SET_WILDERNESS_BOUNDARY":
       return {
         ...state,
         extendedLayers: {
           ...state.extendedLayers,
-          mines: [...state.extendedLayers.mines, action.mine],
+          wildernessBoundary: action.boundary,
         },
       };
 
-    case "REMOVE_MINE":
+    // --- Batch entity operations ---
+    case "BATCH_ADD_ENTITIES":
       return {
         ...state,
         extendedLayers: {
           ...state.extendedLayers,
-          mines: state.extendedLayers.mines.filter((m) => m.id !== action.id),
+          mobSpawns: [...state.extendedLayers.mobSpawns, ...action.mobSpawns],
+          resources: [...state.extendedLayers.resources, ...action.resources],
         },
       };
 
@@ -369,49 +245,9 @@ export function entityReducer(
         },
       };
 
-    // Game entity data from manifest
-    case "SET_GAME_ENTITIES":
-      return {
-        ...state,
-        gameEntities: action.data,
-      };
-
-    // Phase 9.1: Custom Asset CRUD
-    case "ADD_CUSTOM_ASSET":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          customAssets: [...state.extendedLayers.customAssets, action.asset],
-        },
-      };
-    case "UPDATE_CUSTOM_ASSET":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          customAssets: state.extendedLayers.customAssets.map((a) =>
-            a.id === action.id ? { ...a, ...action.updates } : a,
-          ),
-        },
-      };
-    case "REMOVE_CUSTOM_ASSET":
-      return {
-        ...state,
-        extendedLayers: {
-          ...state.extendedLayers,
-          customAssets: state.extendedLayers.customAssets.filter(
-            (a) => a.id !== action.id,
-          ),
-        },
-      };
-
-    // Phase 9.2: Prefab CRUD
+    // --- Prefabs (on state.prefabs, not extendedLayers) ---
     case "ADD_PREFAB":
-      return {
-        ...state,
-        prefabs: [...state.prefabs, action.prefab],
-      };
+      return { ...state, prefabs: [...state.prefabs, action.prefab] };
     case "UPDATE_PREFAB":
       return {
         ...state,
@@ -425,7 +261,11 @@ export function entityReducer(
         prefabs: state.prefabs.filter((p) => p.id !== action.id),
       };
 
-    // Bulk restore actions (project load persistence)
+    // --- Game entity data ---
+    case "SET_GAME_ENTITIES":
+      return { ...state, gameEntities: action.data };
+
+    // --- Bulk restore (project load) ---
     case "RESTORE_EXTENDED_LAYERS":
       return { ...state, extendedLayers: action.layers };
     case "RESTORE_AUDIO_LAYERS":

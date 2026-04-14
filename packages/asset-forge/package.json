@@ -61,6 +61,7 @@
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.0.0",
     "@sinclair/typebox": "^0.34.41",
+    "@tanstack/react-virtual": "^3.13.23",
     "@tensorflow-models/hand-pose-detection": "^2.0.1",
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-webgl": "^4.22.0",

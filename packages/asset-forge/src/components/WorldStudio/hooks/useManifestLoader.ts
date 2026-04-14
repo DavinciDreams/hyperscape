@@ -184,8 +184,11 @@ interface RawPrayer {
 
 const MANIFESTS_API_BASE = "/api/manifests";
 
-async function fetchManifest<T>(path: string): Promise<T> {
-  const res = await fetch(`${MANIFESTS_API_BASE}/${path}`);
+async function fetchManifest<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(`${MANIFESTS_API_BASE}/${path}`, { signal });
   if (!res.ok) {
     throw new Error(
       `Failed to load manifest ${path}: ${res.status} ${res.statusText}`,
@@ -195,8 +198,11 @@ async function fetchManifest<T>(path: string): Promise<T> {
 }
 
 /** Fetch manifest content (uses the existing API that wraps in metadata) */
-async function fetchManifestContent<T>(name: string): Promise<T> {
-  const res = await fetch(`${MANIFESTS_API_BASE}/${name}`);
+async function fetchManifestContent<T>(
+  name: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(`${MANIFESTS_API_BASE}/${name}`, { signal });
   if (!res.ok) {
     throw new Error(
       `Failed to load manifest ${name}: ${res.status} ${res.statusText}`,
@@ -558,10 +564,15 @@ function mapDuelArenas(raw: {
 // ============== SAFE FETCH WITH FALLBACK ==============
 
 /** Fetch manifest or return fallback on failure (non-critical manifests) */
-async function safeFetch<T>(path: string, fallback: T): Promise<T> {
+async function safeFetch<T>(
+  path: string,
+  fallback: T,
+  signal?: AbortSignal,
+): Promise<T> {
   try {
-    return await fetchManifestContent<T>(path);
-  } catch {
+    return await fetchManifestContent<T>(path, signal);
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
     console.warn(`[ManifestLoader] Failed to load ${path}, using fallback`);
     return fallback;
   }
@@ -589,19 +600,30 @@ export function useManifestLoader() {
     loadedRef.current = true;
     actions.loadManifestsStart();
 
+    const controller = new AbortController();
+    const { signal } = controller;
+
     (async () => {
       try {
         // Phase 1: Critical manifests for entity palette (fast path)
         const [npcsRaw, stationsRaw, miningRaw, woodcuttingRaw, fishingRaw] =
           await Promise.all([
-            fetchManifestContent<RawNPC[]>("npcs"),
-            fetchManifestContent<{ stations: RawStation[] }>("stations"),
+            fetchManifestContent<RawNPC[]>("npcs", signal),
+            fetchManifestContent<{ stations: RawStation[] }>(
+              "stations",
+              signal,
+            ),
             fetchManifestContent<{ rocks: RawMiningRock[] }>(
               "gathering/mining",
+              signal,
             ),
-            fetchManifestContent<{ trees: RawTree[] }>("gathering/woodcutting"),
+            fetchManifestContent<{ trees: RawTree[] }>(
+              "gathering/woodcutting",
+              signal,
+            ),
             fetchManifestContent<{ spots: RawFishingSpot[] }>(
               "gathering/fishing",
+              signal,
             ),
           ]);
 
@@ -635,44 +657,86 @@ export function useManifestLoader() {
           lodSettingsRaw,
         ] = await Promise.all([
           // Items (8 files)
-          safeFetch<RawItem[]>("items/weapons", []),
-          safeFetch<RawItem[]>("items/armor", []),
-          safeFetch<RawItem[]>("items/resources", []),
-          safeFetch<RawItem[]>("items/tools", []),
-          safeFetch<RawItem[]>("items/ammunition", []),
-          safeFetch<RawItem[]>("items/food", []),
-          safeFetch<RawItem[]>("items/misc", []),
-          safeFetch<RawItem[]>("items/runes", []),
+          safeFetch<RawItem[]>("items/weapons", [], signal),
+          safeFetch<RawItem[]>("items/armor", [], signal),
+          safeFetch<RawItem[]>("items/resources", [], signal),
+          safeFetch<RawItem[]>("items/tools", [], signal),
+          safeFetch<RawItem[]>("items/ammunition", [], signal),
+          safeFetch<RawItem[]>("items/food", [], signal),
+          safeFetch<RawItem[]>("items/misc", [], signal),
+          safeFetch<RawItem[]>("items/runes", [], signal),
           // Quests & stores
-          safeFetch<Record<string, RawQuest>>("quests", {}),
-          safeFetch<RawStore[]>("stores", []),
+          safeFetch<Record<string, RawQuest>>("quests", {}, signal),
+          safeFetch<RawStore[]>("stores", [], signal),
           // Combat
-          safeFetch<Record<string, unknown>>("combat-spells", {}),
-          safeFetch<{ prayers?: RawPrayer[] }>("prayers", {}),
-          safeFetch<{ runes?: ManifestRune[] }>("runes", {}),
-          safeFetch<{ arrows?: ManifestAmmunition[] }>("ammunition", {}),
+          safeFetch<Record<string, unknown>>("combat-spells", {}, signal),
+          safeFetch<{ prayers?: RawPrayer[] }>("prayers", {}, signal),
+          safeFetch<{ runes?: ManifestRune[] }>("runes", {}, signal),
+          safeFetch<{ arrows?: ManifestAmmunition[] }>(
+            "ammunition",
+            {},
+            signal,
+          ),
           // Recipes (8 files)
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/smithing", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/fletching", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/crafting", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/cooking", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/smelting", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/runecrafting", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/firemaking", {}),
-          safeFetch<{ recipes?: RawRecipeEntry[] }>("recipes/tanning", {}),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/smithing",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/fletching",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/crafting",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/cooking",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/smelting",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/runecrafting",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/firemaking",
+            {},
+            signal,
+          ),
+          safeFetch<{ recipes?: RawRecipeEntry[] }>(
+            "recipes/tanning",
+            {},
+            signal,
+          ),
           // Progression
           safeFetch<{
             skills?: Record<
               string,
               Array<{ level: number; description: string; type?: string }>
             >;
-          }>("skill-unlocks", {}),
-          safeFetch<Record<string, unknown>>("tier-requirements", {}),
+          }>("skill-unlocks", {}, signal),
+          safeFetch<Record<string, unknown>>("tier-requirements", {}, signal),
           // Arenas & config
-          safeFetch<{ arenas?: ManifestDuelArena[] }>("duel-arenas", {}),
-          safeFetch<ManifestLODSettings>("lod-settings", {
-            distanceThresholds: {},
-          }),
+          safeFetch<{ arenas?: ManifestDuelArena[] }>(
+            "duel-arenas",
+            {},
+            signal,
+          ),
+          safeFetch<ManifestLODSettings>(
+            "lod-settings",
+            { distanceThresholds: {} },
+            signal,
+          ),
         ]);
 
         // Combine all items into a single array
@@ -728,6 +792,7 @@ export function useManifestLoader() {
           rawManifests: {},
         });
       } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
         const message =
           err instanceof Error ? err.message : "Failed to load manifests";
         console.error("[ManifestLoader] Failed to load manifests:", message);
@@ -736,5 +801,7 @@ export function useManifestLoader() {
         // User can reload the page to retry.
       }
     })();
+
+    return () => controller.abort();
   }, [actions]);
 }

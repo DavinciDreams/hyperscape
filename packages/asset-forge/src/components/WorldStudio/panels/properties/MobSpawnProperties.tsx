@@ -24,7 +24,9 @@ interface Props {
   mobSpawn: PlacedMobSpawn;
 }
 
-export function MobSpawnProperties({ mobSpawn }: Props) {
+export const MobSpawnProperties = React.memo(function MobSpawnProperties({
+  mobSpawn,
+}: Props) {
   const { actions, state } = useWorldStudio();
 
   const update = useCallback(
@@ -212,4 +214,4 @@ export function MobSpawnProperties({ mobSpawn }: Props) {
       )}
     </>
   );
-}
+});

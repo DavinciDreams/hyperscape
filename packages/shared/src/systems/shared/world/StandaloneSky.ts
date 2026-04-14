@@ -51,6 +51,7 @@ import {
 } from "../../../extras/three/three";
 import { fogRenderTarget } from "./FogConfig";
 import { DAY_CYCLE, SUN_LIGHT } from "./LightingConfig";
+import { computeDayIntensity } from "./SceneLightingCore";
 
 const SKY_DOME_RADIUS = 5000;
 
@@ -561,26 +562,8 @@ export class StandaloneSky {
     this._dayPhase = dayPhase;
     const isDay = this.isDay;
 
-    // Day intensity with sharp transitions
-    const ss = (e0: number, e1: number, x: number) => {
-      const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-      return t * t * (3 - 2 * t);
-    };
-
-    let dayIntensity: number;
-    if (dayPhase < DAY_CYCLE.DAWN_START || dayPhase >= DAY_CYCLE.DUSK_END) {
-      dayIntensity = 0;
-    } else if (dayPhase < DAY_CYCLE.DAWN_END) {
-      dayIntensity = ss(DAY_CYCLE.DAWN_START, DAY_CYCLE.DAWN_END, dayPhase);
-    } else if (dayPhase < DAY_CYCLE.DUSK_START) {
-      const noonFactor = 1 - Math.abs(dayPhase - 0.5) * 2;
-      dayIntensity =
-        DAY_CYCLE.NOON_MIN_INTENSITY +
-        noonFactor * (1 - DAY_CYCLE.NOON_MIN_INTENSITY);
-    } else {
-      dayIntensity = 1 - ss(DAY_CYCLE.DUSK_START, DAY_CYCLE.DUSK_END, dayPhase);
-    }
-    this._dayIntensity = dayIntensity;
+    // Day intensity — delegate to shared pure function
+    this._dayIntensity = computeDayIntensity(dayPhase);
 
     // Sun direction arc
     const sunArcAngle = (dayPhase - 0.25) * Math.PI * 2;

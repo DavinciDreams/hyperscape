@@ -160,6 +160,19 @@ function getClientAssetsBaseUrl(): string {
 }
 
 /**
+ * Check whether a staging URL is safe to fetch from.
+ * Only https: and localhost origins are permitted.
+ */
+function isAllowedStagingUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Try to resolve a staging URL for the given production manifest URL.
  * Returns undefined if staging mode is not active or the URL doesn't match.
  */
@@ -173,7 +186,17 @@ function tryResolveStagingUrl(productionUrl: string): string | undefined {
   if (manifestsIndex === -1) return undefined;
 
   const filename = productionUrl.slice(manifestsIndex + "/manifests/".length);
-  return `${stagingBase}/${filename}`;
+  const stagingUrl = `${stagingBase}/${filename}`;
+
+  // Only allow https: or localhost staging URLs to prevent SSRF
+  if (!isAllowedStagingUrl(stagingUrl)) {
+    console.warn(
+      `[DataManager] Rejected staging URL with disallowed origin: ${stagingUrl}`,
+    );
+    return undefined;
+  }
+
+  return stagingUrl;
 }
 
 /** Staging diagnostic counters — tracks how many manifests came from staging vs production */

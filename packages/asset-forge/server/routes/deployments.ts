@@ -54,6 +54,7 @@ export const createDeploymentRoutes = (
             }
 
             // For production deployments, require approvedBy from a different user
+            // who is also a team member with deploy permission
             if (body.target === "production" && !body.approvedBy) {
               set.status = 400;
               return {
@@ -61,15 +62,29 @@ export const createDeploymentRoutes = (
                   "Production deployments require approval (approvedBy field)",
               };
             }
-            if (
-              body.target === "production" &&
-              body.approvedBy === body.deployedBy
-            ) {
-              set.status = 400;
-              return {
-                error:
-                  "Production deployments must be approved by a different user",
-              };
+            if (body.target === "production" && body.approvedBy) {
+              const deployerId = body.deployedBy ?? user.id;
+              if (body.approvedBy === deployerId) {
+                set.status = 400;
+                return {
+                  error:
+                    "Production deployments must be approved by a different user",
+                };
+              }
+
+              // Verify the approver is a team member with deploy permission
+              const approverHasPermission = await teamService.hasPermission(
+                project.teamId,
+                body.approvedBy,
+                "project:deploy",
+              );
+              if (!approverHasPermission) {
+                set.status = 403;
+                return {
+                  error:
+                    "Approver must be a team member with project:deploy permission",
+                };
+              }
             }
 
             const deployment = await worldProjectService.createDeployment({

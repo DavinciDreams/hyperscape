@@ -44,29 +44,24 @@ import {
   clamp,
 } from "three/tsl";
 import type Node from "three/src/nodes/core/Node.js";
-import { MINE_BIOME_PALETTES, ROAD_COLORS } from "@hyperscape/shared/world";
-
-// ============================================================================
-// TERRAIN CONSTANTS - Shared between all terrain systems
-// ============================================================================
+import {
+  MINE_BIOME_PALETTES,
+  ROAD_COLORS,
+  TERRAIN_SHADER,
+  TUNDRA,
+  FOREST,
+  CANYON,
+  ACCENT,
+  createPermutation,
+  seamlessFbm,
+} from "@hyperscape/shared/world";
 
 export const TERRAIN_CONSTANTS = {
-  TRIPLANAR_SCALE: 0.5,
-  SNOW_HEIGHT: 90.0,
+  ...TERRAIN_SHADER,
   FOG_NEAR: 150.0,
   FOG_FAR: 350.0,
-  NOISE_SCALE: 0.0008,
-  DIRT_THRESHOLD: 0.43,
-  LOD_FULL_DETAIL: 100.0,
-  LOD_MEDIUM_DETAIL: 200.0,
   WATER_LEVEL: 16, // Overridden at runtime by game; standalone default for procgen previews
   FOG_COLOR: new THREE.Color(0xd4c8b8),
-  // Noise distortion for organic terrain transitions (game parity)
-  DISTORT_NOISE_SCALE: 0.067,
-  VARIATION_NOISE_SCALE: 0.0015,
-  ROCK_DISTORT_STRENGTH: 0.5,
-  HEIGHT_DISTORT_STRENGTH: 8.0,
-  SATURATION_BOOST: 1.35,
 } as const;
 
 // ============================================================================
@@ -74,97 +69,7 @@ export const TERRAIN_CONSTANTS = {
 // ============================================================================
 
 let cachedNoiseTexture: THREE.DataTexture | null = null;
-const NOISE_SIZE = 256;
-
-function fade(t: number): number {
-  return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + t * (b - a);
-}
-
-function grad(hash: number, x: number, y: number): number {
-  const h = hash & 3;
-  const u = h < 2 ? x : y;
-  const v = h < 2 ? y : x;
-  return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-}
-
-function createPermutation(seed: number): number[] {
-  const p: number[] = [];
-  for (let i = 0; i < 256; i++) p[i] = i;
-
-  let s = seed;
-  for (let i = 255; i > 0; i--) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    const j = s % (i + 1);
-    [p[i], p[j]] = [p[j], p[i]];
-  }
-
-  return [...p, ...p];
-}
-
-function perlin2D(x: number, y: number, perm: number[]): number {
-  const X = Math.floor(x) & 255;
-  const Y = Math.floor(y) & 255;
-
-  const xf = x - Math.floor(x);
-  const yf = y - Math.floor(y);
-
-  const u = fade(xf);
-  const v = fade(yf);
-
-  const aa = perm[perm[X] + Y];
-  const ab = perm[perm[X] + Y + 1];
-  const ba = perm[perm[X + 1] + Y];
-  const bb = perm[perm[X + 1] + Y + 1];
-
-  const x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
-  const x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
-
-  return lerp(x1, x2, v);
-}
-
-function seamlessPerlin2D(x: number, y: number, perm: number[]): number {
-  const TWO_PI = Math.PI * 2;
-  const radius = 1.0;
-
-  const angleX = x * TWO_PI;
-  const angleY = y * TWO_PI;
-
-  const nx = Math.cos(angleX) * radius;
-  const ny = Math.sin(angleX) * radius;
-  const nz = Math.cos(angleY) * radius;
-  const nw = Math.sin(angleY) * radius;
-
-  const n1 = perlin2D(nx * 4 + 100, nz * 4 + 100, perm);
-  const n2 = perlin2D(ny * 4 + 200, nw * 4 + 200, perm);
-  const n3 = perlin2D(nx * 4 + ny * 4 + 300, nz * 4 + nw * 4 + 300, perm);
-
-  return (n1 + n2 + n3) / 3;
-}
-
-function seamlessFbm(
-  x: number,
-  y: number,
-  perm: number[],
-  octaves: number = 4,
-): number {
-  let value = 0;
-  let amplitude = 0.5;
-  let maxValue = 0;
-
-  for (let i = 0; i < octaves; i++) {
-    const ox = x + i * 17.3;
-    const oy = y + i * 31.7;
-    value += amplitude * seamlessPerlin2D(ox, oy, perm);
-    maxValue += amplitude;
-    amplitude *= 0.5;
-  }
-
-  return value / maxValue;
-}
+const NOISE_SIZE = TERRAIN_SHADER.NOISE_SIZE;
 
 /**
  * Generate a Perlin noise texture for terrain shading
@@ -497,45 +402,41 @@ export function createTerrainMaterial(
   // PER-BIOME TERRAIN COLORS (matches game's TerrainShader.ts palettes)
   // ============================================================================
 
-  // --- Tundra palette: snowy white-blue with frozen grey stone ---
-  const TUNDRA_GRASS = vec3(0.78, 0.82, 0.85);
-  const TUNDRA_GRASS_DARK = vec3(0.65, 0.7, 0.75);
-  const TUNDRA_DIRT = vec3(0.55, 0.55, 0.58);
-  const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
-  const TUNDRA_CLIFF = vec3(0.5, 0.52, 0.56);
-  const TUNDRA_CLIFF_DARK = vec3(0.38, 0.4, 0.44);
+  // --- Biome palettes from shared constants (TerrainConstants.ts) ---
+  const TUNDRA_GRASS = vec3(...TUNDRA.GRASS);
+  const TUNDRA_GRASS_DARK = vec3(...TUNDRA.GRASS_DARK);
+  const TUNDRA_DIRT = vec3(...TUNDRA.DIRT);
+  const TUNDRA_DIRT_DARK = vec3(...TUNDRA.DIRT_DARK);
+  const TUNDRA_CLIFF = vec3(...TUNDRA.CLIFF);
+  const TUNDRA_CLIFF_DARK = vec3(...TUNDRA.CLIFF_DARK);
 
-  // --- Forest palette: vibrant energetic greens with warm brown earth ---
-  const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
-  const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
-  const FOREST_DIRT = vec3(0.26, 0.19, 0.11);
-  const FOREST_DIRT_DARK = vec3(0.17, 0.12, 0.07);
-  const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
-  const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
+  const FOREST_GRASS = vec3(...FOREST.GRASS);
+  const FOREST_GRASS_DARK = vec3(...FOREST.GRASS_DARK);
+  const FOREST_DIRT = vec3(...FOREST.DIRT);
+  const FOREST_DIRT_DARK = vec3(...FOREST.DIRT_DARK);
+  const FOREST_CLIFF = vec3(...FOREST.CLIFF);
+  const FOREST_CLIFF_DARK = vec3(...FOREST.CLIFF_DARK);
 
-  // --- Canyon palette: red-orange sand with deep crimson rock ---
-  const CANYON_SAND = vec3(0.82, 0.52, 0.28);
-  const CANYON_SAND_DARK = vec3(0.72, 0.42, 0.2);
-  const CANYON_ROCK = vec3(0.62, 0.28, 0.15);
-  const CANYON_ROCK_DARK = vec3(0.48, 0.2, 0.1);
-  const CANYON_CLIFF = vec3(0.72, 0.38, 0.18);
-  const CANYON_CLIFF_DARK = vec3(0.55, 0.25, 0.12);
+  const CANYON_SAND = vec3(...CANYON.SAND);
+  const CANYON_SAND_DARK = vec3(...CANYON.SAND_DARK);
+  const CANYON_ROCK = vec3(...CANYON.ROCK);
+  const CANYON_ROCK_DARK = vec3(...CANYON.ROCK_DARK);
+  const CANYON_CLIFF = vec3(...CANYON.CLIFF);
+  const CANYON_CLIFF_DARK = vec3(...CANYON.CLIFF_DARK);
 
-  // Height-gradient colors: lighter/warmer at altitude (game parity)
-  const FOREST_GRASS_HIGH = vec3(0.24, 0.45, 0.18);
-  const TUNDRA_GRASS_HIGH = vec3(0.68, 0.72, 0.78);
-  const CANYON_SAND_HIGH = vec3(0.62, 0.38, 0.22);
+  const FOREST_GRASS_HIGH = vec3(...FOREST.GRASS_HIGH);
+  const TUNDRA_GRASS_HIGH = vec3(...TUNDRA.GRASS_HIGH);
+  const CANYON_SAND_HIGH = vec3(...CANYON.SAND_HIGH);
 
-  // Large-scale variation overlay colors (game parity)
-  const FOREST_VARIATION = vec3(0.15, 0.35, 0.1);
-  const TUNDRA_VARIATION = vec3(0.6, 0.64, 0.7);
-  const CANYON_VARIATION = vec3(0.58, 0.34, 0.16);
+  const FOREST_VARIATION = vec3(...FOREST.VARIATION);
+  const TUNDRA_VARIATION = vec3(...TUNDRA.VARIATION);
+  const CANYON_VARIATION = vec3(...CANYON.VARIATION);
 
   // Legacy aliases (default = forest biome)
   const dirtDark = FOREST_DIRT_DARK;
-  const sandYellow = vec3(0.7, 0.6, 0.38);
-  const mudBrown = vec3(0.18, 0.12, 0.08);
-  const waterEdge = vec3(0.08, 0.06, 0.04);
+  const sandYellow = vec3(...ACCENT.SAND_YELLOW);
+  const mudBrown = vec3(...ACCENT.MUD_BROWN);
+  const waterEdge = vec3(...ACCENT.WATER_EDGE);
 
   // Packed vertex attributes (forestWeight, canyonWeight, roadInfluence, mineInfluence)
   const terrainBlend = attribute("terrainBlend", "vec4");
@@ -667,7 +568,7 @@ export function createTerrainMaterial(
     mul(canyonCliff, dW),
   );
   // CLIFF_TINT: bluish-grey rock texture variation (game parity)
-  const CLIFF_TINT = vec3(0.28, 0.3, 0.36);
+  const CLIFF_TINT = vec3(...ACCENT.CLIFF_TINT);
   const rockTexVar = mul(pow(distortN, float(0.5)), float(0.3));
   cliffColor = mix(cliffColor, CLIFF_TINT, rockTexVar);
   baseColor = mix(

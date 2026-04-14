@@ -11,7 +11,6 @@
  * Uses WebGPU renderer for TSL/node materials compatibility.
  */
 
-import { BuildingGenerator } from "@hyperscape/procgen/building";
 import { TownGenerator } from "@hyperscape/procgen/building/town";
 import type { GeneratedTown as ProcgenTown } from "@hyperscape/procgen/building/town";
 import {
@@ -27,14 +26,8 @@ import React, {
   useState,
   useMemo,
 } from "react";
-import {
-  MeshStandardNodeMaterial,
-  MeshBasicNodeMaterial,
-  LineBasicNodeMaterial,
-} from "three/webgpu";
-import { pass } from "three/tsl";
-import { fxaa } from "three/addons/tsl/display/FXAANode.js";
-import { bloom } from "three/addons/tsl/display/BloomNode.js";
+import { MeshBasicNodeMaterial, LineBasicNodeMaterial } from "three/webgpu";
+// TSL post-processing (pass, fxaa, bloom) now lives inside ViewportRenderLoop.
 
 import { useCameraControls } from "./useCameraControls";
 import { ViewHelper } from "three/examples/jsm/helpers/ViewHelper.js";
@@ -80,7 +73,6 @@ import {
 import { SceneResourceManager } from "./SceneResourceManager";
 import { FoliageManager, FOLIAGE_TILE_RADIUS } from "./FoliageRenderer";
 import {
-  getGpuLifecycleStats,
   processDeferredFrame,
   processDeferredDisposalOnly,
 } from "../WorldStudio/utils/deferredGpuDisposal";
@@ -106,18 +98,19 @@ import {
   type EditorWaterUniforms,
 } from "./EditorWaterMaterial";
 import { EditorGrassManager } from "./EditorGrassManager";
+import { TownRenderer } from "./systems/TownRenderer";
+import { ViewportRenderLoop } from "./systems/ViewportRenderLoop";
+// TODO: Wire these system classes for full decomposition (CameraController, SelectionManager, TileManager)
+// import { CameraController } from "./systems/CameraController";
+// import { SelectionManager } from "./systems/SelectionManager";
+// import { TileManager } from "./systems/TileManager";
 
-import {
-  THREE,
-  createWebGPURenderer,
-  type AssetForgeRenderer,
-} from "@/utils/webgpu-renderer";
+import { THREE, type AssetForgeRenderer } from "@/utils/webgpu-renderer";
 import {
   HEMISPHERE_LIGHT,
   AMBIENT_LIGHT,
   SUN_LIGHT,
   DAY_CYCLE,
-  EXPOSURE,
   FOG_COLORS,
   StandaloneSky,
   updateSceneLighting,
@@ -127,28 +120,8 @@ import {
 } from "@hyperscape/shared";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 
-// Type aliases for clarity (all WebGPU-compatible NodeMaterials)
-const TownBasicMat = MeshBasicNodeMaterial;
-const TownLineMat = LineBasicNodeMaterial;
-const TownStdMat = MeshStandardNodeMaterial;
-// VegStdMat alias removed — rocks are now generated server-side
-
-// ============== SHARED GEOMETRY SINGLETONS (Phase 4B) ==============
-
-let _townConeGeom: THREE.ConeGeometry | null = null;
-let _townPillarGeom: THREE.CylinderGeometry | null = null;
-let _townRingBaseGeom: THREE.RingGeometry | null = null;
-
-function getTownConeGeom(): THREE.ConeGeometry {
-  if (!_townConeGeom) _townConeGeom = new THREE.ConeGeometry(20, 50, 8);
-  return _townConeGeom;
-}
-
-function getTownPillarGeom(): THREE.CylinderGeometry {
-  if (!_townPillarGeom)
-    _townPillarGeom = new THREE.CylinderGeometry(3, 3, 30, 8);
-  return _townPillarGeom;
-}
+// Town rendering moved to TownRenderer — shared geometry singletons, type aliases,
+// and material constructors are now managed by TownRenderer.ts.
 
 // ============== TILE GEOMETRY POOL ==============
 // Instead of disposing tile geometries on eviction and cloning templates on
@@ -248,16 +221,7 @@ function buildTownFlattenZones(
   return zones.length > 0 ? zones : undefined;
 }
 
-// LOD distances for buildings
-const BUILDING_LOD_FULL_DISTANCE = 200; // Full detail within this distance
-const BUILDING_LOD_SIMPLE_DISTANCE = 500; // Simple boxes beyond this distance
-
-// Town marker colors by size
-const TOWN_SIZE_COLORS: Record<string, number> = {
-  town: 0xff0000, // Red - large towns
-  village: 0xff8800, // Orange - medium villages
-  hamlet: 0xffff00, // Yellow - small hamlets
-};
+// Building LOD distances and town size colors now live in TownRenderer.ts.
 
 // ============== TYPES ==============
 
@@ -704,15 +668,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   } = cam;
 
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
-  // THREE.RenderPipeline exists at runtime (r183+) but @types/three 0.182 still
-  // exports it as PostProcessing. Use the runtime name to silence the deprecation
-  // warning, with a type-level cast until types catch up.
-  type RenderPipelineInstance = {
-    outputNode: unknown;
-    render(): void;
-    dispose(): void;
-  };
-  const postProcessingRef = useRef<RenderPipelineInstance | null>(null);
+  const renderLoopRef = useRef<ViewportRenderLoop | null>(null);
+  // Post-processing pipeline is now managed by ViewportRenderLoop.
   const gpuRecoveryCountRef = useRef(0);
   const gpuRecoveringRef = useRef(false);
   const [gpuRecovering, setGpuRecovering] = useState(false);
@@ -735,13 +692,11 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const hemiLightRef = useRef<THREE.HemisphereLight | null>(null);
   const standaloneSkyRef = useRef<StandaloneSky | null>(null);
   const standaloneGrassRef = useRef<EditorGrassManager | null>(null);
-  const currentExposureRef = useRef(EXPOSURE.DAY);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const csmShadowNodeRef = useRef<any>(null);
   const viewHelperRef = useRef<ViewHelper | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const viewModeRef = useRef<ViewMode>("lit");
-  const animationIdRef = useRef<number>(0);
 
   // Terrain state
   const tilesRef = useRef<Map<string, TileData>>(new Map());
@@ -751,10 +706,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   const terrainMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const waterMaterialRef = useRef<THREE.Material | null>(null); // MeshStandardNodeMaterial for WebGPU
   const waterUniformsRef = useRef<EditorWaterUniforms | null>(null);
+  const waterTexturesRef = useRef<{
+    normalTex: THREE.DataTexture;
+    flowTex: THREE.DataTexture;
+    foamTex: THREE.DataTexture;
+  } | null>(null);
   const lodObjectsRef = useRef<THREE.LOD[]>([]);
   const terrainContainerRef = useRef<THREE.Group | null>(null);
   const waterContainerRef = useRef<THREE.Group | null>(null);
   const townMarkersRef = useRef<THREE.Group | null>(null);
+  const townRendererRef = useRef<TownRenderer | null>(null);
   const vegetationContainerRef = useRef<THREE.Group | null>(null);
   /** Map InstancedMesh → species ID for vegetation instance selection */
   const vegetationSpeciesMapRef = useRef<Map<THREE.InstancedMesh, string>>(
@@ -1998,9 +1959,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         128,
       );
       wg.rotateX(-Math.PI / 2);
-      const { material: wMat, uniforms: wUniforms } =
-        createEditorWaterMaterial();
+      const {
+        material: wMat,
+        uniforms: wUniforms,
+        textures: wTextures,
+      } = createEditorWaterMaterial();
       waterUniformsRef.current = wUniforms;
+      waterTexturesRef.current = wTextures;
       const worldWater = new THREE.Mesh(wg, wMat);
       worldWater.position.set(
         worldSizeMeters / 2,
@@ -2013,6 +1978,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     const townMarkers = new THREE.Group();
     scene.add(townMarkers);
     townMarkersRef.current = townMarkers;
+    townRendererRef.current = new TownRenderer(townMarkers, resourceManager);
 
     const vegetationContainer = new THREE.Group();
     vegetationContainer.visible = showVegetationRef.current;
@@ -2221,12 +2187,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     waterTemplate.rotateX(-Math.PI / 2);
     waterTemplateGeometryRef.current = waterTemplate;
     terrainMaterialRef.current = createTerrainMaterial();
-    const { material: editorWaterMat, uniforms: editorWaterUniforms } =
-      createEditorWaterMaterial();
+    const {
+      material: editorWaterMat,
+      uniforms: editorWaterUniforms,
+      textures: editorWaterTextures,
+    } = createEditorWaterMaterial();
     waterMaterialRef.current = editorWaterMat;
     if (!waterUniformsRef.current) {
       waterUniformsRef.current = editorWaterUniforms;
     }
+    waterTexturesRef.current = editorWaterTextures;
 
     // Create terrain generator and querier
     const generator = new TerrainGenerator(terrainConfigRef.current);
@@ -2416,299 +2386,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             : generator.getHeightAt(wx, wz);
 
         // ---- Render town markers, buildings, landmarks, internal roads ----
-        // Shared materials — reuse across all towns to minimize GPU pipeline count
-        const initBuildingGen = new BuildingGenerator();
-        const initSimpleMat = new TownStdMat();
-        initSimpleMat.color = new THREE.Color(0xd4a373);
-        initSimpleMat.roughness = 0.9;
-        const initFarMat = new TownBasicMat();
-        initFarMat.color = new THREE.Color(0xc9a577);
-        const initDetailFallbackMat = new TownStdMat();
-        initDetailFallbackMat.color = new THREE.Color(0xd4a373);
-        initDetailFallbackMat.roughness = 0.7;
-        initDetailFallbackMat.metalness = 0.1;
-        const initPillarMat = new TownBasicMat();
-        initPillarMat.color = new THREE.Color(0xffffff);
-        const initRoadLineMat = new TownLineMat();
-        initRoadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
-        initRoadLineMat.linewidth = 2;
-        const initConeMats = new Map<number, MeshBasicNodeMaterial>();
-        const initRingMats = new Map<number, MeshBasicNodeMaterial>();
-        const initLandmarkMats = new Map<number, MeshStandardNodeMaterial>();
-
-        for (const town of layout.towns) {
-          const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
-          const markerX = town.position.x + worldCenterOffset;
-          // Use queried terrain height at town center — matches the centerHeight
-          // used by generateTileGeometry for flattening
-          const markerY = getHeight(town.position.x, town.position.z);
-          const markerZ = town.position.z + worldCenterOffset;
-
-          const townUserData = {
-            selectable: true,
-            selectableType: "town",
-            selectableId: town.id,
-            townId: town.id,
-            townName: town.name,
-          };
-
-          // Cone marker pointing down — shared material per town-size color
-          const coneGeometry = getTownConeGeom();
-          if (!initConeMats.has(color)) {
-            const mat = new MeshBasicNodeMaterial();
-            mat.color = new THREE.Color(color);
-            initConeMats.set(color, mat);
-          }
-          const marker = new THREE.Mesh(coneGeometry, initConeMats.get(color)!);
-          marker.position.set(markerX, markerY + 60, markerZ);
-          marker.rotation.x = Math.PI;
-          marker.userData = townUserData;
-          resourceManager.stage({
-            object: marker,
-            parent: townMarkers,
-            onAdd: () => selectableObjectsRef.current.push(marker),
-          });
-
-          // Safe zone ring — shared material per town-size color
-          const ringGeometry = new THREE.RingGeometry(
-            town.safeZoneRadius - 5,
-            town.safeZoneRadius,
-            48,
+        // Delegate to TownRenderer — handles shared materials, cone/ring/pillar
+        // markers, buildings with LOD, landmarks, and internal road lines.
+        // The server layout towns match the ProcgenTown interface.
+        const tr = townRendererRef.current;
+        if (tr) {
+          tr.refreshTowns(
+            layout.towns as unknown as ProcgenTown[],
+            worldCenterOffset,
+            getHeight,
+            (obj) => {
+              if (!selectableObjectsRef.current.includes(obj)) {
+                selectableObjectsRef.current.push(obj);
+              }
+            },
+            (lod) => lodObjectsRef.current.push(lod),
           );
-          if (!initRingMats.has(color)) {
-            const mat = new MeshBasicNodeMaterial();
-            mat.color = new THREE.Color(color);
-            mat.side = THREE.DoubleSide;
-            mat.transparent = true;
-            mat.opacity = 0.4;
-            initRingMats.set(color, mat);
-          }
-          const ring = new THREE.Mesh(ringGeometry, initRingMats.get(color)!);
-          ring.rotation.x = -Math.PI / 2;
-          ring.position.set(markerX, markerY + 2, markerZ);
-          ring.userData = townUserData;
-          resourceManager.stage({
-            object: ring,
-            parent: townMarkers,
-            onAdd: () => selectableObjectsRef.current.push(ring),
-          });
-
-          // Town center pillar — shared material
-          const pillarGeometry = getTownPillarGeom();
-          const pillar = new THREE.Mesh(pillarGeometry, initPillarMat);
-          pillar.position.set(markerX, markerY + 15, markerZ);
-          pillar.userData = townUserData;
-          resourceManager.stage({
-            object: pillar,
-            parent: townMarkers,
-            onAdd: () => selectableObjectsRef.current.push(pillar),
-          });
-
-          // Internal roads — shared material
-          if (town.internalRoads && town.internalRoads.length > 0) {
-            for (const road of town.internalRoads) {
-              const startX = road.start.x + worldCenterOffset;
-              const startZ = road.start.z + worldCenterOffset;
-              const endX = road.end.x + worldCenterOffset;
-              const endZ = road.end.z + worldCenterOffset;
-              const startY = markerY + 1;
-              const endY = markerY + 1;
-
-              const roadGeometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(startX, startY, startZ),
-                new THREE.Vector3(endX, endY, endZ),
-              ]);
-              const roadLine = new THREE.Line(roadGeometry, initRoadLineMat);
-              roadLine.userData = { townId: town.id };
-              resourceManager.stage({
-                object: roadLine,
-                parent: townMarkers,
-              });
-            }
-          }
-
-          // Buildings with LOD — use flattened centerHeight for Y
-          for (const building of town.buildings) {
-            const bx = building.position.x + worldCenterOffset;
-            const bz = building.position.z + worldCenterOffset;
-            const by = markerY;
-            const buildingWidth = building.size?.width || 10;
-            const buildingDepth = building.size?.depth || 10;
-            const buildingHeight = 8;
-
-            const buildingLOD = new THREE.LOD();
-            buildingLOD.position.set(bx, by, bz);
-            buildingLOD.rotation.y = building.rotation || 0;
-
-            // LOD 0: Procedural building — shared BuildingGenerator reuses its uberMaterial
-            let fullDetailMesh: THREE.Object3D | null = null;
-            const generatedBuilding = initBuildingGen.generate(
-              building.type || "house",
-              {
-                includeRoof: true,
-                seed: `${town.id}-${building.id}`,
-              },
-            );
-
-            if (generatedBuilding && generatedBuilding.mesh) {
-              fullDetailMesh = generatedBuilding.mesh;
-              fullDetailMesh.traverse((child) => {
-                if (child instanceof THREE.Mesh) {
-                  child.castShadow = true;
-                  child.receiveShadow = true;
-                }
-              });
-              if (generatedBuilding.layout) {
-                buildingWalkabilityService.registerBuilding(
-                  building.id,
-                  town.id,
-                  { x: bx, y: by, z: bz },
-                  building.rotation || 0,
-                  generatedBuilding.layout,
-                  by,
-                );
-              }
-            } else {
-              const detailGeometry = new THREE.BoxGeometry(
-                buildingWidth,
-                buildingHeight,
-                buildingDepth,
-              );
-              fullDetailMesh = new THREE.Mesh(
-                detailGeometry,
-                initDetailFallbackMat,
-              );
-              fullDetailMesh.position.y = buildingHeight / 2;
-              fullDetailMesh.castShadow = true;
-              fullDetailMesh.receiveShadow = true;
-            }
-
-            // LOD 1: Simple box — shared material
-            const simpleGeometry = new THREE.BoxGeometry(
-              buildingWidth,
-              buildingHeight,
-              buildingDepth,
-            );
-            const simpleMesh = new THREE.Mesh(simpleGeometry, initSimpleMat);
-            simpleMesh.position.y = buildingHeight / 2;
-            simpleMesh.castShadow = false;
-            simpleMesh.receiveShadow = true;
-
-            // LOD 2: Far box — shared material
-            const farGeometry = new THREE.BoxGeometry(
-              buildingWidth,
-              buildingHeight,
-              buildingDepth,
-              1,
-              1,
-              1,
-            );
-            const farMesh = new THREE.Mesh(farGeometry, initFarMat);
-            farMesh.position.y = buildingHeight / 2;
-
-            const buildingUserData = {
-              selectable: true,
-              selectableType: "building",
-              selectableId: building.id,
-              townId: town.id,
-              townName: town.name,
-              buildingType: building.type,
-            };
-            fullDetailMesh.userData = buildingUserData;
-            fullDetailMesh.traverse((child) => {
-              child.userData = { ...child.userData, ...buildingUserData };
-            });
-            simpleMesh.userData = buildingUserData;
-            farMesh.userData = buildingUserData;
-
-            buildingLOD.addLevel(fullDetailMesh, 0);
-            buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
-            buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
-            buildingLOD.userData = buildingUserData;
-            resourceManager.stage({
-              object: buildingLOD,
-              parent: townMarkers,
-              onAdd: () => {
-                lodObjectsRef.current.push(buildingLOD);
-                selectableObjectsRef.current.push(buildingLOD);
-              },
-            });
-          }
-
-          // Landmarks — use flattened centerHeight for Y
-          if (town.landmarks && town.landmarks.length > 0) {
-            for (const landmark of town.landmarks) {
-              const lx = landmark.position.x + worldCenterOffset;
-              const lz = landmark.position.z + worldCenterOffset;
-              const ly = markerY;
-
-              let color2 = 0x888888;
-              let height = landmark.size.height;
-              switch (landmark.type) {
-                case "well":
-                  color2 = 0x5a5a6a;
-                  break;
-                case "fountain":
-                  color2 = 0x4a7aaa;
-                  break;
-                case "market_stall":
-                  color2 = 0xaa7a4a;
-                  break;
-                case "signpost":
-                  color2 = 0x8a6a4a;
-                  break;
-                case "bench":
-                  color2 = 0x7a5a3a;
-                  break;
-                case "barrel":
-                  color2 = 0x6a5a4a;
-                  break;
-                case "crate":
-                  color2 = 0x8a7a5a;
-                  break;
-                case "lamppost":
-                  color2 = 0x3a3a3a;
-                  break;
-                case "planter":
-                  color2 = 0x5a8a5a;
-                  break;
-                case "tree":
-                  color2 = 0x3a6a3a;
-                  height = 4;
-                  break;
-                case "fence_post":
-                  color2 = 0x6a5030;
-                  break;
-                case "fence_gate":
-                  color2 = 0x7a6040;
-                  break;
-              }
-
-              const landmarkGeo = new THREE.BoxGeometry(
-                landmark.size.width,
-                height,
-                landmark.size.depth,
-              );
-              if (!initLandmarkMats.has(color2)) {
-                const mat = new TownStdMat();
-                mat.color = new THREE.Color(color2);
-                mat.roughness = 0.7;
-                initLandmarkMats.set(color2, mat);
-              }
-              const landmarkMesh = new THREE.Mesh(
-                landmarkGeo,
-                initLandmarkMats.get(color2)!,
-              );
-              landmarkMesh.position.set(lx, ly + height / 2, lz);
-              landmarkMesh.rotation.y = landmark.rotation;
-              landmarkMesh.castShadow = true;
-              landmarkMesh.receiveShadow = true;
-              resourceManager.stage({
-                object: landmarkMesh,
-                parent: townMarkers,
-              });
-            }
-          }
+          // Sync runtime towns from TownRenderer (already set by refreshTowns)
+          runtimeTownsRef.current = tr.runtimeTowns;
+          lastProcgenTownsRef.current = tr.lastProcgenTowns;
         }
 
         // ---- Inter-town roads: terrain shader handles road rendering via
@@ -2813,321 +2509,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       // Clear selectable objects array
       selectableObjectsRef.current = [];
 
-      // Shared materials for standalone town rendering
-      const stBuildingGen = new BuildingGenerator();
-      const stSimpleMat = new TownStdMat();
-      stSimpleMat.color = new THREE.Color(0xd4a373);
-      stSimpleMat.roughness = 0.9;
-      const stFarMat = new TownBasicMat();
-      stFarMat.color = new THREE.Color(0xc9a577);
-      const stDetailFallbackMat = new TownStdMat();
-      stDetailFallbackMat.color = new THREE.Color(0xd4a373);
-      stDetailFallbackMat.roughness = 0.7;
-      stDetailFallbackMat.metalness = 0.1;
-      const stPillarMat = new TownBasicMat();
-      stPillarMat.color = new THREE.Color(0xffffff);
-      const stRoadLineMat = new TownLineMat();
-      stRoadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
-      stRoadLineMat.linewidth = 2;
-      const stConeMats = new Map<number, MeshBasicNodeMaterial>();
-      const stRingMats = new Map<number, MeshBasicNodeMaterial>();
-
-      // Create town markers and internal roads
-      for (const town of townResult.towns) {
-        const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
-        // Offset town position to match our tile grid (towns are generated with origin at center)
-        const markerX = town.position.x + worldCenterOffset;
-        const markerY = town.position.y;
-        const markerZ = town.position.z + worldCenterOffset;
-
-        // Town userData for selection
-        const townUserData = {
-          selectable: true,
-          selectableType: "town",
-          selectableId: town.id,
-          townId: town.id,
-          townName: town.name,
-        };
-
-        // Cone marker — shared material per town-size color
-        const coneGeometry = getTownConeGeom();
-        if (!stConeMats.has(color)) {
-          const mat = new MeshBasicNodeMaterial();
-          mat.color = new THREE.Color(color);
-          stConeMats.set(color, mat);
-        }
-        const marker = new THREE.Mesh(coneGeometry, stConeMats.get(color)!);
-        marker.position.set(markerX, markerY + 60, markerZ);
-        marker.rotation.x = Math.PI; // Point downward
-        marker.userData = townUserData;
-        resourceManager.stage({
-          object: marker,
-          parent: townMarkers,
-          onAdd: () => selectableObjectsRef.current.push(marker),
-        });
-
-        // Safe zone ring — shared material per town-size color
-        const ringGeometry = new THREE.RingGeometry(
-          town.safeZoneRadius - 5,
-          town.safeZoneRadius,
-          48,
+      // ---- Render town markers, buildings, landmarks, internal roads ----
+      // Delegate to TownRenderer — handles shared materials, cone/ring/pillar
+      // markers, building LOD, internal roads, and landmarks.
+      const tr = townRendererRef.current;
+      if (tr) {
+        const getHeight = (wx: number, wz: number): number =>
+          generator.getHeightAt(wx, wz);
+        tr.refreshTowns(
+          townResult.towns,
+          worldCenterOffset,
+          getHeight,
+          (obj) => {
+            if (!selectableObjectsRef.current.includes(obj))
+              selectableObjectsRef.current.push(obj);
+          },
+          (lod) => lodObjectsRef.current.push(lod),
         );
-        if (!stRingMats.has(color)) {
-          const mat = new MeshBasicNodeMaterial();
-          mat.color = new THREE.Color(color);
-          mat.side = THREE.DoubleSide;
-          mat.transparent = true;
-          mat.opacity = 0.4;
-          stRingMats.set(color, mat);
-        }
-        const ring = new THREE.Mesh(ringGeometry, stRingMats.get(color)!);
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(markerX, markerY + 2, markerZ);
-        ring.userData = townUserData;
-        resourceManager.stage({
-          object: ring,
-          parent: townMarkers,
-          onAdd: () => selectableObjectsRef.current.push(ring),
-        });
-
-        // Town center pillar — shared material + shared geometry
-        const pillarGeometry = getTownPillarGeom();
-        const pillar = new THREE.Mesh(pillarGeometry, stPillarMat);
-        pillar.position.set(markerX, markerY + 15, markerZ);
-        pillar.userData = townUserData;
-        resourceManager.stage({
-          object: pillar,
-          parent: townMarkers,
-          onAdd: () => selectableObjectsRef.current.push(pillar),
-        });
-
-        // Draw internal roads — shared material
-        if (town.internalRoads && town.internalRoads.length > 0) {
-          for (const road of town.internalRoads) {
-            const roadPoints: THREE.Vector3[] = [];
-            const startX = road.start.x + worldCenterOffset;
-            const startZ = road.start.z + worldCenterOffset;
-            const endX = road.end.x + worldCenterOffset;
-            const endZ = road.end.z + worldCenterOffset;
-
-            // Get height at road points
-            const startY =
-              generator.getHeightAt(road.start.x, road.start.z) + 1;
-            const endY = generator.getHeightAt(road.end.x, road.end.z) + 1;
-
-            roadPoints.push(new THREE.Vector3(startX, startY, startZ));
-            roadPoints.push(new THREE.Vector3(endX, endY, endZ));
-
-            const roadGeometry = new THREE.BufferGeometry().setFromPoints(
-              roadPoints,
-            );
-            const roadLine = new THREE.Line(roadGeometry, stRoadLineMat);
-            roadLine.userData = { townId: town.id };
-            resourceManager.stage({
-              object: roadLine,
-              parent: townMarkers,
-            });
-          }
-        }
-
-        // Draw building footprints with LOD support
-        for (const building of town.buildings) {
-          const bx = building.position.x + worldCenterOffset;
-          const bz = building.position.z + worldCenterOffset;
-          const by = building.position.y;
-
-          // Building dimensions (use defaults if not specified)
-          const buildingWidth = building.size?.width || 10;
-          const buildingDepth = building.size?.depth || 10;
-          const buildingHeight = 8; // Default height for visualization
-
-          // Create LOD group for this building
-          const buildingLOD = new THREE.LOD();
-          buildingLOD.position.set(bx, by, bz);
-          buildingLOD.rotation.y = building.rotation || 0;
-
-          // LOD 0: Full detail — shared BuildingGenerator reuses its uberMaterial
-          let fullDetailMesh: THREE.Object3D | null = null;
-          const generatedBuilding = stBuildingGen.generate(
-            building.type || "house",
-            {
-              includeRoof: true,
-              seed: `${town.id}-${building.id}`,
-            },
-          );
-
-          if (generatedBuilding && generatedBuilding.mesh) {
-            fullDetailMesh = generatedBuilding.mesh;
-            fullDetailMesh.traverse((child) => {
-              if (child instanceof THREE.Mesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-              }
-            });
-
-            // Register building for walkability tracking (unified with game logic)
-            if (generatedBuilding.layout) {
-              buildingWalkabilityService.registerBuilding(
-                building.id,
-                town.id,
-                { x: bx, y: by, z: bz },
-                building.rotation || 0,
-                generatedBuilding.layout,
-                by, // maxGroundY approximation
-              );
-            }
-          } else {
-            // Fallback to detailed box if generation fails
-            const detailGeometry = new THREE.BoxGeometry(
-              buildingWidth,
-              buildingHeight,
-              buildingDepth,
-            );
-            const detailMaterial = new TownStdMat();
-            detailMaterial.color = new THREE.Color(0xd4a373);
-            detailMaterial.roughness = 0.7;
-            detailMaterial.metalness = 0.1;
-            fullDetailMesh = new THREE.Mesh(detailGeometry, detailMaterial);
-            fullDetailMesh.position.y = buildingHeight / 2;
-            fullDetailMesh.castShadow = true;
-            fullDetailMesh.receiveShadow = true;
-          }
-
-          // LOD 1: Simple box (medium distance)
-          const simpleGeometry = new THREE.BoxGeometry(
-            buildingWidth,
-            buildingHeight,
-            buildingDepth,
-          );
-          const simpleMaterial = new TownStdMat();
-          simpleMaterial.color = new THREE.Color(0xd4a373);
-          simpleMaterial.roughness = 0.9;
-          const simpleMesh = new THREE.Mesh(simpleGeometry, simpleMaterial);
-          simpleMesh.position.y = buildingHeight / 2;
-          simpleMesh.castShadow = false;
-          simpleMesh.receiveShadow = true;
-
-          // LOD 2: Very simple box (far distance) - less geometry
-          const farGeometry = new THREE.BoxGeometry(
-            buildingWidth,
-            buildingHeight,
-            buildingDepth,
-            1,
-            1,
-            1,
-          );
-          const farMaterial = new TownBasicMat();
-          farMaterial.color = new THREE.Color(0xc9a577);
-          const farMesh = new THREE.Mesh(farGeometry, farMaterial);
-          farMesh.position.y = buildingHeight / 2;
-
-          // Building userData for selection
-          const buildingUserData = {
-            selectable: true,
-            selectableType: "building",
-            selectableId: building.id,
-            townId: town.id,
-            townName: town.name,
-            buildingType: building.type,
-          };
-
-          // Set userData on all meshes and descendants so raycasting works
-          // fullDetailMesh might be a group with children, so traverse it
-          fullDetailMesh.userData = buildingUserData;
-          fullDetailMesh.traverse((child) => {
-            child.userData = { ...child.userData, ...buildingUserData };
-          });
-          simpleMesh.userData = buildingUserData;
-          farMesh.userData = buildingUserData;
-
-          // Add LOD levels
-          buildingLOD.addLevel(fullDetailMesh, 0);
-          buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
-          buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
-
-          // Also set on LOD parent for consistency
-          buildingLOD.userData = buildingUserData;
-
-          resourceManager.stage({
-            object: buildingLOD,
-            parent: townMarkers,
-            onAdd: () => {
-              lodObjectsRef.current.push(buildingLOD);
-              selectableObjectsRef.current.push(buildingLOD);
-            },
-          });
-        }
-
-        // Render town landmarks (fences, lampposts, wells, signposts, etc.)
-        if (town.landmarks && town.landmarks.length > 0) {
-          for (const landmark of town.landmarks) {
-            const lx = landmark.position.x + worldCenterOffset;
-            const lz = landmark.position.z + worldCenterOffset;
-            const ly = landmark.position.y;
-
-            // Color based on landmark type
-            let color = 0x888888;
-            let height = landmark.size.height;
-
-            switch (landmark.type) {
-              case "well":
-                color = 0x5a5a6a;
-                break; // Gray stone
-              case "fountain":
-                color = 0x4a7aaa;
-                break; // Blue-gray
-              case "market_stall":
-                color = 0xaa7a4a;
-                break; // Brown wood
-              case "signpost":
-                color = 0x8a6a4a;
-                break; // Wood brown
-              case "bench":
-                color = 0x7a5a3a;
-                break; // Dark wood
-              case "barrel":
-                color = 0x6a5a4a;
-                break; // Barrel brown
-              case "crate":
-                color = 0x8a7a5a;
-                break; // Crate tan
-              case "lamppost":
-                color = 0x3a3a3a;
-                break; // Dark iron
-              case "planter":
-                color = 0x5a8a5a;
-                break; // Green
-              case "tree":
-                color = 0x3a6a3a;
-                height = 4;
-                break; // Tree green
-              case "fence_post":
-                color = 0x6a5030;
-                break; // Rustic wood brown
-              case "fence_gate":
-                color = 0x7a6040;
-                break; // Lighter wood for gate
-            }
-
-            const landmarkGeo = new THREE.BoxGeometry(
-              landmark.size.width,
-              height,
-              landmark.size.depth,
-            );
-            const landmarkMat = new TownStdMat();
-            landmarkMat.color = new THREE.Color(color);
-            landmarkMat.roughness = 0.7;
-            const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
-            landmarkMesh.position.set(lx, ly + height / 2, lz);
-            landmarkMesh.rotation.y = landmark.rotation;
-            landmarkMesh.castShadow = true;
-            landmarkMesh.receiveShadow = true;
-            resourceManager.stage({
-              object: landmarkMesh,
-              parent: townMarkers,
-            });
-          }
-        }
+        runtimeTownsRef.current = tr.runtimeTowns;
+        lastProcgenTownsRef.current = tr.lastProcgenTowns;
       }
 
       // Roads are rendered by the terrain shader via roadInfluence vertex
@@ -3516,197 +2916,53 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     container.addEventListener("wheel", _onWheel, { passive: false });
     document.addEventListener("contextmenu", _onContextMenu, true);
 
-    // Async WebGPU renderer initialization
+    // Async WebGPU renderer initialization via ViewportRenderLoop
     const initRenderer = async () => {
-      const renderer = await createWebGPURenderer({
-        // Disable antialiasing in World Studio for better FPS
+      const renderLoop = await ViewportRenderLoop.create({
+        scene,
+        camera,
+        container,
         antialias: !isStudioModeRef.current,
-        alpha: true,
+        maxPixelRatio: isStudioModeRef.current ? 1 : 2,
+        enableShadows: !isStudioModeRef.current || enableShadowsRef.current,
+        enableBloom: false,
+        maxRecoveryAttempts: 2,
       });
 
       if (!mounted) {
-        renderer.dispose();
+        renderLoop.dispose();
         return;
       }
 
-      // World Studio: cap pixel ratio at 1 and disable shadows for FPS
-      // (editors don't need Retina resolution or shadow maps)
-      const maxPixelRatio = isStudioModeRef.current
-        ? 1
-        : Math.min(window.devicePixelRatio, 2);
-      renderer.setPixelRatio(maxPixelRatio);
-      // Guard against zero-size container (can happen during mount before layout)
-      const w = container.clientWidth || 1;
-      const h = container.clientHeight || 1;
-      renderer.setSize(w, h);
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping; // Game-parity
-      renderer.toneMappingExposure = EXPOSURE.DAY; // Match game's day exposure
-      renderer.shadowMap.enabled =
-        !isStudioModeRef.current || enableShadowsRef.current;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      container.appendChild(renderer.domElement);
+      const renderer = renderLoop.renderer;
       rendererRef.current = renderer;
+      renderLoopRef.current = renderLoop;
 
-      // ---- RenderPipeline (FXAA anti-aliasing via TSL) ----
-      // Runtime: THREE.RenderPipeline (r183+). @types/three 0.182 still calls
-      // it PostProcessing — use bracket access to avoid TS error until types update.
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const PipelineCtor = (THREE as Record<string, unknown>)[
-          "RenderPipeline"
-        ] as new (r: unknown) => RenderPipelineInstance;
-        const renderPipeline = new PipelineCtor(renderer);
-        const scenePass = pass(scene, camera);
-        const sceneColor = scenePass.getTextureNode("output");
-        renderPipeline.outputNode = fxaa(sceneColor);
-        postProcessingRef.current = renderPipeline;
-      } catch (ppErr) {
-        console.warn(
-          "[TileBasedTerrain] RenderPipeline init failed, falling back to direct render:",
-          ppErr,
-        );
-        postProcessingRef.current = null;
-      }
-
-      // ---- Material pre-compilation ----
-      // Force shader compilation before first render to eliminate ~200-500ms
-      // first-frame stutter. Even though the scene is still mostly empty,
-      // this pre-compiles the terrain/water/post-processing pipelines.
-      try {
-        await renderer.compileAsync(scene, camera);
-      } catch {
-        // Non-fatal — shaders will compile on first use instead
-      }
-
-      // ---- GPU device loss recovery ----
-      // Shared recovery function — called from both device.lost and render catch.
-      // Uses gpuRecoveringRef for re-entrance guard (checked by render loop).
-      const recoverGpu = async (reason: string) => {
-        if (gpuRecoveringRef.current || !mounted) return;
-        gpuRecoveringRef.current = true;
-
-        const stats = getGpuLifecycleStats();
-        console.error(
-          `[GPU-DEBUG] DEVICE LOST reason="${reason}" ` +
-            `tiles=${tilesRef.current.size} ` +
-            `staging=${resourceManager.pendingStaged} disposing=${resourceManager.pendingDisposal} ` +
-            `deferredDisposals=${stats.pendingDisposals} deferredAdditions=${stats.pendingAdditions} ` +
-            `totalDisposed=${stats.totalDisposed} totalAdded=${stats.totalAdded} ` +
-            `sceneChildren=${scene.children.length} ` +
-            `markers=${resourceManager.areMarkersHidden ? "hidden" : "visible"}`,
-        );
-
-        gpuRecoveryCountRef.current++;
-        if (gpuRecoveryCountRef.current > 2) {
+      // Sync GPU recovery state to React for UI overlays
+      renderLoop.onGpuRecovery((event) => {
+        if (event.phase === "started") {
+          gpuRecoveringRef.current = true;
+          gpuRecoveryCountRef.current = event.attempt;
+          setGpuRecovering(true);
+          // Sync rendererRef on recovery start (renderer may become stale)
+          rendererRef.current = renderLoop.renderer;
+        } else if (event.phase === "succeeded") {
+          gpuRecoveringRef.current = false;
+          rendererRef.current = renderLoop.renderer;
+          setGpuRecovering(false);
+          console.log(
+            `[GPU-DEBUG] Device recovery #${event.attempt} successful`,
+          );
+        } else if (event.phase === "failed") {
+          gpuRecoveringRef.current = false;
+          setGpuRecovering(false);
           setGpuError(
             "GPU recovery failed after multiple attempts. Please reload the page.",
           );
-          gpuRecoveringRef.current = false;
-          return;
         }
+      });
 
-        setGpuRecovering(true);
-
-        // Save camera state
-        const camPos = camera.position.clone();
-        const camQuat = camera.quaternion.clone();
-
-        // Null out rendering refs to prevent render loop from using stale objects
-        postProcessingRef.current = null;
-
-        try {
-          // Dispose old renderer
-          const oldRenderer = rendererRef.current;
-          rendererRef.current = null;
-          if (oldRenderer) {
-            try {
-              oldRenderer.dispose();
-            } catch {
-              /* already lost */
-            }
-            if (oldRenderer.domElement.parentNode === container) {
-              container.removeChild(oldRenderer.domElement);
-            }
-          }
-
-          // Create fresh renderer
-          const newRenderer = await createWebGPURenderer({
-            antialias: !isStudioModeRef.current,
-            alpha: true,
-          });
-          if (!mounted) {
-            newRenderer.dispose();
-            gpuRecoveringRef.current = false;
-            return;
-          }
-
-          const maxPr = isStudioModeRef.current
-            ? 1
-            : Math.min(window.devicePixelRatio, 2);
-          newRenderer.setPixelRatio(maxPr);
-          const w = container.clientWidth || 1;
-          const h = container.clientHeight || 1;
-          newRenderer.setSize(w, h);
-          newRenderer.outputColorSpace = THREE.SRGBColorSpace;
-          newRenderer.shadowMap.enabled =
-            !isStudioModeRef.current || enableShadowsRef.current;
-          newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-          container.appendChild(newRenderer.domElement);
-          rendererRef.current = newRenderer;
-
-          // Recreate RenderPipeline
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const PipelineCtor = (THREE as Record<string, unknown>)[
-              "RenderPipeline"
-            ] as new (r: unknown) => RenderPipelineInstance;
-            const rp = new PipelineCtor(newRenderer);
-            const sp = pass(scene, camera);
-            rp.outputNode = fxaa(sp.getTextureNode("output"));
-            postProcessingRef.current = rp;
-          } catch {
-            postProcessingRef.current = null;
-          }
-
-          // Restore camera
-          camera.position.copy(camPos);
-          camera.quaternion.copy(camQuat);
-
-          // Wire up loss handler on new renderer
-          wireDeviceLossHandler(newRenderer);
-
-          console.log(
-            `[GPU-DEBUG] Device recovery #${gpuRecoveryCountRef.current} successful`,
-          );
-        } catch (recoverErr) {
-          console.error("[GPU-DEBUG] Device recovery failed:", recoverErr);
-          setGpuError("GPU recovery failed. Please reload the page.");
-        } finally {
-          gpuRecoveringRef.current = false;
-          setGpuRecovering(false);
-        }
-      };
-
-      // Wire device.lost handler — "destroyed" is expected during cleanup
-      const wireDeviceLossHandler = (r: AssetForgeRenderer) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const backend = (r as any).backend;
-        if (!backend?.device?.lost) return;
-        backend.device.lost.then(
-          (info: { reason: string; message: string }) => {
-            if (info.reason === "destroyed") {
-              console.debug(
-                `[GPU-DEBUG] Device disposed (expected during config change)`,
-              );
-              return;
-            }
-            recoverGpu(info.reason);
-          },
-        );
-      };
-      wireDeviceLossHandler(renderer);
+      // Perf stats logging is handled by ViewportRenderLoop (emits every ~120 frames)
 
       // Create ViewHelper orientation cube (bottom-right corner)
       // Skip in World Studio — it provides its own viewport controls
@@ -4248,20 +3504,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           return vegetationTreesRef.current;
         },
         refreshTownMarkers: (newTowns: ProcgenTown[]) => {
-          console.warn(
-            `%c[refreshTownMarkers] Called with ${newTowns.length} towns: ${newTowns.map((t) => `${t.name}(${t.size}, ${t.buildings.length} bldg, pos ${Math.round(t.position.x)},${Math.round(t.position.z)})`).join(", ")}`,
-            "color: cyan; font-weight: bold",
-          );
-          const townGroup = townMarkersRef.current;
-          if (!townGroup) {
+          const tr = townRendererRef.current;
+          if (!tr) {
             console.error(
-              "[refreshTownMarkers] townMarkersRef.current is NULL! Aborting.",
+              "[refreshTownMarkers] townRendererRef is NULL! Aborting.",
             );
             return;
           }
-          console.warn(
-            `[refreshTownMarkers] Clearing ${townGroup.children.length} existing children from townMarkers group`,
-          );
           const offset = worldCenterOffsetRef.current;
           const heightQuerier = terrainQuerierRef.current;
           const gen = generatorRef.current;
@@ -4272,341 +3521,23 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
                 ? gen.getHeightAt(wx, wz)
                 : 0;
 
-          // Flush any pending staged objects from a previous call
-          resourceManager.flushStagedForParent(townGroup);
-
-          // Clear existing town meshes — remove from scene + queue deferred GPU disposal.
-          // GPU resources are NOT disposed synchronously because bulk disposal on Metal
-          // invalidates the WebGPU pipeline cache and causes device destruction.
-          while (townGroup.children.length > 0) {
-            const child = townGroup.children[0];
-            townGroup.remove(child);
-            const selIdx = selectableObjectsRef.current.indexOf(child);
-            if (selIdx >= 0) selectableObjectsRef.current.splice(selIdx, 1);
-            // Remove LOD objects that belonged to the town group
-            if (child instanceof THREE.LOD) {
-              const lodIdx = lodObjectsRef.current.indexOf(child);
-              if (lodIdx >= 0) lodObjectsRef.current.splice(lodIdx, 1);
-            }
-            // Queue for deferred disposal — processed in small batches after render
-            resourceManager.queueDisposal(child);
-          }
-
-          // Shared materials — reuse across all towns to minimize GPU pipeline count.
-          // Each unique material instance requires its own GPU pipeline/uniform buffer.
-          // Without sharing, 4 towns × 20 buildings × 6+ materials = 500+ GPU pipelines
-          // which exhausts Metal's staging buffer pool on macOS.
-          const sharedBuildingGen = new BuildingGenerator();
-          const sharedSimpleMat = new TownStdMat();
-          sharedSimpleMat.color = new THREE.Color(0xd4a373);
-          sharedSimpleMat.roughness = 0.9;
-          const sharedFarMat = new TownBasicMat();
-          sharedFarMat.color = new THREE.Color(0xc9a577);
-          const sharedDetailFallbackMat = new TownStdMat();
-          sharedDetailFallbackMat.color = new THREE.Color(0xd4a373);
-          sharedDetailFallbackMat.roughness = 0.7;
-          sharedDetailFallbackMat.metalness = 0.1;
-          const sharedPillarMat = new TownBasicMat();
-          sharedPillarMat.color = new THREE.Color(0xffffff);
-          const sharedRoadLineMat = new TownLineMat();
-          sharedRoadLineMat.color = new THREE.Color(0.45, 0.32, 0.18);
-          sharedRoadLineMat.linewidth = 2;
-          // Cache cone/ring materials per town-size color
-          const coneMaterialCache = new Map<number, MeshBasicNodeMaterial>();
-          const ringMaterialCache = new Map<number, MeshBasicNodeMaterial>();
-          // Cache landmark materials per color
-          const landmarkMatCache = new Map<number, MeshStandardNodeMaterial>();
-
-          // Render each town with full detail (mirrors initial layout.towns rendering)
-          for (const town of newTowns) {
-            const color = TOWN_SIZE_COLORS[town.size] ?? 0xffff00;
-            const mx = town.position.x + offset;
-            // Use the queried terrain height at town center — this is the same centerHeight
-            // that generateTileGeometry uses for flattening. Building/landmark/road Y must
-            // match this value, NOT the un-flattened heights from TownGenerator.
-            const my = getHeight(town.position.x, town.position.z);
-            const mz = town.position.z + offset;
-            const townUserData = {
-              selectable: true,
-              selectableType: "town",
-              selectableId: town.id,
-              townId: town.id,
-              townName: town.name,
-            };
-
-            // Cone marker pointing down — shared material per town-size color + shared geometry
-            const coneGeo = getTownConeGeom();
-            if (!coneMaterialCache.has(color)) {
-              const mat = new MeshBasicNodeMaterial();
-              mat.color = new THREE.Color(color);
-              coneMaterialCache.set(color, mat);
-            }
-            const cone = new THREE.Mesh(coneGeo, coneMaterialCache.get(color)!);
-            cone.position.set(mx, my + 60, mz);
-            cone.rotation.x = Math.PI;
-            cone.userData = townUserData;
-            resourceManager.stage({
-              object: cone,
-              parent: townGroup,
-              onAdd: () => selectableObjectsRef.current.push(cone),
-            });
-
-            // Safe zone ring — shared material per town-size color
-            const ringGeo = new THREE.RingGeometry(
-              town.safeZoneRadius - 5,
-              town.safeZoneRadius,
-              48,
-            );
-            if (!ringMaterialCache.has(color)) {
-              const mat = new MeshBasicNodeMaterial();
-              mat.color = new THREE.Color(color);
-              mat.side = THREE.DoubleSide;
-              mat.transparent = true;
-              mat.opacity = 0.4;
-              ringMaterialCache.set(color, mat);
-            }
-            const ring = new THREE.Mesh(ringGeo, ringMaterialCache.get(color)!);
-            ring.rotation.x = -Math.PI / 2;
-            ring.position.set(mx, my + 2, mz);
-            ring.userData = townUserData;
-            resourceManager.stage({
-              object: ring,
-              parent: townGroup,
-              onAdd: () => selectableObjectsRef.current.push(ring),
-            });
-
-            // Center pillar — shared material + shared geometry
-            const pillarGeo = getTownPillarGeom();
-            const pillar = new THREE.Mesh(pillarGeo, sharedPillarMat);
-            pillar.position.set(mx, my + 15, mz);
-            pillar.userData = townUserData;
-            resourceManager.stage({
-              object: pillar,
-              parent: townGroup,
-              onAdd: () => selectableObjectsRef.current.push(pillar),
-            });
-
-            // Internal roads — shared material
-            if (town.internalRoads && town.internalRoads.length > 0) {
-              for (const road of town.internalRoads) {
-                const startX = road.start.x + offset;
-                const startZ = road.start.z + offset;
-                const endX = road.end.x + offset;
-                const endZ = road.end.z + offset;
-                const startY = my + 1;
-                const endY = my + 1;
-
-                const roadGeo = new THREE.BufferGeometry().setFromPoints([
-                  new THREE.Vector3(startX, startY, startZ),
-                  new THREE.Vector3(endX, endY, endZ),
-                ]);
-                const roadLine = new THREE.Line(roadGeo, sharedRoadLineMat);
-                roadLine.userData = { townId: town.id };
-                resourceManager.stage({
-                  object: roadLine,
-                  parent: townGroup,
-                });
+          // Delegate to TownRenderer — handles clearing, shared materials,
+          // cone/ring/pillar markers, buildings with LOD, landmarks, internal roads
+          tr.refreshTowns(
+            newTowns,
+            offset,
+            getHeight,
+            (obj) => {
+              if (!selectableObjectsRef.current.includes(obj)) {
+                selectableObjectsRef.current.push(obj);
               }
-            }
+            },
+            (lod) => lodObjectsRef.current.push(lod),
+          );
 
-            // Buildings with LOD — use flattened centerHeight (my) for Y,
-            // not building.position.y which is the un-flattened terrain height
-            for (const building of town.buildings) {
-              const bx = building.position.x + offset;
-              const bz = building.position.z + offset;
-              const by = my;
-              const buildingWidth = building.size?.width || 10;
-              const buildingDepth = building.size?.depth || 10;
-              const buildingHeight = 8;
-
-              const buildingLOD = new THREE.LOD();
-              buildingLOD.position.set(bx, by, bz);
-              buildingLOD.rotation.y = building.rotation || 0;
-
-              // LOD 0: Procedural building — shared BuildingGenerator reuses its uberMaterial
-              let fullDetailMesh: THREE.Object3D | null = null;
-              const generatedBuilding = sharedBuildingGen.generate(
-                building.type || "house",
-                { includeRoof: true, seed: `${town.id}-${building.id}` },
-              );
-
-              if (generatedBuilding && generatedBuilding.mesh) {
-                fullDetailMesh = generatedBuilding.mesh;
-                fullDetailMesh.traverse((child) => {
-                  if (child instanceof THREE.Mesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                  }
-                });
-                if (generatedBuilding.layout) {
-                  buildingWalkabilityService.registerBuilding(
-                    building.id,
-                    town.id,
-                    { x: bx, y: by, z: bz },
-                    building.rotation || 0,
-                    generatedBuilding.layout,
-                    by,
-                  );
-                }
-              } else {
-                const detailGeo = new THREE.BoxGeometry(
-                  buildingWidth,
-                  buildingHeight,
-                  buildingDepth,
-                );
-                fullDetailMesh = new THREE.Mesh(
-                  detailGeo,
-                  sharedDetailFallbackMat,
-                );
-                fullDetailMesh.position.y = buildingHeight / 2;
-                fullDetailMesh.castShadow = true;
-                fullDetailMesh.receiveShadow = true;
-              }
-
-              // LOD 1: Simple box — shared material
-              const simpleGeo = new THREE.BoxGeometry(
-                buildingWidth,
-                buildingHeight,
-                buildingDepth,
-              );
-              const simpleMesh = new THREE.Mesh(simpleGeo, sharedSimpleMat);
-              simpleMesh.position.y = buildingHeight / 2;
-              simpleMesh.castShadow = false;
-              simpleMesh.receiveShadow = true;
-
-              // LOD 2: Far box — shared material
-              const farGeo = new THREE.BoxGeometry(
-                buildingWidth,
-                buildingHeight,
-                buildingDepth,
-                1,
-                1,
-                1,
-              );
-              const farMat = sharedFarMat;
-              const farMesh = new THREE.Mesh(farGeo, farMat);
-              farMesh.position.y = buildingHeight / 2;
-
-              const buildingUserData = {
-                selectable: true,
-                selectableType: "building",
-                selectableId: building.id,
-                townId: town.id,
-                townName: town.name,
-                buildingType: building.type,
-              };
-              fullDetailMesh.userData = buildingUserData;
-              fullDetailMesh.traverse((child) => {
-                child.userData = { ...child.userData, ...buildingUserData };
-              });
-              simpleMesh.userData = buildingUserData;
-              farMesh.userData = buildingUserData;
-
-              buildingLOD.addLevel(fullDetailMesh, 0);
-              buildingLOD.addLevel(simpleMesh, BUILDING_LOD_FULL_DISTANCE);
-              buildingLOD.addLevel(farMesh, BUILDING_LOD_SIMPLE_DISTANCE);
-              buildingLOD.userData = buildingUserData;
-              resourceManager.stage({
-                object: buildingLOD,
-                parent: townGroup,
-                onAdd: () => {
-                  lodObjectsRef.current.push(buildingLOD);
-                  selectableObjectsRef.current.push(buildingLOD);
-                },
-              });
-            }
-
-            // Landmarks — use flattened centerHeight for Y
-            if (town.landmarks && town.landmarks.length > 0) {
-              for (const landmark of town.landmarks) {
-                const lx = landmark.position.x + offset;
-                const lz = landmark.position.z + offset;
-                const ly = my;
-
-                let landmarkColor = 0x888888;
-                let height = landmark.size.height;
-                switch (landmark.type) {
-                  case "well":
-                    landmarkColor = 0x5a5a6a;
-                    break;
-                  case "fountain":
-                    landmarkColor = 0x4a7aaa;
-                    break;
-                  case "market_stall":
-                    landmarkColor = 0xaa7a4a;
-                    break;
-                  case "signpost":
-                    landmarkColor = 0x8a6a4a;
-                    break;
-                  case "bench":
-                    landmarkColor = 0x7a5a3a;
-                    break;
-                  case "barrel":
-                    landmarkColor = 0x6a5a4a;
-                    break;
-                  case "crate":
-                    landmarkColor = 0x8a7a5a;
-                    break;
-                  case "lamppost":
-                    landmarkColor = 0x3a3a3a;
-                    break;
-                  case "planter":
-                    landmarkColor = 0x5a8a5a;
-                    break;
-                  case "tree":
-                    landmarkColor = 0x3a6a3a;
-                    height = 4;
-                    break;
-                  case "fence_post":
-                    landmarkColor = 0x6a5030;
-                    break;
-                  case "fence_gate":
-                    landmarkColor = 0x7a6040;
-                    break;
-                }
-
-                const landmarkGeo = new THREE.BoxGeometry(
-                  landmark.size.width,
-                  height,
-                  landmark.size.depth,
-                );
-                if (!landmarkMatCache.has(landmarkColor)) {
-                  const mat = new TownStdMat();
-                  mat.color = new THREE.Color(landmarkColor);
-                  mat.roughness = 0.7;
-                  landmarkMatCache.set(landmarkColor, mat);
-                }
-                const landmarkMesh = new THREE.Mesh(
-                  landmarkGeo,
-                  landmarkMatCache.get(landmarkColor)!,
-                );
-                landmarkMesh.position.set(lx, ly + height / 2, lz);
-                landmarkMesh.rotation.y = landmark.rotation;
-                landmarkMesh.castShadow = true;
-                landmarkMesh.receiveShadow = true;
-                landmarkMesh.userData = { townId: town.id };
-                resourceManager.stage({
-                  object: landmarkMesh,
-                  parent: townGroup,
-                });
-              }
-            }
-          }
-
-          // Store full procgen data for town-move pipeline
-          lastProcgenTownsRef.current = newTowns;
-
-          // Update runtimeTowns ref so the pipeline sees them
-          runtimeTownsRef.current = newTowns.map((t) => ({
-            id: t.id,
-            name: t.name,
-            position: { ...t.position },
-            size: t.size,
-            safeZoneRadius: t.safeZoneRadius,
-          }));
-
-          // Inter-town roads are rendered by the terrain shader via roadInfluence
-          // vertex attribute — no ribbon meshes needed. Tile regen below handles it.
+          // Sync runtime towns + procgen data from the renderer
+          runtimeTownsRef.current = tr.runtimeTowns;
+          lastProcgenTownsRef.current = tr.lastProcgenTowns;
 
           // Regenerate terrain tiles under/near towns so flattening takes effect.
           // Use dirty-tile mechanism instead of unload+reload to avoid blanking
@@ -4628,79 +3559,25 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             // Force updateTiles to re-scan on next frame
             lastCameraTileRef.current.tileX = -Infinity;
           }
-
-          console.warn(
-            `%c[refreshTownMarkers] DONE — Rendered ${newTowns.length} towns, townGroup now has ${townGroup.children.length} children`,
-            "color: lime; font-weight: bold",
-          );
         },
         moveTownInScene: (
           townId: string,
           newPosition: { x: number; y: number; z: number },
         ) => {
-          const townGroup = townMarkersRef.current;
-          if (!townGroup) return;
-
-          // Find old position from runtimeTowns
-          const oldTown = runtimeTownsRef.current.find((t) => t.id === townId);
-          if (!oldTown) {
-            console.warn(
-              `[moveTownInScene] Town ${townId} not found in runtimeTowns`,
-            );
-            return;
-          }
-
-          const dx = newPosition.x - oldTown.position.x;
-          const dz = newPosition.z - oldTown.position.z;
-          if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) return;
-
+          const tr = townRendererRef.current;
+          if (!tr) return;
           const offset = worldCenterOffsetRef.current;
-          const newSceneX = newPosition.x + offset;
-          const newSceneZ = newPosition.z + offset;
-
-          // Query terrain height at new position — this is the Y the terrain
-          // will flatten to, and where buildings/markers should sit.
           const heightQuerier = terrainQuerierRef.current;
           const gen = generatorRef.current;
-          const newTerrainY = heightQuerier
-            ? heightQuerier(newPosition.x, newPosition.z).height
-            : gen
-              ? gen.getHeightAt(newPosition.x, newPosition.z)
-              : 0;
-          const oldTerrainY = heightQuerier
-            ? heightQuerier(oldTown.position.x, oldTown.position.z).height
-            : gen
-              ? gen.getHeightAt(oldTown.position.x, oldTown.position.z)
-              : 0;
-          const dy = newTerrainY - oldTerrainY;
-
-          // Move direct children of townGroup that belong to this town.
-          // Town center markers (cone/ring/pillar) use absolute x/z positioning
-          // because the gizmo already moved the attached cone — applying a
-          // delta would double-move it. Buildings/landmarks/roads use x/z delta.
-          // Y is adjusted by terrain height difference for ALL objects.
-          for (const child of townGroup.children) {
-            if (child.userData?.townId === townId) {
-              if (child.userData?.selectableType === "town") {
-                child.position.x = newSceneX;
-                child.position.z = newSceneZ;
-              } else {
-                child.position.x += dx;
-                child.position.z += dz;
-              }
-              child.position.y += dy;
-            }
-          }
-
-          // Update runtimeTowns ref so terrain flattening uses the new
-          // position when tiles regenerate (triggered by the useEffect
-          // watching providedRoads, same path as the world wizard).
-          const rt = runtimeTownsRef.current.find((t) => t.id === townId);
-          if (rt) {
-            rt.position.x = newPosition.x;
-            rt.position.y = newTerrainY;
-            rt.position.z = newPosition.z;
-          }
+          const getHeight = (wx: number, wz: number): number =>
+            heightQuerier
+              ? heightQuerier(wx, wz).height
+              : gen
+                ? gen.getHeightAt(wx, wz)
+                : 0;
+          tr.moveTown(townId, newPosition, offset, getHeight);
+          // Sync runtime towns ref from TownRenderer
+          runtimeTownsRef.current = tr.runtimeTowns;
         },
         rebuildRoadRibbons: (
           roads: Array<{
@@ -4716,7 +3593,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           // tile unload is handled by the useEffect (same path as wizard).
           providedRoadsRef.current = roads as GeneratedRoad[];
         },
-        getLastProcgenTowns: () => lastProcgenTownsRef.current,
+        getLastProcgenTowns: () =>
+          townRendererRef.current?.lastProcgenTowns ??
+          lastProcgenTownsRef.current,
         setVegetationVisible: (visible: boolean) => {
           if (vegetationContainerRef.current) {
             vegetationContainerRef.current.visible = visible;
@@ -4857,38 +3736,29 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         setInitialLoadComplete(true);
       }
 
-      // Animation loop
-      let lastTime = performance.now();
+      // ---- Pre-frame domain logic (registered on ViewportRenderLoop) ----
       // Track camera rotation for minimap (throttled updates)
       let lastRotationUpdate = 0;
       // Pre-allocated vector for label world position query (avoids GC)
       const _labelWorldPos = new THREE.Vector3();
       // Sun direction for shadow follow — updated when ToD changes, default from initial position
       const _sunDir = new THREE.Vector3(100, 200, 100).normalize();
-      // Phase 2D: Cache last time-of-day value to skip unchanged frames
+      // Cache last time-of-day value to skip unchanged frames
       let lastToDValue = -1;
-      // Phase 2E: Throttle LOD updates — every 10 frames or when camera moves
-      let lodFrameCounter = 0;
-      let lastLodCameraX = 0;
-      let lastLodCameraZ = 0;
-      // Perf monitoring: log draw call stats every ~2 seconds
-      let perfFrameCounter = 0;
+      // Domain-specific frame counter for throttled visibility updates
+      let domainFrameCounter = 0;
 
-      const animate = () => {
-        if (!mounted) return;
-        animationIdRef.current = requestAnimationFrame(animate);
+      // Supply LOD objects for ViewportRenderLoop's built-in throttled updates
+      renderLoop.setLodObjects(lodObjectsRef.current);
 
+      renderLoop.onFrame((deltaTime, elapsedSeconds) => {
         const now = performance.now();
-        const deltaTime = Math.min((now - lastTime) / 1000, 0.1); // Cap delta
-        lastTime = now;
-        const elapsedSeconds = now / 1000;
+        domainFrameCounter++;
 
         updateCameraRef.current(deltaTime);
-        // Phase 2C: Pass cached frame timestamp to updateTiles
         updateTilesRef.current(now);
 
         // Check if initial world load is complete (async path for large worlds).
-        // Once all low-res tiles exist, dismiss the loading overlay.
         if (!initialLoadCompleteRef.current) {
           if (tilesRef.current.size >= totalTileCount) {
             initialLoadCompleteRef.current = true;
@@ -4896,7 +3766,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        // Phase 2D: Only run time-of-day lighting when value changes
+        // Time-of-day lighting — only when value changes
         const todValue = timeOfDayRef.current;
         if (
           todValue !== lastToDValue &&
@@ -4920,53 +3790,40 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             },
             enableSkyRef.current,
           );
-          // Phase 3+6: When gameFog is on, use sky-matching fog color
           if (enableGameFogRef.current && scene.fog instanceof THREE.Fog) {
             scene.fog.near = 400;
             scene.fog.far = 800;
-            // When sky dome is active, sync fog color to time-of-day
             if (enableSkyRef.current) {
               updateSceneFog(di, scene.fog as THREE.Fog);
             }
           }
-          // Capture ToD sun direction for shadow follow
           _sunDir.copy(sunRef.current.position).normalize();
 
-          // Phase 8: Auto-exposure — lerp toward target based on dayIntensity
-          const targetExposure = computeTargetExposure(di);
-          currentExposureRef.current +=
-            (targetExposure - currentExposureRef.current) * EXPOSURE.LERP_SPEED;
-          if (rendererRef.current) {
-            rendererRef.current.toneMappingExposure =
-              currentExposureRef.current;
-          }
+          // Auto-exposure — delegate lerp to ViewportRenderLoop
+          renderLoop.setTargetExposure(computeTargetExposure(di));
 
-          // Phase 5: Grass day/night tinting + sun direction
+          // Grass day/night tinting + sun direction
           if (standaloneGrassRef.current) {
             standaloneGrassRef.current.setDayIntensity(di);
             standaloneGrassRef.current.updateSunDirection(_sunDir);
           }
 
-          // Phase 6: Water day/night shade + night dimming
+          // Water day/night shade + night dimming
           if (waterUniformsRef.current) {
             waterUniformsRef.current.dayIntensity.value = di;
-            // Game uses sunIntensity = dayIntensity × DAY_INTENSITY_MULTIPLIER (1.8)
             waterUniformsRef.current.sunIntensity.value = di * 1.8;
           }
         }
 
-        // Phase 2: Update standalone sky system
+        // Standalone sky system
         if (standaloneSkyRef.current && enableSkyRef.current) {
-          // Convert hour (0-24) to world time seconds for the sky system
           const dayPhase = hourToDayPhase(todValue);
           const worldTimeSec = dayPhase * DAY_CYCLE.DURATION_SEC;
           standaloneSkyRef.current.update(deltaTime, worldTimeSec);
           standaloneSkyRef.current.lateUpdate(camera.position);
         }
 
-        // Shadow camera follow: center shadow frustum on camera's ground position
-        // (matches game's Environment.ts shadow anchor). Run every frame since
-        // the ±200 frustum is small and camera moves frequently.
+        // Shadow camera follow
         if (sunRef.current?.castShadow) {
           sunRef.current.position.set(
             camera.position.x + _sunDir.x * 200,
@@ -4981,31 +3838,27 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           sunRef.current.target.updateMatrixWorld();
         }
 
-        // GPU resource staging — see SceneResourceManager for invariants.
-        // Must run BEFORE LOD updates so newly added LOD objects get their
-        // visibility set correctly (without update(), all 3 levels render).
+        // GPU resource staging — must run BEFORE LOD updates
         resourceManager.processStaging(entitySyncRef.current);
 
-        // Phase 7: Process foliage generation queue (1 tile/frame) + visibility culling
+        // Foliage queue processing + throttled visibility culling
         const foliageMgr = foliageManagerRef.current;
         if (foliageMgr && foliageMgr.isEnabled()) {
           foliageMgr.processQueue();
-          // Update foliage visibility every 10 frames to avoid per-frame overhead
-          if (perfFrameCounter % 10 === 0) {
+          if (domainFrameCounter % 10 === 0) {
             foliageMgr.updateVisibility(camera.position.x, camera.position.z);
           }
         }
 
-        // Phase 5: Update procedural grass — process queue + camera position
+        // Procedural grass — process queue + camera position
         if (standaloneGrassRef.current && enableGrassRef.current) {
           standaloneGrassRef.current.processQueue(1);
           standaloneGrassRef.current.update(camera.position);
         }
 
-        // Update water shader uniforms: time + sun direction
+        // Water shader uniforms: time + sun direction
         if (waterUniformsRef.current) {
           waterUniformsRef.current.time.value = elapsedSeconds;
-          // Sync sun direction so water specular follows the ToD sun
           if (sunRef.current) {
             waterUniformsRef.current.sunDirection.value
               .copy(sunRef.current.position)
@@ -5013,27 +3866,20 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        // Entity marker visibility — progressive distance culling.
-        // At low altitude (<200): all markers visible.
-        // At medium altitude (200-400): markers culled by distance from camera.
-        // At high altitude (>400): all markers hidden (saves thousands of draw calls).
-        // Only override when RM isn't managing visibility during staging.
+        // Entity marker visibility — progressive distance culling
         if (entitySyncRef.current && !resourceManager.areMarkersHidden) {
           const camAlt = camera.position.y;
           if (camAlt >= MARKER_HIDE_ALTITUDE) {
             entitySyncRef.current.visible = false;
           } else {
             entitySyncRef.current.visible = true;
-            // Progressive distance culling at medium altitude (every 30 frames)
-            if (camAlt > 200 && perfFrameCounter % 30 === 0) {
-              const cullDist = 300; // world units
-              const cullDistSq = cullDist * cullDist;
+            if (camAlt > 200 && domainFrameCounter % 30 === 0) {
+              const cullDistSq = 300 * 300;
               const cx = camera.position.x;
               const cz = camera.position.z;
               for (const subGroup of entitySyncRef.current.children) {
                 for (const marker of subGroup.children) {
                   if (!marker.userData?.selectable) continue;
-                  // Use first child's world position as proxy (avoids full traverse)
                   const firstChild = (marker as THREE.Group).children[0];
                   if (!firstChild) continue;
                   const dx = firstChild.position.x - cx;
@@ -5045,19 +3891,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
 
-        // Phase 2E: Throttle LOD updates — every 10 frames or when camera moves > 5 units
-        lodFrameCounter++;
-        const camDx = camera.position.x - lastLodCameraX;
-        const camDz = camera.position.z - lastLodCameraZ;
-        if (lodFrameCounter >= 10 || camDx * camDx + camDz * camDz > 25) {
-          lodFrameCounter = 0;
-          lastLodCameraX = camera.position.x;
-          lastLodCameraZ = camera.position.z;
-          for (const lod of lodObjectsRef.current) {
-            lod.update(camera);
-          }
-        }
-
         // Animate wilderness skull (bobbing and pulsing)
         if (wildernessOverlayRef.current) {
           const wildernessGroup =
@@ -5065,35 +3898,26 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
               skullSprite?: THREE.Sprite;
             };
           if (wildernessGroup.skullSprite) {
-            // Bob up and down
             const baseY = 50;
-            const bobAmplitude = 3.0;
-            const bobSpeed = 1.2;
             wildernessGroup.skullSprite.position.y =
-              baseY + Math.sin(elapsedSeconds * bobSpeed) * bobAmplitude;
-
-            // Subtle scale pulse
-            const skullBaseSize = 30.0;
+              baseY + Math.sin(elapsedSeconds * 1.2) * 3.0;
             const scalePulse = 1.0 + Math.sin(elapsedSeconds * 0.5) * 0.05;
             wildernessGroup.skullSprite.scale.set(
-              skullBaseSize * scalePulse,
-              skullBaseSize * scalePulse,
+              30.0 * scalePulse,
+              30.0 * scalePulse,
               1,
             );
           }
         }
 
-        // Update camera rotation for minimap (only when built-in minimap is shown)
+        // Camera rotation for minimap (throttled)
         if (!isStudioModeRef.current && now - lastRotationUpdate > 100) {
           setCameraRotationY(cameraStateRef.current.euler.y);
           lastRotationUpdate = now;
         }
 
-        // UE5-style constant screen-space label sizing —
-        // scale visible label sprites so they stay the same pixel height
-        // regardless of camera distance.  Only hovered + selected are visible
-        // so this is O(1).
-        const LABEL_SCREEN_HEIGHT = 0.035; // fraction of viewport height
+        // Constant screen-space label sizing
+        const LABEL_SCREEN_HEIGHT = 0.035;
         const labelTargets = [
           hoveredSelectableRef.current,
           selectedLabelRef.current,
@@ -5113,97 +3937,41 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             sprite.scale.set(worldHeight * aspect, worldHeight, 1);
           }
         }
+      });
 
-        // Skip rendering while GPU recovery is in progress
-        if (gpuRecoveringRef.current || !rendererRef.current) {
-          return;
-        }
-
-        try {
-          if (postProcessingRef.current) {
-            postProcessingRef.current.render();
-          } else {
-            rendererRef.current.render(scene, camera);
-          }
-        } catch (err) {
-          // GPU error — attempt device loss recovery instead of dying
-          const crashStats = getGpuLifecycleStats();
-          console.error(
-            `[GPU-DEBUG] RENDER CRASH: deferDispose=${crashStats.pendingDisposals} deferAdd=${crashStats.pendingAdditions} ` +
-              `rmStaging=${resourceManager.pendingStaged} rmDisposing=${resourceManager.pendingDisposal} ` +
-              `scene=${scene.children.length}`,
-          );
-          console.error(
-            "[TileBasedTerrain] Render error, triggering device loss recovery:",
-            err,
-          );
-          recoverGpu("render-crash");
-          return;
-        }
-
+      // ---- Post-render: ViewHelper overlay + GPU resource disposal ----
+      renderLoop.onPostRender(() => {
         // Render ViewHelper orientation cube overlay
-        // ViewHelper types expect WebGLRenderer but work with WebGPURenderer at runtime
         if (viewHelperRef.current && rendererRef.current) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           viewHelperRef.current.render(rendererRef.current as any);
         }
 
-        // Perf monitoring — log draw call and triangle counts every ~2s (120 frames)
-        perfFrameCounter++;
-        if (perfFrameCounter >= 120 && rendererRef.current) {
-          perfFrameCounter = 0;
-          const info = rendererRef.current.info;
-          console.log(
-            `[PERF] calls=${info.render.calls} tris=${info.render.triangles} ` +
-              `geoms=${info.memory.geometries} textures=${info.memory.textures}`,
-          );
-        }
-
-        // GPU resource disposal — runs AFTER rendering every frame.
-        // Safe to run alongside staging because disposal only destroys
-        // buffers after the GPU command buffer has been submitted.
+        // GPU resource disposal — runs AFTER rendering every frame
         resourceManager.processDisposal();
 
-        // Deferred GPU disposal — runs EVERY frame to free old GPU resources.
-        // Disposal only destroys buffers (never creates them), so it is safe
-        // to run alongside SceneResourceManager staging. Without this, wizard
-        // apply leaves thousands of unreleased buffers while staging adds new
-        // ones, exhausting Metal's staging buffer pool and crashing the device.
+        // Deferred GPU disposal — frees old GPU resources every frame
         processDeferredDisposalOnly();
 
-        // Deferred additions (entity markers) — only when SceneResourceManager
-        // has no pending work, to avoid both systems creating GPU buffers in
-        // the same frame.
+        // Deferred additions (entity markers) — only when no pending staging work
         if (
           !resourceManager.hasStagedWork &&
           resourceManager.pendingDisposal === 0
         ) {
           processDeferredFrame();
         }
-      };
-      animate();
+      });
+
+      // Start the render loop
+      renderLoop.start();
     };
 
     initRenderer();
 
-    // Handle resize — use ResizeObserver so sidebar collapse/expand triggers
-    // a resize (window.resize only fires when the browser window itself changes)
-    const handleResize = () => {
-      if (!container || !camera || !rendererRef.current) return;
-      const width = container.clientWidth || 1;
-      const height = container.clientHeight || 1;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      rendererRef.current.setSize(width, height);
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(container);
-    // Also listen on window resize as fallback (fullscreen changes, etc.)
-    window.addEventListener("resize", handleResize);
+    // Resize is handled by ViewportRenderLoop (ResizeObserver + window.resize)
 
     // Capture refs for cleanup
     const currentTiles = tilesRef.current;
-    const currentAnimationId = animationIdRef;
     const currentTemplateGeometry = templateGeometryRef;
     const currentTerrainMaterial = terrainMaterialRef;
     const currentWaterMaterial = waterMaterialRef;
@@ -5211,8 +3979,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     // Cleanup
     return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", handleResize);
       document.removeEventListener("mousemove", _onMouseMove);
       document.removeEventListener("keydown", _onKeyDown);
       document.removeEventListener("keyup", _onKeyUp);
@@ -5223,7 +3989,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       container.removeEventListener("wheel", _onWheel);
       document.removeEventListener("contextmenu", _onContextMenu, true);
 
-      cancelAnimationFrame(currentAnimationId.current);
+      // Stop and dispose ViewportRenderLoop (stops RAF, removes canvas,
+      // disconnects ResizeObserver, disposes renderer + post-processing)
+      renderLoopRef.current?.dispose();
+      renderLoopRef.current = null;
 
       // Flush staging + disposal queues — on unmount we can dispose everything
       // synchronously since the renderer is being torn down anyway.
@@ -5248,6 +4017,10 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
           }
         }
       });
+
+      // Dispose TownRenderer (releases shared materials, geometries, etc.)
+      townRendererRef.current?.dispose();
+      townRendererRef.current = null;
 
       // Dispose difficulty heatmap
       heatmapManagerRef.current?.dispose();
@@ -5327,6 +4100,13 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       waterTemplateGeometryRef.current?.dispose();
       currentTerrainMaterial.current?.dispose();
       currentWaterMaterial.current?.dispose();
+      // Dispose water textures (normalTex, flowTex, foamTex)
+      if (waterTexturesRef.current) {
+        waterTexturesRef.current.normalTex.dispose();
+        waterTexturesRef.current.flowTex.dispose();
+        waterTexturesRef.current.foamTex.dispose();
+        waterTexturesRef.current = null;
+      }
       lodObjectsRef.current = [];
 
       // Dispose orbit controls
@@ -5335,21 +4115,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         orbitControlsRef.current = null;
       }
 
-      // Dispose RenderPipeline and WebGPU renderer
-      if (postProcessingRef.current) {
-        postProcessingRef.current.dispose();
-        postProcessingRef.current = null;
-      }
-      if (rendererRef.current) {
-        if (
-          container &&
-          rendererRef.current.domElement.parentNode === container
-        ) {
-          container.removeChild(rendererRef.current.domElement);
-        }
-        rendererRef.current.dispose();
-        rendererRef.current = null;
-      }
+      // Renderer + post-processing disposal is handled by ViewportRenderLoop.dispose()
+      // (called at the top of this cleanup function). Clear ref for safety.
+      rendererRef.current = null;
 
       // Exit pointer lock if active
       if (document.pointerLockElement === container) {
@@ -5428,41 +4196,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     };
   }, [enableShadows]);
 
-  // Phase 6: Dynamic bloom toggle — rebuilds RenderPipeline with/without bloom
+  // Phase 6: Dynamic bloom toggle — delegates to ViewportRenderLoop
   useEffect(() => {
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    if (!renderer || !scene || !camera) return;
-
-    // Dispose existing pipeline
-    if (postProcessingRef.current) {
-      postProcessingRef.current.dispose();
-      postProcessingRef.current = null;
-    }
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const PipelineCtor = (THREE as Record<string, unknown>)[
-        "RenderPipeline"
-      ] as new (r: unknown) => RenderPipelineInstance;
-      const renderPipeline = new PipelineCtor(renderer);
-      const scenePass = pass(scene, camera);
-      const sceneColor = scenePass.getTextureNode("output");
-
-      if (enableBloom) {
-        // FXAA + bloom: add bloom on top of scene color, then apply FXAA
-        const bloomPass = bloom(sceneColor, 0.5, 0.1);
-        renderPipeline.outputNode = fxaa(sceneColor.add(bloomPass));
-      } else {
-        renderPipeline.outputNode = fxaa(sceneColor);
-      }
-
-      postProcessingRef.current = renderPipeline;
-    } catch (ppErr) {
-      console.warn("[TileBasedTerrain] RenderPipeline rebuild failed:", ppErr);
-      postProcessingRef.current = null;
-    }
+    renderLoopRef.current?.setBloomEnabled(enableBloom);
   }, [enableBloom]);
 
   // Phase 6: Dynamic fog toggle — switch between studio fog and game-matching fog

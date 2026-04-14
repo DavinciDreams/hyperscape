@@ -30,7 +30,14 @@ import {
   Users,
   X,
 } from "lucide-react";
-import React, { useState, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useDeferredValue,
+  useRef,
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type {
   ManifestItem,
@@ -590,6 +597,7 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
   const manifests = state.manifests;
 
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearch = useDeferredValue(searchQuery);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(
     () => new Set(["entities", "items"]),
@@ -638,8 +646,11 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
     [allEntries],
   );
 
-  // Parse search
-  const parsed = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);
+  // Parse search (uses deferred value for filtering performance)
+  const parsed = useMemo(
+    () => parseSearchQuery(deferredSearch),
+    [deferredSearch],
+  );
 
   // Filter entries
   const filteredEntries = useMemo(() => {
@@ -669,6 +680,17 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
 
     return result;
   }, [allEntries, selectedCategory, parsed]);
+
+  // Virtualizer for large content lists
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const GRID_COLS = 2;
+  const gridRowCount = Math.ceil(filteredEntries.length / GRID_COLS);
+  const gridVirtualizer = useVirtualizer({
+    count: viewMode === "grid" ? gridRowCount : filteredEntries.length,
+    getScrollElement: () => contentScrollRef.current,
+    estimateSize: () => (viewMode === "grid" ? 72 : 32),
+    overscan: 8,
+  });
 
   // Toggle parent expansion
   const toggleParent = useCallback((key: string) => {
@@ -873,8 +895,11 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
 
         {/* Right content area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Content grid/list */}
-          <div className="flex-1 overflow-y-auto scrollbar-thin">
+          {/* Content grid/list (virtualized) */}
+          <div
+            ref={contentScrollRef}
+            className="flex-1 overflow-y-auto scrollbar-thin"
+          >
             {filteredEntries.length === 0 ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center text-text-tertiary px-4">
@@ -886,29 +911,70 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
                   </p>
                 </div>
               </div>
-            ) : viewMode === "grid" ? (
-              <div className="grid grid-cols-2 gap-1 p-1.5">
-                {filteredEntries.map((entry) => (
-                  <ContentGridCard
-                    key={entry.id}
-                    entry={entry}
-                    isSelected={selectedEntry?.id === entry.id}
-                    onClick={() => setSelectedEntry(entry)}
-                    onDragStart={(e) => handleDragStart(e, entry)}
-                  />
-                ))}
-              </div>
             ) : (
-              <div>
-                {filteredEntries.map((entry) => (
-                  <ContentListRow
-                    key={entry.id}
-                    entry={entry}
-                    isSelected={selectedEntry?.id === entry.id}
-                    onClick={() => setSelectedEntry(entry)}
-                    onDragStart={(e) => handleDragStart(e, entry)}
-                  />
-                ))}
+              <div
+                style={{
+                  height: `${gridVirtualizer.getTotalSize()}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+                className="p-1.5"
+              >
+                {gridVirtualizer.getVirtualItems().map((virtualRow) => {
+                  if (viewMode === "grid") {
+                    const startIdx = virtualRow.index * GRID_COLS;
+                    const rowEntries = filteredEntries.slice(
+                      startIdx,
+                      startIdx + GRID_COLS,
+                    );
+                    return (
+                      <div
+                        key={virtualRow.key}
+                        className="grid grid-cols-2 gap-1"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: `${virtualRow.size}px`,
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        {rowEntries.map((entry) => (
+                          <ContentGridCard
+                            key={entry.id}
+                            entry={entry}
+                            isSelected={selectedEntry?.id === entry.id}
+                            onClick={() => setSelectedEntry(entry)}
+                            onDragStart={(e) => handleDragStart(e, entry)}
+                          />
+                        ))}
+                      </div>
+                    );
+                  } else {
+                    const entry = filteredEntries[virtualRow.index];
+                    return (
+                      <div
+                        key={virtualRow.key}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: `${virtualRow.size}px`,
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        <ContentListRow
+                          entry={entry}
+                          isSelected={selectedEntry?.id === entry.id}
+                          onClick={() => setSelectedEntry(entry)}
+                          onDragStart={(e) => handleDragStart(e, entry)}
+                        />
+                      </div>
+                    );
+                  }
+                })}
               </div>
             )}
           </div>

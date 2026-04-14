@@ -24,7 +24,9 @@ interface Props {
   resource: PlacedResource;
 }
 
-export function ResourceProperties({ resource }: Props) {
+export const ResourceProperties = React.memo(function ResourceProperties({
+  resource,
+}: Props) {
   const { actions, state } = useWorldStudio();
 
   const update = useCallback(
@@ -150,4 +152,4 @@ export function ResourceProperties({ resource }: Props) {
       </PropertySection>
     </>
   );
-}
+});

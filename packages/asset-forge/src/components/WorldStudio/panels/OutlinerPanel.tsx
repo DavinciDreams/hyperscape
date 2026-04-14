@@ -64,6 +64,7 @@ import React, {
   useMemo,
   useRef,
   useEffect,
+  useDeferredValue,
 } from "react";
 
 import type { HierarchyNode, Selection } from "../../WorldBuilder/types";
@@ -703,6 +704,7 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
   const clearMulti = useSelectionStore((store) => store.clearMultiSelection);
 
   const [searchText, setSearchText] = useState("");
+  const deferredSearchText = useDeferredValue(searchText);
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [visibilityMap, setVisibilityMap] = useState<VisibilityMap>(
@@ -738,9 +740,9 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
   );
 
   const searchQuery = useMemo(() => {
-    if (!searchText.trim()) return null;
-    return parseSearchQuery(searchText);
-  }, [searchText]);
+    if (!deferredSearchText.trim()) return null;
+    return parseSearchQuery(deferredSearchText);
+  }, [deferredSearchText]);
 
   const handleToggle = useCallback(
     (nodeId: string) => actions.toggleNodeExpanded(nodeId),

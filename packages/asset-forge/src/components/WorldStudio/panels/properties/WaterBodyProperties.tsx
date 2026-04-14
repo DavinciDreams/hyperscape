@@ -30,7 +30,9 @@ const BODY_TYPES: Array<{ value: PlacedWaterBody["bodyType"]; label: string }> =
     { value: "pond", label: "Pond" },
   ];
 
-export function WaterBodyProperties({ waterBody }: Props) {
+export const WaterBodyProperties = React.memo(function WaterBodyProperties({
+  waterBody,
+}: Props) {
   const { state, actions } = useWorldStudio();
   const isAddingVertices = state.tools.isAddingWaterVertices;
 
@@ -211,4 +213,4 @@ export function WaterBodyProperties({ waterBody }: Props) {
       )}
     </>
   );
-}
+});

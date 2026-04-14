@@ -109,3 +109,22 @@ export {
   type PrecomputedExclusions,
   type FilterableTree,
 } from "./vegetation-filter";
+
+// Shared Perlin noise (single source of truth for terrain noise pipeline)
+export {
+  createPermutation,
+  perlin2D,
+  seamlessPerlin2D,
+  seamlessFbm,
+  buildPerlinNoiseJS,
+} from "../utils/noise/PerlinNoise";
+
+// Shared terrain shader constants & biome palettes
+export {
+  TERRAIN_SHADER,
+  TUNDRA,
+  FOREST,
+  CANYON,
+  ACCENT,
+  type RGB,
+} from "../systems/shared/world/TerrainConstants";

@@ -17,7 +17,10 @@ interface Props {
   world: WorldData;
 }
 
-export function RoadProperties({ roadId, world }: Props) {
+export const RoadProperties = React.memo(function RoadProperties({
+  roadId,
+  world,
+}: Props) {
   const { actions } = useWorldStudio();
 
   // Check custom roads first, then generated roads
@@ -123,7 +126,7 @@ export function RoadProperties({ roadId, world }: Props) {
       </PropertySection>
     </>
   );
-}
+});
 
 // ============== Custom Road Editor ==============
 

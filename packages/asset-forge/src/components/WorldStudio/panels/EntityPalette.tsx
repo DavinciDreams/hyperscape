@@ -38,7 +38,7 @@ import {
   Volume2,
   Zap,
 } from "lucide-react";
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useDeferredValue } from "react";
 
 import type { PaletteCategory, PaletteItem } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
@@ -266,6 +266,7 @@ export const EntityPalette = React.memo(function EntityPalette() {
   const [expandedCategory, setExpandedCategory] =
     useState<PaletteCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearch = useDeferredValue(searchQuery);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [recentPlacements, setRecentPlacements] = useState<string[]>([]);
@@ -650,9 +651,9 @@ export const EntityPalette = React.memo(function EntityPalette() {
 
   // Filter items by search
   const filteredItems = useMemo(() => {
-    if (!searchQuery.trim()) return paletteItems;
+    if (!deferredSearch.trim()) return paletteItems;
 
-    const query = searchQuery.toLowerCase();
+    const query = deferredSearch.toLowerCase();
     const filtered = new Map<PaletteCategory, PaletteItem[]>();
 
     paletteItems.forEach((items, category) => {
@@ -667,7 +668,7 @@ export const EntityPalette = React.memo(function EntityPalette() {
     });
 
     return filtered;
-  }, [paletteItems, searchQuery]);
+  }, [paletteItems, deferredSearch]);
 
   const handleCategoryToggle = useCallback((categoryId: PaletteCategory) => {
     setExpandedCategory((prev) => (prev === categoryId ? null : categoryId));

@@ -24,14 +24,25 @@ export interface EditorWaterUniforms {
   sunIntensity: { value: number };
 }
 
+export interface EditorWaterResult {
+  material: THREE.Material;
+  uniforms: EditorWaterUniforms;
+  /** Textures created for the water shader — caller must dispose these on cleanup. */
+  textures: {
+    normalTex: THREE.DataTexture;
+    flowTex: THREE.DataTexture;
+    foamTex: THREE.DataTexture;
+  };
+}
+
 /**
  * Create a TSL-based water material for the World Studio viewport.
  * Same shader as the game, minus reflections and fog.
+ *
+ * **IMPORTANT**: Caller is responsible for disposing the returned textures
+ * via `result.textures.normalTex.dispose()` etc. on cleanup.
  */
-export function createEditorWaterMaterial(): {
-  material: THREE.Material;
-  uniforms: EditorWaterUniforms;
-} {
+export function createEditorWaterMaterial(): EditorWaterResult {
   // Generate textures (same sizes as game: normal=512, flow=256, foam=128)
   const normalTex = generateWaterNormalMap(512, 42);
   const flowTex = generateWaterFlowMap(256);
@@ -54,5 +65,6 @@ export function createEditorWaterMaterial(): {
       dayIntensity: uniforms.dayIntensity,
       sunIntensity: uniforms.sunIntensity,
     },
+    textures: { normalTex, flowTex, foamTex },
   };
 }

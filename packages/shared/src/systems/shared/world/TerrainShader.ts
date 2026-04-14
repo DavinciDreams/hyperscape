@@ -53,20 +53,23 @@ import { FOG_NEAR_SQ, FOG_FAR_SQ, fogRenderTarget } from "./FogConfig";
 
 import { MINE_BIOME_PALETTES, ROAD_COLORS } from "../../../world/biome-colors";
 import { SUN_LIGHT, SUN_SHADE } from "./LightingConfig";
+import {
+  TERRAIN_SHADER,
+  TUNDRA,
+  FOREST,
+  CANYON,
+  ACCENT,
+} from "./TerrainConstants";
+import {
+  createPermutation,
+  perlin2D,
+  seamlessPerlin2D,
+  seamlessFbm,
+} from "../../../utils/noise/PerlinNoise";
 
 export const TERRAIN_SHADER_CONSTANTS = {
-  TRIPLANAR_SCALE: 0.5,
-  SNOW_HEIGHT: 90.0,
-  NOISE_SCALE: 0.0008,
-  DIRT_THRESHOLD: 0.43,
-  LOD_FULL_DETAIL: 100.0,
-  LOD_MEDIUM_DETAIL: 200.0,
+  ...TERRAIN_SHADER,
   WATER_LEVEL: TERRAIN_CONSTANTS.WATER_THRESHOLD,
-  DISTORT_NOISE_SCALE: 0.067,
-  VARIATION_NOISE_SCALE: 0.0015,
-  ROCK_DISTORT_STRENGTH: 0.5,
-  HEIGHT_DISTORT_STRENGTH: 8.0,
-  SATURATION_BOOST: 1.35,
 };
 
 /**
@@ -221,49 +224,47 @@ function createTerrainBiomeTex(
 // SHARED TERRAIN BASE COLOR (used by terrain shader AND tree ground-blend)
 // ============================================================================
 
-// --- Tundra palette: snowy white-blue with frozen grey stone ---
-const TUNDRA_GRASS = vec3(0.78, 0.82, 0.85);
-const TUNDRA_GRASS_DARK = vec3(0.65, 0.7, 0.75);
-const TUNDRA_GRASS_HIGH = vec3(0.68, 0.72, 0.78);
-const TUNDRA_VARIATION = vec3(0.6, 0.64, 0.7);
-const TUNDRA_DIRT = vec3(0.55, 0.55, 0.58);
-const TUNDRA_DIRT_DARK = vec3(0.42, 0.42, 0.45);
-const TUNDRA_CLIFF = vec3(0.5, 0.52, 0.56);
-const TUNDRA_CLIFF_DARK = vec3(0.38, 0.4, 0.44);
+// --- Biome palettes from shared constants (TerrainConstants.ts) ---
+const TUNDRA_GRASS = vec3(...TUNDRA.GRASS);
+const TUNDRA_GRASS_DARK = vec3(...TUNDRA.GRASS_DARK);
+const TUNDRA_GRASS_HIGH = vec3(...TUNDRA.GRASS_HIGH);
+const TUNDRA_VARIATION = vec3(...TUNDRA.VARIATION);
+const TUNDRA_DIRT = vec3(...TUNDRA.DIRT);
+const TUNDRA_DIRT_DARK = vec3(...TUNDRA.DIRT_DARK);
+const TUNDRA_CLIFF = vec3(...TUNDRA.CLIFF);
+const TUNDRA_CLIFF_DARK = vec3(...TUNDRA.CLIFF_DARK);
 
-// --- Forest palette: vibrant energetic greens with warm brown earth ---
-const FOREST_GRASS = vec3(0.3, 0.58, 0.15);
-const FOREST_GRASS_DARK = vec3(0.18, 0.42, 0.08);
-const FOREST_GRASS_HIGH = vec3(0.24, 0.45, 0.18);
-const FOREST_VARIATION = vec3(0.15, 0.35, 0.1);
-const FOREST_DIRT = vec3(0.26, 0.19, 0.11);
-const FOREST_DIRT_DARK = vec3(0.17, 0.12, 0.07);
-const FOREST_CLIFF = vec3(0.4, 0.38, 0.32);
-const FOREST_CLIFF_DARK = vec3(0.28, 0.26, 0.22);
+const FOREST_GRASS = vec3(...FOREST.GRASS);
+const FOREST_GRASS_DARK = vec3(...FOREST.GRASS_DARK);
+const FOREST_GRASS_HIGH = vec3(...FOREST.GRASS_HIGH);
+const FOREST_VARIATION = vec3(...FOREST.VARIATION);
+const FOREST_DIRT = vec3(...FOREST.DIRT);
+const FOREST_DIRT_DARK = vec3(...FOREST.DIRT_DARK);
+const FOREST_CLIFF = vec3(...FOREST.CLIFF);
+const FOREST_CLIFF_DARK = vec3(...FOREST.CLIFF_DARK);
 
-// --- Canyon palette: red-orange sand with deep crimson rock ---
-const CANYON_SAND = vec3(0.82, 0.52, 0.28);
-const CANYON_SAND_DARK = vec3(0.72, 0.42, 0.2);
-const CANYON_SAND_HIGH = vec3(0.62, 0.38, 0.22);
-const CANYON_VARIATION = vec3(0.58, 0.34, 0.16);
-const CANYON_ROCK = vec3(0.62, 0.28, 0.15);
-const CANYON_ROCK_DARK = vec3(0.48, 0.2, 0.1);
-const CANYON_CLIFF = vec3(0.72, 0.38, 0.18);
-const CANYON_CLIFF_DARK = vec3(0.55, 0.25, 0.12);
+const CANYON_SAND = vec3(...CANYON.SAND);
+const CANYON_SAND_DARK = vec3(...CANYON.SAND_DARK);
+const CANYON_SAND_HIGH = vec3(...CANYON.SAND_HIGH);
+const CANYON_VARIATION = vec3(...CANYON.VARIATION);
+const CANYON_ROCK = vec3(...CANYON.ROCK);
+const CANYON_ROCK_DARK = vec3(...CANYON.ROCK_DARK);
+const CANYON_CLIFF = vec3(...CANYON.CLIFF);
+const CANYON_CLIFF_DARK = vec3(...CANYON.CLIFF_DARK);
 
-const CLIFF_TINT = vec3(0.28, 0.3, 0.36);
+const CLIFF_TINT = vec3(...ACCENT.CLIFF_TINT);
 
 // Legacy aliases used by road overlay and other shader sections (default = forest)
 const GRASS_GREEN = FOREST_GRASS;
 const GRASS_DARK = FOREST_GRASS_DARK;
 const DIRT_BROWN = FOREST_DIRT;
 const DIRT_DARK = FOREST_DIRT_DARK;
-const ROCK_GRAY = vec3(0.45, 0.42, 0.38);
-const ROCK_DARK = vec3(0.3, 0.28, 0.25);
-const SAND_YELLOW = vec3(0.7, 0.6, 0.38);
-const SNOW_WHITE = vec3(0.92, 0.94, 0.96);
-const MUD_BROWN = vec3(0.18, 0.12, 0.08);
-const WATER_EDGE = vec3(0.08, 0.06, 0.04);
+const ROCK_GRAY = vec3(...ACCENT.ROCK_GRAY);
+const ROCK_DARK = vec3(...ACCENT.ROCK_DARK);
+const SAND_YELLOW = vec3(...ACCENT.SAND_YELLOW);
+const SNOW_WHITE = vec3(...ACCENT.SNOW_WHITE);
+const MUD_BROWN = vec3(...ACCENT.MUD_BROWN);
+const WATER_EDGE = vec3(...ACCENT.WATER_EDGE);
 
 /**
  * Compute the procedural terrain base color at a world position.
@@ -418,137 +419,7 @@ export function computeTerrainBaseColor(
 
 // Cached noise texture - generated once, reused everywhere
 let cachedNoiseTexture: THREE.DataTexture | null = null;
-const NOISE_SIZE = 256; // Texture resolution
-
-// Simple Perlin-like noise implementation
-function fade(t: number): number {
-  return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + t * (b - a);
-}
-
-function grad(hash: number, x: number, y: number): number {
-  const h = hash & 3;
-  const u = h < 2 ? x : y;
-  const v = h < 2 ? y : x;
-  return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-}
-
-// Seeded permutation table for deterministic noise
-function createPermutation(seed: number): number[] {
-  const p: number[] = [];
-  for (let i = 0; i < 256; i++) p[i] = i;
-
-  // Fisher-Yates shuffle with seed
-  let s = seed;
-  for (let i = 255; i > 0; i--) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    const j = s % (i + 1);
-    [p[i], p[j]] = [p[j], p[i]];
-  }
-
-  // Double the permutation table
-  return [...p, ...p];
-}
-
-function perlin2D(x: number, y: number, perm: number[]): number {
-  const X = Math.floor(x) & 255;
-  const Y = Math.floor(y) & 255;
-
-  const xf = x - Math.floor(x);
-  const yf = y - Math.floor(y);
-
-  const u = fade(xf);
-  const v = fade(yf);
-
-  const aa = perm[perm[X] + Y];
-  const ab = perm[perm[X] + Y + 1];
-  const ba = perm[perm[X + 1] + Y];
-  const bb = perm[perm[X + 1] + Y + 1];
-
-  const x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
-  const x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
-
-  return lerp(x1, x2, v);
-}
-
-// Multi-octave fractal noise (non-seamless version, kept for reference)
-function _fbm(
-  x: number,
-  y: number,
-  perm: number[],
-  octaves: number = 4,
-): number {
-  let value = 0;
-  let amplitude = 0.5;
-  let frequency = 1;
-  let maxValue = 0;
-
-  for (let i = 0; i < octaves; i++) {
-    value += amplitude * perlin2D(x * frequency, y * frequency, perm);
-    maxValue += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2;
-  }
-
-  return value / maxValue;
-}
-
-/**
- * Seamless 2D Perlin noise using proper torus mapping
- * Maps the 2D plane onto a 4D torus to eliminate seams
- */
-function seamlessPerlin2D(x: number, y: number, perm: number[]): number {
-  // Map 2D coordinates to 4D torus
-  // This creates truly seamless tiling
-  const TWO_PI = Math.PI * 2;
-  const radius = 1.0;
-
-  // Convert to angles (0-1 maps to 0-2PI)
-  const angleX = x * TWO_PI;
-  const angleY = y * TWO_PI;
-
-  // Map to 4D coordinates on a torus
-  const nx = Math.cos(angleX) * radius;
-  const ny = Math.sin(angleX) * radius;
-  const nz = Math.cos(angleY) * radius;
-  const nw = Math.sin(angleY) * radius;
-
-  // Sample 2D noise at 4 different 2D positions and blend
-  // This simulates 4D noise sampling using 2D noise
-  const n1 = perlin2D(nx * 4 + 100, nz * 4 + 100, perm);
-  const n2 = perlin2D(ny * 4 + 200, nw * 4 + 200, perm);
-  const n3 = perlin2D(nx * 4 + ny * 4 + 300, nz * 4 + nw * 4 + 300, perm);
-
-  return (n1 + n2 + n3) / 3;
-}
-
-/**
- * Multi-octave seamless fractal noise
- */
-function seamlessFbm(
-  x: number,
-  y: number,
-  perm: number[],
-  octaves: number = 4,
-): number {
-  let value = 0;
-  let amplitude = 0.5;
-  let maxValue = 0;
-
-  for (let i = 0; i < octaves; i++) {
-    // Each octave uses a different offset to add variation
-    const ox = x + i * 17.3;
-    const oy = y + i * 31.7;
-    value += amplitude * seamlessPerlin2D(ox, oy, perm);
-    maxValue += amplitude;
-    amplitude *= 0.5;
-  }
-
-  return value / maxValue;
-}
+const NOISE_SIZE = TERRAIN_SHADER.NOISE_SIZE;
 
 /**
  * Generate a Perlin noise texture - call once at startup

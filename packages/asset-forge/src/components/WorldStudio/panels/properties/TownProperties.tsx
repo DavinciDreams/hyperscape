@@ -28,7 +28,10 @@ interface Props {
   world: WorldData;
 }
 
-export function TownProperties({ townId, world }: Props) {
+export const TownProperties = React.memo(function TownProperties({
+  townId,
+  world,
+}: Props) {
   const { actions } = useWorldStudio();
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(
     null,
@@ -362,4 +365,4 @@ export function TownProperties({ townId, world }: Props) {
       </PropertySection>
     </>
   );
-}
+});
