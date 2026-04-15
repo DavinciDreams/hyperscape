@@ -5065,12 +5065,37 @@ export class TerrainSystem extends System {
 
     // Process queued tile generations within a small per-frame budget
     // (also processes pre-computed worker results when available)
-    this.processTileGenerationQueue();
-
-    // Process queued collision generation and walkability baking on the server
-    if (this.world.network?.isServer) {
-      this.processCollisionGenerationQueue();
-      this.processWalkabilityQueue();
+    // DIAGNOSTIC: per-phase instrumentation so we can find the slow phase in
+    // production without a rebuild-and-restart cycle. The runtime gate uses
+    // globalThis so esbuild cannot dead-code-eliminate the branch at build
+    // time the way it does for `process.env.TERRAIN_TIMING_DEBUG`. Remove
+    // this block once P7.a investigation is done.
+    const _terrainDiag = (globalThis as { __TERRAIN_PHASE_DIAG__?: boolean })
+      .__TERRAIN_PHASE_DIAG__;
+    if (_terrainDiag) {
+      const _p0 = performance.now();
+      this.processTileGenerationQueue();
+      const _p1 = performance.now();
+      if (this.world.network?.isServer) {
+        this.processCollisionGenerationQueue();
+        const _p2 = performance.now();
+        this.processWalkabilityQueue();
+        const _p3 = performance.now();
+        const _tileMs = _p1 - _p0;
+        const _collMs = _p2 - _p1;
+        const _walkMs = _p3 - _p2;
+        if (_tileMs + _collMs + _walkMs > 50) {
+          console.warn(
+            `[TerrainPhase] tiles=${_tileMs.toFixed(0)}ms coll=${_collMs.toFixed(0)}ms walk=${_walkMs.toFixed(0)}ms pending(tile=${this.pendingTileKeys.length},coll=${this.pendingCollisionKeys.length},walk=${this.pendingWalkabilityTiles.length}) loaded=${this.terrainTiles.size}`,
+          );
+        }
+      }
+    } else {
+      this.processTileGenerationQueue();
+      if (this.world.network?.isServer) {
+        this.processCollisionGenerationQueue();
+        this.processWalkabilityQueue();
+      }
     }
 
     // Process pending resource instance creation (client only, spreads work across frames)
