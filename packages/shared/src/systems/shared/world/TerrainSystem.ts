@@ -556,6 +556,9 @@ export class TerrainSystem extends System {
         : () => Date.now();
     const start = nowFn();
     let generated = 0;
+    // DIAGNOSTIC: per-tile timing via runtime globalThis flag. See P7.a.
+    const _diagEnabled = !!(globalThis as { __TERRAIN_PHASE_DIAG__?: boolean })
+      .__TERRAIN_PHASE_DIAG__;
     while (this.pendingTileKeys.length > 0) {
       if (generated >= this.maxTilesPerFrame) break;
       if (nowFn() - start > this.generationBudgetMsPerFrame) break;
@@ -570,17 +573,23 @@ export class TerrainSystem extends System {
         const geometry = this.createTileGeometryFromWorkerData(workerData);
         this.createTileFromGeometryWithResources(x, z, geometry);
         this.pendingWorkerResults.delete(key);
-        if (TERRAIN_TIMING_DEBUG) {
-          console.debug(
-            `[TerrainTiming] worker tile ${key}: ${(performance.now() - _tStart).toFixed(1)}ms`,
-          );
+        if (_diagEnabled || TERRAIN_TIMING_DEBUG) {
+          const elapsed = performance.now() - _tStart;
+          if (elapsed > 50) {
+            console.warn(
+              `[TerrainTileGen] worker ${key} ${elapsed.toFixed(0)}ms biome=${this.getBiomeAt(x, z)}`,
+            );
+          }
         }
       } else {
         this.generateTile(x, z);
-        if (TERRAIN_TIMING_DEBUG) {
-          console.debug(
-            `[TerrainTiming] sync tile ${key}: ${(performance.now() - _tStart).toFixed(1)}ms`,
-          );
+        if (_diagEnabled || TERRAIN_TIMING_DEBUG) {
+          const elapsed = performance.now() - _tStart;
+          if (elapsed > 50) {
+            console.warn(
+              `[TerrainTileGen] sync ${key} ${elapsed.toFixed(0)}ms biome=${this.getBiomeAt(x, z)}`,
+            );
+          }
         }
       }
       generated++;
@@ -2227,8 +2236,15 @@ export class TerrainSystem extends System {
       return this.terrainTiles.get(key)!;
     }
 
+    // DIAGNOSTIC: sub-phase timing for P7.a. Removed after investigation.
+    const _tilePhaseDiag = !!(
+      globalThis as { __TERRAIN_PHASE_DIAG__?: boolean }
+    ).__TERRAIN_PHASE_DIAG__;
+    const _tPhaseStart = _tilePhaseDiag ? performance.now() : 0;
+
     // Create geometry for this tile
     const geometry = this.createTileGeometry(tileX, tileZ);
+    const _tAfterGeom = _tilePhaseDiag ? performance.now() : 0;
 
     // Use triplanar terrain shader material (or fallback to vertex colors)
     const material = this.getTerrainMaterial();
@@ -2391,6 +2407,8 @@ export class TerrainSystem extends System {
       this.terrainContainer.add(mesh);
     }
 
+    const _tAfterPhysics = _tilePhaseDiag ? performance.now() : 0;
+
     if (generateContent) {
       const isServer =
         this.runtimeIsServer || this.world.network?.isServer || false;
@@ -2494,12 +2512,28 @@ export class TerrainSystem extends System {
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
 
+    const _tAfterResources = _tilePhaseDiag ? performance.now() : 0;
+
     // Synchronously bake WATER and STEEP_SLOPE collision flags (server-only).
     // Must complete before any movement query can reach this tile, otherwise
     // players can walk into water during the gap between tile generation and
     // flag baking. ~1-2ms per tile (10K height lookups with cached data).
     if (isServer) {
       this.bakeWalkabilityFlags(tileX, tileZ);
+    }
+
+    if (_tilePhaseDiag) {
+      const _tAfterBake = performance.now();
+      const _tGeom = _tAfterGeom - _tPhaseStart;
+      const _tPhys = _tAfterPhysics - _tAfterGeom;
+      const _tRes = _tAfterResources - _tAfterPhysics;
+      const _tBake = _tAfterBake - _tAfterResources;
+      const _tTot = _tAfterBake - _tPhaseStart;
+      if (_tTot > 50) {
+        console.warn(
+          `[TerrainGenTile] ${key} total=${_tTot.toFixed(0)}ms geom=${_tGeom.toFixed(0)}ms physics=${_tPhys.toFixed(0)}ms resources=${_tRes.toFixed(0)}ms bakeWalk=${_tBake.toFixed(0)}ms biome=${tile.biome}`,
+        );
+      }
     }
 
     return tile;
