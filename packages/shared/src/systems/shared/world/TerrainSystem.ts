@@ -563,9 +563,6 @@ export class TerrainSystem extends System {
         : () => Date.now();
     const start = nowFn();
     let generated = 0;
-    // DIAGNOSTIC: per-tile timing via runtime globalThis flag. See P7.a.
-    const _diagEnabled = !!(globalThis as { __TERRAIN_PHASE_DIAG__?: boolean })
-      .__TERRAIN_PHASE_DIAG__;
     while (this.pendingTileKeys.length > 0) {
       if (generated >= this.maxTilesPerFrame) break;
       if (nowFn() - start > this.generationBudgetMsPerFrame) break;
@@ -580,23 +577,17 @@ export class TerrainSystem extends System {
         const geometry = this.createTileGeometryFromWorkerData(workerData);
         this.createTileFromGeometryWithResources(x, z, geometry);
         this.pendingWorkerResults.delete(key);
-        if (_diagEnabled || TERRAIN_TIMING_DEBUG) {
-          const elapsed = performance.now() - _tStart;
-          if (elapsed > 50) {
-            console.warn(
-              `[TerrainTileGen] worker ${key} ${elapsed.toFixed(0)}ms biome=${this.getBiomeAt(x, z)}`,
-            );
-          }
+        if (TERRAIN_TIMING_DEBUG) {
+          console.debug(
+            `[TerrainTiming] worker tile ${key}: ${(performance.now() - _tStart).toFixed(1)}ms`,
+          );
         }
       } else {
         this.generateTile(x, z);
-        if (_diagEnabled || TERRAIN_TIMING_DEBUG) {
-          const elapsed = performance.now() - _tStart;
-          if (elapsed > 50) {
-            console.warn(
-              `[TerrainTileGen] sync ${key} ${elapsed.toFixed(0)}ms biome=${this.getBiomeAt(x, z)}`,
-            );
-          }
+        if (TERRAIN_TIMING_DEBUG) {
+          console.debug(
+            `[TerrainTiming] sync tile ${key}: ${(performance.now() - _tStart).toFixed(1)}ms`,
+          );
         }
       }
       generated++;
@@ -2243,15 +2234,8 @@ export class TerrainSystem extends System {
       return this.terrainTiles.get(key)!;
     }
 
-    // DIAGNOSTIC: sub-phase timing for P7.a. Removed after investigation.
-    const _tilePhaseDiag = !!(
-      globalThis as { __TERRAIN_PHASE_DIAG__?: boolean }
-    ).__TERRAIN_PHASE_DIAG__;
-    const _tPhaseStart = _tilePhaseDiag ? performance.now() : 0;
-
     // Create geometry for this tile
     const geometry = this.createTileGeometry(tileX, tileZ);
-    const _tAfterGeom = _tilePhaseDiag ? performance.now() : 0;
 
     // Use triplanar terrain shader material (or fallback to vertex colors)
     const material = this.getTerrainMaterial();
@@ -2414,8 +2398,6 @@ export class TerrainSystem extends System {
       this.terrainContainer.add(mesh);
     }
 
-    const _tAfterPhysics = _tilePhaseDiag ? performance.now() : 0;
-
     if (generateContent) {
       const isServer =
         this.runtimeIsServer || this.world.network?.isServer || false;
@@ -2531,28 +2513,13 @@ export class TerrainSystem extends System {
       this._pendingTileHeightData.delete(key);
     }
 
-    const _tAfterResources = _tilePhaseDiag ? performance.now() : 0;
-
     // Synchronously bake WATER and STEEP_SLOPE collision flags (server-only).
     // Must complete before any movement query can reach this tile, otherwise
     // players can walk into water during the gap between tile generation and
-    // flag baking. ~1-2ms per tile (10K height lookups with cached data).
+    // flag baking. ~1-2ms per tile now that the fast in-tile bilinear path
+    // is used — see P7.a fix 2026-04-15.
     if (isServer) {
       this.bakeWalkabilityFlags(tileX, tileZ);
-    }
-
-    if (_tilePhaseDiag) {
-      const _tAfterBake = performance.now();
-      const _tGeom = _tAfterGeom - _tPhaseStart;
-      const _tPhys = _tAfterPhysics - _tAfterGeom;
-      const _tRes = _tAfterResources - _tAfterPhysics;
-      const _tBake = _tAfterBake - _tAfterResources;
-      const _tTot = _tAfterBake - _tPhaseStart;
-      if (_tTot > 50) {
-        console.warn(
-          `[TerrainGenTile] ${key} total=${_tTot.toFixed(0)}ms geom=${_tGeom.toFixed(0)}ms physics=${_tPhys.toFixed(0)}ms resources=${_tRes.toFixed(0)}ms bakeWalk=${_tBake.toFixed(0)}ms biome=${tile.biome}`,
-        );
-      }
     }
 
     return tile;
@@ -5127,37 +5094,12 @@ export class TerrainSystem extends System {
 
     // Process queued tile generations within a small per-frame budget
     // (also processes pre-computed worker results when available)
-    // DIAGNOSTIC: per-phase instrumentation so we can find the slow phase in
-    // production without a rebuild-and-restart cycle. The runtime gate uses
-    // globalThis so esbuild cannot dead-code-eliminate the branch at build
-    // time the way it does for `process.env.TERRAIN_TIMING_DEBUG`. Remove
-    // this block once P7.a investigation is done.
-    const _terrainDiag = (globalThis as { __TERRAIN_PHASE_DIAG__?: boolean })
-      .__TERRAIN_PHASE_DIAG__;
-    if (_terrainDiag) {
-      const _p0 = performance.now();
-      this.processTileGenerationQueue();
-      const _p1 = performance.now();
-      if (this.world.network?.isServer) {
-        this.processCollisionGenerationQueue();
-        const _p2 = performance.now();
-        this.processWalkabilityQueue();
-        const _p3 = performance.now();
-        const _tileMs = _p1 - _p0;
-        const _collMs = _p2 - _p1;
-        const _walkMs = _p3 - _p2;
-        if (_tileMs + _collMs + _walkMs > 50) {
-          console.warn(
-            `[TerrainPhase] tiles=${_tileMs.toFixed(0)}ms coll=${_collMs.toFixed(0)}ms walk=${_walkMs.toFixed(0)}ms pending(tile=${this.pendingTileKeys.length},coll=${this.pendingCollisionKeys.length},walk=${this.pendingWalkabilityTiles.length}) loaded=${this.terrainTiles.size}`,
-          );
-        }
-      }
-    } else {
-      this.processTileGenerationQueue();
-      if (this.world.network?.isServer) {
-        this.processCollisionGenerationQueue();
-        this.processWalkabilityQueue();
-      }
+    this.processTileGenerationQueue();
+
+    // Process queued collision generation and walkability baking on the server
+    if (this.world.network?.isServer) {
+      this.processCollisionGenerationQueue();
+      this.processWalkabilityQueue();
     }
 
     // Process pending resource instance creation (client only, spreads work across frames)
