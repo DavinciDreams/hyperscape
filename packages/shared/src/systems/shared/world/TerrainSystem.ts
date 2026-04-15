@@ -223,6 +223,13 @@ export class TerrainSystem extends System {
   private pendingTileSet = new Set<string>();
   private pendingCollisionKeys: string[] = [];
   private pendingCollisionSet = new Set<string>();
+  // Buffer for heightData computed during createTileGeometry() before the
+  // corresponding tile object has been inserted into this.terrainTiles. Without
+  // this, storeHeightData() silently no-ops during initial tile creation and
+  // bakeWalkabilityFlags() then falls through to expensive noise-based
+  // getHeightAtComputed() for every sample (observed 2026-04-15: ~900ms per
+  // tile bake instead of the intended ~1-2ms).
+  private _pendingTileHeightData = new Map<string, number[]>();
   // Deferred walkability baking queue — spreads 10,000 iterations across ticks
   private pendingWalkabilityTiles: Array<{ tileX: number; tileZ: number }> = [];
   private walkabilityProgress: {
@@ -2511,6 +2518,18 @@ export class TerrainSystem extends System {
     // Store tile
     this.terrainTiles.set(key, tile);
     this.activeChunks.add(key);
+
+    // Drain any heightData that createTileGeometry() buffered earlier in this
+    // same call. storeHeightData() fell back to the pending buffer because
+    // tile wasn't yet in this.terrainTiles at that point; now that it is, we
+    // copy the data onto the tile so getHeightAtCached() can bilinear-sample
+    // it during bakeWalkabilityFlags below (P7.a fix 2026-04-15).
+    const _pendingHeights = this._pendingTileHeightData.get(key);
+    if (_pendingHeights) {
+      tile.heightData = _pendingHeights;
+      tile.needsSave = true;
+      this._pendingTileHeightData.delete(key);
+    }
 
     const _tAfterResources = _tilePhaseDiag ? performance.now() : 0;
 
@@ -5051,7 +5070,16 @@ export class TerrainSystem extends System {
     if (tile) {
       tile.heightData = heightData;
       tile.needsSave = true;
+      return;
     }
+
+    // Tile not yet inserted into this.terrainTiles (initial createTileGeometry
+    // path). Stash the data in the pending buffer so generateTile() can drain
+    // it onto the tile immediately after adding the tile to the map. Without
+    // this the tile ends up with heightData=[], which forces bakeWalkability-
+    // Flags through the expensive noise-based height path — see P7.a fix
+    // 2026-04-15.
+    this._pendingTileHeightData.set(key, heightData);
   }
 
   private saveModifiedChunks(): void {
