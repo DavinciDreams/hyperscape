@@ -354,40 +354,75 @@ async function getModelProviderPlugin(
     }
   }
 
-  // Fall back to Ollama when no cloud keys (env or character)
+  // Fall back to Ollama when no cloud keys (env or character).
+  //
+  // We try the local shim first — `./plugins/localOllama.ts` wraps
+  // `ollama-ai-provider-v2@^3.5.0` which implements AI SDK spec v2 and is
+  // compatible with our `ai@^6.0.97`. The upstream
+  // `@elizaos/plugin-ollama@2.0.0-alpha.70` bundles `ollama-ai-provider@^1.2.0`
+  // (spec v1), so it imports successfully but every model call fails at
+  // runtime with "Unsupported model version v1 for provider 'ollama.chat'".
+  // See `packages/server/src/eliza/plugins/localOllama.ts` for the shim
+  // contract and the rollback plan.
+  //
+  // If the shim import itself fails (e.g. `ollama-ai-provider-v2` not
+  // installed on the node_modules tree yet), we still try the upstream
+  // plugin as a second best — that way we don't regress the existing
+  // behaviour if the shim is missing for any reason.
+  const buildOllamaProviderRecord = (
+    plugin: Plugin,
+    source: string,
+  ): ResolvedChatModelProvider => {
+    const model =
+      (typeof charModel === "string" && charModel.trim()
+        ? charModel.trim()
+        : "") ||
+      process.env.OLLAMA_LARGE_MODEL?.trim() ||
+      process.env.OLLAMA_MODEL?.trim() ||
+      "provider default";
+    return {
+      plugin,
+      provider: "ollama",
+      model,
+      source,
+      secrets: {
+        ...(process.env.OLLAMA_BASE_URL
+          ? { OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL }
+          : {}),
+        ...(model === "provider default"
+          ? {}
+          : {
+              LARGE_MODEL: model,
+              OLLAMA_MODEL: model,
+            }),
+      },
+    };
+  };
+
+  try {
+    const localMod = await import("./plugins/localOllama.js");
+    const plugin = localMod.ollamaPlugin;
+    if (plugin) {
+      return buildOllamaProviderRecord(plugin, "local Ollama (shim)");
+    }
+  } catch (err) {
+    console.warn(
+      "[AgentManager] Failed to load local Ollama shim:",
+      errMsg(err),
+    );
+  }
+
   try {
     const mod = await import("@elizaos/plugin-ollama");
     const plugin = mod.ollamaPlugin;
     if (plugin) {
-      const model =
-        (typeof charModel === "string" && charModel.trim()
-          ? charModel.trim()
-          : "") ||
-        process.env.OLLAMA_LARGE_MODEL?.trim() ||
-        process.env.OLLAMA_MODEL?.trim() ||
-        "provider default";
-      return {
-        plugin,
-        provider: "ollama",
-        model,
-        source: "local Ollama",
-        secrets: {
-          ...(process.env.OLLAMA_BASE_URL
-            ? {
-                OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL,
-              }
-            : {}),
-          ...(model === "provider default"
-            ? {}
-            : {
-                LARGE_MODEL: model,
-                OLLAMA_MODEL: model,
-              }),
-        },
-      };
+      return buildOllamaProviderRecord(plugin, "local Ollama (upstream)");
     }
   } catch (err) {
-    console.warn("[AgentManager] Failed to load Ollama plugin:", errMsg(err));
+    console.warn(
+      "[AgentManager] Failed to load upstream Ollama plugin:",
+      errMsg(err),
+    );
   }
 
   console.warn(
