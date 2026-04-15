@@ -652,6 +652,26 @@ export class CameraDirector {
       }
     }
 
+    // Final fallback: if we have an active cycle, prefer to point at a
+    // contestant whose entity is still alive in the world even if they are
+    // no longer in the matchmaking `availableAgents` pool (e.g. mid-fight
+    // disconnect). The matchmaking pool is the set of agents eligible to
+    // start a NEW duel; a fighter who has dropped out of that pool is still
+    // physically in the arena and is what the viewer should see. Without
+    // this fallback `resolveCycleCameraTarget` returns null during FIGHTING
+    // when both contestants have been unregistered mid-fight, leaving the
+    // camera untargeted. Observed on 2026-04-15.
+    if (cycle) {
+      const cycleAgent1 = cycle.agent1?.characterId;
+      if (cycleAgent1 && this.world.entities.get(cycleAgent1)) {
+        return cycleAgent1;
+      }
+      const cycleAgent2 = cycle.agent2?.characterId;
+      if (cycleAgent2 && this.world.entities.get(cycleAgent2)) {
+        return cycleAgent2;
+      }
+    }
+
     return null;
   }
 

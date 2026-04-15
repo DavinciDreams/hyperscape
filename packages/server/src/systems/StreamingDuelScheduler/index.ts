@@ -2398,6 +2398,25 @@ export class StreamingDuelScheduler {
       }
     }
 
+    // Final fallback: during an active cycle, prefer to point at a contestant
+    // that still has a live world entity, even if they are no longer in the
+    // matchmaking `availableAgents` pool. This covers the case where a
+    // contestant disconnects mid-fight (PLAYER_LEFT → unregisterAgent) and
+    // is therefore no longer a "valid camera candidate" by the matchmaking
+    // rule, but their entity is still in the arena and is the thing the
+    // viewer actually wants to see. Observed on 2026-04-15 where the state
+    // endpoint returned `phase: FIGHTING` with `cameraTarget: null` because
+    // both contestants had been unregistered from matchmaking but were still
+    // alive in the world.
+    const cycleAgent1Id = this.currentCycle.agent1?.characterId;
+    if (cycleAgent1Id && this.world.entities.get(cycleAgent1Id)) {
+      return cycleAgent1Id;
+    }
+    const cycleAgent2Id = this.currentCycle.agent2?.characterId;
+    if (cycleAgent2Id && this.world.entities.get(cycleAgent2Id)) {
+      return cycleAgent2Id;
+    }
+
     return null;
   }
 
