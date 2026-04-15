@@ -2386,32 +2386,64 @@ async function main() {
   }, 30000);
 
   // Handle shutdown
+  //
+  // IMPORTANT: every step below `await`s an operation that can hang when the
+  // underlying subsystem is already dead (Chromium already crashed, FFmpeg
+  // already killed, CDP session already closed, etc.). If any one of these
+  // deadlocks, `process.exit()` below is never reached and pm2 keeps
+  // reporting the worker as "online" indefinitely — we observed a ~75-minute
+  // zombie on gpu-server on 2026-04-15 where `[Main] Cleaning up...` was the
+  // last line ever emitted. The force-exit timer below caps the total
+  // graceful-shutdown time at SHUTDOWN_FORCE_EXIT_MS; if that elapses before
+  // we reach the clean process.exit at the bottom, we log and exit anyway so
+  // pm2 can auto-respawn the worker.
+  const SHUTDOWN_FORCE_EXIT_MS = Number(
+    process.env.STREAM_SHUTDOWN_FORCE_EXIT_MS ?? 15_000,
+  );
   const shutdown = async (exitCodeOrSignal: number | NodeJS.Signals = 0) => {
     const exitCode =
       typeof exitCodeOrSignal === "number" ? exitCodeOrSignal : 0;
     console.log("\n[Main] Shutting down...");
-    if (captureWatchdog) clearInterval(captureWatchdog);
-    clearInterval(statusSnapshotInterval);
-    clearInterval(statusInterval);
-    await stopCdpCapture();
-    await getRTMPBridge().stop();
-    clearExternalStatusSnapshot();
-    await cleanup();
 
-    // Final leak report: print and validate that no timers were orphaned.
-    const diag = getStreamLeakDiagnostics();
-    if (diag) {
-      diag.printReport();
-      try {
-        diag.assertNoLeaks("after shutdown");
-        console.log("[StreamLeakDiagnostics] ✅ No timer leaks detected.");
-      } catch (leakErr) {
-        console.error(String(leakErr));
+    const forceExitTimer = setTimeout(() => {
+      console.error(
+        `[Main] Graceful shutdown exceeded ${SHUTDOWN_FORCE_EXIT_MS}ms timeout; forcing process.exit(${exitCode}) so pm2 can respawn.`,
+      );
+      process.exit(exitCode);
+    }, SHUTDOWN_FORCE_EXIT_MS);
+    // Let the process exit naturally if this is the only outstanding timer.
+    if (typeof forceExitTimer.unref === "function") forceExitTimer.unref();
+
+    try {
+      if (captureWatchdog) clearInterval(captureWatchdog);
+      clearInterval(statusSnapshotInterval);
+      clearInterval(statusInterval);
+      await stopCdpCapture();
+      await getRTMPBridge().stop();
+      clearExternalStatusSnapshot();
+      await cleanup();
+
+      // Final leak report: print and validate that no timers were orphaned.
+      const diag = getStreamLeakDiagnostics();
+      if (diag) {
+        diag.printReport();
+        try {
+          diag.assertNoLeaks("after shutdown");
+          console.log("[StreamLeakDiagnostics] ✅ No timer leaks detected.");
+        } catch (leakErr) {
+          console.error(String(leakErr));
+        }
+        diag.uninstall();
       }
-      diag.uninstall();
+    } catch (shutdownErr) {
+      console.error(
+        "[Main] Error during graceful shutdown (will still exit):",
+        shutdownErr,
+      );
+    } finally {
+      clearTimeout(forceExitTimer);
+      process.exit(exitCode);
     }
-
-    process.exit(exitCode);
   };
 
   process.on("SIGINT", shutdown);
@@ -2456,5 +2488,28 @@ async function cleanup() {
 // Run
 main().catch((err) => {
   console.error("[Main] Fatal error:", err);
-  cleanup().then(() => process.exit(1));
+  // Same belt-and-suspenders pattern as shutdown(): if cleanup() hangs (because
+  // Chromium or the RTMP bridge has already crashed in a way that deadlocks
+  // the corresponding cleanup await), force-exit so pm2 can respawn us. Bug
+  // observed 2026-04-15.
+  const fatalForceExitMs = Number(
+    process.env.STREAM_SHUTDOWN_FORCE_EXIT_MS ?? 15_000,
+  );
+  const fatalForceExitTimer = setTimeout(() => {
+    console.error(
+      `[Main] Fatal cleanup exceeded ${fatalForceExitMs}ms; forcing exit(1).`,
+    );
+    process.exit(1);
+  }, fatalForceExitMs);
+  if (typeof fatalForceExitTimer.unref === "function") {
+    fatalForceExitTimer.unref();
+  }
+  cleanup()
+    .catch((cleanupErr) => {
+      console.error("[Main] Error during fatal cleanup:", cleanupErr);
+    })
+    .finally(() => {
+      clearTimeout(fatalForceExitTimer);
+      process.exit(1);
+    });
 });
