@@ -5723,6 +5723,58 @@ export class TerrainSystem extends System {
     const originXInt = Math.floor(originX);
     const originZInt = Math.floor(originZ);
 
+    // FAST HEIGHT PATH: bakeWalkabilityFlags only cares about raw terrain
+    // height, not bridge/dock/flat-zone overrides (those are applied later
+    // in Pass 3/4 as walkability flag overrides, not height overrides). Using
+    // `getHeightAt` here means 94,356 lookups × (3 system-lookups + flat-zone
+    // scan + bilinear interpolation) per bake. That's what made bake take
+    // 800ms+ per tile even after the heightData caching fix.
+    //
+    // Instead, cache the current tile's heightData locally and bilinear-
+    // interpolate directly for in-tile samples. For samples outside this
+    // tile's bounds (tile edges, slope check overflow), fall back to
+    // `getHeightAtCached` which handles adjacent-tile lookups, and finally
+    // to the noise path if nothing is cached.
+    const tileKey = `${terrainTileX}_${terrainTileZ}`;
+    const currentTile = this.terrainTiles.get(tileKey);
+    const tileHeightData = currentTile?.heightData;
+    const hasLocalHeights =
+      Array.isArray(tileHeightData) && tileHeightData.length > 0;
+    const resolution = this.CONFIG.TILE_RESOLUTION;
+    const fastHeight = (wx: number, wz: number): number => {
+      if (hasLocalHeights) {
+        // In-tile bilinear from the local heightData. Only applies when the
+        // sample is actually inside this tile; otherwise fall through.
+        const lxf = wx - originX;
+        const lzf = wz - originZ;
+        if (lxf >= 0 && lxf <= tileSize && lzf >= 0 && lzf <= tileSize) {
+          const gx = (lxf / tileSize) * (resolution - 1);
+          const gz = (lzf / tileSize) * (resolution - 1);
+          const gxClamped = Math.max(0, Math.min(resolution - 1.001, gx));
+          const gzClamped = Math.max(0, Math.min(resolution - 1.001, gz));
+          const ix0 = Math.floor(gxClamped);
+          const iz0 = Math.floor(gzClamped);
+          const ix1 = Math.min(ix0 + 1, resolution - 1);
+          const iz1 = Math.min(iz0 + 1, resolution - 1);
+          const fx = gxClamped - ix0;
+          const fz = gzClamped - iz0;
+          const h00 = tileHeightData![iz0 * resolution + ix0];
+          const h10 = tileHeightData![iz0 * resolution + ix1];
+          const h01 = tileHeightData![iz1 * resolution + ix0];
+          const h11 = tileHeightData![iz1 * resolution + ix1];
+          const h0 = h00 + (h10 - h00) * fx;
+          const h1 = h01 + (h11 - h01) * fx;
+          return h0 + (h1 - h0) * fz;
+        }
+      }
+      // Out-of-tile or missing local data → walk the full adjacent-tile cache
+      // then fall back to the computed noise path (skip flat-zone since we
+      // already know we're not inside a flat zone for terrain sampling).
+      const adjacentCached = this.getHeightAtCached(wx, wz);
+      if (adjacentCached !== null) return adjacentCached;
+      return this.getHeightAtComputedSkipFlatZone(wx, wz);
+    };
+
     // Clear stale terrain flags first (handles re-baking after flat zone regeneration)
     const terrainFlagsMask = CollisionFlag.WATER | CollisionFlag.STEEP_SLOPE;
     for (let lx = 0; lx < tilesPerSide; lx++) {
@@ -5756,7 +5808,7 @@ export class TerrainSystem extends System {
       const iStride = i * gridPoints;
       for (let j = 0; j < gridPoints; j++) {
         const wz = gridStartZ + j * cellSize;
-        heights[iStride + j] = this.getHeightAt(wx, wz);
+        heights[iStride + j] = fastHeight(wx, wz);
       }
     }
 
@@ -5878,6 +5930,15 @@ export class TerrainSystem extends System {
     }
 
     // ---- PASS 2: Biome + slope flags (non-water tiles only) ----
+    // Inline the slope computation using fastHeight() so the inner 10K×9
+    // getHeightAt calls become 10K×9 fastHeight calls (direct bilinear from
+    // the current tile's heightData array, no bridge/dock/flat-zone lookup,
+    // no per-call Map indirection). Matches the behaviour of calculateSlope()
+    // but skips the system lookups that are irrelevant for the raw terrain
+    // slope used here.
+    const slopeD = this.CONFIG.SLOPE_CHECK_DISTANCE;
+    const slopeInvD = 1 / slopeD;
+    const slopeInvDiag = 1 / (slopeD * Math.SQRT2);
     for (let lx = 0; lx < tilesPerSide; lx++) {
       const worldX = originX + lx + 0.5;
       const moveTileX = originXInt + lx;
@@ -5899,8 +5960,33 @@ export class TerrainSystem extends System {
           // Slope check — slope exceeds biome's maxSlope
           const biomeData = BIOMES[biome];
           if (biomeData) {
-            const slope = this.calculateSlope(worldX, worldZ);
-            if (slope > biomeData.maxSlope) {
+            const c = fastHeight(worldX, worldZ);
+            let maxSlope =
+              Math.abs(fastHeight(worldX, worldZ + slopeD) - c) * slopeInvD;
+            let s =
+              Math.abs(fastHeight(worldX, worldZ - slopeD) - c) * slopeInvD;
+            if (s > maxSlope) maxSlope = s;
+            s = Math.abs(fastHeight(worldX + slopeD, worldZ) - c) * slopeInvD;
+            if (s > maxSlope) maxSlope = s;
+            s = Math.abs(fastHeight(worldX - slopeD, worldZ) - c) * slopeInvD;
+            if (s > maxSlope) maxSlope = s;
+            s =
+              Math.abs(fastHeight(worldX + slopeD, worldZ + slopeD) - c) *
+              slopeInvDiag;
+            if (s > maxSlope) maxSlope = s;
+            s =
+              Math.abs(fastHeight(worldX - slopeD, worldZ + slopeD) - c) *
+              slopeInvDiag;
+            if (s > maxSlope) maxSlope = s;
+            s =
+              Math.abs(fastHeight(worldX + slopeD, worldZ - slopeD) - c) *
+              slopeInvDiag;
+            if (s > maxSlope) maxSlope = s;
+            s =
+              Math.abs(fastHeight(worldX - slopeD, worldZ - slopeD) - c) *
+              slopeInvDiag;
+            if (s > maxSlope) maxSlope = s;
+            if (maxSlope > biomeData.maxSlope) {
               collision.addFlags(
                 moveTileX,
                 originZInt + lz,
