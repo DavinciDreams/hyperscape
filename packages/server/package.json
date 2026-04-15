@@ -63,7 +63,7 @@
     "@elizaos/plugin-elizacloud": "alpha",
     "@elizaos/plugin-goals": "2.0.0-alpha.9",
     "@elizaos/plugin-groq": "alpha",
-    "@elizaos/plugin-ollama": "alpha",
+    "@elizaos/plugin-ollama": "2.0.0-alpha.70",
     "@elizaos/plugin-openai": "alpha",
     "@elizaos/plugin-sql": "alpha",
     "@fastify/compress": "^8.0.1",
