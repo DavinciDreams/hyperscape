@@ -231,15 +231,48 @@ async function generateOllamaText(
   params: TextGenerationParams,
 ): Promise<string> {
   try {
+    // Ollama's native /api/chat accepts stop sequences and a single
+    // `repeat_penalty` multiplier, not separate presence/frequency penalties
+    // or a top-level `stopSequences` array. ai@6 / the v2 provider exposes
+    // the Ollama-native knobs via `providerOptions.ollama.options.*`, so we
+    // route the params through that path. Keeping them at the top level
+    // would produce "feature setting not supported" warnings on every call
+    // and (more importantly) silently drop the values.
+    //
+    // `repeat_penalty` maps roughly onto the AI SDK's penalty concept:
+    // Ollama's default is 1.1, neutral is 1.0. We average the caller's
+    // presence+frequency signal and offset from the neutral baseline so
+    // that the upstream plugin's 0.7/0.7 defaults map to a sensible ~1.1.
+    const ollamaOptions: Record<string, unknown> = {};
+    if (typeof params.temperature === "number") {
+      ollamaOptions.temperature = params.temperature;
+    }
+    if (typeof params.maxOutputTokens === "number") {
+      ollamaOptions.num_predict = params.maxOutputTokens;
+    }
+    if (params.stopSequences && params.stopSequences.length > 0) {
+      ollamaOptions.stop = params.stopSequences;
+    }
+    const penaltySignal =
+      ((params.frequencyPenalty ?? 0) + (params.presencePenalty ?? 0)) / 2;
+    if (penaltySignal !== 0) {
+      ollamaOptions.repeat_penalty = 1 + penaltySignal * 0.2;
+    }
+
     const { text } = await generateText({
       model: provider(modelName),
       prompt: params.prompt,
       system: params.system,
+      // Keep top-level temperature + maxOutputTokens for transparency in
+      // other providers if the same handler is ever reused; the v2 Ollama
+      // provider honours `providerOptions.ollama.options.*` as the
+      // primary source of truth.
       temperature: params.temperature,
       maxOutputTokens: params.maxOutputTokens,
-      frequencyPenalty: params.frequencyPenalty,
-      presencePenalty: params.presencePenalty,
-      stopSequences: params.stopSequences,
+      providerOptions:
+        Object.keys(ollamaOptions).length > 0
+          ? { ollama: { options: ollamaOptions } }
+          : undefined,
     });
     return text;
   } catch (err) {
