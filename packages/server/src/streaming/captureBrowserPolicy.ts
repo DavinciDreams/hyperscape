@@ -32,14 +32,14 @@ export function buildDefaultCaptureLaunchArgs(params: {
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-hang-monitor",
-    // Remove compositor frame-rate ceiling so the WebGPU renderer can
-    // produce as many unique frames as the scene allows. Without this,
-    // Xvfb virtual displays that report 0 Hz cause Chrome to render at
-    // <5 fps. With it, rendering is limited only by GPU/CPU capacity.
     // NOTE: --user-data-dir is NOT passed here because Playwright
     // requires launchPersistentContext() for that. IndexedDB persistence
     // across Tier-3 browser restarts is a future improvement.
-    "--disable-frame-rate-limit",
+    // NOTE: --disable-frame-rate-limit was tested and regressed the
+    // pipeline (353 dropped frames, encoder stall). The Xvfb 60Hz
+    // modeline applied in stream-to-rtmp.ts startup is the correct fix
+    // for the compositor rate — it keeps Chrome V-sync locked to 60Hz
+    // without overwhelming the CDP screencast/FFmpeg pipeline.
   ];
 }
 
