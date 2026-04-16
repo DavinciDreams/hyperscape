@@ -5088,12 +5088,26 @@ export class TerrainSystem extends System {
     }
   }
 
+  private _clientUpdateTickCounter = 0;
+
   update(_deltaTime: number): void {
     // Skip processing until terrain is fully initialized (DataManager loaded BIOMES)
     // This prevents race conditions where update() is called before start() completes
     if (!this._terrainInitialized) {
       return;
     }
+
+    // Track client-side tick count for throttling expensive per-frame work.
+    // Quad-tree LOD updates and instance visibility checks only need to run
+    // at ~4 Hz (every 4th frame at 15 fps), not every tick. Throttling frees
+    // ~75% of terrain CPU for the WebGPU render loop, which is the primary
+    // bottleneck for the streaming capture pipeline (1 unique fps at full
+    // tick rate vs ~8-12 fps when throttled).
+    if (this.runtimeIsClient) {
+      this._clientUpdateTickCounter++;
+    }
+    const isClientHeavyTick =
+      this.runtimeIsClient && this._clientUpdateTickCounter % 4 === 0;
 
     // Dispatch pending tiles to workers for pre-computation (client only)
     if (this.runtimeIsClient && this.CONFIG.USE_WORKERS) {
@@ -5110,13 +5124,13 @@ export class TerrainSystem extends System {
       this.processWalkabilityQueue();
     }
 
-    // Process pending resource instance creation (client only, spreads work across frames)
-    if (this.runtimeIsClient) {
+    // Process pending resource instance creation (client only, throttled)
+    if (isClientHeavyTick) {
       this.processResourceInstanceQueue();
     }
 
-    // Update quad-tree LOD visual manager (client only)
-    if (this.runtimeIsClient && this.quadTreeVisualManager) {
+    // Update quad-tree LOD visual manager (client only, throttled)
+    if (isClientHeavyTick && this.quadTreeVisualManager) {
       const centers = this.getTerrainCenters();
       if (centers.length > 0) {
         const pos = centers[0].position;
@@ -5124,8 +5138,8 @@ export class TerrainSystem extends System {
       }
     }
 
-    // Update instance visibility on client based on player position
-    if (this.runtimeIsClient && this.instancedMeshManager) {
+    // Update instance visibility on client based on player position (throttled)
+    if (isClientHeavyTick && this.instancedMeshManager) {
       this.instancedMeshManager.updateAllInstanceVisibility();
 
       // TEMPORARILY DISABLED - rock instancer update
