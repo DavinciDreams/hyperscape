@@ -32,17 +32,13 @@ export function buildDefaultCaptureLaunchArgs(params: {
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-hang-monitor",
-    // Persist browser profile so IndexedDB (VRM model cache), Service
-    // Worker cache, and WebGPU shader cache survive Tier-3 browser
-    // restarts. On cold boot the profile is empty and populates during
-    // the first session; on warm Tier-2 restarts the browser stays alive
-    // so this dir is already warm. On Tier-3 (browser crash → relaunch)
-    // the profile directory persists on disk and Chrome reloads it.
-    "--user-data-dir=/tmp/hyperscape-capture-profile",
     // Remove compositor frame-rate ceiling so the WebGPU renderer can
     // produce as many unique frames as the scene allows. Without this,
     // Xvfb virtual displays that report 0 Hz cause Chrome to render at
     // <5 fps. With it, rendering is limited only by GPU/CPU capacity.
+    // NOTE: --user-data-dir is NOT passed here because Playwright
+    // requires launchPersistentContext() for that. IndexedDB persistence
+    // across Tier-3 browser restarts is a future improvement.
     "--disable-frame-rate-limit",
   ];
 }
