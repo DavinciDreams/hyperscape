@@ -109,9 +109,25 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
-// Keep this diagnostic-only: renderer readiness must still require the real
-// target avatar so the public stream cannot look healthy with missing fighters.
-const TARGET_AVATAR_READY_GRACE_MS = 8_000;
+// How long the streaming renderer waits for the target avatar to load before
+// declaring the grace period expired (keeping the renderer degraded until the
+// avatar eventually loads — but avatar polling STOPS on expiry per 33dab353f,
+// so this value must be generous enough for the full game boot: WS connect +
+// entity snapshot + CDN VRM download + WebGPU init = 40-60s in practice.
+// Override for the capture pipeline via ?avatarGraceMs=<ms> query param so
+// stream-source can tune separately without rebuilding the client.
+const TARGET_AVATAR_READY_GRACE_MS = (() => {
+  if (typeof window !== "undefined") {
+    const param = new URLSearchParams(window.location.search).get(
+      "avatarGraceMs",
+    );
+    if (param) {
+      const parsed = parseInt(param, 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return 90_000;
+})();
 
 function normalizeCaptureBridgeUrl(rawValue: string | null): string {
   const fallbackUrl = "ws://localhost:8765";

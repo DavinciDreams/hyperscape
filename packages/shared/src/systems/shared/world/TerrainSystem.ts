@@ -591,6 +591,14 @@ export class TerrainSystem extends System {
         }
       }
       generated++;
+      // Post-check: if the tile we just generated blew the budget, exit now
+      // rather than starting another tile that will block the event loop for
+      // another 60-135ms. The pre-check at the top of the loop catches the
+      // easy case (already over budget from a previous iteration), but a
+      // single expensive bakeWalkabilityFlags() call can take 60ms+ — without
+      // this post-check, the loop would start a second tile before realizing
+      // the budget was blown.
+      if (nowFn() - start > this.generationBudgetMsPerFrame) break;
     }
   }
 
