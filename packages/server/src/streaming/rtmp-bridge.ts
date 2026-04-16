@@ -1288,6 +1288,40 @@ export class RTMPBridge {
   }
 
   /**
+   * Re-initialize output destinations by re-reading environment variables.
+   * Use after credential rotation (e.g. Cloudflare Stream live input
+   * recreation) so a Tier-1 FFmpeg-only restart picks up new ingest URLs
+   * without killing the browser or restarting the process.
+   */
+  reinitOutputs(): void {
+    this.destinations = [];
+    this.outputsInitialized = false;
+    this.initOutputs();
+    console.log(
+      `[RTMPBridge] Destinations re-initialized (${this.enabledOutputCount()} outputs)`,
+    );
+  }
+
+  /**
+   * Tier-1 warm restart: stop the current FFmpeg process and launch a new
+   * one with fresh destinations. Everything else (browser, page, CDP
+   * session, IndexedDB cache, WebGPU context) survives. Recovery time: ~2s.
+   *
+   * Optionally pass `rereadEnv: true` to call `reinitOutputs()` first,
+   * picking up rotated Cloudflare credentials from the process environment.
+   */
+  async restartFFmpegDirect(options?: { rereadEnv?: boolean }): Promise<void> {
+    console.log(
+      `[RTMPBridge] Tier-1 restart: stopping FFmpeg (rereadEnv=${options?.rereadEnv ?? false})`,
+    );
+    await this.stopFFmpeg();
+    if (options?.rereadEnv) {
+      this.reinitOutputs();
+    }
+    this.startFFmpegDirect();
+  }
+
+  /**
    * Start the WebSocket server (legacy MediaRecorder mode)
    */
   start(port: number = 8765): void {

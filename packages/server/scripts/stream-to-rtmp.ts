@@ -2074,6 +2074,45 @@ async function main() {
     console.warn("");
   }
 
+  // ── Xvfb 60Hz modeline setup ──────────────────────────────────────
+  // Xvfb virtual displays default to 0 Hz refresh rate. Chrome's
+  // compositor locks to V-sync, so 0 Hz means 0-5 fps rendering. Set
+  // the display to 60 Hz via xrandr modeline so the compositor runs at
+  // full speed. This only matters for headed mode on Linux Xvfb; it's
+  // harmless on macOS, in headless mode, or if xrandr isn't available.
+  if (!STREAM_CAPTURE_HEADLESS && process.env.DISPLAY) {
+    try {
+      const { execSync } = await import("child_process");
+      const display = process.env.DISPLAY;
+      // Check current refresh rate
+      const xrandrOutput = execSync(`DISPLAY=${display} xrandr`, {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      if (xrandrOutput.includes("0.00*")) {
+        console.log(
+          `[Main] Xvfb display ${display} is at 0 Hz — applying 60 Hz modeline`,
+        );
+        const modeline =
+          '"1280x720_60.00" 74.50 1280 1344 1472 1664 720 723 728 748 -hsync +vsync';
+        execSync(
+          `DISPLAY=${display} xrandr --newmode ${modeline} 2>/dev/null; DISPLAY=${display} xrandr --addmode screen 1280x720_60.00 2>/dev/null; DISPLAY=${display} xrandr --output screen --mode 1280x720_60.00 2>/dev/null`,
+          { timeout: 5000 },
+        );
+        console.log(`[Main] Xvfb display ${display} set to 60 Hz`);
+      } else {
+        console.log(
+          `[Main] Xvfb display ${display} already has a non-zero refresh rate`,
+        );
+      }
+    } catch (xrandrErr) {
+      console.warn(
+        "[Main] Xvfb modeline setup skipped (xrandr not available or failed):",
+        errMsg(xrandrErr),
+      );
+    }
+  }
+
   // Get bridge instance
   const bridge = getRTMPBridge();
 
@@ -2090,6 +2129,61 @@ async function main() {
   let cdpRecoveryInFlight = false;
   let cdpRecoveryFailures = 0;
   let sourceDegradedPolls = 0;
+  let tier1Failures = 0; // FFmpeg-only restart failures
+  let tier2Failures = 0; // Warm restart (page reload) failures
+  let tier3Failures = 0; // Browser restart failures
+
+  // ── Tiered recovery functions ──────────────────────────────────────
+  // See plan: warm-boot-tiered-recovery for full design rationale.
+
+  /**
+   * Tier 2: warm restart — reload the page but keep the browser alive.
+   * IndexedDB VRM cache and WebGPU shader cache survive, cutting recovery
+   * from ~90s (cold) to ~15s. CDP session and FFmpeg are recreated.
+   */
+  async function warmRestart(reason: string): Promise<void> {
+    console.log(`[Main] Warm restart (Tier 2): ${reason}`);
+    await stopCdpCapture();
+    bridge.stopFFmpeg();
+    // DON'T close browser — IndexedDB + WebGPU cache survive
+    if (pageRef) {
+      try {
+        await pageRef.goto(selectedGameUrl || GAME_URL_CANDIDATES[0], {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+      } catch (navErr) {
+        console.error("[Main] Warm restart navigation failed:", navErr);
+        throw navErr;
+      }
+    } else {
+      throw new Error("No page reference for warm restart");
+    }
+    launchTime = Date.now();
+    await startCdpCapture(bridge);
+    // Reset tier counters on successful warm restart
+    tier1Failures = 0;
+    console.log("[Main] Warm restart complete");
+  }
+
+  /**
+   * Tier 3: browser restart — close and relaunch the browser.
+   * The Node process, bridge singleton, and selectedGameUrl survive.
+   * With persistent user-data-dir, IndexedDB may also survive.
+   */
+  async function browserRestart(reason: string): Promise<void> {
+    console.log(`[Main] Browser restart (Tier 3): ${reason}`);
+    await stopCdpCapture();
+    bridge.stopFFmpeg();
+    await cleanup();
+    await setupBrowser(false); // reuse selectedGameUrl
+    launchTime = Date.now();
+    await startCdpCapture(bridge);
+    // Reset all tier counters on successful browser restart
+    tier1Failures = 0;
+    tier2Failures = 0;
+    console.log("[Main] Browser restart complete");
+  }
 
   if (CAPTURE_MODE === "cdp") {
     // ── CDP Mode: Direct screencast frame piping ──
@@ -2191,10 +2285,89 @@ async function main() {
           sourceDegradedPolls >= SOURCE_DEGRADED_RESTART_POLLS
         ) {
           console.error(
-            `[Main] Source remained degraded (${degradedReason}) for ${sourceDegradedPolls} consecutive health polls; restarting worker.`,
+            `[Main] Source remained degraded (${degradedReason}) for ${sourceDegradedPolls} consecutive health polls; attempting tiered recovery.`,
           );
           sourceDegradedPolls = 0;
-          void shutdown(1);
+
+          // ── Tiered recovery ──────────────────────────────────────────
+          // Tier 1: FFmpeg-only restart (~2s). Encoder/transport failures
+          //   don't need a page reload — just restart the encoder.
+          // Tier 2: Page reload + CDP restart (~15s). Page-level issues
+          //   (canvas missing, navigation, capture stalled) need a fresh
+          //   page load but the browser (and its IndexedDB VRM cache,
+          //   WebGPU shader cache) survives.
+          // Tier 3: Browser restart (~35s). Browser crashed or Tier 2
+          //   failed 3 times. New browser, reuse selectedGameUrl.
+          // Tier 4: Full shutdown (~90s). Last resort, pm2 cold-restarts.
+          //
+          // Each tier has a consecutive-failure counter. If Tier N fails
+          // 3 times without a successful recovery, escalate to Tier N+1.
+          const isTier1Reason =
+            degradedReason === "encoder_stalled" ||
+            degradedReason === "manifest_stale";
+          const isTier2Reason =
+            degradedReason === "capture_stalled" ||
+            degradedReason === "unexpected_navigation" ||
+            degradedReason === "page_not_ready" ||
+            degradedReason === "canvas_missing";
+          const isTier3Reason = degradedReason === "browser_missing";
+
+          if (isTier1Reason && tier1Failures < 3) {
+            tier1Failures += 1;
+            console.log(
+              `[Main] Tier 1 recovery (FFmpeg restart ${tier1Failures}/3): ${degradedReason}`,
+            );
+            void bridge
+              .restartFFmpegDirect()
+              .then(() => {
+                startCdpFramePump(bridge);
+              })
+              .catch((err) => {
+                console.error(
+                  "[Main] Tier 1 recovery failed, escalating:",
+                  err,
+                );
+                tier1Failures = 3; // force escalation on next poll
+              });
+          } else if (
+            (isTier2Reason || (isTier1Reason && tier1Failures >= 3)) &&
+            tier2Failures < 3
+          ) {
+            tier2Failures += 1;
+            tier1Failures = 0;
+            console.log(
+              `[Main] Tier 2 recovery (warm restart ${tier2Failures}/3): ${degradedReason}`,
+            );
+            void warmRestart(degradedReason ?? "unknown").catch((err) => {
+              console.error("[Main] Tier 2 recovery failed, escalating:", err);
+              tier2Failures = 3;
+            });
+          } else if (
+            (isTier3Reason || tier2Failures >= 3) &&
+            tier3Failures < 3
+          ) {
+            tier3Failures += 1;
+            tier2Failures = 0;
+            tier1Failures = 0;
+            console.log(
+              `[Main] Tier 3 recovery (browser restart ${tier3Failures}/3): ${degradedReason}`,
+            );
+            void browserRestart(degradedReason ?? "unknown").catch((err) => {
+              console.error(
+                "[Main] Tier 3 recovery failed, falling through to shutdown:",
+                err,
+              );
+              void shutdown(1);
+            });
+          } else {
+            console.error(
+              `[Main] All recovery tiers exhausted — full shutdown (tier1=${tier1Failures}, tier2=${tier2Failures}, tier3=${tier3Failures})`,
+            );
+            tier1Failures = 0;
+            tier2Failures = 0;
+            tier3Failures = 0;
+            void shutdown(1);
+          }
         }
       });
   }, 2000);
