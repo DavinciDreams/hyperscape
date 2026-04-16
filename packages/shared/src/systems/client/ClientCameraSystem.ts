@@ -1627,9 +1627,18 @@ export class ClientCameraSystem extends SystemBase {
           radiusMin: 4.0,
           radiusMax: 7.5,
           basePhi: Math.PI * 0.27,
-          driftSpeed: 0.018,
+          driftSpeed: 0.035,
           targetFov: 46,
-          orbitAmplitude: 0.07,
+          // Orbit amplitude raised from 0.07 to 0.25 so the per-frame pixel
+          // delta exceeds CDP screencast JPEG quality-80 deduplication. At
+          // 0.07 rad (~4°) the camera drift was too subtle for the capture
+          // pipeline to distinguish consecutive frames — CDP marked 98% as
+          // "repeated", collapsing effective capture to 2 unique FPS. At
+          // 0.25 rad (~14°) combined with the multi-frequency orbit sines,
+          // the per-frame shift is ~40-80 px at 720p/46° FOV, well above
+          // JPEG detection threshold. Drift speed also bumped (0.018→0.035)
+          // for more dynamic camera motion during fights.
+          orbitAmplitude: 0.25,
           focusBias: 0.5,
           reverseAngleCooldownMs: 14_000,
         };
@@ -1638,9 +1647,9 @@ export class ClientCameraSystem extends SystemBase {
           radiusMin: 5.5,
           radiusMax: 8,
           basePhi: Math.PI * 0.44,
-          driftSpeed: 0.025,
+          driftSpeed: 0.03,
           targetFov: 45,
-          orbitAmplitude: 0.06,
+          orbitAmplitude: 0.2,
           focusBias: 0.5,
           reverseAngleCooldownMs: 20_000,
         };
