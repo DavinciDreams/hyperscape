@@ -25,7 +25,14 @@
 // stay personal and untracked for enoomian staging; shared project secrets
 // are intentionally not consulted here.
 const fs = require("fs");
+// Prefer persistent paths first. /tmp is wiped on reboot by systemd-tmpfiles
+// on recent Ubuntu/Debian (rule `D /tmp` in /usr/lib/tmpfiles.d/tmp.conf),
+// so after a host reboot a pm2 resurrect would find /tmp/hyperscape-secrets.env
+// missing and start processes with default env. The persistent copy at
+// /root/hyperscape-secrets.env survives reboots. The /tmp path remains as a
+// transitional fallback for deploy scripts that haven't migrated.
 const SECRETS_FILES = [
+  "/root/hyperscape-secrets.env",
   "/tmp/hyperscape-secrets.env",
   require("path").join(__dirname, ".env.production"),
 ];

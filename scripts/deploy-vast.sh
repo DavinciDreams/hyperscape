@@ -6,15 +6,35 @@ set -euo pipefail
 export PATH="/root/.bun/bin:$PATH"
 cd /root/hyperscape
 
-SECRETS_FILE="/tmp/hyperscape-secrets.env"
-if [ -f "$SECRETS_FILE" ]; then
+# Prefer the persistent path first. /tmp is wiped on reboot by systemd-tmpfiles,
+# so a pm2 resurrect or manual restart after a host reboot would otherwise lose
+# the deploy-time env. The /tmp path remains as a transitional fallback.
+SECRETS_CANDIDATES=(
+    "/root/hyperscape-secrets.env"
+    "/tmp/hyperscape-secrets.env"
+)
+SECRETS_FILE=""
+for candidate in "${SECRETS_CANDIDATES[@]}"; do
+    if [ -f "$candidate" ]; then
+        SECRETS_FILE="$candidate"
+        break
+    fi
+done
+
+if [ -n "$SECRETS_FILE" ]; then
     echo "[deploy] Loading local runtime secrets from $SECRETS_FILE"
     set -a
     # shellcheck disable=SC1090
     . "$SECRETS_FILE"
     set +a
+    # Mirror to the persistent path so subsequent reboots retain these secrets.
+    if [ "$SECRETS_FILE" != "/root/hyperscape-secrets.env" ]; then
+        cp "$SECRETS_FILE" /root/hyperscape-secrets.env
+        chmod 600 /root/hyperscape-secrets.env
+        echo "[deploy] Mirrored secrets to /root/hyperscape-secrets.env"
+    fi
 else
-    echo "[deploy] Warning: $SECRETS_FILE not found; relying on the existing local shell environment only"
+    echo "[deploy] Warning: no secrets file found at ${SECRETS_CANDIDATES[*]}; relying on the existing local shell environment only"
 fi
 
 echo "[deploy] Shared project secrets are intentionally not read in this enoomian staging path"
