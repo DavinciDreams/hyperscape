@@ -283,6 +283,17 @@ const PAGE_READINESS_STALL_MS = Math.max(
     5 * 60_000,
   ),
 );
+const SOURCE_PROBE_TIMEOUT_MS = Math.max(
+  1_000,
+  parseIntegerSetting(process.env.STREAM_SOURCE_PROBE_TIMEOUT_MS, 5_000),
+);
+const SOURCE_RECOVERY_READY_TIMEOUT_MS = Math.max(
+  10_000,
+  parseIntegerSetting(
+    process.env.STREAM_SOURCE_RECOVERY_READY_TIMEOUT_MS,
+    60_000,
+  ),
+);
 const FATAL_WRITE_PAGE_STALL_THRESHOLD_MS = Math.max(
   2_000,
   Math.min(5_000, Math.floor(SOURCE_CAPTURE_STALL_MS / 2)),
@@ -1402,7 +1413,11 @@ async function refreshRendererHealthSnapshot(
 
   rendererHealthProbeInFlight = (async () => {
     try {
-      latestRendererHealth = await probeRendererHealth(pageRef);
+      latestRendererHealth = await withTimeout(
+        probeRendererHealth(pageRef),
+        SOURCE_PROBE_TIMEOUT_MS,
+        "Renderer health probe",
+      );
     } catch (err) {
       latestRendererHealth = {
         ready: false,
@@ -2071,23 +2086,27 @@ async function getBrowserCaptureStatus(): Promise<BrowserCaptureStatus | null> {
   if (!page || page.isClosed()) return null;
 
   try {
-    return (await page.evaluate(() => {
-      const win = window as unknown as {
-        __captureControl__?: { getStatus: () => unknown };
-        __HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__?: string | null;
-      };
-      const captureStatus =
-        (win.__captureControl__?.getStatus?.() as Record<string, unknown>) ??
-        {};
-      return {
-        ...captureStatus,
-        captureSessionGeneration:
-          typeof win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ ===
-          "string"
-            ? win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__
-            : null,
-      };
-    })) as BrowserCaptureStatus | null;
+    return (await withTimeout(
+      page.evaluate(() => {
+        const win = window as unknown as {
+          __captureControl__?: { getStatus: () => unknown };
+          __HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__?: string | null;
+        };
+        const captureStatus =
+          (win.__captureControl__?.getStatus?.() as Record<string, unknown>) ??
+          {};
+        return {
+          ...captureStatus,
+          captureSessionGeneration:
+            typeof win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ ===
+            "string"
+              ? win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__
+              : null,
+        };
+      }),
+      SOURCE_PROBE_TIMEOUT_MS,
+      "Browser capture status probe",
+    )) as BrowserCaptureStatus | null;
   } catch (err) {
     if (isTransientPageEvalError(err)) return null;
     throw err;
@@ -2154,6 +2173,49 @@ async function waitForCaptureTraffic(
   }
 
   return false;
+}
+
+async function startValidatedWebCodecsCapture(
+  bridge: ReturnType<typeof getRTMPBridge>,
+): Promise<{
+  mode: ActiveCaptureMode;
+  watchdog: ReturnType<typeof setInterval> | null;
+}> {
+  console.log(
+    "[Main] WebCodecs mode: trying exposed-function bridge (bypasses WebSocket)...",
+  );
+  let watchdog = (await startWebCodecsExposedCapture(bridge)) ?? null;
+  let healthy = await waitForCaptureTraffic(bridge, 25_000);
+  if (!healthy) {
+    console.warn(
+      "[Main] WebCodecs/Exposed produced no media within 25s; trying WebSocket fallback...",
+    );
+    if (watchdog) {
+      clearInterval(watchdog);
+      watchdog = null;
+    }
+    await stopInPageCaptureControl();
+    await bridge.stop();
+    bridge.startSpectatorServer(SPECTATOR_PORT);
+    watchdog = (await startWebCodecsCapture(bridge)) ?? null;
+    healthy = await waitForCaptureTraffic(bridge, 20_000);
+  }
+  if (!healthy) {
+    console.warn(
+      "[Main] WebCodecs capture produced no media within 20s; falling back to CDP screencast capture.",
+    );
+    if (watchdog) {
+      clearInterval(watchdog);
+      watchdog = null;
+    }
+    await stopInPageCaptureControl();
+    await bridge.stop();
+    bridge.startSpectatorServer(SPECTATOR_PORT);
+    await startCdpCapture(bridge);
+    return { mode: "cdp", watchdog: null };
+  }
+
+  return { mode: "webcodecs", watchdog };
 }
 
 // ── Main Entry Point ───────────────────────────────────────────────────────
@@ -2278,7 +2340,7 @@ async function main() {
   async function startActiveCapture(
     mode: ActiveCaptureMode,
     options: { restartSpectatorServer?: boolean } = {},
-  ): Promise<void> {
+  ): Promise<ActiveCaptureMode> {
     pageNotReadySinceMs = null;
     if (options.restartSpectatorServer) {
       bridge.startSpectatorServer(SPECTATOR_PORT);
@@ -2286,15 +2348,36 @@ async function main() {
 
     if (mode === "cdp") {
       await startCdpCapture(bridge);
-      return;
+      lastCdpBytesReceived = bridge.getStats().bytesReceived;
+      return "cdp";
     }
 
     if (mode === "webcodecs") {
-      captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-      return;
+      const result = await startValidatedWebCodecsCapture(bridge);
+      captureWatchdog = result.watchdog;
+      if (result.mode === "cdp") {
+        lastCdpBytesReceived = bridge.getStats().bytesReceived;
+      }
+      return result.mode;
     }
 
     captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
+    return "mediarecorder";
+  }
+
+  async function waitForRecoveryReadiness(reason: string): Promise<void> {
+    if (!page) {
+      throw new Error(`${reason}: missing page after restart`);
+    }
+    const ready = await waitForStreamReadiness(
+      page,
+      SOURCE_RECOVERY_READY_TIMEOUT_MS,
+    );
+    if (!ready) {
+      throw new Error(
+        `${reason}: renderer did not recover within ${SOURCE_RECOVERY_READY_TIMEOUT_MS}ms`,
+      );
+    }
   }
 
   async function closeBrowserForRestart(): Promise<void> {
@@ -2346,7 +2429,10 @@ async function main() {
       throw new Error("No page reference for warm restart");
     }
     launchTime = Date.now();
-    await startActiveCapture(activeCaptureMode, { restartSpectatorServer });
+    activeCaptureMode = await startActiveCapture(activeCaptureMode, {
+      restartSpectatorServer,
+    });
+    await waitForRecoveryReadiness(`warm restart (${reason})`);
     // Reset consecutive-failure counters on successful warm restart.
     tier1Failures = 0;
     tier2Failures = 0;
@@ -2365,7 +2451,10 @@ async function main() {
     await closeBrowserForRestart();
     await setupBrowser(false); // reuse selectedGameUrl
     launchTime = Date.now();
-    await startActiveCapture(activeCaptureMode, { restartSpectatorServer });
+    activeCaptureMode = await startActiveCapture(activeCaptureMode, {
+      restartSpectatorServer,
+    });
+    await waitForRecoveryReadiness(`browser restart (${reason})`);
     // Reset all consecutive-failure counters on successful browser restart.
     tier1Failures = 0;
     tier2Failures = 0;
@@ -2392,61 +2481,21 @@ async function main() {
       ).catch(() => undefined);
       await bridge.stop();
       bridge.startSpectatorServer(SPECTATOR_PORT);
-      captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-      activeCaptureMode = "webcodecs";
-      recordSourceRecovery("cdp_startup_failed_to_webcodecs");
-
-      const healthy = await waitForCaptureTraffic(bridge, 20_000);
-      if (!healthy) {
-        throw new Error(
-          "WebCodecs fallback produced no media within 20s after CDP startup failure.",
-        );
-      }
+      activeCaptureMode = await startActiveCapture("webcodecs");
+      recordSourceRecovery(
+        activeCaptureMode === "webcodecs"
+          ? "cdp_startup_failed_to_webcodecs"
+          : "cdp_startup_failed_to_cdp_fallback",
+      );
     }
   } else if (CAPTURE_MODE === "webcodecs") {
-    // ── WebCodecs Mode: try exposed-function bridge first (no WebSocket) ──
-    // The exposed-function bridge uses page.exposeFunction() instead of a
-    // WebSocket so we sidestep a Bun/ws handshake timeout seen on headless
-    // Linux. If it fails to produce media, fall back to the legacy WebSocket
-    // WebCodecs path, then to CDP screencast as a last resort.
-    console.log(
-      "[Main] WebCodecs mode: trying exposed-function bridge (bypasses WebSocket)...",
-    );
-    captureWatchdog = (await startWebCodecsExposedCapture(bridge)) ?? null;
-    let healthy = await waitForCaptureTraffic(bridge, 25_000);
-    if (!healthy) {
-      console.warn(
-        "[Main] WebCodecs/Exposed produced no media within 25s; trying WebSocket fallback...",
-      );
-      if (captureWatchdog) {
-        clearInterval(captureWatchdog);
-        captureWatchdog = null;
-      }
-      await stopInPageCaptureControl();
-      await bridge.stop();
-      bridge.startSpectatorServer(SPECTATOR_PORT);
-      captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-      healthy = await waitForCaptureTraffic(bridge, 20_000);
-    }
-    if (!healthy) {
-      console.warn(
-        "[Main] WebCodecs capture produced no media within 20s; falling back to CDP screencast capture.",
-      );
-      if (captureWatchdog) {
-        clearInterval(captureWatchdog);
-        captureWatchdog = null;
-      }
-      await stopInPageCaptureControl();
-      await bridge.stop();
-      bridge.startSpectatorServer(SPECTATOR_PORT);
-      await startCdpCapture(bridge);
-      activeCaptureMode = "cdp";
+    activeCaptureMode = await startActiveCapture("webcodecs");
+    if (activeCaptureMode === "cdp") {
       recordSourceRecovery("webcodecs_startup_failed_to_cdp");
     }
   } else {
     // ── Legacy Mode: MediaRecorder + WebSocket ──
-    captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
-    activeCaptureMode = "mediarecorder";
+    activeCaptureMode = await startActiveCapture("mediarecorder");
   }
 
   console.log("");
@@ -2714,12 +2763,16 @@ async function main() {
             ).catch(() => undefined);
             await bridge.stop();
             bridge.startSpectatorServer(SPECTATOR_PORT);
-            captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-            activeCaptureMode = "webcodecs";
-            lastCdpBytesReceived = bridge.getStats().bytesReceived;
+            activeCaptureMode = await startActiveCapture("webcodecs");
             cdpRecoveryFailures = 0;
-            recordSourceRecovery("cdp_stall_fallback_to_webcodecs");
-            console.log("[Main] Fallback to WebCodecs mode complete");
+            recordSourceRecovery(
+              activeCaptureMode === "webcodecs"
+                ? "cdp_stall_fallback_to_webcodecs"
+                : "cdp_stall_recovered_via_cdp_fallback",
+            );
+            console.log(
+              `[Main] Capture recovery after CDP stall settled on ${activeCaptureMode}`,
+            );
           } catch (fallbackErr) {
             console.error(
               "[Main] WebCodecs fallback failed:",
@@ -2765,23 +2818,7 @@ async function main() {
           "[Main] 🔄 Scheduled browser rotation to prevent WebGL memory leaks.",
         );
         try {
-          if (activeCaptureMode === "cdp") {
-            await stopCdpCapture();
-          } else {
-            if (captureWatchdog) {
-              clearInterval(captureWatchdog);
-              captureWatchdog = null;
-            }
-            await stopInPageCaptureControl();
-          }
-          await setupBrowser();
-          if (activeCaptureMode === "cdp") {
-            await startCdpCapture(bridge);
-          } else if (activeCaptureMode === "webcodecs") {
-            captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-          } else if (activeCaptureMode === "mediarecorder") {
-            captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
-          }
+          await browserRestart("scheduled_browser_rotation");
           recordSourceRecovery("scheduled_browser_rotation");
         } catch (err) {
           console.error("[Main] Failed to rotate browser!", err);
