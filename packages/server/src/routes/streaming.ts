@@ -1137,11 +1137,35 @@ export function registerStreamingRoutes(
     }
   };
 
+  const redactOracleProofFromCycle = (cycle: unknown): unknown => {
+    if (!cycle || typeof cycle !== "object") {
+      return cycle;
+    }
+
+    const {
+      duelKeyHex: _k,
+      duelEndTime: _e,
+      seed: _s,
+      replayHash: _r,
+      ...publicCycle
+    } = cycle as Record<string, unknown>;
+
+    return publicCycle;
+  };
+
+  const redactOracleProofFromState = <T extends { cycle: unknown }>(
+    state: T,
+  ): T =>
+    ({
+      ...state,
+      cycle: redactOracleProofFromCycle(state.cycle),
+    }) as T;
+
   const getPublicStreamingState = (
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
   ): ReturnType<typeof scheduler.getStreamingState> | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      return scheduler.getStreamingState();
+      return redactOracleProofFromState(scheduler.getStreamingState());
     }
 
     // Keep delayed replay frames fresh for REST polling consumers
@@ -1159,7 +1183,7 @@ export function registerStreamingRoutes(
 
     return {
       type: "STREAMING_STATE_UPDATE" as const,
-      cycle: delayed.cycle as ReturnType<
+      cycle: redactOracleProofFromCycle(delayed.cycle) as ReturnType<
         typeof scheduler.getStreamingState
       >["cycle"],
       leaderboard: delayed.leaderboard as ReturnType<
@@ -1179,7 +1203,7 @@ export function registerStreamingRoutes(
     const scheduler = getStreamingDuelScheduler();
     if (!scheduler) return null;
 
-    const state = scheduler.getStreamingState();
+    const state = redactOracleProofFromState(scheduler.getStreamingState());
     const serialized = JSON.stringify(state);
     if (
       !forceNewFrame &&
