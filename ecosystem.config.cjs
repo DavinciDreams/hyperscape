@@ -254,6 +254,19 @@ const apiProcessEnv = {
 const streamSourceEnv = {
   ...sharedProductionEnv,
   STREAMING_CAPTURE_ENABLED: "true",
+  // ───────────────────────────────────────────────────────────────────────────
+  // To switch this worker to the native x11grab + NVENC capture path
+  // (replaces CDP JPEG screencast; Chromium becomes a pure scene renderer):
+  //
+  //   STREAM_CAPTURE_MODE: "x11_nvenc",
+  //
+  // Requirements:
+  //   - FFMPEG_HWACCEL=nvidia (already set in sharedProductionEnv on Linux)
+  //   - Xvfb sized to exactly STREAM_CAPTURE_WIDTH x STREAM_CAPTURE_HEIGHT
+  //   - xdpyinfo available on PATH (preflighted at start)
+  // Rollback is instant: unset STREAM_CAPTURE_MODE (or set it to "cdp")
+  // and `pm2 restart hyperscape-stream-source`.
+  // ───────────────────────────────────────────────────────────────────────────
 };
 
 module.exports = {

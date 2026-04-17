@@ -16,6 +16,14 @@ export function buildDefaultCaptureLaunchArgs(params: {
   angleBackend: string;
   featureFlags: string;
   disableSandbox?: boolean;
+  /**
+   * When set, pins the Chromium window to exactly these dimensions at the
+   * top-left of the display (via --kiosk + --window-size + --window-position).
+   * This is required by the x11_nvenc capture mode so FFmpeg's x11grab reads
+   * the canvas region exactly and not stray Chromium chrome or surrounding
+   * screen pixels.
+   */
+  fullScreenPin?: { width: number; height: number };
 }): string[] {
   return [
     "--use-gl=angle",
@@ -32,6 +40,15 @@ export function buildDefaultCaptureLaunchArgs(params: {
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-hang-monitor",
+    ...(params.fullScreenPin
+      ? [
+          "--kiosk",
+          `--window-size=${params.fullScreenPin.width},${params.fullScreenPin.height}`,
+          "--window-position=0,0",
+          "--hide-scrollbars",
+          "--disable-infobars",
+        ]
+      : []),
     // NOTE: --user-data-dir is NOT passed here because Playwright
     // requires launchPersistentContext() for that. IndexedDB persistence
     // across Tier-3 browser restarts is a future improvement.

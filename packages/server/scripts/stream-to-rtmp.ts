@@ -88,6 +88,7 @@ import {
 import { redactStreamingSecretsFromUrl } from "../src/streaming/redactStreamingUrl.js";
 import { errMsg } from "../src/shared/errMsg.ts";
 import { getStreamLeakDiagnostics } from "../src/streaming/stream-leak-diagnostics.js";
+import { startX11NvencCapture } from "./capture/x11-nvenc.ts";
 
 // Auto-enable leak diagnostics if STREAM_LEAK_DIAGNOSTICS=true.
 // Installed before any timers are allocated so the counts are accurate.
@@ -110,23 +111,29 @@ const STREAM_CAPTURE_PRESERVE_STREAM_ROUTE = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_PRESERVE_STREAM_ROUTE || "",
 );
 
+type RequestedCaptureMode =
+  | "cdp"
+  | "mediarecorder"
+  | "webcodecs"
+  | "x11_nvenc";
+
 function resolveRequestedCaptureMode(
   env: NodeJS.ProcessEnv = process.env,
-): "cdp" | "mediarecorder" | "webcodecs" {
-  return (env.STREAM_CAPTURE_MODE?.trim() || "cdp") as
-    | "cdp"
-    | "mediarecorder"
-    | "webcodecs";
+): RequestedCaptureMode {
+  return (env.STREAM_CAPTURE_MODE?.trim() || "cdp") as RequestedCaptureMode;
 }
 
 function resolveEffectiveCaptureMode(
   env: NodeJS.ProcessEnv = process.env,
-): "cdp" | "mediarecorder" | "webcodecs" {
+): RequestedCaptureMode {
   const requestedMode = resolveRequestedCaptureMode(env);
   const ingest = resolveStreamIngestSettings(env);
   const allowWebCodecsForCloudflare = /^(1|true|yes|on)$/i.test(
     env.STREAM_ALLOW_WEBCODECS_CLOUDFLARE || "",
   );
+  // x11_nvenc is Cloudflare-safe (it does not go through the in-browser
+  // WebCodecs encoder path that Cloudflare rejects), so the
+  // webcodecs->cdp guardrail does not apply here.
   if (
     requestedMode === "webcodecs" &&
     ingest.profile === "cloudflare_live" &&
@@ -138,7 +145,12 @@ function resolveEffectiveCaptureMode(
 }
 
 function normalizeCaptureGameUrl(rawUrl: string): string {
-  if (resolveEffectiveCaptureMode(process.env) !== "cdp") {
+  // CDP reads frames from the compositor; x11_nvenc reads the same
+  // compositor via x11grab on Xvfb. Both want the dedicated stream
+  // entrypoint (no bridge params, no SPA player gate) — WebCodecs on the
+  // other hand relies on the in-page capture bridge and keeps the raw URL.
+  const mode = resolveEffectiveCaptureMode(process.env);
+  if (mode !== "cdp" && mode !== "x11_nvenc") {
     return rawUrl;
   }
 
@@ -893,10 +905,16 @@ function resolveSourceRuntimeSnapshot(
     latestBrowserCaptureStatus as BrowserCaptureStatusSnapshot | null,
     nowMs,
   );
+  // x11_nvenc has no browser-side or CDP-side frame timestamps — the
+  // authoritative liveness is FFmpeg's own `frame=` progression, exposed by
+  // the bridge. Fall back to `lastEncodedFrameAt` only if the bridge hasn't
+  // yet reported an encoder frame (expected briefly at startup).
   const lastFrameAt =
-    captureMode === "cdp"
-      ? (lastEncodedFrameAt ?? lastCaptureFrameAt)
-      : browserCaptureLastFrameAt;
+    captureMode === "x11_nvenc"
+      ? (bridge.getLastEncoderFrameAt() ?? lastEncodedFrameAt)
+      : captureMode === "cdp"
+        ? (lastEncodedFrameAt ?? lastCaptureFrameAt)
+        : browserCaptureLastFrameAt;
   const rendererReason = mapRendererReasonToSourceDegradedReason(
     latestRendererHealth.degradedReason,
   );
@@ -914,17 +932,19 @@ function resolveSourceRuntimeSnapshot(
   } else if (bridgeStatus.ffmpegRunning !== true) {
     degradedReason = "encoder_stalled";
   } else if (
-    captureMode === "cdp" &&
+    (captureMode === "cdp" || captureMode === "x11_nvenc") &&
     (lastFrameAt == null || nowMs - lastFrameAt > SOURCE_CAPTURE_STALL_MS)
   ) {
     degradedReason = "capture_stalled";
   } else if (
     captureMode !== "cdp" &&
+    captureMode !== "x11_nvenc" &&
     !latestBrowserCaptureStatus?.captureSessionGeneration
   ) {
     degradedReason = "page_not_ready";
   } else if (
     captureMode !== "cdp" &&
+    captureMode !== "x11_nvenc" &&
     (bridgeStatus.clientConnected !== true ||
       latestBrowserCaptureStatus?.recording !== true ||
       latestBrowserCaptureStatus?.wsConnected !== true ||
@@ -1534,12 +1554,20 @@ async function waitForStreamReadiness(
 
 async function launchCaptureBrowser() {
   const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
+  // When in x11_nvenc mode, pin Chromium full-screen to the Xvfb display so
+  // FFmpeg's x11grab captures the canvas region exactly (no browser chrome,
+  // no stray surrounding pixels). No effect on other capture modes.
+  const fullScreenPin =
+    CAPTURE_MODE === "x11_nvenc"
+      ? { width: VIEWPORT.width, height: VIEWPORT.height }
+      : undefined;
   const launchConfig = {
     headless: STREAM_CAPTURE_HEADLESS,
     args: buildDefaultCaptureLaunchArgs({
       angleBackend: ANGLE_BACKEND,
       featureFlags,
       disableSandbox: CAPTURE_DISABLE_SANDBOX,
+      fullScreenPin,
     }),
   };
 
@@ -2370,11 +2398,19 @@ async function main() {
   await setupBrowser();
 
   let captureWatchdog: ReturnType<typeof setInterval> | null = null;
-  let activeCaptureMode: "cdp" | "webcodecs" | "mediarecorder" = CAPTURE_MODE;
+  let activeCaptureMode: ActiveCaptureMode = CAPTURE_MODE;
   let cdpStalledIntervals = 0;
   let lastCdpBytesReceived = 0;
   let cdpRecoveryInFlight = false;
   let cdpRecoveryFailures = 0;
+  // x11_nvenc stall tracking — parallels CDP's counters but uses encoder
+  // `frame=` progression (via bridge.getLastEncoderFrameCount) rather than
+  // bytesReceived, because x11grab always produces bytes even against a
+  // frozen display and is therefore not a useful liveness signal.
+  let x11StalledIntervals = 0;
+  let lastX11EncoderFrameCount = 0;
+  let x11RecoveryInFlight = false;
+  let x11RecoveryFailures = 0;
   let sourceDegradedPolls = 0;
   let pageNotReadySinceMs: number | null = null;
   let tier1Failures = 0; // FFmpeg-only restart failures
@@ -2397,6 +2433,18 @@ async function main() {
 
     if (mode === "cdp") {
       await stopCdpCapture();
+      if (options.preserveBridgeProcessing) {
+        await bridge.stopProcessing();
+        return false;
+      }
+      await bridge.stop();
+      return true;
+    }
+
+    if (mode === "x11_nvenc") {
+      // No in-page capture script and no CDP session for this mode — the
+      // bridge owns the whole FFmpeg child (which is reading from X11
+      // directly). Preserve-processing semantics match the CDP branch.
       if (options.preserveBridgeProcessing) {
         await bridge.stopProcessing();
         return false;
@@ -2432,6 +2480,13 @@ async function main() {
         lastCdpBytesReceived = bridge.getStats().bytesReceived;
       }
       return result.mode;
+    }
+
+    if (mode === "x11_nvenc") {
+      // No in-page script to maintain — liveness is tracked by the
+      // supervisor loop using `bridge.getLastEncoderFrame{Count,At}`.
+      captureWatchdog = await startX11NvencCapture(bridge);
+      return "x11_nvenc";
     }
 
     captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
@@ -2565,6 +2620,22 @@ async function main() {
     activeCaptureMode = await startActiveCapture("webcodecs");
     if (activeCaptureMode === "cdp") {
       recordSourceRecovery("webcodecs_startup_failed_to_cdp");
+    }
+  } else if (CAPTURE_MODE === "x11_nvenc") {
+    // ── x11_nvenc Mode: FFmpeg x11grab + NVENC, Chromium as pure renderer ──
+    // Startup preflights (xdpyinfo, h264_nvenc availability) live inside
+    // startX11NvencCapture — a failure there throws and we fall back to CDP
+    // to keep the worker streaming rather than exiting entirely.
+    try {
+      activeCaptureMode = await startActiveCapture("x11_nvenc");
+    } catch (err) {
+      console.warn(
+        `[Main] x11_nvenc startup failed; falling back to CDP capture: ${errMsg(err)}`,
+      );
+      await bridge.stop().catch(() => undefined);
+      bridge.startSpectatorServer(SPECTATOR_PORT);
+      activeCaptureMode = await startActiveCapture("cdp");
+      recordSourceRecovery("x11_nvenc_startup_failed_to_cdp");
     }
   } else {
     // ── Legacy Mode: MediaRecorder + WebSocket ──
@@ -2855,6 +2926,106 @@ async function main() {
           }
         }
       }
+    } else if (activeCaptureMode === "x11_nvenc") {
+      const encoderFrameCount = bridge.getLastEncoderFrameCount();
+      const encoderFrameAt = bridge.getLastEncoderFrameAt();
+      const encoderFps = stats.encoderFps;
+      const frameDelta = encoderFrameCount - lastX11EncoderFrameCount;
+      lastX11EncoderFrameCount = encoderFrameCount;
+      const encoderFrameAgeMs =
+        encoderFrameAt != null ? Date.now() - encoderFrameAt : null;
+
+      console.log(
+        `[Stream Health] x11_nvenc encoder=${encoderFrameCount} +${frameDelta} fps=${encoderFps.toFixed(1)} ageMs=${encoderFrameAgeMs ?? "n/a"} BridgeDrops: ${stats.droppedFrames} | Backpressure: ${stats.backpressured ? "ON" : "off"}`,
+      );
+
+      // Stall signal: no `frame=` advance this interval AND encoder either
+      // reports near-zero fps or has never yet reported a frame after startup
+      // grace. `frameDelta === 0` alone is insufficient — a 30s status tick
+      // against a 30fps encoder should always see delta ≥ ~30 when healthy;
+      // any 30s window with delta === 0 is a real stall.
+      const startupGraceElapsed =
+        encoderFrameAt != null || Date.now() - launchTime > 30_000;
+      const looksStalled =
+        startupGraceElapsed && frameDelta === 0 && encoderFps < 1;
+
+      if (looksStalled) {
+        x11StalledIntervals += 1;
+      } else {
+        x11StalledIntervals = 0;
+      }
+
+      if (x11StalledIntervals >= 2) {
+        if (x11RecoveryInFlight) {
+          console.warn(
+            "[Main] x11_nvenc recovery already in progress; skipping duplicate stall recovery attempt.",
+          );
+        } else {
+          console.warn(
+            `[Main] x11_nvenc capture stalled (${x11StalledIntervals} intervals, last frame=${encoderFrameCount}). Attempting FFmpeg-only restart (tier-1)...`,
+          );
+          x11StalledIntervals = 0;
+          x11RecoveryInFlight = true;
+
+          let recovered = false;
+          try {
+            await withTimeout(
+              (async () => {
+                await bridge.stopProcessing();
+                await startX11NvencCapture(bridge);
+              })(),
+              CAPTURE_RECOVERY_TIMEOUT_MS,
+              "x11_nvenc restart",
+            );
+            recovered = true;
+            x11RecoveryFailures = 0;
+            lastX11EncoderFrameCount = bridge.getLastEncoderFrameCount();
+            recordSourceRecovery("x11_nvenc_stall_recovery");
+            console.log("[Main] x11_nvenc FFmpeg restarted successfully");
+          } catch (err) {
+            x11RecoveryFailures += 1;
+            console.warn(
+              `[Main] x11_nvenc restart failed (${x11RecoveryFailures}/${CAPTURE_RECOVERY_MAX_FAILURES}):`,
+              errMsg(err),
+            );
+          } finally {
+            x11RecoveryInFlight = false;
+          }
+
+          if (
+            !recovered &&
+            x11RecoveryFailures >= CAPTURE_RECOVERY_MAX_FAILURES
+          ) {
+            console.warn(
+              "[Main] Falling back to CDP capture mode after x11_nvenc stall.",
+            );
+            try {
+              if (captureWatchdog) {
+                clearInterval(captureWatchdog);
+                captureWatchdog = null;
+              }
+              await withTimeout(
+                bridge.stop(),
+                5_000,
+                "Stop stalled x11_nvenc bridge",
+              ).catch(() => undefined);
+              bridge.startSpectatorServer(SPECTATOR_PORT);
+              await startCdpCapture(bridge);
+              activeCaptureMode = "cdp";
+              x11RecoveryFailures = 0;
+              lastCdpBytesReceived = bridge.getStats().bytesReceived;
+              recordSourceRecovery("x11_nvenc_stall_fallback_to_cdp");
+              console.log("[Main] Fallback to CDP mode complete");
+            } catch (fallbackErr) {
+              console.error(
+                "[Main] CDP fallback from x11_nvenc failed:",
+                errMsg(fallbackErr),
+              );
+              void shutdown(1);
+            }
+          }
+        }
+      }
     } else {
       try {
         const captureStatus = await refreshBrowserCaptureStatusSnapshot();
@@ -2881,17 +3052,25 @@ async function main() {
 
     // Check for periodic restart to clear memory leaks
     if (Date.now() - launchTime > BROWSER_RESTART_INTERVAL_MS) {
-      // Guard: skip rotation if a CDP recovery is already in flight.
-      if (cdpRecoveryInFlight) {
+      // Guard: skip rotation if any in-flight recovery is running to avoid
+      // stepping on it mid-restart.
+      if (cdpRecoveryInFlight || x11RecoveryInFlight) {
         console.warn(
-          "[Main] Skipping scheduled browser rotation — CDP recovery in progress.",
+          "[Main] Skipping scheduled browser rotation — capture recovery in progress.",
         );
       } else {
         console.log(
           "[Main] 🔄 Scheduled browser rotation to prevent WebGL memory leaks.",
         );
         try {
+          // browserRestart dispatches via stopActiveCapture/startActiveCapture,
+          // both of which already know how to handle x11_nvenc.
           await browserRestart("scheduled_browser_rotation");
+          // Reset x11_nvenc frame counter after a fresh browser+FFmpeg start
+          // so the supervisor stall detector doesn't flag the gap.
+          if (activeCaptureMode === "x11_nvenc") {
+            lastX11EncoderFrameCount = 0;
+          }
           recordSourceRecovery("scheduled_browser_rotation");
         } catch (err) {
           console.error("[Main] Failed to rotate browser!", err);

@@ -7,6 +7,7 @@ export type StreamSourceCaptureMode =
   | "cdp"
   | "webcodecs"
   | "mediarecorder"
+  | "x11_nvenc"
   | "none";
 
 export type StreamSourceDegradedReason =
@@ -80,6 +81,7 @@ export function normalizeStreamSourceCaptureMode(
   return value === "cdp" ||
     value === "webcodecs" ||
     value === "mediarecorder" ||
+    value === "x11_nvenc" ||
     value === "none"
     ? value
     : null;
@@ -112,8 +114,11 @@ export function normalizeStreamSourceRuntime(
     ready: candidate.ready === true,
     statusSource:
       normalizeStreamSourceStatusSource(candidate.statusSource) ?? "none",
-    captureMode: normalizeStreamSourceCaptureMode(candidate.captureMode) ?? "none",
-    degradedReason: normalizeStreamSourceDegradedReason(candidate.degradedReason),
+    captureMode:
+      normalizeStreamSourceCaptureMode(candidate.captureMode) ?? "none",
+    degradedReason: normalizeStreamSourceDegradedReason(
+      candidate.degradedReason,
+    ),
     currentSceneUrl: asNonEmptyString(candidate.currentSceneUrl),
     activeBundle: asNonEmptyString(candidate.activeBundle),
     lastFrameAt: asFiniteNumber(candidate.lastFrameAt),

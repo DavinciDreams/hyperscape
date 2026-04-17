@@ -179,6 +179,16 @@ export class RTMPBridge {
   private ffmpegBackpressured = false;
   /** Rolling encoder FPS reported by FFmpeg progress logs */
   private ffmpegEncoderFps = 0;
+  /**
+   * Monotonic encoder frame counter parsed from FFmpeg stderr (`frame=  NNN`).
+   * Unlike `directFrameCount` (which counts JPEG frames we *wrote* to FFmpeg
+   * stdin), this counts frames FFmpeg itself has actually encoded. For
+   * x11grab-based capture modes there is no stdin frame write, so this is the
+   * only reliable encoder-side liveness signal.
+   */
+  private lastEncoderFrameCount = 0;
+  /** Wallclock timestamp of the most recent `frame=` advance observed in FFmpeg stderr */
+  private lastEncoderFrameAt: number | null = null;
   /** Whether client socket reads are paused due to FFmpeg backpressure */
   private clientSocketPaused = false;
   /** Recent CDP frame arrival diagnostics */
@@ -1889,6 +1899,189 @@ export class RTMPBridge {
   }
 
   /**
+   * Start FFmpeg with x11grab input (native X11 display capture) and NVENC
+   * encode, bypassing the in-browser encode path and the JPEG stdin-pipe
+   * entirely. Chromium keeps rendering the scene to the Xvfb display; FFmpeg
+   * reads that display directly, encodes with h264_nvenc, and fans out to
+   * configured destinations via the existing tee/direct output paths.
+   *
+   * The caller is responsible for ensuring:
+   *   - An Xvfb (or Xorg) display is running at `options.display`.
+   *   - Chromium is pinned full-screen at (0,0) to WxH so the captured region
+   *     is the canvas and not the whole virtual screen.
+   *   - `FFMPEG_HWACCEL=nvidia` is set so `buildVideoEncoderArgs` picks
+   *     h264_nvenc; this method does not fall back to libx264.
+   */
+  startFFmpegX11Grab(options: {
+    display: string;
+    width: number;
+    height: number;
+    fps: number;
+    drawMouse?: boolean;
+  }): void {
+    if (this.ffmpeg) {
+      console.warn("[RTMPBridge] FFmpeg already running");
+      return;
+    }
+
+    const drawMouse = options.drawMouse === true;
+    // x11grab format string. The `.0+0,0` suffix pins the grab offset to the
+    // top-left of screen 0. If the caller has sized Xvfb to exactly WxH and
+    // pinned Chromium at (0,0), this captures the scene region exactly.
+    const x11Input = `${options.display}.0+0,0`;
+
+    this.initOutputs();
+    // x11grab does not use the CDP-direct stdin path, but we mark the bridge
+    // as running so destination bookkeeping, backpressure accounting, and
+    // status reporting all behave identically to `startFFmpegDirect`.
+    this.cdpDirectMode = false;
+    this.directFrameCount = 0;
+    this.droppedFrameCount = 0;
+    this.lastEncoderFrameCount = 0;
+    this.lastEncoderFrameAt = null;
+
+    const outputString = this.buildOutputString();
+    const isNullOutput = outputString === "-f null -";
+
+    const args: string[] = [
+      // Low-latency input flags — x11grab is real-time only
+      "-fflags",
+      "nobuffer",
+      "-flags",
+      "low_delay",
+      "-thread_queue_size",
+      "512",
+      "-probesize",
+      "32",
+      "-analyzeduration",
+      "0",
+      "-f",
+      "x11grab",
+      "-draw_mouse",
+      drawMouse ? "1" : "0",
+      "-video_size",
+      `${options.width}x${options.height}`,
+      "-framerate",
+      String(options.fps),
+      "-i",
+      x11Input,
+    ];
+
+    args.push(...this.buildBridgeAudioInputArgs());
+
+    // Video from x11grab (input 0), audio from pulse/anullsrc (input 1).
+    args.push("-map", "0:v:0", "-map", "1:a:0");
+
+    // Force output frame rate (matches existing CDP path).
+    args.push("-r", String(options.fps));
+
+    // NOTE: buildOutputVideoFilter normalises scale/pad for the final output
+    // resolution. Safe to reuse here; if Xvfb is sized to exactly WxH this is
+    // a no-op pass-through.
+    args.push("-vf", this.buildOutputVideoFilter(true));
+
+    // Video encoder (h264_nvenc via FFMPEG_HWACCEL=nvidia).
+    args.push(...this.buildVideoEncoderArgs());
+
+    args.push(...this.buildAudioArgs());
+
+    // Use wallclock PTS so audio/video stay in lockstep against Cloudflare
+    // ingest expectations (matches the existing CDP path's implicit behaviour).
+    args.push("-fflags", "+genpts", "-use_wallclock_as_timestamps", "1");
+
+    if (isNullOutput) {
+      args.push("-f", "null", "-");
+    } else {
+      const directOutputArgs = this.buildDirectOutputArgs();
+      if (directOutputArgs) {
+        args.push(...directOutputArgs);
+      } else {
+        args.push("-f", "tee", outputString);
+      }
+    }
+
+    const redactedArgs = args.map((arg) =>
+      RTMPBridge.redactSensitiveFfmpegText(arg),
+    );
+    console.log(
+      "[RTMPBridge] Starting FFmpeg (x11grab + NVENC mode) with args:",
+      redactedArgs.join(" "),
+    );
+
+    this.ffmpeg = spawn(this.ffmpegCommand, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.setFfmpegBackpressured(false);
+
+    this.startTime = Date.now();
+    this.status.active = true;
+    this.status.ffmpegRunning = true;
+    // x11grab is always "connected" to its source (the X display); unlike the
+    // WebSocket-based modes there is no client socket to wait for.
+    this.status.clientConnected = true;
+
+    this.setupFFmpegHandlers(
+      "x11grab",
+      () => this.status.ffmpegRunning === true,
+    );
+  }
+
+  /** Exposed for unit tests — builds the args array without spawning FFmpeg. */
+  buildX11GrabArgsForTest(options: {
+    display: string;
+    width: number;
+    height: number;
+    fps: number;
+    drawMouse?: boolean;
+  }): string[] {
+    const drawMouse = options.drawMouse === true;
+    const x11Input = `${options.display}.0+0,0`;
+    const outputString = this.buildOutputString();
+    const isNullOutput = outputString === "-f null -";
+    const args: string[] = [
+      "-fflags",
+      "nobuffer",
+      "-flags",
+      "low_delay",
+      "-thread_queue_size",
+      "512",
+      "-probesize",
+      "32",
+      "-analyzeduration",
+      "0",
+      "-f",
+      "x11grab",
+      "-draw_mouse",
+      drawMouse ? "1" : "0",
+      "-video_size",
+      `${options.width}x${options.height}`,
+      "-framerate",
+      String(options.fps),
+      "-i",
+      x11Input,
+    ];
+    args.push(...this.buildBridgeAudioInputArgs());
+    args.push("-map", "0:v:0", "-map", "1:a:0");
+    args.push("-r", String(options.fps));
+    args.push("-vf", this.buildOutputVideoFilter(true));
+    args.push(...this.buildVideoEncoderArgs());
+    args.push(...this.buildAudioArgs());
+    args.push("-fflags", "+genpts", "-use_wallclock_as_timestamps", "1");
+    if (isNullOutput) {
+      args.push("-f", "null", "-");
+    } else {
+      const directOutputArgs = this.buildDirectOutputArgs();
+      if (directOutputArgs) {
+        args.push(...directOutputArgs);
+      } else {
+        args.push("-f", "tee", outputString);
+      }
+    }
+    return args;
+  }
+
+  /**
    * Feed a single JPEG frame to FFmpeg (CDP direct mode)
    *
    * @param jpegBuffer - Raw JPEG image data
@@ -1929,6 +2122,25 @@ export class RTMPBridge {
    */
   getDirectFrameCount(): number {
     return this.directFrameCount;
+  }
+
+  /**
+   * Monotonic frame counter as reported by FFmpeg's own `frame= NNN` stderr
+   * progress line. Authoritative encoder-side liveness signal — used by the
+   * x11_nvenc watchdog since that capture mode does not write JPEG frames to
+   * FFmpeg stdin (and therefore `directFrameCount` is meaningless there).
+   */
+  getLastEncoderFrameCount(): number {
+    return this.lastEncoderFrameCount;
+  }
+
+  /**
+   * Wallclock ms timestamp of the most recent FFmpeg `frame=` advance, or
+   * null if the encoder has not yet reported progress (typical before FFmpeg
+   * first emits a progress line or immediately after a restart).
+   */
+  getLastEncoderFrameAt(): number | null {
+    return this.lastEncoderFrameAt;
   }
 
   getCaptureDiagnostics(): {
@@ -2577,7 +2789,19 @@ export class RTMPBridge {
       }
     }
 
-    if (/frame=\s*\d+/i.test(msg) || encoderFpsMatch) {
+    const encoderFrameMatch = msg.match(/frame=\s*(\d+)/i);
+    if (encoderFrameMatch) {
+      const parsedFrame = Number.parseInt(encoderFrameMatch[1] || "", 10);
+      if (
+        Number.isFinite(parsedFrame) &&
+        parsedFrame > this.lastEncoderFrameCount
+      ) {
+        this.lastEncoderFrameCount = parsedFrame;
+        this.lastEncoderFrameAt = Date.now();
+      }
+    }
+
+    if (encoderFrameMatch || encoderFpsMatch) {
       this.markHealthyDestinationsConnected();
     }
 
