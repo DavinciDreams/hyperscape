@@ -644,6 +644,10 @@ export class MatchmakingManager {
       winReason: duel.winReason,
       damageWinner: duel.damageWinner,
       damageLoser: duel.damageLoser,
+      duelKeyHex: duel.duelKeyHex,
+      duelEndTime: duel.duelEndTime,
+      seed: duel.seed,
+      replayHash: duel.replayHash,
     });
   }
 

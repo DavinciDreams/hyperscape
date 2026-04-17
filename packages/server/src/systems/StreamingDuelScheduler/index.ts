@@ -1522,6 +1522,12 @@ export class StreamingDuelScheduler {
         this.currentCycle.agent1?.characterId === loserId
           ? this.currentCycle.agent1.damageDealtThisFight
           : (this.currentCycle.agent2?.damageDealtThisFight ?? 0),
+      // Oracle proof — needed by the keeper result-catch-up endpoint so a
+      // missed onDuelEnd event can still be replayed to resolve the bundle.
+      duelKeyHex: this.currentCycle.duelKeyHex ?? null,
+      duelEndTime: this.currentCycle.duelEndTime ?? null,
+      seed: this.currentCycle.seed ?? null,
+      replayHash: this.currentCycle.replayHash ?? null,
     });
 
     // Pull per-fight AI stats (attacksLanded, healsUsed) captured in stopCombatAIs

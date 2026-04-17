@@ -1380,6 +1380,10 @@ describe.skip("StreamingDuelScheduler", () => {
       winReason: "kill",
       damageWinner: 50,
       damageLoser: 30,
+      duelKeyHex: null,
+      duelEndTime: null,
+      seed: null,
+      replayHash: null,
     });
 
     const duels1 = scheduler.getRecentDuels(10);
