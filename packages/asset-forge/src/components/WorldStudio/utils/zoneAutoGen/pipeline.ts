@@ -8,7 +8,7 @@
  * Extracted from useZoneAutoGen to keep the hook as a thin React orchestrator.
  */
 
-import { NoiseGenerator } from "@hyperscape/procgen/terrain";
+import { NoiseGenerator } from "@hyperforge/procgen/terrain";
 
 import {
   computeZoneDifficulty,
@@ -53,11 +53,11 @@ import {
   type ExistingEntityPosition,
 } from "../../pipeline/entityPopulator";
 import { generateRoadNetwork } from "../../pipeline/roadGenerator";
-import { TownGenerator } from "@hyperscape/procgen/building/town";
+import { TownGenerator } from "@hyperforge/procgen/building/town";
 import type {
   TerrainProvider,
   GeneratedTown as ProcgenTown,
-} from "@hyperscape/procgen/building/town";
+} from "@hyperforge/procgen/building/town";
 
 // ============== STAGE RESULT TYPES ==============
 

@@ -139,8 +139,8 @@ function copyPhysXAssets() {
   const assetsWebDir = path.join(assetsDir, 'web')
   fs.mkdirSync(assetsWebDir, { recursive: true })
 
-  const physxWasm = path.join(rootDir, 'node_modules/@hyperscape/physx-js-webidl/dist/physx-js-webidl.wasm')
-  const physxJs = path.join(rootDir, 'node_modules/@hyperscape/physx-js-webidl/dist/physx-js-webidl.js')
+  const physxWasm = path.join(rootDir, 'node_modules/@hyperforge/physx-js-webidl/dist/physx-js-webidl.wasm')
+  const physxJs = path.join(rootDir, 'node_modules/@hyperforge/physx-js-webidl/dist/physx-js-webidl.js')
 
   if (fs.existsSync(physxWasm)) {
     fs.copyFileSync(physxWasm, path.join(assetsWebDir, 'physx-js-webidl.wasm'))

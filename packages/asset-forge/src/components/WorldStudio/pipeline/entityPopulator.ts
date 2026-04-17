@@ -13,7 +13,7 @@
  * (herbs, traps, hazards) without modifying core pipeline.
  */
 
-import { NoiseGenerator } from "@hyperscape/procgen/terrain";
+import { NoiseGenerator } from "@hyperforge/procgen/terrain";
 
 import {
   computeZoneDifficulty,

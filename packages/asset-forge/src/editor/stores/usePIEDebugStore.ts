@@ -16,7 +16,7 @@
  */
 
 import { create } from "zustand";
-import type { PIEDebugEntry } from "@hyperscape/shared/runtime";
+import type { PIEDebugEntry } from "@hyperforge/shared/runtime";
 
 /** Maximum number of entries kept in memory. Older entries are dropped. */
 const MAX_ENTRIES = 500;

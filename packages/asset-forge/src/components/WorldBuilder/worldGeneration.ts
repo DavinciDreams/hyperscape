@@ -5,17 +5,17 @@
  * can generate worlds from a WorldCreationConfig.
  */
 
-import { TownGenerator } from "@hyperscape/procgen/building/town";
+import { TownGenerator } from "@hyperforge/procgen/building/town";
 import type {
   TownBuilding,
   GeneratedTown as ProcgenTown,
-} from "@hyperscape/procgen/building/town";
+} from "@hyperforge/procgen/building/town";
 import {
   TerrainGenerator,
   createConfigFromPreset,
   TERRAIN_PRESETS,
   BiomeSystem,
-} from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/terrain";
 
 import type {
   WorldCreationConfig,

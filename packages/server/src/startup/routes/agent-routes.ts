@@ -16,7 +16,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import { getDefaultPublicWsUrl } from "../../shared/public-ws-url.js";
 import { createJWT } from "../../shared/utils.js";
 import {

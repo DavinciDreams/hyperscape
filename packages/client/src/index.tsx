@@ -14,7 +14,7 @@ import {
   installThreeJSExtensions,
   THREE,
   World,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { ErrorBoundary } from "./lib/ErrorBoundary";

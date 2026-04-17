@@ -19,7 +19,7 @@ import {
   OctahedronType,
   type ImpostorBakeResult,
   type CompatibleRenderer,
-} from "@hyperscape/impostor";
+} from "@hyperforge/impostor";
 import type { World } from "../../types";
 
 export type LODCategory =

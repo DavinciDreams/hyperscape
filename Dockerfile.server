@@ -141,20 +141,20 @@ COPY --from=builder /app/packages/client/package.json          ./packages/client
 # Bun 1.3 uses per-package node_modules (not flat hoisting). Docker COPY
 # also destroys workspace symlinks. We need three things:
 #   1. Root node_modules (with .bun cache containing all resolved packages)
-#   2. Manual workspace symlinks (@hyperscape/* -> packages/*)
+#   2. Manual workspace symlinks (@hyperforge/* -> packages/*)
 #   3. Per-package node_modules for every workspace member used at runtime
 COPY --from=builder /app/node_modules ./node_modules
 
-RUN mkdir -p node_modules/@hyperscape && \
-    ln -s ../../packages/physx-js-webidl    node_modules/@hyperscape/physx-js-webidl && \
-    ln -s ../../packages/decimation         node_modules/@hyperscape/decimation && \
-    ln -s ../../packages/impostors          node_modules/@hyperscape/impostor && \
-    ln -s ../../packages/procgen            node_modules/@hyperscape/procgen && \
-    ln -s ../../packages/shared             node_modules/@hyperscape/shared && \
-    ln -s ../../packages/plugin-hyperscape  node_modules/@hyperscape/plugin-hyperscape && \
-    ln -s ../../packages/web3              node_modules/@hyperscape/web3 && \
-    ln -s ../../packages/server            node_modules/@hyperscape/server && \
-    ln -s ../../packages/client            node_modules/@hyperscape/client
+RUN mkdir -p node_modules/@hyperforge && \
+    ln -s ../../packages/physx-js-webidl    node_modules/@hyperforge/physx-js-webidl && \
+    ln -s ../../packages/decimation         node_modules/@hyperforge/decimation && \
+    ln -s ../../packages/impostors          node_modules/@hyperforge/impostor && \
+    ln -s ../../packages/procgen            node_modules/@hyperforge/procgen && \
+    ln -s ../../packages/shared             node_modules/@hyperforge/shared && \
+    ln -s ../../packages/plugin-hyperscape  node_modules/@hyperforge/plugin-hyperscape && \
+    ln -s ../../packages/web3              node_modules/@hyperforge/web3 && \
+    ln -s ../../packages/server            node_modules/@hyperforge/server && \
+    ln -s ../../packages/client            node_modules/@hyperforge/client
 
 COPY --from=builder /app/packages/server/node_modules            ./packages/server/node_modules
 COPY --from=builder /app/packages/shared/node_modules            ./packages/shared/node_modules

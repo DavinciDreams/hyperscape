@@ -6,7 +6,7 @@ import {
   getPanelInsetStyle,
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
-import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
+import { EventType, getAvailableStyles, WeaponType } from "@hyperforge/shared";
 import {
   PANEL_PADDING,
   PANEL_MOBILE_PADDING,

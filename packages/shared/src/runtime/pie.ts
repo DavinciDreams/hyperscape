@@ -31,7 +31,7 @@ export type { RuntimeScriptGraph } from "../systems/shared/scripting/ScriptGraph
 
 // GameMode surface exposed to PIE consumers. usePIESession reads
 // `HYPERSCAPE_DEFAULT_MANIFEST` and branches on `CLICK_TO_WALK_CONTROLLER_ID`.
-// Deeper registry manipulation still lives behind `@hyperscape/shared/gameMode`.
+// Deeper registry manipulation still lives behind `@hyperforge/shared/gameMode`.
 export type {
   GameMode,
   GameModeManifest,

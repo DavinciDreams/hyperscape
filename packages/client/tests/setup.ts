@@ -207,7 +207,7 @@ export function disablePerformanceMock(): void {
 // @HYPERSCAPE/SHARED SETUP
 // ============================================================================
 
-// Tests rely on real @hyperscape/shared implementation; item data can be
+// Tests rely on real @hyperforge/shared implementation; item data can be
 // populated per-test via the ITEMS map for deterministic UI rendering.
 
 // ============================================================================

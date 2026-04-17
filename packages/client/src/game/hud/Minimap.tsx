@@ -19,7 +19,7 @@ import {
   THREE,
   TERRAIN_CONSTANTS,
   INPUT,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import type { ClientWorld } from "../../types";
 import { type EntityPip, useMinimapEntityPips } from "./useMinimapEntityPips";
 import { useQuestStatusSync } from "./useQuestStatusSync";

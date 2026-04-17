@@ -225,7 +225,7 @@ export class HyperscapeClientInterface extends EventEmitter implements Client {
 
     // Emit message event for monitoring if runtime supports it
     if ("emit" in this.runtime && typeof this.runtime.emit === "function") {
-      // Use EventType from @hyperscape/shared if available, otherwise use string
+      // Use EventType from @hyperforge/shared if available, otherwise use string
       const eventType = "NETWORK_MESSAGE_RECEIVED";
       (this.runtime as { emit: (type: string, data: unknown) => void }).emit(
         eventType,

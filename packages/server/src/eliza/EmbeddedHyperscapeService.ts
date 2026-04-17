@@ -15,7 +15,7 @@ import {
   isPositionInsideCombatArena,
   ALL_WORLD_AREAS,
   type World,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import { errMsg } from "../shared/errMsg.js";
 import type {
   IEmbeddedHyperscapeService,
@@ -467,7 +467,7 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     this.world.emit(EventType.PLAYER_JOINED, {
       playerId: this.characterId,
       player:
-        addedEntity as unknown as import("@hyperscape/shared").PlayerLocal,
+        addedEntity as unknown as import("@hyperforge/shared").PlayerLocal,
       isEmbeddedAgent: true,
     });
 

@@ -18,8 +18,8 @@
  * resource manager to respect WebGPU/Metal rate-limiting.
  */
 
-import { BuildingGenerator } from "@hyperscape/procgen/building";
-import type { GeneratedTown as ProcgenTown } from "@hyperscape/procgen/building/town";
+import { BuildingGenerator } from "@hyperforge/procgen/building";
+import type { GeneratedTown as ProcgenTown } from "@hyperforge/procgen/building/town";
 import {
   MeshStandardNodeMaterial,
   MeshBasicNodeMaterial,

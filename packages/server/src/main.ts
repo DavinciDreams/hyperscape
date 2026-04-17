@@ -31,7 +31,7 @@ import {
   startMemoryMonitor as startMemoryMonitorInfra,
   type MemoryMonitorConfig,
 } from "./infrastructure/memory-monitor.js";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 
 function resolveBooleanEnvFlag(name: string, defaultEnabled: boolean): boolean {
   const raw = process.env[name];

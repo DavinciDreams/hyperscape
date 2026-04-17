@@ -8,7 +8,7 @@
  *
  * Usage:
  * ```ts
- * import { gameModeRegistry } from "@hyperscape/shared";
+ * import { gameModeRegistry } from "@hyperforge/shared";
  *
  * gameModeRegistry.register("hyperscape", (manifest, ctx) =>
  *   new HyperscapeGameMode(manifest, ctx),

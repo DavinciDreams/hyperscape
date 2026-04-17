@@ -2,7 +2,7 @@
  * Server-side GameMode manifest allowlist.
  *
  * The client/PIE resolves a full `GameMode` via
- * `@hyperscape/shared/gameMode` — that registry drags in Three.js,
+ * `@hyperforge/shared/gameMode` — that registry drags in Three.js,
  * PhysX, and the whole scene layer, which has no place inside the
  * Elysia API process.
  *

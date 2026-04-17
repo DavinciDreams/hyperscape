@@ -6,7 +6,7 @@
  */
 
 import type { WorldPosition, PlacedNPC } from "../WorldBuilder/types";
-import type { GeneratedTown as ProcgenTown } from "@hyperscape/procgen/building/town";
+import type { GeneratedTown as ProcgenTown } from "@hyperforge/procgen/building/town";
 
 export type { PlacedNPC };
 
@@ -786,7 +786,7 @@ export interface BrushSettings {
   /** Collision-specific: block or unblock tiles */
   collisionMode: "block" | "unblock";
   /** Material-specific: target material layer */
-  materialPaintTarget: import("@hyperscape/procgen/terrain").MaterialLayerId;
+  materialPaintTarget: import("@hyperforge/procgen/terrain").MaterialLayerId;
   /** Foliage-specific: add/remove mode */
   foliagePaintMode: VegetationPaintMode;
   /** Foliage-specific: type filter (empty = all) */
@@ -863,7 +863,7 @@ export interface MaterialPaintStroke {
   strength: number;
   falloff: BrushFalloff;
   /** Target material layer to paint */
-  targetMaterial: import("@hyperscape/procgen/terrain").MaterialLayerId;
+  targetMaterial: import("@hyperforge/procgen/terrain").MaterialLayerId;
   timestamp: number;
 }
 

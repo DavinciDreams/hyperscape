@@ -10,8 +10,8 @@
  */
 
 import React, { memo, useCallback, useMemo } from "react";
-import { EventType, getItem } from "@hyperscape/shared";
-import type { PlayerStats, PlayerID, StakedItem } from "@hyperscape/shared";
+import { EventType, getItem } from "@hyperforge/shared";
+import type { PlayerStats, PlayerID, StakedItem } from "@hyperforge/shared";
 import { ModalWindow, useThemeStore } from "@/ui";
 import { UI } from "@/ui/core";
 import {

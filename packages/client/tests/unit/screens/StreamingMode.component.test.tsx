@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 import { StreamingMode } from "../../../src/screens/StreamingMode";
 
 type Listener = (payload?: unknown) => void;

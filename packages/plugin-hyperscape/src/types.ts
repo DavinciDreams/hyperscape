@@ -1,11 +1,11 @@
 /**
- * Type definitions for @hyperscape/plugin-hyperscape
+ * Type definitions for @hyperforge/plugin-hyperscape
  *
  * This file defines the TypeScript interfaces and types used throughout the plugin
  * to connect ElizaOS AI agents to Hyperscape game worlds.
  *
  * NOTE: This plugin is standalone and defines all types it needs based on the
- * Hyperscape server's WebSocket protocol. It does NOT import from @hyperscape/shared.
+ * Hyperscape server's WebSocket protocol. It does NOT import from @hyperforge/shared.
  */
 
 import type { IAgentRuntime } from "@elizaos/core";

@@ -21,7 +21,7 @@ import {
   DUEL_RULE_DEFINITIONS,
   EQUIPMENT_SLOT_LABELS,
   EQUIPMENT_SLOTS_ORDERED,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 
 // ============================================================================
 // Types
@@ -40,7 +40,7 @@ interface RulesScreenProps {
 }
 
 // ============================================================================
-// Rule Definitions - Now imported from @hyperscape/shared/data/duel-manifest
+// Rule Definitions - Now imported from @hyperforge/shared/data/duel-manifest
 // ============================================================================
 
 // ============================================================================

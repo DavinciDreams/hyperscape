@@ -49,11 +49,11 @@ export async function loadPhysXWasmForNode(): Promise<Buffer> {
     // Node modules (installed package)
     join(
       process.cwd(),
-      "node_modules/@hyperscape/physx-js-webidl/dist/physx-js-webidl.wasm",
+      "node_modules/@hyperforge/physx-js-webidl/dist/physx-js-webidl.wasm",
     ),
     join(
       process.cwd(),
-      "../../node_modules/@hyperscape/physx-js-webidl/dist/physx-js-webidl.wasm",
+      "../../node_modules/@hyperforge/physx-js-webidl/dist/physx-js-webidl.wasm",
     ),
     // Workspace root assets
     join(process.cwd(), "assets/web/physx-js-webidl.wasm"),

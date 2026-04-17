@@ -12,7 +12,7 @@
  *   4. The `debugSink` receives one entry per trigger fire and action emit
  *   5. `world.stop()` tears down all script state
  *
- * These tests use the *built* PIE bundle (via the `@hyperscape/shared/runtime`
+ * These tests use the *built* PIE bundle (via the `@hyperforge/shared/runtime`
  * subpath export) rather than reaching into source so they exercise the same
  * artifact World Studio loads in the browser.
  */
@@ -22,7 +22,7 @@ import {
   createPlayTestWorld,
   type PIEDebugEntry,
   type RuntimeScriptGraph,
-} from "@hyperscape/shared/runtime";
+} from "@hyperforge/shared/runtime";
 
 // ---------------------------------------------------------------------------
 // Graph factories — keep tests readable

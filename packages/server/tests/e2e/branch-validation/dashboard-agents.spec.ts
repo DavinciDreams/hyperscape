@@ -158,7 +158,7 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
         bio: ["Test bio"],
         topics: ["test"],
         adjectives: ["test"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -311,7 +311,7 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
         bio: ["Test"],
         topics: ["test"],
         adjectives: ["test"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -493,7 +493,7 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
         bio: ["Test"],
         topics: ["test"],
         adjectives: ["test"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -623,7 +623,7 @@ test.describe("Dashboard Agents (plugin-work branch)", () => {
         bio: ["Test"],
         topics: ["test"],
         adjectives: ["test"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,

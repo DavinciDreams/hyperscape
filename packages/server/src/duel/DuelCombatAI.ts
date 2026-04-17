@@ -12,7 +12,7 @@
  *   DuelOrchestrator calls DuelCombatAI.stop() when the duel ends.
  */
 
-import { TICK_DURATION_MS } from "@hyperscape/shared";
+import { TICK_DURATION_MS } from "@hyperforge/shared";
 import type { EmbeddedHyperscapeService } from "../eliza/EmbeddedHyperscapeService";
 import type { EmbeddedGameState } from "../eliza/types";
 import { type AgentRuntime, ModelType } from "@elizaos/core";

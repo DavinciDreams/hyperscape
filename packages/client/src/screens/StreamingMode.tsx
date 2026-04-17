@@ -24,8 +24,8 @@ import type {
   Entity,
   StreamingGuardrailAgentSnapshot,
   StreamingGuardrailPhase,
-} from "@hyperscape/shared";
-import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
+} from "@hyperforge/shared";
+import { EventType, deriveStreamingGuardrailReason } from "@hyperforge/shared";
 import type { StreamingWindow } from "@/lib/streamingWindow";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";

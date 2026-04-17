@@ -1,4 +1,4 @@
-declare module "@hyperscape/web3" {
+declare module "@hyperforge/web3" {
   export interface ChainWriterStats {
     totalCallsFlushed: number;
     totalFlushes: number;

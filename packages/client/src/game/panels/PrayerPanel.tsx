@@ -57,7 +57,7 @@ import {
   type PrayerToggledEvent,
   type PrayerDefinition,
   prayerDataProvider,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 
 // Type guards for prayer events
 function isPrayerStateSyncPayload(

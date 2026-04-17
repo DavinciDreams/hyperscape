@@ -39,7 +39,7 @@ else:
 TEMP_DIR = os.environ.get("LOD_TEMP_DIR", "")
 
 # Configuration
-# Note: Rocks are now procedurally generated via @hyperscape/procgen/rock
+# Note: Rocks are now procedurally generated via @hyperforge/procgen/rock
 # and do not need static LOD GLB files
 CONFIG = {
     "dry_run": False,

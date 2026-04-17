@@ -20,7 +20,7 @@ import {
   type StakedItem,
   DUEL_RULE_LABELS,
   EQUIPMENT_SLOT_LABELS,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import { formatQuantity, formatGoldValue, calculateTotalValue } from "./utils";
 
 // ============================================================================

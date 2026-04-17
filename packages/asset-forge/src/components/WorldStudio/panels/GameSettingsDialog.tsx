@@ -16,7 +16,7 @@
 import { X, Gamepad2, Save, Loader2, AlertTriangle } from "lucide-react";
 import React, { useState, useEffect, useCallback } from "react";
 
-import type { GameModeManifest } from "@hyperscape/shared/runtime";
+import type { GameModeManifest } from "@hyperforge/shared/runtime";
 
 import { updateGame } from "../../../utils/worldProjectApi";
 import { useWorldStudio } from "../WorldStudioContext";

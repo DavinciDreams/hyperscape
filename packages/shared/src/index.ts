@@ -1,5 +1,5 @@
 /**
- * index.ts - @hyperscape/shared Package Entry Point
+ * index.ts - @hyperforge/shared Package Entry Point
  *
  * This is the main export file for the Hyperscape 3D multiplayer game engine.
  * It provides a comprehensive public API for building 3D multiplayer games and applications.

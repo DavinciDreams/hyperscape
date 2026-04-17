@@ -6,15 +6,15 @@ import {
   tileToWorld,
   BuildingCollisionService,
   EntityID,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import type {
   World,
   Player,
   TileCoord,
   WalkabilityChecker,
   Position3D,
-} from "@hyperscape/shared";
-import { Entity } from "@hyperscape/shared";
+} from "@hyperforge/shared";
+import { Entity } from "@hyperforge/shared";
 import { EventEmitter } from "events";
 
 // Pre-allocated temp objects for hot path optimizations (avoid GC pressure)

@@ -7,7 +7,7 @@ import {
   EventType,
   isPositionInsideDuelArenaZone,
   type World,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import { errMsg } from "../shared/errMsg.js";
 
 /**

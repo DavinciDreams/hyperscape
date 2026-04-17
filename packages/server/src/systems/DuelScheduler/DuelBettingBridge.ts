@@ -14,7 +14,7 @@
  * Enable via DUEL_BETTING_ENABLED=true environment variable
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import { createHash } from "node:crypto";
 import { Logger } from "../ServerNetwork/services";
 import { getStreamingDuelScheduler } from "../StreamingDuelScheduler/index.js";

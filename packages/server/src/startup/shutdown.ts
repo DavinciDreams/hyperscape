@@ -29,7 +29,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import type { DatabaseContext } from "./database.js";
 import { closeDatabase } from "./database.js";

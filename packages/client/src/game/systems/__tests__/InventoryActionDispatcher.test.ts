@@ -15,7 +15,7 @@ import {
   dispatchInventoryAction,
   type InventoryActionContext,
 } from "../InventoryActionDispatcher";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 
 /**
  * Minimal world interface for testing the dispatcher

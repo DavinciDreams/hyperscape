@@ -26,7 +26,7 @@ import {
   World,
   type EquipmentSyncData,
   type InventorySyncData,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import {
   sendFriendsListSync,
   notifyFriendsOfStatusChange,
@@ -112,7 +112,7 @@ async function _createElizaOSAgent(
 
       plugins: [
         "@elizaos/plugin-sql", // Database operations
-        "@hyperscape/plugin-hyperscape", // Hyperscape game integration
+        "@hyperforge/plugin-hyperscape", // Hyperscape game integration
       ],
 
       settings: {
@@ -926,7 +926,7 @@ export async function handleEnterWorld(
   // Check if player logged out inside a combat arena (server restart edge case)
   // If so, teleport them to the duel arena lobby spawn point
   const { isPositionInsideCombatArena, getDuelArenaConfig } =
-    await import("@hyperscape/shared");
+    await import("@hyperforge/shared");
 
   // Duel harness bots should always begin from the normal duel arena lobby.
   if (isLoadTestBot && isDuelBot) {
@@ -1160,7 +1160,7 @@ export async function handleEnterWorld(
       playerId: spawnedPlayer.data.id as string,
       userId: characterId || undefined,
       player:
-        spawnedPlayer as unknown as import("@hyperscape/shared").PlayerLocal,
+        spawnedPlayer as unknown as import("@hyperforge/shared").PlayerLocal,
       equipment: equipmentRows,
       inventory: inventoryRows,
       isLoadTestBot,

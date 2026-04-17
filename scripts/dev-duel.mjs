@@ -340,10 +340,10 @@ async function loadMatchmaker() {
 
   // Fallback: try the compiled server build
   try {
-    const mod = await import("@hyperscape/server/eliza");
+    const mod = await import("@hyperforge/server/eliza");
     if (mod?.ElizaDuelMatchmaker) return mod;
   } catch (err) {
-    console.warn(`[dev-duel] Failed to import @hyperscape/server/eliza:`, err.message);
+    console.warn(`[dev-duel] Failed to import @hyperforge/server/eliza:`, err.message);
   }
 
   // Final fallback: try loading the old DuelMatchmaker from shared

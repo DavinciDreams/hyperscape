@@ -41,7 +41,7 @@ import {
   PANEL_SLOT_RADIUS,
 } from "../../constants/panelLayout";
 import type { PlayerStats, ClientWorld } from "../../types";
-import { spellService, EventType, type Spell } from "@hyperscape/shared";
+import { spellService, EventType, type Spell } from "@hyperforge/shared";
 
 // Spell panel layout constants — use shared sizing tokens from panelLayout.ts
 // to ensure consistency across Prayer, Spells, Skills, and Inventory panels.

@@ -71,7 +71,7 @@ export {
   COMPETITIVE_SYSTEM_PROMPT,
 } from "./agentHelpers.js";
 
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import { AgentManager, setAgentManager } from "./AgentManager.js";
 import { spawnModelAgents, getAvailableModels } from "./ModelAgentSpawner.js";
 

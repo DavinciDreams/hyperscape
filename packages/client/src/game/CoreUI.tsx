@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useThemeStore } from "@/ui";
 
-import type { ControlAction, EventMap } from "@hyperscape/shared";
+import type { ControlAction, EventMap } from "@hyperforge/shared";
 import {
   buttons,
   cls,
   EventType,
   isTouch,
   propToLabel,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import type { ClientWorld } from "../types";
 import { PlayerDataProvider, usePlayerStatsContext } from "../hooks";
 import { ActionProgressBar } from "./hud/ActionProgressBar";

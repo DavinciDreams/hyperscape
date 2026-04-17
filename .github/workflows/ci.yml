@@ -110,7 +110,7 @@ jobs:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
 
       - name: Run tests
-        run: bunx turbo run test --filter='!@hyperscape/app' --filter='!@hyperscape/contracts' --filter='!@hyperscapeai/duel-oracle-evm' --filter='!@hyperscape/impostor'
+        run: bunx turbo run test --filter='!@hyperforge/app' --filter='!@hyperforge/contracts' --filter='!@hyperscapeai/duel-oracle-evm' --filter='!@hyperforge/impostor'
         env:
           DATABASE_URL: postgresql://hyperscape:hyperscape_test@localhost:5432/hyperscape_test
           NODE_ENV: test
@@ -162,7 +162,7 @@ jobs:
           done
 
       - name: Build all packages with Turbo
-        run: bunx turbo run build --filter=!@hyperscape/app
+        run: bunx turbo run build --filter=!@hyperforge/app
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

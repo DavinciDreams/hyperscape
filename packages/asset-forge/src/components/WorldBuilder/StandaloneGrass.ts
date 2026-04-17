@@ -33,7 +33,7 @@ export interface StandaloneGrassOptions {
 
 /**
  * StandaloneGrass for World Studio.
- * Delegates to @hyperscape/shared's game-accurate implementation.
+ * Delegates to @hyperforge/shared's game-accurate implementation.
  */
 export class StandaloneGrass {
   private inner: SharedStandaloneGrass;

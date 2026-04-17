@@ -1,5 +1,5 @@
 /**
- * `@hyperscape/shared/gameMode` — public barrel for the GameMode system.
+ * `@hyperforge/shared/gameMode` — public barrel for the GameMode system.
  *
  * UE5-inspired abstraction that lets each Hyperscape-family game declare
  * its own player controller, camera, input context, and pawn. See

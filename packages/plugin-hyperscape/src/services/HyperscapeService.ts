@@ -61,7 +61,7 @@ import { AgentLiveKit } from "../systems/liveKit.js";
 import {
   getPacketId as sharedGetPacketId,
   getPacketName as sharedGetPacketName,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 
 // msgpackr instances for binary packet encoding/decoding
 const packr = new Packr({ structuredClone: true });

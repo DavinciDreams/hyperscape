@@ -6,7 +6,7 @@
  * management, HP tracking, fight resolution, and post-duel cleanup.
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import {
   AttackType,
   COMBAT_SPELLS,
@@ -20,7 +20,7 @@ import {
   getDuelArenaConfig,
   getItem,
   isPositionInsideCombatArena,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import { DuelCombatAI } from "../../../duel/DuelCombatAI.js";
 import {
   type StreamingDuelCycle,

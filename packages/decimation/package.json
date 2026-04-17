@@ -1,5 +1,5 @@
 {
-  "name": "@hyperscape/decimation",
+  "name": "@hyperforge/decimation",
   "version": "1.0.0",
   "type": "module",
   "description": "Seam-aware mesh decimation that preserves UV boundaries - TypeScript port of SIGGRAPH Asia 2017 paper implementation",

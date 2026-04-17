@@ -60,7 +60,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
       // Use actual shared package - per project rules, no mocks allowed
       // Tests should use real Hyperscape instances with Playwright
-      "@hyperscape/shared": path.resolve(
+      "@hyperforge/shared": path.resolve(
         __dirname,
         "../shared/build/framework.client.js",
       ),

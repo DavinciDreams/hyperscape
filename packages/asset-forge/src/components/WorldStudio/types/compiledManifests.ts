@@ -1,7 +1,7 @@
 /**
  * compiledManifests — Typed interfaces for compiler output
  *
- * These mirror the runtime types from @hyperscape/shared exactly.
+ * These mirror the runtime types from @hyperforge/shared exactly.
  * The compiler produces these types; the game consumes them.
  */
 

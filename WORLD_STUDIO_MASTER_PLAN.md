@@ -63,7 +63,7 @@ The brush tool lets designers raise/lower/flatten/smooth terrain. Strokes are st
 - **Manifest compiler** (`useManifestCompiler.ts`): Stop ignoring `_brushOverlays`. Include `terrainSculpts` array in a new `brush-overlays.json` manifest file.
 - **Deploy route** (`deploy-routes.ts`): Write `brush-overlays.json` alongside other manifests to staging/production.
 - **Game TerrainSystem** (`TerrainSystem.ts`): Load `brush-overlays.json` via DataManager. Pass strokes to tile generation. Call existing `applySculptStrokesToGeometry()` after generating each tile.
-- **Shared code**: The stroke application function (`brushApplication.ts`) already lives in the shared-accessible WorldBuilder utils. Extract to a shared location or duplicate the ~60-line function into `@hyperscape/shared`.
+- **Shared code**: The stroke application function (`brushApplication.ts`) already lives in the shared-accessible WorldBuilder utils. Extract to a shared location or duplicate the ~60-line function into `@hyperforge/shared`.
 
 **Files:**
 - `packages/asset-forge/src/components/WorldStudio/hooks/useManifestCompiler.ts` — use `brushOverlays` param

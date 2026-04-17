@@ -23,12 +23,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { QuestSystem } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
+import { QuestSystem } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 import type {
   QuestDefinition,
   QuestStatus,
-} from "@hyperscape/shared/types/game/quest-types";
+} from "@hyperforge/shared/types/game/quest-types";
 
 // Mock world interface - minimal mock to test real QuestSystem logic
 interface MockWorld {
@@ -309,7 +309,7 @@ describe("QuestSystem Integration Tests", () => {
     };
 
     questSystem = new QuestSystem(
-      mockWorld as unknown as import("@hyperscape/shared").World,
+      mockWorld as unknown as import("@hyperforge/shared").World,
     );
 
     await questSystem.init();

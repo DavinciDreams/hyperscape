@@ -1,4 +1,4 @@
-// Core types for plugin-hyperscape - imports from @hyperscape/shared and @elizaos/core
+// Core types for plugin-hyperscape - imports from @hyperforge/shared and @elizaos/core
 import { Action, IAgentRuntime, Provider, Service, UUID } from "@elizaos/core";
 import type {
   Vector3 as THREEVector3,
@@ -14,7 +14,7 @@ import {
   Entities as EntitiesClass,
   EventBus,
   THREE,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 
 // Import canonical types from hyperscape shared package
 import type {
@@ -22,7 +22,7 @@ import type {
   PlayerInput,
   PlayerStats,
   ChatMessage,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 
 // Define local type aliases for THREE types
 export type Vector3 = THREEVector3;
@@ -133,7 +133,7 @@ export interface ChatListener {
   (messages: ChatMessage[]): void;
 }
 
-// ChatMessage is imported and re-exported from @hyperscape/shared above
+// ChatMessage is imported and re-exported from @hyperforge/shared above
 
 // Plugin-specific Physics interface
 export interface Physics {

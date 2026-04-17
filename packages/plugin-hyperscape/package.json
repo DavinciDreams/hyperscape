@@ -1,5 +1,5 @@
 {
-  "name": "@hyperscape/plugin-hyperscape",
+  "name": "@hyperforge/plugin-hyperscape",
   "description": "ElizaOS plugin for AI agents to play Hyperscape 3D multiplayer RPG",
   "version": "1.0.0",
   "type": "module",
@@ -41,6 +41,6 @@
     "vitest": "^4.0.6"
   },
   "peerDependencies": {
-    "@hyperscape/shared": "workspace:*"
+    "@hyperforge/shared": "workspace:*"
   }
 }

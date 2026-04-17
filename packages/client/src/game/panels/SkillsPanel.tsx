@@ -32,7 +32,7 @@ import {
   SKILL_DEFINITIONS,
   getUnlocksForSkill,
   type SkillDefinition,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import { SkillGuidePanel } from "./SkillGuidePanel";
 
 interface SkillsPanelProps {

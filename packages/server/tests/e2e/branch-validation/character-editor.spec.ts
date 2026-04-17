@@ -180,7 +180,7 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
         ],
         topics: ["hyperscape", "gaming", "rpg"],
         adjectives: ["adventurous", "strategic"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -324,7 +324,7 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
         bio: ["Test bio"],
         topics: ["test"],
         adjectives: ["test"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -570,7 +570,7 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
         ],
         topics: ["hyperscape", "gaming", "rpg"],
         adjectives: ["adventurous", "strategic"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         knowledge: [],
         messageExamples: [],
         postExamples: [],
@@ -695,7 +695,7 @@ test.describe("Character Editor Screen (plugin-work branch)", () => {
         bio: ["Original bio"],
         topics: ["original"],
         adjectives: ["original"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,

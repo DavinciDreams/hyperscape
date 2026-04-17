@@ -37,7 +37,7 @@
     "Player interactions"
   ],
   "plugins": [
-    "@hyperscape/plugin-hyperscape"
+    "@hyperforge/plugin-hyperscape"
   ],
   "settings": {
     "secrets": {}

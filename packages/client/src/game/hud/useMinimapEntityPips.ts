@@ -1,5 +1,5 @@
 import { useEffect, type MutableRefObject } from "react";
-import { Entity, THREE } from "@hyperscape/shared";
+import { Entity, THREE } from "@hyperforge/shared";
 import type { ClientWorld } from "../../types";
 
 export interface EntityPip {

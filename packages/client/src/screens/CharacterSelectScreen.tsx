@@ -28,7 +28,7 @@ import {
   writePacket,
   storage,
   AVATAR_OPTIONS,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import React from "react";
 import { CharacterPreview } from "../game/character/CharacterPreview";
 import { usePrivy, useCreateWallet } from "@privy-io/react-auth";

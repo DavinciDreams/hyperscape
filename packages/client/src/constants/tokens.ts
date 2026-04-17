@@ -15,7 +15,7 @@
  */
 
 import type { CSSProperties } from "react";
-import { INVENTORY_CONSTANTS } from "@hyperscape/shared";
+import { INVENTORY_CONSTANTS } from "@hyperforge/shared";
 
 /**
  * Spacing - 8px Base Unit System

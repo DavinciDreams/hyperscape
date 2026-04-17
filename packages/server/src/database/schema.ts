@@ -71,7 +71,7 @@
  * **Migrations**:
  * Changes to this schema require new migrations. Run:
  * ```bash
- * pnpm --filter @hyperscape/server db:generate
+ * pnpm --filter @hyperforge/server db:generate
  * ```
  *
  * **Referenced by**: client.ts (initialization), DatabaseSystem.ts (queries), drizzle-adapter.ts (legacy compat)

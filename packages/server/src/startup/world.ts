@@ -24,9 +24,9 @@ import path from "path";
 import {
   createServerWorld,
   installThreeJSExtensions,
-} from "@hyperscape/shared";
-import { NodeStorage as Storage } from "@hyperscape/shared";
-import type { World, SystemDatabase } from "@hyperscape/shared";
+} from "@hyperforge/shared";
+import { NodeStorage as Storage } from "@hyperforge/shared";
+import type { World, SystemDatabase } from "@hyperforge/shared";
 import { ServerNetwork } from "../systems/ServerNetwork/index.js";
 import type { ServerConfig } from "./config.js";
 import type { DatabaseContext } from "./database.js";

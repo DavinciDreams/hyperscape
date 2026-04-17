@@ -25,8 +25,8 @@
  * ```
  */
 
-import { SystemBase } from "@hyperscape/shared";
-import type { World } from "@hyperscape/shared";
+import { SystemBase } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { eq, sql } from "drizzle-orm";
 import type pg from "pg";

@@ -7,7 +7,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import type { DatabaseSystem } from "../../systems/DatabaseSystem/index.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";

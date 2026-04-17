@@ -38,7 +38,7 @@ import {
   BiomeSystem,
   type TerrainConfig,
   type BiomeDefinition,
-} from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/terrain";
 
 /**
  * Terrain System
@@ -299,7 +299,7 @@ export class TerrainSystem extends System {
   private waterVisualManager: WaterVisualManager | null = null;
   private grassVisualManager: GrassVisualManager | null = null;
 
-  // Unified terrain generator from @hyperscape/procgen
+  // Unified terrain generator from @hyperforge/procgen
   // Provides deterministic height/biome calculation independent of rendering
   private terrainGenerator!: TerrainGenerator;
 
@@ -1462,7 +1462,7 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Initialize the unified TerrainGenerator from @hyperscape/procgen
+   * Initialize the unified TerrainGenerator from @hyperforge/procgen
    * This creates a standalone generator that matches this system's configuration
    */
   private initializeTerrainGenerator(): void {
@@ -1673,7 +1673,7 @@ export class TerrainSystem extends System {
     // Initialize deterministic noise from world id + per-biome noise sets
     this.ensureNoiseInitialized();
 
-    // Initialize the unified terrain generator from @hyperscape/procgen
+    // Initialize the unified terrain generator from @hyperforge/procgen
     this.initializeTerrainGenerator();
 
     // Water body registry — ocean level only (no manual rivers/ponds)
@@ -4652,7 +4652,7 @@ export class TerrainSystem extends System {
 
   /**
    * Apply town-wide circular terrain flattening.
-   * Delegates to the shared pure function from @hyperscape/shared/world.
+   * Delegates to the shared pure function from @hyperforge/shared/world.
    * Returns the flattened height, or null if outside all town flatten zones.
    */
   private applyTownCircularFlatten(
@@ -5603,7 +5603,7 @@ export class TerrainSystem extends System {
 
   /**
    * Generate decorative (non-harvestable) rocks for a tile.
-   * Uses procedural generation from @hyperscape/procgen/rock.
+   * Uses procedural generation from @hyperforge/procgen/rock.
    */
   private generateDecorativeRocksForTile(
     tile: TerrainTile,
@@ -5647,7 +5647,7 @@ export class TerrainSystem extends System {
 
   /**
    * Generate decorative (non-harvestable) plants for a tile.
-   * Uses procedural generation from @hyperscape/procgen/plant.
+   * Uses procedural generation from @hyperforge/procgen/plant.
    * DISABLED: Plants not working/looking good yet
    */
   // private generateDecorativePlantsForTile(tile: TerrainTile, biomeData: BiomeData): void {

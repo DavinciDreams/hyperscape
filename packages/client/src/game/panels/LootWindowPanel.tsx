@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import type {
   InventoryItem,
   PendingLootTransaction,
   LootResult,
-} from "@hyperscape/shared";
-import { EventType, generateTransactionId, getItem } from "@hyperscape/shared";
+} from "@hyperforge/shared";
+import { EventType, generateTransactionId, getItem } from "@hyperforge/shared";
 import { ErrorBoundary } from "../../lib/ErrorBoundary";
 import { CursorTooltip, useThemeStore } from "@/ui";
 import {

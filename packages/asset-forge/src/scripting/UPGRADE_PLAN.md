@@ -129,7 +129,7 @@ Triggers (21): `trigger/onBankDeposit`, `trigger/onBankWithdraw`, `trigger/onCoo
 
 **What**: Invoke runtime `validateNodeData()` from the editor before graph save to catch invalid configurations client-side.
 
-**Copy pattern from**: `NodeDataSchemas.ts:283-300` (exports `validateNodeData`). Either (a) share via `@hyperscape/shared` import in asset-forge, or (b) copy schema definitions into asset-forge and keep in sync.
+**Copy pattern from**: `NodeDataSchemas.ts:283-300` (exports `validateNodeData`). Either (a) share via `@hyperforge/shared` import in asset-forge, or (b) copy schema definitions into asset-forge and keep in sync.
 
 **Verification**:
 - Save a graph with missing required field → editor shows error, save blocked.

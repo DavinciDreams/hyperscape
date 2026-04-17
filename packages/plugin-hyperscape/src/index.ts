@@ -1,5 +1,5 @@
 /**
- * @hyperscape/plugin-hyperscape - ElizaOS Plugin for Hyperscape
+ * @hyperforge/plugin-hyperscape - ElizaOS Plugin for Hyperscape
  *
  * This plugin connects ElizaOS AI agents to Hyperscape multiplayer RPG worlds,
  * enabling agents to play as real players with full access to game mechanics.
@@ -197,7 +197,7 @@ function normalizeEnvValue(value: string | undefined, fallback = ""): string {
  * - Automatic reconnection and error handling
  */
 export const hyperscapePlugin: Plugin = {
-  name: "@hyperscape/plugin-hyperscape",
+  name: "@hyperforge/plugin-hyperscape",
   description:
     "Connect ElizaOS AI agents to Hyperscape 3D multiplayer RPG worlds",
 

@@ -107,87 +107,87 @@ export default defineConfig(({ mode }) => {
         three: threeRoot,
         // Shared world algorithms barrel — single source of truth for terrain,
         // biome, road, and town flatten code used by both World Studio and game client.
-        // Must come BEFORE the general @hyperscape/shared alias.
-        "@hyperscape/shared/world": path.resolve(
+        // Must come BEFORE the general @hyperforge/shared alias.
+        "@hyperforge/shared/world": path.resolve(
           __dirname,
           "../shared/src/world/index.ts",
         ),
         // Legacy deep imports that still resolve through the barrel
-        "@hyperscape/shared/world/BiomeResourceGenerator": path.resolve(
+        "@hyperforge/shared/world/BiomeResourceGenerator": path.resolve(
           __dirname,
           "../shared/src/systems/shared/world/BiomeResourceGenerator.ts",
         ),
-        "@hyperscape/shared/world/TerrainBiomeTypes": path.resolve(
+        "@hyperforge/shared/world/TerrainBiomeTypes": path.resolve(
           __dirname,
           "../shared/src/systems/shared/world/TerrainBiomeTypes.ts",
         ),
-        "@hyperscape/shared/constants/TreeTypes": path.resolve(
+        "@hyperforge/shared/constants/TreeTypes": path.resolve(
           __dirname,
           "../shared/src/constants/TreeTypes.ts",
         ),
         // PIE runtime barrel (createPlayTestWorld + PIEScriptRunner).
-        // Must come BEFORE the general @hyperscape/shared alias.
-        "@hyperscape/shared/runtime": path.resolve(
+        // Must come BEFORE the general @hyperforge/shared alias.
+        "@hyperforge/shared/runtime": path.resolve(
           __dirname,
           "../shared/build/runtime-pie.js",
         ),
         // Use client-only build of shared to exclude server-side modules (fs-extra, etc.)
-        "@hyperscape/shared": path.resolve(
+        "@hyperforge/shared": path.resolve(
           __dirname,
           "../shared/build/framework.client.js",
         ),
         // Workspace package aliases
-        "@hyperscape/decimation": path.resolve(
+        "@hyperforge/decimation": path.resolve(
           __dirname,
           "../decimation/dist/index.js",
         ),
-        "@hyperscape/impostor": path.resolve(
+        "@hyperforge/impostor": path.resolve(
           __dirname,
           "../impostors/dist/index.js",
         ),
         // Procgen package aliases for terrain, vegetation, etc.
         // NOTE: More specific paths must come BEFORE less specific paths
-        "@hyperscape/procgen/terrain": path.resolve(
+        "@hyperforge/procgen/terrain": path.resolve(
           __dirname,
           "../procgen/dist/terrain/index.js",
         ),
-        "@hyperscape/procgen/vegetation": path.resolve(
+        "@hyperforge/procgen/vegetation": path.resolve(
           __dirname,
           "../procgen/dist/vegetation/index.js",
         ),
-        "@hyperscape/procgen/grass": path.resolve(
+        "@hyperforge/procgen/grass": path.resolve(
           __dirname,
           "../procgen/dist/grass/index.js",
         ),
-        "@hyperscape/procgen/building/viewer": path.resolve(
+        "@hyperforge/procgen/building/viewer": path.resolve(
           __dirname,
           "../procgen/src/building/viewer/index.ts",
         ),
-        "@hyperscape/procgen/building/town": path.resolve(
+        "@hyperforge/procgen/building/town": path.resolve(
           __dirname,
           "../procgen/dist/building/town/index.js",
         ),
-        "@hyperscape/procgen/building": path.resolve(
+        "@hyperforge/procgen/building": path.resolve(
           __dirname,
           "../procgen/dist/building/index.js",
         ),
-        "@hyperscape/procgen/rock": path.resolve(
+        "@hyperforge/procgen/rock": path.resolve(
           __dirname,
           "../procgen/dist/rock/index.js",
         ),
-        "@hyperscape/procgen/plant": path.resolve(
+        "@hyperforge/procgen/plant": path.resolve(
           __dirname,
           "../procgen/dist/plant/index.js",
         ),
-        "@hyperscape/procgen/items/dock": path.resolve(
+        "@hyperforge/procgen/items/dock": path.resolve(
           __dirname,
           "../procgen/dist/items/dock/index.js",
         ),
-        "@hyperscape/procgen/items": path.resolve(
+        "@hyperforge/procgen/items": path.resolve(
           __dirname,
           "../procgen/dist/items/index.js",
         ),
-        "@hyperscape/procgen": path.resolve(
+        "@hyperforge/procgen": path.resolve(
           __dirname,
           "../procgen/dist/index.js",
         ),

@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { getItem } from "@hyperscape/shared";
+import { getItem } from "@hyperforge/shared";
 import { CursorTooltip, useThemeStore, useMobileLayout } from "@/ui";
 import {
   getTooltipBodyStyle,

@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect } from "react";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 import {
   useWindowStore,
   useQuestSelectionStore,

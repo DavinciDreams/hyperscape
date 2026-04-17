@@ -22,7 +22,7 @@ import {
   createWebGPURenderer,
   type AssetForgeRenderer,
 } from "@/utils/webgpu-renderer";
-import { EXPOSURE } from "@hyperscape/shared";
+import { EXPOSURE } from "@hyperforge/shared";
 
 // ============== Types ==============
 

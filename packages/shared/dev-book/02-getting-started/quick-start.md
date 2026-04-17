@@ -31,7 +31,7 @@ npm init -y
 ### Install Dependencies
 
 ```bash
-npm install @hyperscape/shared three
+npm install @hyperforge/shared three
 npm install -D typescript vite @types/three
 ```
 
@@ -67,7 +67,7 @@ export default defineConfig({
     port: 3000
   },
   optimizeDeps: {
-    exclude: ['@hyperscape/shared']
+    exclude: ['@hyperforge/shared']
   }
 });
 ```
@@ -125,7 +125,7 @@ Create `index.html`:
 Create `src/main.ts`:
 
 ```typescript
-import { createClientWorld } from '@hyperscape/shared';
+import { createClientWorld } from '@hyperforge/shared';
 
 // Get canvas element
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
@@ -197,7 +197,7 @@ You should see a blank 3D scene with FPS counter!
 Update `src/main.ts`:
 
 ```typescript
-import { createClientWorld } from '@hyperscape/shared';
+import { createClientWorld } from '@hyperforge/shared';
 import * as THREE from 'three';
 
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
@@ -253,7 +253,7 @@ Now you should see a green ground plane!
 Add player spawning:
 
 ```typescript
-import { createClientWorld, PlayerLocal } from '@hyperscape/shared';
+import { createClientWorld, PlayerLocal } from '@hyperforge/shared';
 import * as THREE from 'three';
 
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
@@ -418,7 +418,7 @@ console.log('Obstacles added!');
 Here's the complete `src/main.ts`:
 
 ```typescript
-import { createClientWorld, PlayerLocal } from '@hyperscape/shared';
+import { createClientWorld, PlayerLocal } from '@hyperforge/shared';
 import * as THREE from 'three';
 
 // Initialize

@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
   );
 
   const optimizeDepsExclude = [
-    "@hyperscape/shared", // CRITICAL: Exclude from dep optimization so changes are detected
+    "@hyperforge/shared", // CRITICAL: Exclude from dep optimization so changes are detected
     "@playwright/test", // Exclude Playwright from optimization
     "fs-extra", // Exclude Node.js modules
     "fs",
@@ -507,17 +507,17 @@ export default defineConfig(({ mode }) => {
 
     resolve: {
       // IMPORTANT: Use array format for aliases to ensure correct matching order
-      // More specific paths (e.g., @hyperscape/procgen/items/dock) must be listed
-      // BEFORE less specific ones (e.g., @hyperscape/procgen) to prevent incorrect resolution
+      // More specific paths (e.g., @hyperforge/procgen/items/dock) must be listed
+      // BEFORE less specific ones (e.g., @hyperforge/procgen) to prevent incorrect resolution
       alias: [
-        // Shared world algorithms (must come BEFORE general @hyperscape/shared)
+        // Shared world algorithms (must come BEFORE general @hyperforge/shared)
         {
-          find: "@hyperscape/shared/world",
+          find: "@hyperforge/shared/world",
           replacement: path.resolve(__dirname, "../shared/src/world/index.ts"),
         },
         // Use client-only build of shared package to avoid Node.js module leakage
         {
-          find: "@hyperscape/shared",
+          find: "@hyperforge/shared",
           replacement: path.resolve(
             __dirname,
             "../shared/build/framework.client.js",
@@ -525,69 +525,69 @@ export default defineConfig(({ mode }) => {
         },
         // Workspace package aliases (these are kept external in shared's build)
         {
-          find: "@hyperscape/decimation",
+          find: "@hyperforge/decimation",
           replacement: path.resolve(__dirname, "../decimation/dist/index.js"),
         },
         {
-          find: "@hyperscape/impostor",
+          find: "@hyperforge/impostor",
           replacement: path.resolve(__dirname, "../impostors/dist/index.js"),
         },
         // Procgen package aliases - MOST SPECIFIC PATHS FIRST
         {
-          find: "@hyperscape/procgen/building/town",
+          find: "@hyperforge/procgen/building/town",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/building/town/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/building",
+          find: "@hyperforge/procgen/building",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/building/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/items/dock",
+          find: "@hyperforge/procgen/items/dock",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/items/dock/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/items",
+          find: "@hyperforge/procgen/items",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/items/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/terrain",
+          find: "@hyperforge/procgen/terrain",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/terrain/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/vegetation",
+          find: "@hyperforge/procgen/vegetation",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/vegetation/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/grass",
+          find: "@hyperforge/procgen/grass",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/grass/index.js",
           ),
         },
         {
-          find: "@hyperscape/procgen/rock",
+          find: "@hyperforge/procgen/rock",
           replacement: path.resolve(__dirname, "../procgen/dist/rock/index.js"),
         },
         {
-          find: "@hyperscape/procgen/plant",
+          find: "@hyperforge/procgen/plant",
           replacement: path.resolve(
             __dirname,
             "../procgen/dist/plant/index.js",
@@ -595,7 +595,7 @@ export default defineConfig(({ mode }) => {
         },
         // Base procgen alias LAST
         {
-          find: "@hyperscape/procgen",
+          find: "@hyperforge/procgen",
           replacement: path.resolve(__dirname, "../procgen/dist/index.js"),
         },
         // Generic app-source alias LAST so it doesn't shadow scoped packages.

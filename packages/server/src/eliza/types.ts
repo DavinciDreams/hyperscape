@@ -2,7 +2,7 @@
  * Types for embedded Eliza agents in Hyperscape server
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 
 /**
  * Configuration for an embedded agent

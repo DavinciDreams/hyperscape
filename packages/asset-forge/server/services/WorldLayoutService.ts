@@ -1,7 +1,7 @@
 /**
  * WorldLayoutService — Generates towns, buildings, and roads using the EXACT game code.
  *
- * Runs the actual TownGenerator from @hyperscape/procgen with the same config,
+ * Runs the actual TownGenerator from @hyperforge/procgen with the same config,
  * seed, and terrain as the live game's TownSystem. No manifest towns exist
  * (buildings.json is empty), so all towns are procedural.
  *
@@ -14,13 +14,13 @@
 import {
   TownGenerator,
   DEFAULT_LANDMARK_CONFIG,
-} from "@hyperscape/procgen/building/town";
+} from "@hyperforge/procgen/building/town";
 import type {
   TerrainProvider,
   GeneratedTown,
   TownBuilding,
-} from "@hyperscape/procgen/building/town";
-import { NoiseGenerator } from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/building/town";
+import { NoiseGenerator } from "@hyperforge/procgen/terrain";
 import {
   getGameWorldContext,
   GAME_SEED,

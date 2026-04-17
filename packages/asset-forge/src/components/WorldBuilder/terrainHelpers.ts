@@ -8,7 +8,7 @@
 import {
   createTerrainMaterial as createGameTerrainMaterial,
   type TerrainUniforms,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import {
   getRoadHeightAndInfluence,
   computeRoadBounds,
@@ -18,7 +18,7 @@ import {
   type RoadBounds,
   calculateMineInfluenceAtPoint,
   getMineEffectiveRadius,
-} from "@hyperscape/shared/world";
+} from "@hyperforge/shared/world";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 
 import { THREE } from "@/utils/webgpu-renderer";
@@ -42,7 +42,7 @@ export type TerrainQuerier = (
 ) => TerrainQueryResult;
 
 // Mine area type alias for backwards compatibility with prop types
-export type MineAreaData = import("@hyperscape/shared/world").MineArea;
+export type MineAreaData = import("@hyperforge/shared/world").MineArea;
 
 /** Town flatten data passed into tile generation */
 export interface TownFlattenZone {
@@ -306,7 +306,7 @@ export function clipRoadPathAtTowns<T extends { x: number; z: number }>(
 }
 
 // Road influence and height blending — delegated to shared pure functions
-// from @hyperscape/shared/world (imported at top of file).
+// from @hyperforge/shared/world (imported at top of file).
 
 /**
  * Create water material

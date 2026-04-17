@@ -103,7 +103,7 @@
   ],
 
   "plugins": [
-    "@hyperscape/plugin-hyperscape",
+    "@hyperforge/plugin-hyperscape",
     "@elizaos/plugin-sql",
     "@elizaos/plugin-openrouter",
     "@elizaos/plugin-openai",

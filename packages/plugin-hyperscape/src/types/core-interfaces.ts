@@ -15,7 +15,7 @@ import type {
   UUID,
 } from "@elizaos/core";
 
-// Import types from local core-types (not @hyperscape/shared)
+// Import types from local core-types (not @hyperforge/shared)
 import type {
   World,
   Entity,

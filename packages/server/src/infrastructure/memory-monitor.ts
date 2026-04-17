@@ -11,7 +11,7 @@
  * - Memory pressure alerts
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import { createRequire } from "node:module";
 import v8 from "v8";
 import fs from "fs";

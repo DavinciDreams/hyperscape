@@ -19,7 +19,7 @@ import {
   createPlayTestWorld,
   type PIEDebugEntry,
   type RuntimeScriptGraph,
-} from "@hyperscape/shared/runtime";
+} from "@hyperforge/shared/runtime";
 
 /** Editor graph → runtime graph is an identity cast; the shapes are aligned. */
 function toRuntimeGraph(g: ScriptGraph): RuntimeScriptGraph {

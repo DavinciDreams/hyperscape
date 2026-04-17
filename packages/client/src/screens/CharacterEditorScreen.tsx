@@ -539,7 +539,7 @@ export const CharacterEditorScreen: React.FC = () => {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
       const missingPlugins = (character.plugins || []).filter(
-        (p) => p !== "@hyperscape/plugin-hyperscape",
+        (p) => p !== "@hyperforge/plugin-hyperscape",
       );
 
       if (
@@ -1020,7 +1020,7 @@ const PluginsTab: React.FC<{
 
   const handlePluginAdd = (plugin: string) => {
     // Only show tooltip for non-hyperscape plugins
-    if (plugin !== "@hyperscape/plugin-hyperscape") {
+    if (plugin !== "@hyperforge/plugin-hyperscape") {
       // Clear any existing timeout
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -1108,7 +1108,7 @@ const PluginsTab: React.FC<{
           </p>
           <div className="space-y-1">
             {character.plugins
-              .filter((p) => p !== "@hyperscape/plugin-hyperscape")
+              .filter((p) => p !== "@hyperforge/plugin-hyperscape")
               .map((plugin, i) => (
                 <code
                   key={i}

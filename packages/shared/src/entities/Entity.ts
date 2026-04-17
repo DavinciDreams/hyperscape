@@ -131,7 +131,7 @@ import {
   type TSLImpostorMaterial,
   type ImpostorBakeResult,
   type DissolveConfig,
-} from "@hyperscape/impostor";
+} from "@hyperforge/impostor";
 import {
   getLODConfig,
   type LODDistancesWithSq,

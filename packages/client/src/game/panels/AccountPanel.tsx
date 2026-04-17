@@ -11,7 +11,7 @@ import {
   getPanelInsetStyle,
   getPanelSurfaceStyle,
 } from "@/ui/theme/themes";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 import type { ClientWorld } from "../../types";
 import { privyAuthManager } from "../../auth/PrivyAuthManager";
 import { useSolanaWallet } from "../../hooks/useSolanaWallet";

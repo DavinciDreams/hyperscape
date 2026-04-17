@@ -54,7 +54,7 @@ import {
   ACCENT,
   createPermutation,
   seamlessFbm,
-} from "@hyperscape/shared/world";
+} from "@hyperforge/shared/world";
 
 export const TERRAIN_CONSTANTS = {
   ...TERRAIN_SHADER,

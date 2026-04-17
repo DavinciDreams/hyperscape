@@ -25,15 +25,15 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@hyperscape/procgen": resolve(__dirname, "../src"),
-      "@hyperscape/impostor": resolve(__dirname, "../../impostors/src"),
-      // Shared world algorithms barrel (must come before general @hyperscape/shared)
-      "@hyperscape/shared/world": resolve(
+      "@hyperforge/procgen": resolve(__dirname, "../src"),
+      "@hyperforge/impostor": resolve(__dirname, "../../impostors/src"),
+      // Shared world algorithms barrel (must come before general @hyperforge/shared)
+      "@hyperforge/shared/world": resolve(
         __dirname,
         "../../shared/src/world/index.ts",
       ),
       // Prefer built client bundle when available, fall back to source.
-      "@hyperscape/shared": sharedClientEntry,
+      "@hyperforge/shared": sharedClientEntry,
     },
   },
   optimizeDeps: {

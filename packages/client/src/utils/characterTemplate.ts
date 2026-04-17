@@ -140,7 +140,7 @@ export function generateCharacterTemplate(
     ],
 
     plugins: [
-      "@hyperscape/plugin-hyperscape", // Required - Hyperscape game integration
+      "@hyperforge/plugin-hyperscape", // Required - Hyperscape game integration
       "@elizaos/plugin-sql", // Database operations
       "@elizaos/plugin-openrouter", // OpenRouter LLM provider
       "@elizaos/plugin-openai", // OpenAI models (GPT-5, etc)

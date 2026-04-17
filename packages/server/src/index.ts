@@ -55,7 +55,7 @@
 // POLYFILLS - MUST BE FIRST
 // ============================================================================
 // Static imports are evaluated before module body execution. If any imported
-// module (directly or via @hyperscape/shared) pulls in `three/webgpu`, Bun will
+// module (directly or via @hyperforge/shared) pulls in `three/webgpu`, Bun will
 // crash unless WebGPU-ish globals exist. So we install polyfills first, then
 // load the real startup module via dynamic import.
 import "./shared/polyfills.js";

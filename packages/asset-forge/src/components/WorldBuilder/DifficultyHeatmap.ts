@@ -11,7 +11,7 @@
 
 import * as THREE from "three/webgpu";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { NoiseGenerator } from "@hyperscape/procgen/terrain";
+import { NoiseGenerator } from "@hyperforge/procgen/terrain";
 
 // ============== DIFFICULTY CONSTANTS ==============
 // Must match TerrainSystem.ts CONFIG values exactly

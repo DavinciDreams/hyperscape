@@ -11,7 +11,7 @@ import type {
   IslandConfig,
   TerrainNoiseConfig,
   ShorelineConfig,
-} from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/terrain";
 
 // ============== WORLD BUILDER MODES ==============
 
@@ -51,12 +51,12 @@ export interface TownLandmarkConfig {
 
 // ============== VEGETATION TYPES ==============
 // These types MUST match the game's BiomeTreeConfig and TreeSpawnConfig
-// from @hyperscape/shared (TreeTypes.ts and world-types.ts).
-// Kept as local definitions because @hyperscape/shared/world doesn't emit .d.ts files.
+// from @hyperforge/shared (TreeTypes.ts and world-types.ts).
+// Kept as local definitions because @hyperforge/shared/world doesn't emit .d.ts files.
 
 /**
  * Per-species spawn configuration.
- * Mirrors TreeSpawnConfig from @hyperscape/shared/constants/TreeTypes.ts
+ * Mirrors TreeSpawnConfig from @hyperforge/shared/constants/TreeTypes.ts
  */
 export interface TreeSpawnConfigUI {
   /** Relative spawn weight (higher = more likely) */
@@ -77,7 +77,7 @@ export interface TreeSpawnConfigUI {
 
 /**
  * Per-biome tree vegetation configuration.
- * Mirrors BiomeTreeConfig from @hyperscape/shared/types/world/world-types.ts
+ * Mirrors BiomeTreeConfig from @hyperforge/shared/types/world/world-types.ts
  */
 export interface BiomeTreeVegetationConfig {
   /** Whether trees are enabled for this biome */
@@ -1352,7 +1352,7 @@ export const DEFAULT_SHORELINE_CONFIG: ShorelineConfig = {
  * Default per-biome vegetation configs — exact mirrors of the FOREST/CANYON/TUNDRA_TREE_CONFIG
  * constants in TerrainBiomeTypes.ts.
  *
- * Tree IDs use the "tree_xxx" format matching the TreeId enum in @hyperscape/shared.
+ * Tree IDs use the "tree_xxx" format matching the TreeId enum in @hyperforge/shared.
  * If you change these defaults, update TerrainBiomeTypes.ts too (or vice versa).
  * The game's getTreeConfigForBiome() is the runtime authority; these defaults are only
  * used in the editor's creation-mode UI before the user overrides them.

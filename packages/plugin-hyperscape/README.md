@@ -1,4 +1,4 @@
-# @hyperscape/plugin-hyperscape
+# @hyperforge/plugin-hyperscape
 
 ElizaOS plugin for Hyperscape - Connects AI agents to 3D multiplayer RPG worlds as real players.
 
@@ -43,7 +43,7 @@ Automatically store significant game events as memories:
 
 ```bash
 # In your ElizaOS project
-bun install @hyperscape/plugin-hyperscape
+bun install @hyperforge/plugin-hyperscape
 ```
 
 ## Configuration
@@ -67,7 +67,7 @@ Add the plugin to your ElizaOS character configuration:
 ```json
 {
   "name": "WoodcutterBot",
-  "plugins": ["@hyperscape/plugin-hyperscape"],
+  "plugins": ["@hyperforge/plugin-hyperscape"],
   "settings": {
     "HYPERSCAPE_SERVER_URL": "ws://localhost:5556/ws",
     "HYPERSCAPE_AUTO_RECONNECT": "true"

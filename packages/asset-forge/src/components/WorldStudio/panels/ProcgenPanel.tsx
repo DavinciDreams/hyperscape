@@ -9,8 +9,8 @@
 import type {
   TerrainNoiseConfig,
   NoiseLayerConfig,
-} from "@hyperscape/procgen/terrain";
-import { TERRAIN_PRESETS } from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/terrain";
+import { TERRAIN_PRESETS } from "@hyperforge/procgen/terrain";
 import {
   Mountain,
   Loader2,

@@ -1,5 +1,5 @@
 /**
- * @module @hyperscape/web3
+ * @module @hyperforge/web3
  *
  * The Web3 integration package for Hyperscape.
  * Provides the ChainWriter service and supporting infrastructure

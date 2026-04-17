@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 import { EmbeddedHyperscapeService } from "../EmbeddedHyperscapeService";
 
 type TestEntity = {

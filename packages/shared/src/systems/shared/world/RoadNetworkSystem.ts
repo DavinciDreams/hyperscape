@@ -2815,7 +2815,7 @@ export class RoadNetworkSystem extends System {
 
   /**
    * Get the interpolated road path height at a world point.
-   * Delegates to the shared pure function from @hyperscape/shared/world.
+   * Delegates to the shared pure function from @hyperforge/shared/world.
    */
   getRoadHeightAtPoint(
     worldX: number,

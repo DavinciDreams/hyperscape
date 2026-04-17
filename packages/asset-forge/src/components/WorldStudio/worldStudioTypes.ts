@@ -8,7 +8,7 @@
 
 import type { VegetationConfig } from "../WorldBuilder/types";
 import type { GameEntityData } from "../WorldBuilder/TileBasedTerrain";
-import type { GameModeManifest } from "@hyperscape/shared/runtime";
+import type { GameModeManifest } from "@hyperforge/shared/runtime";
 
 import type {
   WorldBuilderState,
@@ -723,7 +723,7 @@ export interface ViewportCallbacks {
   }>;
   /** Rebuild town 3D meshes (buildings, roads, landmarks) from full procgen town data. */
   refreshTownMarkers?: (
-    towns: import("@hyperscape/procgen/building/town").GeneratedTown[],
+    towns: import("@hyperforge/procgen/building/town").GeneratedTown[],
   ) => void;
   /** Show or hide the decorative instanced vegetation layer. */
   setVegetationVisible?: (visible: boolean) => void;

@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { PIEDebugEntry, PIEDebugLevel } from "@hyperscape/shared/runtime";
+import type { PIEDebugEntry, PIEDebugLevel } from "@hyperforge/shared/runtime";
 import { usePIEDebugStore } from "../../../editor/stores/usePIEDebugStore";
 
 // ---------------------------------------------------------------------------

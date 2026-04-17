@@ -7,8 +7,8 @@
  * Created once (expensive ~50ms), cached for reuse.
  */
 
-import { NoiseGenerator, BiomeSystem } from "@hyperscape/procgen/terrain";
-import type { BiomeDefinition, BiomeConfig } from "@hyperscape/procgen/terrain";
+import { NoiseGenerator, BiomeSystem } from "@hyperforge/procgen/terrain";
+import type { BiomeDefinition, BiomeConfig } from "@hyperforge/procgen/terrain";
 
 // ============== GAME CONSTANTS ==============
 // Mirrored from TerrainHeightParams.ts / TerrainSystem.ts / GameTerrainAdapter.ts

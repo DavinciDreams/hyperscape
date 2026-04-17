@@ -703,7 +703,7 @@ if (world.isClient) {
 ## Example: Complete World Setup
 
 ```typescript
-import { createClientWorld } from '@hyperscape/shared';
+import { createClientWorld } from '@hyperforge/shared';
 
 // Create world
 const world = await createClientWorld({

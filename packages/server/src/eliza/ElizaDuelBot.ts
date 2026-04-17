@@ -17,7 +17,7 @@ import {
   InMemoryDatabaseAdapter,
 } from "@elizaos/core";
 import { EventEmitter } from "events";
-import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
+import { hyperscapePlugin } from "@hyperforge/plugin-hyperscape";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
 import type { ModelProviderConfig } from "./ModelAgentSpawner.js";

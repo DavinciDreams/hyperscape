@@ -1,5 +1,5 @@
 /**
- * @hyperscape/shared/world — Pure world algorithm exports.
+ * @hyperforge/shared/world — Pure world algorithm exports.
  *
  * Single source of truth for terrain height, road influence, town flattening,
  * biome types, noise generation, and vegetation used by both the game client

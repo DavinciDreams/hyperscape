@@ -22,7 +22,7 @@ import {
 } from "../../WorldBuilder/types";
 import type { WorldCreationConfig, WorldData } from "../../WorldBuilder/types";
 import { generateWorldFromConfig } from "../../WorldBuilder/worldGeneration";
-import { BiomeSystem } from "@hyperscape/procgen/terrain";
+import { BiomeSystem } from "@hyperforge/procgen/terrain";
 import { GAME_BIOME_DEFINITIONS } from "../../WorldBuilder/GameTerrainAdapter";
 import {
   getWorldProject,
@@ -41,7 +41,7 @@ import {
   EMPTY_AUDIO_LAYERS,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
-import type { GameModeManifest } from "@hyperscape/shared/runtime";
+import type { GameModeManifest } from "@hyperforge/shared/runtime";
 
 /**
  * Config matching the live Hyperscape game world.

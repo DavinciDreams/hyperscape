@@ -11,7 +11,7 @@
 import { Mountain, RefreshCw } from "lucide-react";
 import React, { useCallback } from "react";
 
-import type { TerrainNoiseConfig } from "@hyperscape/procgen/terrain";
+import type { TerrainNoiseConfig } from "@hyperforge/procgen/terrain";
 import type { WorldData } from "../../../WorldBuilder/types";
 import { useWorldStudio } from "../../WorldStudioContext";
 import {

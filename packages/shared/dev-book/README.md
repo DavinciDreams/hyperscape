@@ -196,7 +196,7 @@ npm install  # or: bun install
 ### Create Your First World
 
 ```typescript
-import { createClientWorld } from '@hyperscape/shared';
+import { createClientWorld } from '@hyperforge/shared';
 
 // Create a client world
 const world = await createClientWorld({

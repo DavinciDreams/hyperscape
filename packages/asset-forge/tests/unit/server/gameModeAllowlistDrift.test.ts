@@ -3,10 +3,10 @@
  *
  * Guarantees the server-side allowlist in
  * `asset-forge/server/utils/gameModeRegistry.ts` stays in lockstep with
- * the canonical manifests shipped by `@hyperscape/shared`.
+ * the canonical manifests shipped by `@hyperforge/shared`.
  *
  * Note: the canonical manifest shapes are inlined here rather than
- * imported from `@hyperscape/shared/runtime`. The shared runtime subpath
+ * imported from `@hyperforge/shared/runtime`. The shared runtime subpath
  * resolves to a pre-built bundle (`./build/runtime-pie.js`) that can
  * lag behind source changes, and importing source directly pulls in
  * Three.js/PhysX side-effects. Inlining keeps this test hermetic and

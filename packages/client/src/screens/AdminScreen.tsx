@@ -30,7 +30,7 @@ import {
   Warehouse,
   RefreshCw,
 } from "lucide-react";
-import { INVENTORY_CONSTANTS } from "@hyperscape/shared";
+import { INVENTORY_CONSTANTS } from "@hyperforge/shared";
 import { AdminLiveControls } from "./AdminLiveControls";
 import "./AdminScreen.css";
 

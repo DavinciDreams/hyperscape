@@ -21,19 +21,19 @@ Before installing Hyperscape Shared, ensure you have:
 
 ```bash
 # NPM
-npm install @hyperscape/shared three
+npm install @hyperforge/shared three
 
 # Yarn
-yarn add @hyperscape/shared three
+yarn add @hyperforge/shared three
 
 # PNPM
-pnpm add @hyperscape/shared three
+pnpm add @hyperforge/shared three
 ```
 
 ### Method 2: Bun
 
 ```bash
-bun add @hyperscape/shared three
+bun add @hyperforge/shared three
 ```
 
 ### Method 3: From Source (Development)
@@ -58,7 +58,7 @@ npm run build
 Create a test file to verify installation:
 
 ```typescript
-import { createClientWorld } from '@hyperscape/shared';
+import { createClientWorld } from '@hyperforge/shared';
 
 console.log('Hyperscape Shared installed successfully!');
 ```

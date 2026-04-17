@@ -1,5 +1,5 @@
 /**
- * Type declarations for @hyperscape/shared/world
+ * Type declarations for @hyperforge/shared/world
  *
  * This hand-maintained declaration file provides types for the world algorithm
  * module. It is copied to build/world.d.ts during `bun run build:shared`.

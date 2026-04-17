@@ -12,9 +12,9 @@
  * - Combat chat reactions
  */
 
-import { getItem, EventType } from "@hyperscape/shared";
+import { getItem, EventType } from "@hyperforge/shared";
 import type { AgentRuntime } from "@elizaos/core";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import {
   ejectAgentFromCombatArena,
   recoverAgentFromDeathLoop,

@@ -1,5 +1,5 @@
 /**
- * GameTerrainAdapter — Thin wrapper around @hyperscape/shared/world pure functions.
+ * GameTerrainAdapter — Thin wrapper around @hyperforge/shared/world pure functions.
  *
  * Provides the same public API (createGameTerrainQuerier, GAME_* constants) but
  * imports the actual terrain algorithm from shared instead of duplicating it.
@@ -23,10 +23,10 @@ import {
   COAST_MEDIUM,
   COAST_SMALL,
   type BiomeNoiseSet,
-} from "@hyperscape/shared/world";
-import { BiomeSystem } from "@hyperscape/procgen/terrain";
-import type { BiomeDefinition, BiomeConfig } from "@hyperscape/procgen/terrain";
-import { TERRAIN_CONSTANTS } from "@hyperscape/shared";
+} from "@hyperforge/shared/world";
+import { BiomeSystem } from "@hyperforge/procgen/terrain";
+import type { BiomeDefinition, BiomeConfig } from "@hyperforge/procgen/terrain";
+import { TERRAIN_CONSTANTS } from "@hyperforge/shared";
 
 // ============== GAME CONSTANTS (re-exported for consumers) ==============
 
@@ -104,7 +104,7 @@ export interface GameTerrainQuery {
 
 /**
  * Creates a terrain querier that produces the EXACT same terrain as the live game.
- * Uses shared computeBaseHeight from @hyperscape/shared/world.
+ * Uses shared computeBaseHeight from @hyperforge/shared/world.
  */
 export function createGameTerrainQuerier(seed: number = GAME_SEED) {
   const noise = new NoiseGenerator(seed);

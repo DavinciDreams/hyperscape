@@ -68,7 +68,7 @@
  * @public
  */
 
-import type PhysX from "@hyperscape/physx-js-webidl";
+import type PhysX from "@hyperforge/physx-js-webidl";
 import { createNode } from "../../extras/three/createNode";
 import { Layers } from "../../physics/Layers";
 import { Emotes, essentialEmotes } from "../../data/playerEmotes";

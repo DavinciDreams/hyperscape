@@ -14,7 +14,7 @@ import {
   generateWaterFoamTexture,
   createWaterMaterial,
   type WaterMaterialUniforms,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import type * as THREE from "three/webgpu";
 
 export interface EditorWaterUniforms {

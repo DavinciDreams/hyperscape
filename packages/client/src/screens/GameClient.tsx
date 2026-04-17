@@ -5,8 +5,8 @@ import {
 } from "@/lib/api-config";
 import type { PublicRuntimeEnv, StreamingWindow } from "@/lib/streamingWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { THREE, createClientWorld, System } from "@hyperscape/shared";
-import { World } from "@hyperscape/shared";
+import { THREE, createClientWorld, System } from "@hyperforge/shared";
+import { World } from "@hyperforge/shared";
 import { CoreUI } from "../game/CoreUI";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
 import { ThreeResourceManager } from "@/lib/ThreeResourceManager";

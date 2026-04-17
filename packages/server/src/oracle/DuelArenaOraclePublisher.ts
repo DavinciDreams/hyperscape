@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 import {
   Connection,
   Keypair,

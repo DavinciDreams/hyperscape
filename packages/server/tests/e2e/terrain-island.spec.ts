@@ -115,7 +115,7 @@ async function getOfflineFrameworkBundle(): Promise<Buffer> {
       "node:path",
     ],
     stdin: {
-      contents: `import { createClientWorld, THREE } from "@hyperscape/shared/client";
+      contents: `import { createClientWorld, THREE } from "@hyperforge/shared/client";
 export { createClientWorld, THREE };
 `,
       resolveDir: WORKSPACE_ROOT,

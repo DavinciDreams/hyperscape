@@ -1,5 +1,5 @@
 {
-	"name": "@hyperscape/vast-keeper",
+	"name": "@hyperforge/vast-keeper",
 	"version": "1.0.0",
 	"description": "Watchdog service for managing the Vast.ai Hyperscape deployment with WebGPU support",
 	"private": true,

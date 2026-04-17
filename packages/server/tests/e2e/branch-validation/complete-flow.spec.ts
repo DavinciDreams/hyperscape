@@ -306,7 +306,7 @@ test.describe("Complete Flow End-to-End (plugin-work branch)", () => {
         bio: ["I am a test agent for lifecycle testing."],
         topics: ["hyperscape", "testing"],
         adjectives: ["adventurous", "reliable"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -596,7 +596,7 @@ test.describe("Complete Flow End-to-End (plugin-work branch)", () => {
         bio: ["Test"],
         topics: ["test"],
         adjectives: ["test"],
-        plugins: ["@hyperscape/plugin-hyperscape"],
+        plugins: ["@hyperforge/plugin-hyperscape"],
         settings: {
           secrets: {
             HYPERSCAPE_CHARACTER_ID: charData.character.id,
@@ -782,7 +782,7 @@ test.describe("Complete Flow End-to-End (plugin-work branch)", () => {
           bio: [`I am agent ${i}`],
           topics: ["test"],
           adjectives: ["test"],
-          plugins: ["@hyperscape/plugin-hyperscape"],
+          plugins: ["@hyperforge/plugin-hyperscape"],
           settings: {
             secrets: {
               HYPERSCAPE_CHARACTER_ID: charData.character.id,

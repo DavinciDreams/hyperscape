@@ -1,7 +1,7 @@
 /**
  * RPG Content Pack for ElizaOS Agent Integration
  *
- * This content pack bridges the polished RPG systems from @hyperscape/shared
+ * This content pack bridges the polished RPG systems from @hyperforge/shared
  * with ElizaOS agents, enabling AI agents to interact with our RPG world.
  */
 

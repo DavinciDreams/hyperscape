@@ -1,7 +1,7 @@
 import "./polyfills/buffer-shim";
 import "./index.css";
 
-import { installThreeJSExtensions } from "@hyperscape/shared";
+import { installThreeJSExtensions } from "@hyperforge/shared";
 import { Buffer } from "buffer";
 import React from "react";
 import ReactDOM from "react-dom/client";

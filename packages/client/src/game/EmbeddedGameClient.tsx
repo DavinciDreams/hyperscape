@@ -10,8 +10,8 @@ import { GameClient } from "../screens/GameClient";
 import { LoadingScreen } from "../screens/LoadingScreen";
 import type { EmbeddedViewportConfig } from "../types/embeddedConfig";
 import { getEmbeddedConfig, getQualityPreset } from "../types/embeddedConfig";
-import type { World } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 import { logger } from "../lib/logger";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 

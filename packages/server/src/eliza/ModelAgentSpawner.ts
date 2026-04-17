@@ -22,10 +22,10 @@ import {
   // @ts-ignore — InMemoryDatabaseAdapter is exported at runtime but not in .d.ts
   InMemoryDatabaseAdapter,
 } from "@elizaos/core";
-import { EventType, getDuelArenaConfig, type World } from "@hyperscape/shared";
+import { EventType, getDuelArenaConfig, type World } from "@hyperforge/shared";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
-import { hyperscapePlugin } from "@hyperscape/plugin-hyperscape";
+import { hyperscapePlugin } from "@hyperforge/plugin-hyperscape";
 import type { EmbeddedHyperscapeService } from "./EmbeddedHyperscapeService.js";
 import {
   ejectAgentFromCombatArena,

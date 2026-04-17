@@ -46,7 +46,7 @@ import {
   type ImpostorBakeConfig,
   type CompatibleRenderer,
   type DissolveConfig,
-} from "@hyperscape/impostor";
+} from "@hyperforge/impostor";
 import type { World } from "../../../types";
 import { LoadPriority } from "../../../types";
 import { getKTX2Loader } from "../../../extras/three/ktx2TextureLoader";

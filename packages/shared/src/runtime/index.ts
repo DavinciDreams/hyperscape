@@ -35,7 +35,7 @@ export type { RuntimeScriptGraph } from "../systems/shared/scripting/ScriptGraph
 
 // Re-export GameMode surface PIE consumers need to drive the runtime /
 // Simulate-vs-Play branch in usePIESession. Deeper registry manipulation
-// still goes through `@hyperscape/shared/gameMode` barrel.
+// still goes through `@hyperforge/shared/gameMode` barrel.
 export type {
   GameMode,
   GameModeManifest,

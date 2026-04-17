@@ -244,7 +244,7 @@ async function generateDeclarations() {
  * Main Build Process
  */
 async function main() {
-  console.log(`Building @hyperscape/shared in ${dev ? 'development' : 'production'} mode...`)
+  console.log(`Building @hyperforge/shared in ${dev ? 'development' : 'production'} mode...`)
 
   await buildLibrary()
 

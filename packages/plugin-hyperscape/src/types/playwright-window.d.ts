@@ -1,4 +1,4 @@
-import { THREE } from "@hyperscape/shared";
+import { THREE } from "@hyperforge/shared";
 
 // Minimal renderer interface for Playwright window globals
 interface PlaywrightRenderer {

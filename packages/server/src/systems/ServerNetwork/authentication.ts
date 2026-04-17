@@ -23,7 +23,7 @@ import {
   verifyPrivyToken,
 } from "../../infrastructure/auth/privy-auth";
 import { createJWT, verifyJWT } from "../../shared/utils";
-import { uuid } from "@hyperscape/shared";
+import { uuid } from "@hyperforge/shared";
 import { errMsg } from "../../shared/errMsg.js";
 
 /**

@@ -29,7 +29,7 @@ import {
   getTreeConfigForBiome,
   BIOME_LIST,
   BiomeType,
-} from "@hyperscape/shared/world";
+} from "@hyperforge/shared/world";
 
 // ============== TYPES ==============
 

@@ -1,5 +1,5 @@
 {
-  "name": "@hyperscape/app",
+  "name": "@hyperforge/app",
   "version": "0.13.0",
   "type": "module",
   "private": true,
@@ -20,7 +20,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@hyperscape/client": "workspace:*",
+    "@hyperforge/client": "workspace:*",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-deep-link": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",

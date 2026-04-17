@@ -15,7 +15,7 @@ import type {
   TerrainNoiseConfig,
   BiomeConfig,
   IslandConfig,
-} from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/terrain";
 import React, {
   createContext,
   useContext,
@@ -126,7 +126,7 @@ import type {
 
 import { worldStudioInitialState } from "./worldStudioTypes";
 import { worldStudioReducer } from "./worldStudioReducer";
-import type { GameModeManifest } from "@hyperscape/shared/runtime";
+import type { GameModeManifest } from "@hyperforge/shared/runtime";
 
 // Re-export types for backwards compatibility (70+ files import from this file)
 export type {

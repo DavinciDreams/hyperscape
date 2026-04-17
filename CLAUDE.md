@@ -167,13 +167,13 @@ The `turbo.json` configuration handles this automatically via `dependsOn: ["^bui
 
 > **TODO(AUDIT-004): CIRCULAR DEPENDENCY - shared ↔ procgen**
 >
-> There is a circular dependency between `@hyperscape/shared` and `@hyperscape/procgen`.
+> There is a circular dependency between `@hyperforge/shared` and `@hyperforge/procgen`.
 > - shared imports procgen for vegetation/terrain generation
 > - procgen imports shared for TileCoord type in viewers
 >
 > **Current workaround**: procgen build ignores TypeScript errors.
 >
-> **Recommended fix**: Extract shared types to `@hyperscape/types` package:
+> **Recommended fix**: Extract shared types to `@hyperforge/types` package:
 > - Create new package with only type definitions (no runtime code)
 > - Both shared and procgen depend on types (no circular dep)
 > - Move TileCoord, Position3D, EntityData to types package

@@ -8,7 +8,7 @@ import {
   removeEquipmentVisual,
   type EquipmentVisualStore,
   THREE,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";

@@ -15,7 +15,7 @@ import {
   NPC_BEHIND_COUNTER_OFFSET,
   getCellCenter,
   getSideVector,
-} from "@hyperscape/procgen/building";
+} from "@hyperforge/procgen/building";
 
 // ============== TYPES ==============
 

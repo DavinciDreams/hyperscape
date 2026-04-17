@@ -3,7 +3,7 @@
  *
  * This component renders terrain exactly as it appears in the game:
  * - Individual 100m x 100m tiles as separate THREE.Mesh objects
- * - Same terrain generation via TerrainGenerator from @hyperscape/procgen
+ * - Same terrain generation via TerrainGenerator from @hyperforge/procgen
  * - Tile loading/unloading based on camera position
  * - Fly camera controls for exploration
  * - Town markers showing generated towns
@@ -11,14 +11,14 @@
  * Uses WebGPU renderer for TSL/node materials compatibility.
  */
 
-import { TownGenerator } from "@hyperscape/procgen/building/town";
-import type { GeneratedTown as ProcgenTown } from "@hyperscape/procgen/building/town";
+import { TownGenerator } from "@hyperforge/procgen/building/town";
+import type { GeneratedTown as ProcgenTown } from "@hyperforge/procgen/building/town";
 import {
   TerrainGenerator,
   createConfigFromPreset,
   TERRAIN_PRESETS,
   type TerrainConfig,
-} from "@hyperscape/procgen/terrain";
+} from "@hyperforge/procgen/terrain";
 import React, {
   useEffect,
   useRef,
@@ -49,7 +49,7 @@ import {
   precomputeExclusions,
   filterTreesByExclusions,
   type VegetationExclusionInput,
-} from "@hyperscape/shared/world";
+} from "@hyperforge/shared/world";
 import {
   initTreeModels,
   getTreeSpeciesInstance,
@@ -117,7 +117,7 @@ import {
   hourToDayPhase,
   computeTargetExposure,
   updateSceneFog,
-} from "@hyperscape/shared";
+} from "@hyperforge/shared";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 
 // Town rendering moved to TownRenderer — shared geometry singletons, type aliases,

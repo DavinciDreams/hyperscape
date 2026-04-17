@@ -60,7 +60,7 @@ vi.mock("three/webgpu", () => {
 });
 
 // Mock the procgen terrain import used by DifficultyHeatmap
-vi.mock("@hyperscape/procgen/terrain", () => ({
+vi.mock("@hyperforge/procgen/terrain", () => ({
   NoiseGenerator: class MockNoiseGenerator {
     constructor(_seed: number) {}
     simplex2D(x: number, _y: number): number {
@@ -100,13 +100,13 @@ vi.mock("@/utils/webgpu-renderer", () => {
   };
 });
 
-// Mock @hyperscape/shared for createTerrainMaterial
-vi.mock("@hyperscape/shared", () => ({
+// Mock @hyperforge/shared for createTerrainMaterial
+vi.mock("@hyperforge/shared", () => ({
   createTerrainMaterial: () => ({}),
 }));
 
-// Mock @hyperscape/shared/world for road functions
-vi.mock("@hyperscape/shared/world", () => ({
+// Mock @hyperforge/shared/world for road functions
+vi.mock("@hyperforge/shared/world", () => ({
   getRoadHeightAndInfluence: () => ({
     influence: 0,
     heightInfluence: 0,
@@ -127,7 +127,7 @@ import {
   type TownInfo,
   type DangerSourceInfo,
 } from "../DifficultyHeatmap";
-import { NoiseGenerator } from "@hyperscape/procgen/terrain";
+import { NoiseGenerator } from "@hyperforge/procgen/terrain";
 
 // ────────────────────────────────────────
 // clipRoadPathAtTowns — additional edge-case coverage

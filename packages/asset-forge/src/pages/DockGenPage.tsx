@@ -17,8 +17,8 @@ import {
   type DockRecipe,
   type DockStyleValue,
   type DockLayout,
-} from "@hyperscape/procgen/items/dock";
-import { WoodType, type WoodTypeValue } from "@hyperscape/procgen/items";
+} from "@hyperforge/procgen/items/dock";
+import { WoodType, type WoodTypeValue } from "@hyperforge/procgen/items";
 import {
   Anchor,
   RefreshCw,
@@ -1014,7 +1014,7 @@ const DockGenPage: React.FC = () => {
 
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-md p-3">
             <p className="text-xs text-blue-300">
-              Uses @hyperscape/procgen DockGenerator for layout, with simplified
+              Uses @hyperforge/procgen DockGenerator for layout, with simplified
               world-space mesh matching the in-game rendering.
             </p>
           </div>

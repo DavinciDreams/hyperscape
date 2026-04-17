@@ -18,7 +18,7 @@ import {
   getShellControlButtonStyle,
 } from "@/ui/theme/themes";
 import type { ClientWorld, PlayerStats } from "../../types";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 import { UI } from "@/ui/core";
 
 interface XpLampPanelProps {

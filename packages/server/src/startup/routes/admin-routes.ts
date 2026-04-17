@@ -4,8 +4,8 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { World } from "@hyperscape/shared";
-import { bfsPool, tilePool, quaternionPool } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
+import { bfsPool, tilePool, quaternionPool } from "@hyperforge/shared";
 import type { ServerConfig } from "../config.js";
 import type { DatabaseSystem } from "../../systems/DatabaseSystem/index.js";
 import { eq, like, sql, desc, and, type SQL } from "drizzle-orm";

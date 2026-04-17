@@ -1,4 +1,4 @@
-import { getItem, isFood } from "@hyperscape/shared";
+import { getItem, isFood } from "@hyperforge/shared";
 import type {
   AgentQuestInfo,
   AgentQuestProgress,

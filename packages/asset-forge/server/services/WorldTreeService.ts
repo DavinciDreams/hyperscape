@@ -1,7 +1,7 @@
 /**
  * WorldTreeService — Generates tree positions using the EXACT game code.
  *
- * Runs the actual BiomeResourceGenerator.generateTrees() from @hyperscape/shared
+ * Runs the actual BiomeResourceGenerator.generateTrees() from @hyperforge/shared
  * with the real BiomeSystem and terrain height computation. No reimplementation,
  * no coordinate hacks — this IS the game's tree generation code.
  *

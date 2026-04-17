@@ -28,7 +28,7 @@ import {
 } from "@elizaos/core";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
-import { EventType } from "@hyperscape/shared";
+import { EventType } from "@hyperforge/shared";
 import { EmbeddedHyperscapeService } from "./EmbeddedHyperscapeService.js";
 import {
   recordAgentThought,
@@ -52,11 +52,11 @@ async function getHyperscapePlugin(): Promise<Plugin | null> {
   }
 
   try {
-    const mod = await import("@hyperscape/plugin-hyperscape");
+    const mod = await import("@hyperforge/plugin-hyperscape");
     return mod.hyperscapePlugin;
   } catch (err) {
     console.warn(
-      "[AgentManager] Failed to load @hyperscape/plugin-hyperscape:",
+      "[AgentManager] Failed to load @hyperforge/plugin-hyperscape:",
       errMsg(err),
     );
     return null;
@@ -505,7 +505,7 @@ async function normalizeDashboardUseModelResponse(
   }
   return "";
 }
-import type { World } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
 
 type Equipment = {
   helmet?: unknown;

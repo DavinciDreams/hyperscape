@@ -7,8 +7,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useThemeStore } from "@/ui";
 
-import { World } from "@hyperscape/shared";
-import { EventType } from "@hyperscape/shared";
+import { World } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 
 export function LoadingScreen({
   world,

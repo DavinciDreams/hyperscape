@@ -98,7 +98,7 @@ const VEGETATION_SPECIES = [
   "grass",
 ];
 
-import { MATERIAL_LAYER_DEFINITIONS } from "@hyperscape/procgen/terrain";
+import { MATERIAL_LAYER_DEFINITIONS } from "@hyperforge/procgen/terrain";
 
 const FOLIAGE_TYPES = ["grass", "flower", "rock"];
 

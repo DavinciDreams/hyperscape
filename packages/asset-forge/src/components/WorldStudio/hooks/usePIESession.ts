@@ -15,7 +15,7 @@
 import { useRef, useCallback, useEffect } from "react";
 import * as THREE from "three/webgpu";
 
-// PIE world + script runtime live in @hyperscape/shared.
+// PIE world + script runtime live in @hyperforge/shared.
 // The runtime uses the same ScriptGraphInterpreter as the production server
 // so behavior graphs run identically inside PIE and in-game.
 import {
@@ -28,7 +28,7 @@ import {
   type GameModeManifest,
   HYPERSCAPE_DEFAULT_MANIFEST,
   CLICK_TO_WALK_CONTROLLER_ID,
-} from "@hyperscape/shared/runtime";
+} from "@hyperforge/shared/runtime";
 import type { ScriptGraph } from "../../../scripting/types";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";

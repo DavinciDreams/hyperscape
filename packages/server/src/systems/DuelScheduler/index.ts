@@ -19,8 +19,8 @@
  *    - DUEL_SCHEDULER_MIN_AGENTS: Minimum agents for scheduling
  */
 
-import type { World } from "@hyperscape/shared";
-import { EventType, type PlayerEntity } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
+import { EventType, type PlayerEntity } from "@hyperforge/shared";
 import { Logger } from "../ServerNetwork/services";
 
 // ============================================================================

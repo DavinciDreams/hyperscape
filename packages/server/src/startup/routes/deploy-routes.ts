@@ -21,9 +21,9 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerConfig } from "../config.js";
-import type { World } from "@hyperscape/shared";
-import { DataManager } from "@hyperscape/shared";
-import type { WorldJson, BrushOverlaysManifest } from "@hyperscape/shared";
+import type { World } from "@hyperforge/shared";
+import { DataManager } from "@hyperforge/shared";
+import type { WorldJson, BrushOverlaysManifest } from "@hyperforge/shared";
 import path from "path";
 import fs from "fs-extra";
 import crypto from "crypto";

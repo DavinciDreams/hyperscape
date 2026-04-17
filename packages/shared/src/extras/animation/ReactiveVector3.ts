@@ -29,7 +29,7 @@
  */
 
 import type { PxTransform, PxVec3 } from "../../types/systems/physics";
-import type PhysX from "@hyperscape/physx-js-webidl";
+import type PhysX from "@hyperforge/physx-js-webidl";
 import * as THREE from "../three/three";
 import {
   setTransformPosition,
