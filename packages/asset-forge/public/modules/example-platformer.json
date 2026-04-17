@@ -1,0 +1,141 @@
+{
+  "id": "platformer",
+  "name": "Example Platformer",
+  "version": "0.1.0",
+  "paletteCategories": [
+    { "id": "pickups", "label": "Pickups", "icon": "Star", "description": "Collectible items" },
+    { "id": "hazards", "label": "Hazards", "icon": "Flame", "description": "Dangerous obstacles" },
+    { "id": "mechanics", "label": "Mechanics", "icon": "Cog", "description": "Gameplay triggers" }
+  ],
+  "outlinerLayers": [
+    { "id": "pickups", "label": "Pickups", "icon": "Star", "entityTypes": ["coin", "powerup"] },
+    { "id": "hazards", "label": "Hazards", "icon": "Flame", "entityTypes": ["spike", "lavaPool"] },
+    { "id": "mechanics", "label": "Mechanics", "icon": "Cog", "entityTypes": ["checkpoint", "levelExit"] }
+  ],
+  "entityTypes": [
+    {
+      "id": "coin",
+      "name": "Coin",
+      "icon": "Circle",
+      "color": "#ffd700",
+      "paletteCategory": "pickups",
+      "outlinerLayer": "pickups",
+      "selectionType": "coin",
+      "storage": { "stateKey": "coins", "type": "array" },
+      "spatial": true,
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string", "section": "General", "required": true, "default": "Coin" },
+        { "key": "value", "label": "Value", "type": "number", "section": "General", "default": 10, "config": { "min": 1, "max": 1000, "step": 1 } },
+        { "key": "position", "label": "Position", "type": "position", "section": "Transform", "default": { "x": 0, "y": 0, "z": 0 } }
+      ],
+      "defaults": { "name": "Gold Coin", "value": 10, "position": { "x": 0, "y": 0, "z": 0 } },
+      "marker": { "shape": "sphere", "scale": 0.3, "yOffset": 0.5 },
+      "templates": [
+        { "id": "gold", "name": "Gold Coin", "description": "Worth 10 points", "defaults": { "value": 10 } },
+        { "id": "silver", "name": "Silver Coin", "description": "Worth 5 points", "defaults": { "value": 5 } },
+        { "id": "diamond", "name": "Diamond", "description": "Worth 100 points", "defaults": { "value": 100 } }
+      ]
+    },
+    {
+      "id": "powerup",
+      "name": "Power-Up",
+      "icon": "Zap",
+      "color": "#22d3ee",
+      "paletteCategory": "pickups",
+      "outlinerLayer": "pickups",
+      "selectionType": "powerup",
+      "storage": { "stateKey": "powerups", "type": "array" },
+      "spatial": true,
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string", "section": "General", "required": true, "default": "Power-Up" },
+        { "key": "powerType", "label": "Power Type", "type": "select", "section": "General", "required": true, "default": "speed", "config": { "options": [{ "value": "speed", "label": "Speed Boost" }, { "value": "shield", "label": "Shield" }, { "value": "magnet", "label": "Coin Magnet" }, { "value": "double-jump", "label": "Double Jump" }] } },
+        { "key": "duration", "label": "Duration", "type": "slider", "section": "Effect", "default": 10, "description": "Effect duration in seconds", "config": { "min": 1, "max": 60, "step": 1, "unit": "s" } },
+        { "key": "position", "label": "Position", "type": "position", "section": "Transform", "default": { "x": 0, "y": 0, "z": 0 } }
+      ],
+      "defaults": { "name": "Power-Up", "powerType": "speed", "duration": 10, "position": { "x": 0, "y": 0, "z": 0 } },
+      "marker": { "shape": "cube", "scale": 0.5, "yOffset": 0.5 }
+    },
+    {
+      "id": "spike",
+      "name": "Spike Trap",
+      "icon": "AlertTriangle",
+      "color": "#ef4444",
+      "paletteCategory": "hazards",
+      "outlinerLayer": "hazards",
+      "selectionType": "spike",
+      "storage": { "stateKey": "spikes", "type": "array" },
+      "spatial": true,
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string", "section": "General", "required": true, "default": "Spike Trap" },
+        { "key": "damage", "label": "Damage", "type": "number", "section": "Combat", "default": 25, "config": { "min": 1, "max": 100, "step": 1 } },
+        { "key": "retractable", "label": "Retractable", "type": "boolean", "section": "Behavior", "default": false },
+        { "key": "cycleTime", "label": "Cycle Time", "type": "slider", "section": "Behavior", "default": 2, "description": "Extend/retract cycle (s)", "config": { "min": 0.5, "max": 10, "step": 0.5, "unit": "s" }, "visibleWhen": { "field": "retractable", "equals": true } },
+        { "key": "position", "label": "Position", "type": "position", "section": "Transform", "default": { "x": 0, "y": 0, "z": 0 } }
+      ],
+      "defaults": { "name": "Spike Trap", "damage": 25, "retractable": false, "cycleTime": 2, "position": { "x": 0, "y": 0, "z": 0 } },
+      "marker": { "shape": "cube", "scale": 0.4, "yOffset": 0.2 }
+    },
+    {
+      "id": "lavaPool",
+      "name": "Lava Pool",
+      "icon": "Flame",
+      "color": "#f97316",
+      "paletteCategory": "hazards",
+      "outlinerLayer": "hazards",
+      "selectionType": "lavaPool",
+      "storage": { "stateKey": "lavaPools", "type": "array" },
+      "spatial": true,
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string", "section": "General", "required": true, "default": "Lava Pool" },
+        { "key": "radius", "label": "Radius", "type": "number", "section": "Area", "default": 5, "config": { "min": 1, "max": 50, "step": 1, "unit": "m" } },
+        { "key": "damagePerSecond", "label": "DPS", "type": "number", "section": "Combat", "default": 50, "config": { "min": 1, "max": 200, "step": 1 } },
+        { "key": "position", "label": "Position", "type": "position", "section": "Transform", "default": { "x": 0, "y": 0, "z": 0 } }
+      ],
+      "defaults": { "name": "Lava Pool", "radius": 5, "damagePerSecond": 50, "position": { "x": 0, "y": 0, "z": 0 } },
+      "marker": { "shape": "cylinder", "scale": 1, "yOffset": 0, "showRadius": true, "radiusField": "radius" }
+    },
+    {
+      "id": "checkpoint",
+      "name": "Checkpoint",
+      "icon": "Flag",
+      "color": "#22c55e",
+      "paletteCategory": "mechanics",
+      "outlinerLayer": "mechanics",
+      "selectionType": "checkpoint",
+      "storage": { "stateKey": "checkpoints", "type": "array" },
+      "spatial": true,
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string", "section": "General", "required": true, "default": "Checkpoint" },
+        { "key": "order", "label": "Order", "type": "number", "section": "General", "default": 0, "description": "Checkpoint sequence number", "config": { "min": 0, "max": 100, "step": 1 } },
+        { "key": "position", "label": "Position", "type": "position", "section": "Transform", "default": { "x": 0, "y": 0, "z": 0 } }
+      ],
+      "defaults": { "name": "Checkpoint", "order": 0, "position": { "x": 0, "y": 0, "z": 0 } },
+      "marker": { "shape": "capsule", "scale": 1, "yOffset": 1 }
+    },
+    {
+      "id": "levelExit",
+      "name": "Level Exit",
+      "icon": "DoorOpen",
+      "color": "#a855f7",
+      "paletteCategory": "mechanics",
+      "outlinerLayer": "mechanics",
+      "selectionType": "levelExit",
+      "storage": { "stateKey": "levelExits", "type": "array" },
+      "spatial": true,
+      "fields": [
+        { "key": "name", "label": "Name", "type": "string", "section": "General", "required": true, "default": "Level Exit" },
+        { "key": "targetLevel", "label": "Target Level", "type": "string", "section": "Navigation", "required": true, "description": "Level ID to load" },
+        { "key": "requiredCoins", "label": "Required Coins", "type": "number", "section": "Requirements", "default": 0, "description": "Coins needed to unlock", "config": { "min": 0, "max": 999, "step": 1 } },
+        { "key": "position", "label": "Position", "type": "position", "section": "Transform", "default": { "x": 0, "y": 0, "z": 0 } }
+      ],
+      "defaults": { "name": "Level Exit", "targetLevel": "", "requiredCoins": 0, "position": { "x": 0, "y": 0, "z": 0 } },
+      "marker": { "shape": "cylinder", "scale": 1.2, "yOffset": 0 }
+    }
+  ],
+  "terrain": {
+    "enabled": true,
+    "tileSize": 4,
+    "biomes": ["grass", "underground", "sky", "lava"],
+    "procgen": false
+  }
+}

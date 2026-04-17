@@ -99,6 +99,7 @@ import type {
 } from "./types";
 import type { ManifestOverrides } from "./types";
 
+import type { GameModule } from "../../gameModules/GameModule";
 import { EntityTypeRegistry } from "../../gameModules/EntityTypeRegistry";
 import { HyperscapeModule } from "../../gameModules/hyperscape";
 import { useStoreSync } from "../../editor/stores/useStoreSync";
@@ -120,10 +121,12 @@ import type {
   ActivePlacement,
   ExtendedWorldLayers,
   GameEntityData,
+  PIEMode,
 } from "./worldStudioTypes";
 
 import { worldStudioInitialState } from "./worldStudioTypes";
 import { worldStudioReducer } from "./worldStudioReducer";
+import type { GameModeManifest } from "@hyperscape/shared/runtime";
 
 // Re-export types for backwards compatibility (70+ files import from this file)
 export type {
@@ -136,6 +139,7 @@ export type {
   ViewportCallbacks,
   WizardPreviewData,
   ZonePaintState,
+  PIEMode,
 } from "./worldStudioTypes";
 
 // Re-export selectors for discoverability
@@ -143,6 +147,7 @@ export {
   selectActiveTool,
   selectTransformMode,
   selectTransformSpace,
+  selectGridSize,
   selectActivePlacement,
   selectBrushSettings,
   selectZonePaint,
@@ -181,6 +186,8 @@ interface WorldStudioContextValue {
   dispatch: React.Dispatch<WorldStudioAction>;
   /** Ref to viewport callbacks — does not trigger re-renders when mutated */
   viewportRef: React.MutableRefObject<ViewportCallbacks>;
+  /** The active game module definition */
+  activeModule: GameModule;
   /** Entity type registry for the active game module */
   registry: EntityTypeRegistry;
 
@@ -281,9 +288,11 @@ interface WorldStudioContextValue {
       projectId: string,
       name: string,
       version: number,
+      gameMode: GameModeManifest | null,
     ) => void;
     clearProject: () => void;
     setProjectLock: (lockedBy: string | null) => void;
+    setGameMode: (gameMode: GameModeManifest | null) => void;
 
     // Studio-specific: Persistence
     saveStart: () => void;
@@ -298,6 +307,7 @@ interface WorldStudioContextValue {
     setTool: (tool: StudioToolMode) => void;
     setTransformMode: (mode: GizmoTransformMode) => void;
     setTransformSpace: (space: GizmoTransformSpace) => void;
+    setGridSize: (size: number) => void;
     setAddingWaterVertices: (enabled: boolean) => void;
     cameraTeleport: (target: {
       x: number;
@@ -329,6 +339,7 @@ interface WorldStudioContextValue {
       category: PaletteCategory,
       templateId: string,
       templateName: string,
+      entityTypeId?: string,
     ) => void;
     updatePlacementPosition: (
       position: WorldPosition,
@@ -565,6 +576,11 @@ interface WorldStudioContextValue {
     pieStarted: () => void;
     pieStop: () => void;
     pieError: (error: string) => void;
+    /**
+     * Set the PIE execution mode. Only takes effect while PIE is idle;
+     * mid-session mode switches are rejected in the reducer.
+     */
+    pieSetMode: (mode: PIEMode) => void;
   };
 
   /** Computed values */
@@ -598,17 +614,28 @@ const WorldStudioDispatchContext =
 
 interface WorldStudioProviderProps {
   children: ReactNode;
+  /** Active game module — defaults to HyperscapeModule */
+  module?: GameModule;
 }
 
-export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
+export function WorldStudioProvider({
+  children,
+  module,
+}: WorldStudioProviderProps) {
   const [state, dispatch] = useReducer(
     worldStudioReducer,
     worldStudioInitialState,
   );
   const viewportRef = useRef<ViewportCallbacks>({});
 
-  // Build entity type registry for the active game module (currently Hyperscape)
-  const registry = useMemo(() => new EntityTypeRegistry(HyperscapeModule), []);
+  // Accept module prop, default to Hyperscape
+  const activeModule = module ?? HyperscapeModule;
+
+  // Build entity type registry for the active game module
+  const registry = useMemo(
+    () => new EntityTypeRegistry(activeModule),
+    [activeModule],
+  );
 
   // Sync context state → Zustand stores for incremental migration
   useStoreSync(state);
@@ -744,6 +771,7 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         projectId: string,
         name: string,
         version: number,
+        gameMode: GameModeManifest | null,
       ) =>
         dispatch({
           type: "SET_PROJECT",
@@ -752,10 +780,13 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
           projectId,
           name,
           version,
+          gameMode,
         }),
       clearProject: () => dispatch({ type: "CLEAR_PROJECT" }),
       setProjectLock: (lockedBy: string | null) =>
         dispatch({ type: "SET_PROJECT_LOCK", lockedBy }),
+      setGameMode: (gameMode: GameModeManifest | null) =>
+        dispatch({ type: "SET_GAME_MODE", gameMode }),
 
       // Studio-specific: Persistence
       saveStart: () => dispatch({ type: "SAVE_START" }),
@@ -774,6 +805,7 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         dispatch({ type: "SET_TRANSFORM_MODE", mode }),
       setTransformSpace: (space: GizmoTransformSpace) =>
         dispatch({ type: "SET_TRANSFORM_SPACE", space }),
+      setGridSize: (size: number) => dispatch({ type: "SET_GRID_SIZE", size }),
       setAddingWaterVertices: (enabled: boolean) =>
         dispatch({ type: "SET_ADDING_WATER_VERTICES", enabled }),
       cameraTeleport: (target: {
@@ -819,12 +851,14 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
         category: PaletteCategory,
         templateId: string,
         templateName: string,
+        entityTypeId?: string,
       ) =>
         dispatch({
           type: "START_PLACEMENT",
           category,
           templateId,
           templateName,
+          entityTypeId,
         }),
       updatePlacementPosition: (position: WorldPosition, rotation?: number) =>
         dispatch({ type: "UPDATE_PLACEMENT_POSITION", position, rotation }),
@@ -1153,6 +1187,7 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
       pieStarted: () => dispatch({ type: "PIE_STARTED" }),
       pieStop: () => dispatch({ type: "PIE_STOP" }),
       pieError: (error: string) => dispatch({ type: "PIE_ERROR", error }),
+      pieSetMode: (mode: PIEMode) => dispatch({ type: "PIE_SET_MODE", mode }),
     }),
     [],
   );
@@ -2207,8 +2242,16 @@ export function WorldStudioProvider({ children }: WorldStudioProviderProps) {
   );
 
   const contextValue = useMemo(
-    () => ({ state, dispatch, actions, computed, viewportRef, registry }),
-    [state, actions, computed, registry],
+    () => ({
+      state,
+      dispatch,
+      actions,
+      computed,
+      viewportRef,
+      activeModule,
+      registry,
+    }),
+    [state, actions, computed, activeModule, registry],
   );
 
   return (
@@ -2228,6 +2271,15 @@ export function useWorldStudio(): WorldStudioContextValue {
     throw new Error("useWorldStudio must be used within a WorldStudioProvider");
   }
   return context;
+}
+
+/**
+ * Convenience hook to get the active game module from context.
+ * Returns the GameModule definition for the currently loaded module.
+ */
+export function useActiveModule(): GameModule {
+  const { activeModule } = useWorldStudio();
+  return activeModule;
 }
 
 /**

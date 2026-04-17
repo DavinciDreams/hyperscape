@@ -18,6 +18,7 @@ import {
   SliderInput,
   InfoRow,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   station: PlacedStation;
@@ -131,6 +132,16 @@ export function StationProperties({ station }: Props) {
           </div>
         </PropertySection>
       )}
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={station.id}
+        stateKey="stations"
+        stateRoot="extendedLayers"
+        entityData={station as unknown as Record<string, unknown>}
+        tracksSource
+        entityCategory="station"
+      />
     </>
   );
 }

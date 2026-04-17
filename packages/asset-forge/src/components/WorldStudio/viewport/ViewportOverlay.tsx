@@ -65,6 +65,8 @@ export interface ViewportOverlayProps {
   gridEnabled: boolean;
   snapEnabled: boolean;
   surfaceSnap: boolean;
+  /** Current grid snap size in meters */
+  gridSize: number;
   tileProgress?: { loaded: number; total: number } | null;
   /** World size in tiles (for minimap) */
   worldSizeTiles?: number;
@@ -96,6 +98,15 @@ export interface ViewportOverlayProps {
   onToggleGrid: () => void;
   onToggleSnap: () => void;
   onToggleSurfaceSnap: () => void;
+  /** Cycle to next grid size */
+  onCycleGridSize: () => void;
+  /** GPU renderer stats (updated every 2s) */
+  rendererStats?: {
+    drawCalls: number;
+    triangles: number;
+    geometries: number;
+    textures: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +470,7 @@ export function ViewportOverlay({
   gridEnabled,
   snapEnabled,
   surfaceSnap,
+  gridSize,
   tileProgress,
   worldSizeTiles,
   tileSize,
@@ -474,6 +486,8 @@ export function ViewportOverlay({
   onToggleGrid,
   onToggleSnap,
   onToggleSurfaceSnap,
+  onCycleGridSize,
+  rendererStats,
 }: ViewportOverlayProps) {
   const fps = useFps();
   const [showMinimap, setShowMinimap] = useState(false);
@@ -522,8 +536,17 @@ export function ViewportOverlay({
             title={snapEnabled ? "Snap ON" : "Snap OFF"}
           >
             <Magnet size={10} />
-            {snapEnabled && <span className="text-primary">1.0</span>}
           </button>
+
+          {snapEnabled && (
+            <button
+              className={`${CHIP_BTN_ON} text-[10px]`}
+              onClick={onCycleGridSize}
+              title={`Grid: ${gridSize}m (click to cycle)`}
+            >
+              <span className="text-primary font-medium">{gridSize}m</span>
+            </button>
+          )}
 
           <button
             className={`${surfaceSnap ? CHIP_BTN_ON : CHIP_BTN_OFF} text-[10px]`}
@@ -664,6 +687,22 @@ export function ViewportOverlay({
             {/* Entity count */}
             <Layers size={9} className="text-white/40" />
             <span className="text-white/70">{entityCount}</span>
+
+            {/* Renderer stats */}
+            {rendererStats && (
+              <>
+                <span className="text-white/15 mx-0.5">|</span>
+                <span className="text-white/50">{rendererStats.drawCalls}</span>
+                <span className="text-white/30 text-[8px]">draws</span>
+                <span className="text-white/15 mx-0.5">|</span>
+                <span className="text-white/50">
+                  {rendererStats.triangles >= 1_000_000
+                    ? `${(rendererStats.triangles / 1_000_000).toFixed(1)}M`
+                    : `${(rendererStats.triangles / 1_000).toFixed(0)}K`}
+                </span>
+                <span className="text-white/30 text-[8px]">tris</span>
+              </>
+            )}
 
             <span className="text-white/15 mx-0.5">|</span>
 

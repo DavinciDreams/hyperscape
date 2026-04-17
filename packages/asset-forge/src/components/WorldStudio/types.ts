@@ -248,6 +248,8 @@ export interface AudioLayers {
   musicZones: MusicZone[];
   ambientZones: AmbientZone[];
   sfxTriggers: SFXTrigger[];
+  /** Dynamic module audio entity types */
+  [key: string]: unknown;
 }
 
 export const EMPTY_AUDIO_LAYERS: AudioLayers = {
@@ -670,6 +672,8 @@ export interface ExtendedWorldLayers {
   mines: PlacedMine[];
   /** Phase 9.1: Imported/generated custom assets */
   customAssets: PlacedCustomAsset[];
+  /** Dynamic module entity types — arrays auto-initialized by entityReducer */
+  [key: string]: unknown;
 }
 
 /** Default empty extended layers */
@@ -691,24 +695,10 @@ export const EMPTY_EXTENDED_LAYERS: ExtendedWorldLayers = {
 
 // ============== ENTITY PALETTE TYPES ==============
 
-/** Category in the entity palette */
-export type PaletteCategory =
-  | "npcs"
-  | "stations"
-  | "mob-spawns"
-  | "resources-mining"
-  | "resources-woodcutting"
-  | "resources-fishing"
-  | "spawn-points"
-  | "teleports"
-  | "pois"
-  | "water-bodies"
-  | "danger-sources"
-  | "music-zones"
-  | "ambient-zones"
-  | "sfx-triggers"
-  | "custom-assets"
-  | "prefabs";
+/** Category in the entity palette.
+ * Relaxed to `string` to support dynamic GameModule categories.
+ * Hyperscape categories retain their literal values for type safety in existing code. */
+export type PaletteCategory = string;
 
 /** Template item from a manifest */
 export interface PaletteItem {
@@ -724,6 +714,8 @@ export interface PaletteItem {
   levelRequired?: number;
   /** Original manifest data for reference */
   manifestData: Record<string, unknown>;
+  /** Entity type schema ID for generic module placement */
+  entityTypeId?: string;
 }
 
 // ============== PLACEMENT STATE ==============
@@ -736,6 +728,8 @@ export interface ActivePlacement {
   templateId: string;
   /** Template name for display */
   templateName: string;
+  /** Entity type schema ID for generic module placement (e.g., "spawnPoint") */
+  entityTypeId?: string;
   /** Current ghost position (updates as mouse moves) */
   position: WorldPosition;
   /** Current rotation */
@@ -1779,6 +1773,26 @@ export interface NPCManifestOverride {
       chance?: number;
     }>;
   };
+  dialogue?: {
+    entryNodeId: string;
+    questOverrides?: Record<
+      string,
+      { in_progress?: string; ready_to_complete?: string; completed?: string }
+    >;
+    nodes: Array<{
+      id: string;
+      text: string;
+      responses?: Array<{
+        text: string;
+        nextNodeId?: string;
+        condition?: string;
+        effect?: string;
+      }>;
+      effect?: string;
+    }>;
+  };
+  /** Visual script graph for entity behavior triggers */
+  behaviorGraph?: import("../../scripting/types").ScriptGraph;
 }
 
 export interface StationManifestOverride {
@@ -1790,6 +1804,8 @@ export interface StationManifestOverride {
   flattenGround?: boolean;
   flattenPadding?: number;
   flattenBlendRadius?: number;
+  /** Visual script graph for entity behavior triggers */
+  behaviorGraph?: import("../../scripting/types").ScriptGraph;
 }
 
 export interface ResourceManifestOverride {
@@ -1804,12 +1820,16 @@ export interface ResourceManifestOverride {
     toolRequired?: string;
   };
   model?: { scale?: number };
+  /** Visual script graph for entity behavior triggers */
+  behaviorGraph?: import("../../scripting/types").ScriptGraph;
 }
 
 export interface MobSpawnManifestOverride {
   entityId: string;
   spawnRadius?: number;
   maxCount?: number;
+  /** Visual script graph for entity behavior triggers */
+  behaviorGraph?: import("../../scripting/types").ScriptGraph;
 }
 
 export interface StoreManifestOverride {
@@ -1826,6 +1846,8 @@ export interface StoreManifestOverride {
     price: number;
     stockQuantity: number;
   }>;
+  /** Visual script graph for entity behavior triggers */
+  behaviorGraph?: import("../../scripting/types").ScriptGraph;
 }
 
 export interface ManifestOverrides {

@@ -39,6 +39,7 @@ import {
   InfoRow,
   Toggle,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   region: PlacedRegion;
@@ -792,6 +793,15 @@ export function RegionProperties({ region }: Props) {
           )}
         </div>
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={region.id}
+        stateKey="regions"
+        stateRoot="extendedLayers"
+        entityData={region as unknown as Record<string, unknown>}
+        description="Visual event graph for zone behavior triggers (e.g., player enters/leaves)"
+      />
     </>
   );
 }

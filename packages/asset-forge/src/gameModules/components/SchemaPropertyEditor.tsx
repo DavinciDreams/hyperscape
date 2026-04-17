@@ -5,6 +5,7 @@
  * generic ENTITY_UPDATE actions via the World Studio context.
  */
 
+import { Workflow } from "lucide-react";
 import React, { useCallback } from "react";
 import type { EntityTypeSchema, FieldSchema } from "../GameModule";
 import {
@@ -18,6 +19,8 @@ import {
   InfoRow,
 } from "../../components/WorldStudio/panels/properties/PropertyControls";
 import { useWorldStudio } from "../../components/WorldStudio/WorldStudioContext";
+import { useOpenScriptEditor } from "../../components/WorldStudio/ScriptEditorContext";
+import type { ScriptGraph } from "../../scripting/types";
 
 interface SchemaPropertyEditorProps {
   schema: EntityTypeSchema;
@@ -31,6 +34,7 @@ export function SchemaPropertyEditor({
   entityData,
 }: SchemaPropertyEditorProps) {
   const { dispatch } = useWorldStudio();
+  const openScriptEditor = useOpenScriptEditor();
 
   const handleChange = useCallback(
     (key: string, value: unknown) => {
@@ -88,6 +92,19 @@ export function SchemaPropertyEditor({
               field={field}
               value={entityData[field.key]}
               onChange={(v: unknown) => handleChange(field.key, v)}
+              onOpenScriptEditor={
+                field.type === "scriptGraph" && openScriptEditor
+                  ? (fk, graph) =>
+                      openScriptEditor(
+                        entityId,
+                        schema.storage.stateKey,
+                        schema.storage.stateRoot ?? "extendedLayers",
+                        schema.tracksSource,
+                        fk,
+                        graph,
+                      )
+                  : undefined
+              }
             />
           ))}
         </PropertySection>
@@ -102,14 +119,49 @@ interface SchemaFieldProps {
   field: FieldSchema;
   value: unknown;
   onChange: (v: unknown) => void;
+  onOpenScriptEditor?: (
+    fieldKey: string,
+    graph: ScriptGraph | undefined,
+  ) => void;
 }
 
-function SchemaField({ field, value, onChange }: SchemaFieldProps) {
+function SchemaField({
+  field,
+  value,
+  onChange,
+  onOpenScriptEditor,
+}: SchemaFieldProps) {
   if (field.readOnly) {
     return <InfoRow label={field.label} value={String(value ?? "")} />;
   }
 
   switch (field.type) {
+    case "scriptGraph": {
+      const graph = value as ScriptGraph | undefined;
+      const nodeCount = graph?.nodes?.length ?? 0;
+      return (
+        <div className="space-y-1">
+          <label className="text-[11px] text-text-secondary font-medium">
+            {field.label}
+          </label>
+          <button
+            onClick={() => onOpenScriptEditor?.(field.key, graph)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/30 hover:border-indigo-500/50 transition-colors"
+          >
+            <Workflow size={14} />
+            {nodeCount > 0
+              ? `Edit Script (${nodeCount} node${nodeCount !== 1 ? "s" : ""})`
+              : "Create Script"}
+          </button>
+          {field.description && (
+            <p className="text-[10px] text-text-tertiary">
+              {field.description}
+            </p>
+          )}
+        </div>
+      );
+    }
+
     case "string":
     case "entityId":
       return (

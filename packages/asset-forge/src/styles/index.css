@@ -1001,4 +1001,42 @@ body {
   .ws-unsaved-pulse {
     animation: ws-unsaved-pulse 2s ease-in-out infinite;
   }
+
+  /* --- React Flow overrides for script editor --- */
+  .react-flow {
+    --xy-background-color: var(--bg-primary);
+    --xy-node-background-color: var(--bg-secondary);
+    --xy-node-border: 1px solid var(--border-primary);
+    --xy-node-border-radius: 8px;
+    --xy-node-box-shadow: var(--shadow-lg);
+    --xy-edge-stroke: var(--border-hover);
+    --xy-minimap-background-color: var(--bg-secondary);
+    --xy-minimap-mask-background-color: rgba(0, 0, 0, 0.7);
+    --xy-controls-button-background-color: var(--bg-elevated);
+    --xy-controls-button-border-color: var(--border-primary);
+    --xy-controls-button-color: var(--text-secondary);
+    --xy-controls-button-background-color-hover: var(--bg-hover);
+    --xy-attribution-background-color: transparent;
+  }
+  .react-flow__controls {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+  }
+  .react-flow__controls-button {
+    border-bottom: 1px solid var(--border-primary);
+    width: 28px;
+    height: 28px;
+  }
+  .react-flow__controls-button svg {
+    fill: var(--text-secondary);
+  }
+  .react-flow__controls-button:hover svg {
+    fill: var(--text-primary);
+  }
+  .react-flow__minimap {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-primary);
+  }
 }

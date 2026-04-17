@@ -17,18 +17,20 @@ import { useEffect, useRef, useCallback } from "react";
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import { useWorldStudio } from "../WorldStudioContext";
 
-const SNAP_GRID = 1; // Snap to 1m grid
 const ROTATION_STEP = Math.PI / 4; // 45 degree increments
 
 interface PlacementInteractionOptions {
   sceneRefs: TerrainSceneRefs | null;
-  /** When true, snap placement X/Z to the 1m grid */
+  /** When true, snap placement X/Z to the grid */
   gridSnap: boolean;
+  /** Grid snap size in meters (default: 1.0) */
+  gridSize?: number;
 }
 
 export function usePlacementInteraction({
   sceneRefs,
   gridSnap,
+  gridSize = 1.0,
 }: PlacementInteractionOptions) {
   const { state, actions } = useWorldStudio();
   const activePlacement = state.tools.activePlacement;
@@ -51,13 +53,18 @@ export function usePlacementInteraction({
   const gridSnapRef = useRef(gridSnap);
   gridSnapRef.current = gridSnap;
 
+  // Stable ref for gridSize so event handlers see latest value without re-registering
+  const gridSizeRef = useRef(gridSize);
+  gridSizeRef.current = gridSize;
+
   // Snap position to grid (conditional)
   const applySnap = useCallback(
     (x: number, z: number): { x: number; z: number } => {
       if (!gridSnapRef.current) return { x, z };
+      const snap = gridSizeRef.current;
       return {
-        x: Math.round(x / SNAP_GRID) * SNAP_GRID,
-        z: Math.round(z / SNAP_GRID) * SNAP_GRID,
+        x: Math.round(x / snap) * snap,
+        z: Math.round(z / snap) * snap,
       };
     },
     [],

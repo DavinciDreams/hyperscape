@@ -109,7 +109,8 @@ export type FieldType =
   | "json"
   | "entityId"
   | "polygon"
-  | "waypoints";
+  | "waypoints"
+  | "scriptGraph";
 
 /** Type-specific configuration for field widgets. */
 export interface FieldConfig {

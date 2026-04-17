@@ -9,6 +9,11 @@ import { TeamService } from "../services/TeamService";
 import { AuditLogService } from "../services/AuditLogService";
 import * as WS from "../models/world-studio.models";
 import * as Models from "../models";
+import {
+  DEFAULT_GAME_MODE_MANIFEST,
+  validateGameModeManifest,
+  type GameModeManifest,
+} from "../utils/gameModeRegistry";
 
 export const createGameRoutes = (
   teamService: TeamService,
@@ -35,6 +40,8 @@ export const createGameRoutes = (
               name: g.name,
               slug: g.slug,
               description: g.description,
+              moduleId: g.moduleId,
+              gameMode: g.gameMode,
               stagingServerUrl: g.stagingServerUrl,
               productionServerUrl: g.productionServerUrl,
               createdAt: g.createdAt.toISOString(),
@@ -68,7 +75,25 @@ export const createGameRoutes = (
               return { error: "Admin role required to create games" };
             }
 
-            const game = await teamService.createGame(teamId, body);
+            // Validate optional GameMode manifest against the server-side
+            // registry allowlist. Unknown ids would produce a broken PIE /
+            // client session — reject at the edge.
+            if (body.gameMode) {
+              const err = validateGameModeManifest(
+                body.gameMode as GameModeManifest,
+              );
+              if (err) {
+                set.status = 400;
+                return {
+                  error: `Invalid gameMode.${err.field}: "${err.value}". Known: ${err.known.join(", ")}`,
+                };
+              }
+            }
+
+            const game = await teamService.createGame(teamId, {
+              ...body,
+              gameMode: body.gameMode ?? DEFAULT_GAME_MODE_MANIFEST,
+            });
             if (!game) {
               set.status = 500;
               return { error: "Failed to create game" };
@@ -89,6 +114,8 @@ export const createGameRoutes = (
               name: game.name,
               slug: game.slug,
               description: game.description,
+              moduleId: game.moduleId,
+              gameMode: game.gameMode,
               stagingServerUrl: game.stagingServerUrl,
               productionServerUrl: game.productionServerUrl,
               createdAt: game.createdAt.toISOString(),
@@ -99,6 +126,7 @@ export const createGameRoutes = (
             body: WS.CreateGameBody,
             response: {
               200: WS.GameResponse,
+              400: Models.ErrorResponse,
               403: Models.ErrorResponse,
               500: Models.ErrorResponse,
             },
@@ -132,6 +160,8 @@ export const createGameRoutes = (
               name: game.name,
               slug: game.slug,
               description: game.description,
+              moduleId: game.moduleId,
+              gameMode: game.gameMode,
               stagingServerUrl: game.stagingServerUrl,
               productionServerUrl: game.productionServerUrl,
               createdAt: game.createdAt.toISOString(),
@@ -172,6 +202,19 @@ export const createGameRoutes = (
               return { error: "Game not found" };
             }
 
+            // Validate optional GameMode manifest on update.
+            if (body.gameMode) {
+              const err = validateGameModeManifest(
+                body.gameMode as GameModeManifest,
+              );
+              if (err) {
+                set.status = 400;
+                return {
+                  error: `Invalid gameMode.${err.field}: "${err.value}". Known: ${err.known.join(", ")}`,
+                };
+              }
+            }
+
             const game = await teamService.updateGame(gameId, body);
             if (!game) {
               set.status = 500;
@@ -193,6 +236,8 @@ export const createGameRoutes = (
               name: game.name,
               slug: game.slug,
               description: game.description,
+              moduleId: game.moduleId,
+              gameMode: game.gameMode,
               stagingServerUrl: game.stagingServerUrl,
               productionServerUrl: game.productionServerUrl,
               createdAt: game.createdAt.toISOString(),
@@ -203,6 +248,7 @@ export const createGameRoutes = (
             body: WS.UpdateGameBody,
             response: {
               200: WS.GameResponse,
+              400: Models.ErrorResponse,
               403: Models.ErrorResponse,
               404: Models.ErrorResponse,
               500: Models.ErrorResponse,

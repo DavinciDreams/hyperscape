@@ -291,6 +291,16 @@ export class World extends EventEmitter {
   /** Main perspective camera for rendering the 3D scene */
   camera: THREE.PerspectiveCamera;
 
+  /**
+   * Active GameMode (UE5-inspired composition of player controller, camera,
+   * input context, and pawn). Stashed by the bootstrap once — read by PIE
+   * to branch on which controllers to instantiate. Hyperscape gameplay
+   * systems must NOT read this; PlayerLocal / InteractionRouter /
+   * ClientCameraSystem remain the authoritative path in the live client.
+   * See `packages/shared/src/gameMode/PLAN.md` for invariants.
+   */
+  gameMode?: import("../gameMode/GameMode").GameMode;
+
   // ============================================================================
   // CORE SYSTEMS (Always present in client and server)
   // ============================================================================

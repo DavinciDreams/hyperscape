@@ -8,6 +8,7 @@
 
 import type { VegetationConfig } from "../WorldBuilder/types";
 import type { GameEntityData } from "../WorldBuilder/TileBasedTerrain";
+import type { GameModeManifest } from "@hyperscape/shared/runtime";
 
 import type {
   WorldBuilderState,
@@ -127,6 +128,12 @@ export interface StudioProjectState {
   projectName: string | null;
   projectVersion: number;
   lockedBy: string | null;
+  /**
+   * GameMode manifest fetched from the game record (Phase 4). Null until a
+   * project is loaded, or if the API response did not include one (legacy
+   * games). Callers should fall back to `HYPERSCAPE_DEFAULT_MANIFEST`.
+   */
+  gameMode: GameModeManifest | null;
 }
 
 /** Server persistence state */
@@ -174,6 +181,8 @@ export interface StudioToolState {
   zonePaint: ZonePaintState | null;
   /** Water body editor: vertex/waypoint adding mode (Phase 8.1) */
   isAddingWaterVertices: boolean;
+  /** Grid snap size in meters (0.25, 0.5, 1.0, 2.0, 4.0) */
+  gridSize: number;
 }
 
 /** State for painting zone tiles */
@@ -224,6 +233,15 @@ export const DEFAULT_VIEWPORT_OVERLAYS: StudioViewportOverlays = {
 
 // ============== COMBINED STATE ==============
 
+/**
+ * PIE execution mode, mirroring UE5's Simulate / Play distinction.
+ * - `simulate`: editor fly-cam, no pawn possession. Level designers move
+ *   freely; game input (WASD + mouse look) drives the editor camera.
+ * - `play`: the resolved GameMode's controller stack possesses the pawn.
+ *   For Hyperscape this is click-to-walk + orbit camera.
+ */
+export type PIEMode = "simulate" | "play";
+
 /** Play-In-Editor state */
 export interface PIEState {
   /** Whether PIE mode is active */
@@ -232,12 +250,15 @@ export interface PIEState {
   loading: boolean;
   /** Error message if PIE failed to start */
   error: string | null;
+  /** Which PIE flavour the next pieStart() will launch. */
+  mode: PIEMode;
 }
 
 export const EMPTY_PIE_STATE: PIEState = {
   active: false,
   loading: false,
   error: null,
+  mode: "simulate",
 };
 
 export interface WorldStudioState {
@@ -289,10 +310,12 @@ export type StudioSpecificAction =
       projectId: string;
       name: string;
       version: number;
+      gameMode: GameModeManifest | null;
     }
   | { type: "CLEAR_PROJECT" }
   | { type: "SET_PROJECT_LOCK"; lockedBy: string | null }
   | { type: "UPDATE_PROJECT_VERSION"; version: number }
+  | { type: "SET_GAME_MODE"; gameMode: GameModeManifest | null }
 
   // Persistence actions
   | { type: "SAVE_START" }
@@ -307,6 +330,7 @@ export type StudioSpecificAction =
   | { type: "SET_TOOL"; tool: StudioToolMode }
   | { type: "SET_TRANSFORM_MODE"; mode: GizmoTransformMode }
   | { type: "SET_TRANSFORM_SPACE"; space: GizmoTransformSpace }
+  | { type: "SET_GRID_SIZE"; size: number }
   | { type: "CAMERA_TELEPORT"; target: { x: number; y: number; z: number } }
   | { type: "CAMERA_TELEPORT_CONSUMED" }
 
@@ -316,6 +340,8 @@ export type StudioSpecificAction =
       category: PaletteCategory;
       templateId: string;
       templateName: string;
+      /** Entity type schema ID for generic module placement */
+      entityTypeId?: string;
     }
   | {
       type: "UPDATE_PLACEMENT_POSITION";
@@ -620,6 +646,7 @@ export type StudioSpecificAction =
   | { type: "PIE_STARTED" }
   | { type: "PIE_STOP" }
   | { type: "PIE_ERROR"; error: string }
+  | { type: "PIE_SET_MODE"; mode: PIEMode }
 
   // Generic entity CRUD — schema-driven GameModule actions
   | {
@@ -737,6 +764,7 @@ export const initialProjectState: StudioProjectState = {
   projectName: null,
   projectVersion: 0,
   lockedBy: null,
+  gameMode: null,
 };
 
 export const initialPersistenceState: StudioPersistenceState = {
@@ -757,6 +785,7 @@ export const initialToolState: StudioToolState = {
   transformSpace: "world",
   zonePaint: null,
   isAddingWaterVertices: false,
+  gridSize: 1.0,
 };
 
 export const worldStudioInitialState: WorldStudioState = {

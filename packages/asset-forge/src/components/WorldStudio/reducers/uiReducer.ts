@@ -69,6 +69,12 @@ export function uiReducer(
         tools: { ...state.tools, transformSpace: action.space },
       };
 
+    case "SET_GRID_SIZE":
+      return {
+        ...state,
+        tools: { ...state.tools, gridSize: action.size },
+      };
+
     case "SET_ADDING_WATER_VERTICES":
       return {
         ...state,
@@ -97,6 +103,7 @@ export function uiReducer(
             category: action.category,
             templateId: action.templateId,
             templateName: action.templateName,
+            entityTypeId: action.entityTypeId,
             position: { x: 0, y: 0, z: 0 },
             rotation: 0,
             confirmed: false,
@@ -313,23 +320,33 @@ export function uiReducer(
     case "PIE_START":
       return {
         ...state,
-        pie: { active: false, loading: true, error: null },
+        pie: { ...state.pie, active: false, loading: true, error: null },
       };
     case "PIE_STARTED":
       return {
         ...state,
-        pie: { active: true, loading: false, error: null },
+        pie: { ...state.pie, active: true, loading: false, error: null },
       };
     case "PIE_STOP":
       return {
         ...state,
-        pie: { active: false, loading: false, error: null },
+        pie: { ...state.pie, active: false, loading: false, error: null },
       };
     case "PIE_ERROR":
       return {
         ...state,
-        pie: { active: false, loading: false, error: action.error },
+        pie: {
+          ...state.pie,
+          active: false,
+          loading: false,
+          error: action.error,
+        },
       };
+    case "PIE_SET_MODE":
+      // Only allowed while PIE is idle — switching mode mid-session would
+      // require tearing down and re-attaching the controller stack.
+      if (state.pie.active || state.pie.loading) return state;
+      return { ...state, pie: { ...state.pie, mode: action.mode } };
 
     default:
       return null;

@@ -10,6 +10,14 @@ build/
 dist/
 *.tsbuildinfo
 
+# TypeScript emit artifacts that leak into src/ (tsc running without --outDir)
+src/**/*.d.ts
+src/**/*.d.ts.map
+src/**/*.js.map
+src/**/*.js
+# Re-include vendored third-party JS that is the source (not emitted from a .ts)
+!src/libs/gltfloader/GLTFLoader.js
+
 # TypeScript cache
 *.tscache
 .tscache/

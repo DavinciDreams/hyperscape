@@ -33,6 +33,7 @@ import {
   Trash2,
   Play,
   Square,
+  Gamepad2,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 
@@ -43,6 +44,8 @@ import {
   GenerationWizardDialog,
   type WizardMode,
 } from "../panels/GenerationWizardDialog";
+import { GenerateGameDialog } from "../panels/GenerateGameDialog";
+import { GameSettingsDialog } from "../panels/GameSettingsDialog";
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -208,6 +211,8 @@ export function MainToolbar({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<WizardMode>("full");
   const [genDropdownOpen, setGenDropdownOpen] = useState(false);
+  const [gameGenOpen, setGameGenOpen] = useState(false);
+  const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
   const { clearAutogen } = useZoneAutoGen();
 
   // Save flash animation
@@ -319,6 +324,15 @@ export function MainToolbar({
               />
               <div className="h-px bg-border-primary my-1" />
               <DropdownItem
+                icon={Sparkles}
+                label="AI Generate Game"
+                onClick={() => {
+                  setGameGenOpen(true);
+                  setGenDropdownOpen(false);
+                }}
+              />
+              <div className="h-px bg-border-primary my-1" />
+              <DropdownItem
                 icon={Trash2}
                 label="Clear All Procgen"
                 onClick={() => {
@@ -331,8 +345,46 @@ export function MainToolbar({
           )}
         </div>
 
-        {/* Play-In-Editor button */}
+        {/* Play-In-Editor mode toggle (Simulate / Play). Hidden while PIE
+            is running — mode changes mid-session would require tearing
+            down and re-attaching the controller stack. */}
         <Divider />
+        {!state.pie.active && !state.pie.loading && (
+          <div
+            className="flex items-center rounded-md overflow-hidden border border-border-primary"
+            role="radiogroup"
+            aria-label="PIE execution mode"
+          >
+            <button
+              role="radio"
+              aria-checked={state.pie.mode === "simulate"}
+              className={`px-2 py-1 text-xs font-medium transition-colors ${
+                state.pie.mode === "simulate"
+                  ? "bg-primary/20 text-primary"
+                  : "bg-transparent text-text-secondary hover:bg-background-tertiary"
+              }`}
+              onClick={() => actions.pieSetMode("simulate")}
+              title="Simulate — editor fly-cam, no pawn possession"
+            >
+              Simulate
+            </button>
+            <button
+              role="radio"
+              aria-checked={state.pie.mode === "play"}
+              className={`px-2 py-1 text-xs font-medium transition-colors ${
+                state.pie.mode === "play"
+                  ? "bg-primary/20 text-primary"
+                  : "bg-transparent text-text-secondary hover:bg-background-tertiary"
+              }`}
+              onClick={() => actions.pieSetMode("play")}
+              title="Play — GameMode controller possesses the pawn"
+            >
+              Play
+            </button>
+          </div>
+        )}
+
+        {/* Play-In-Editor button */}
         {state.pie.active ? (
           <button
             className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-500/15 text-red-400 border border-red-400/30 hover:bg-red-500/25 transition-all"
@@ -516,6 +568,11 @@ export function MainToolbar({
             }
           }}
         />
+        <ToolButton
+          icon={Gamepad2}
+          label="GameMode Settings"
+          onClick={() => setGameSettingsOpen(true)}
+        />
 
         <Divider />
 
@@ -532,6 +589,18 @@ export function MainToolbar({
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         mode={wizardMode}
+      />
+
+      {/* AI Game Module generation dialog */}
+      <GenerateGameDialog
+        open={gameGenOpen}
+        onClose={() => setGameGenOpen(false)}
+      />
+
+      {/* GameMode settings dialog */}
+      <GameSettingsDialog
+        open={gameSettingsOpen}
+        onClose={() => setGameSettingsOpen(false)}
       />
     </div>
   );

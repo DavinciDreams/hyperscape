@@ -189,6 +189,16 @@ export class TeamService {
       stagingAssetsPath?: string;
       productionServerUrl?: string;
       productionAssetsPath?: string;
+      /**
+       * GameMode manifest. Omit to use the Hyperscape default. The route
+       * validates this against the registry before passing it here.
+       */
+      gameMode?: {
+        playerController: string;
+        camera: string;
+        inputContext: string;
+        pawn: string;
+      };
     },
   ): Promise<Game | null> {
     const db = getDb();
@@ -205,6 +215,12 @@ export class TeamService {
         stagingAssetsPath: data.stagingAssetsPath ?? null,
         productionServerUrl: data.productionServerUrl ?? null,
         productionAssetsPath: data.productionAssetsPath ?? null,
+        gameMode: data.gameMode ?? {
+          playerController: "click-to-walk",
+          camera: "orbit",
+          inputContext: "hyperscape-default",
+          pawn: "humanoid-rpg",
+        },
       })
       .returning();
 
@@ -257,9 +273,7 @@ export class TeamService {
 
   // ==================== Members ====================
 
-  async getMembers(
-    teamId: string,
-  ): Promise<
+  async getMembers(teamId: string): Promise<
     Array<{
       member: TeamMember;
       user: {

@@ -8,6 +8,8 @@
 import type { useWorldStudio } from "../WorldStudioContext";
 import type { Prefab, PrefabEntry, PrefabEntityType } from "../types";
 import type { WorldPosition } from "../../WorldBuilder/types";
+import type { WorldStudioAction } from "../worldStudioTypes";
+import type { EntityTypeRegistry } from "../../../gameModules/EntityTypeRegistry";
 import {
   commandHistory,
   DuplicateEntityCommand,
@@ -58,7 +60,7 @@ type StudioActions = ReturnType<typeof useWorldStudio>["actions"];
 // Find entity data by type + id
 // ---------------------------------------------------------------------------
 
-function findEntityData(
+export function findEntityData(
   state: StudioState,
   type: string,
   id: string,
@@ -170,8 +172,26 @@ function findEntityData(
           | Record<string, unknown>
           | undefined) ?? null
       );
-    default:
+    default: {
+      // Registry fallback for dynamic module entity types
+      // Try to find entity in generic state arrays by selection type
+      for (const key of Object.keys(ext)) {
+        const arr = ext[key as keyof typeof ext];
+        if (Array.isArray(arr)) {
+          const found = (arr as Array<{ id: string }>).find((e) => e.id === id);
+          if (found) return found as Record<string, unknown>;
+        }
+      }
+      // Then audioLayers
+      for (const key of Object.keys(audio)) {
+        const arr = audio[key as keyof typeof audio];
+        if (Array.isArray(arr)) {
+          const found = (arr as Array<{ id: string }>).find((e) => e.id === id);
+          if (found) return found as Record<string, unknown>;
+        }
+      }
       return null;
+    }
   }
 }
 
@@ -184,9 +204,38 @@ export function executeDuplicate(
   actions: StudioActions,
   entityType: string,
   entityId: string,
+  registry?: EntityTypeRegistry,
+  dispatch?: (action: WorldStudioAction) => void,
 ): boolean {
   const entityActions = ENTITY_ACTIONS[entityType];
-  if (!entityActions) return false;
+
+  // Registry fallback for dynamic module entity types
+  if (!entityActions) {
+    if (!registry || !dispatch) return false;
+    const schema = registry.getBySelectionType(entityType);
+    if (!schema) return false;
+
+    const entityData = findEntityData(state, entityType, entityId);
+    if (!entityData) return false;
+
+    const { stateKey, stateRoot } = schema.storage;
+    const target: DuplicateEntityTarget = {
+      entityType,
+      entityData,
+      onPlace: (data) =>
+        dispatch({
+          type: "ENTITY_ADD",
+          stateKey,
+          stateRoot,
+          entity: data as { id: string } & Record<string, unknown>,
+        }),
+      onRemove: (id) =>
+        dispatch({ type: "ENTITY_REMOVE", stateKey, stateRoot, id }),
+    };
+
+    commandHistory.execute(new DuplicateEntityCommand(target));
+    return true;
+  }
 
   const entityData = findEntityData(state, entityType, entityId);
   if (!entityData) return false;
@@ -219,9 +268,39 @@ export function executeDelete(
   actions: StudioActions,
   entityType: string,
   entityId: string,
+  registry?: EntityTypeRegistry,
+  dispatch?: (action: WorldStudioAction) => void,
 ): boolean {
   const entityActions = ENTITY_ACTIONS[entityType];
-  if (!entityActions) return false;
+
+  // Registry fallback for dynamic module entity types
+  if (!entityActions) {
+    if (!registry || !dispatch) return false;
+    const schema = registry.getBySelectionType(entityType);
+    if (!schema) return false;
+
+    const entityData = findEntityData(state, entityType, entityId);
+    if (!entityData) return false;
+
+    const { stateKey, stateRoot } = schema.storage;
+    const target: DeleteEntityTarget = {
+      entityType,
+      entityData,
+      onDelete: (id) =>
+        dispatch({ type: "ENTITY_REMOVE", stateKey, stateRoot, id }),
+      onRestore: (data) =>
+        dispatch({
+          type: "ENTITY_ADD",
+          stateKey,
+          stateRoot,
+          entity: data as { id: string } & Record<string, unknown>,
+        }),
+    };
+
+    commandHistory.execute(new DeleteEntityCommand(entityId, target));
+    actions.setSelection(null);
+    return true;
+  }
 
   const entityData = findEntityData(state, entityType, entityId);
   if (!entityData) return false;

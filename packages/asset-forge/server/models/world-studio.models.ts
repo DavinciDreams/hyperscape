@@ -47,6 +47,18 @@ export const TeamMemberResponse = t.Object({
 
 // ==================== Game Models ====================
 
+/**
+ * GameMode manifest (Phase 4) — UE5-inspired controller/camera/input/pawn
+ * selection. All fields are strings validated at the route layer against
+ * `gameModeRegistry`'s registered ids.
+ */
+export const GameModeManifestBody = t.Object({
+  playerController: t.String({ minLength: 1, maxLength: 64 }),
+  camera: t.String({ minLength: 1, maxLength: 64 }),
+  inputContext: t.String({ minLength: 1, maxLength: 64 }),
+  pawn: t.String({ minLength: 1, maxLength: 64 }),
+});
+
 export const CreateGameBody = t.Object({
   name: t.String({ minLength: 1, maxLength: 100 }),
   slug: t.String({
@@ -59,6 +71,8 @@ export const CreateGameBody = t.Object({
   stagingAssetsPath: t.Optional(t.String()),
   productionServerUrl: t.Optional(t.String()),
   productionAssetsPath: t.Optional(t.String()),
+  /** Optional GameMode manifest. Omit to use the Hyperscape default. */
+  gameMode: t.Optional(GameModeManifestBody),
 });
 
 export const UpdateGameBody = t.Object({
@@ -70,6 +84,7 @@ export const UpdateGameBody = t.Object({
   productionAssetsPath: t.Optional(t.String()),
   stagingAdminCode: t.Optional(t.String()),
   productionAdminCode: t.Optional(t.String()),
+  gameMode: t.Optional(GameModeManifestBody),
 });
 
 export const GameResponse = t.Object({
@@ -78,6 +93,8 @@ export const GameResponse = t.Object({
   name: t.String(),
   slug: t.String(),
   description: t.Nullable(t.String()),
+  moduleId: t.String(),
+  gameMode: GameModeManifestBody,
   stagingServerUrl: t.Nullable(t.String()),
   productionServerUrl: t.Nullable(t.String()),
   createdAt: t.String(),
@@ -184,6 +201,87 @@ export const WorldDeploymentResponse = t.Object({
   deployedAt: t.String(),
 });
 
+// ==================== Game Module Models ====================
+
+export const CreateGameModuleBody = t.Object({
+  name: t.String({ minLength: 1, maxLength: 100 }),
+  version: t.Optional(t.String({ maxLength: 20 })),
+  moduleData: t.Unknown(), // Full GameModule JSON, validated by loadGameModule()
+});
+
+export const UpdateGameModuleBody = t.Object({
+  name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+  version: t.Optional(t.String({ maxLength: 20 })),
+  moduleData: t.Optional(t.Unknown()),
+});
+
+export const GameModuleResponse = t.Object({
+  id: t.String(),
+  teamId: t.String(),
+  name: t.String(),
+  slug: t.String(),
+  version: t.String(),
+  isBuiltin: t.Boolean(),
+  createdBy: t.Nullable(t.String()),
+  createdAt: t.String(),
+  updatedAt: t.String(),
+});
+
+export const GameModuleDetailResponse = t.Composite([
+  GameModuleResponse,
+  t.Object({
+    moduleData: t.Unknown(),
+  }),
+]);
+
+// ==================== Script Models ====================
+
+export const CreateScriptBody = t.Object({
+  name: t.String({ minLength: 1, maxLength: 100 }),
+  description: t.Optional(t.String({ maxLength: 500 })),
+  version: t.Optional(t.String({ maxLength: 20 })),
+  gameId: t.Optional(t.String()),
+  graphData: t.Unknown(), // RuntimeScriptGraph JSON, validated by scriptGraphValidator
+  isTemplate: t.Optional(t.Boolean()),
+  isPublic: t.Optional(t.Boolean()),
+});
+
+export const UpdateScriptBody = t.Object({
+  name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+  description: t.Optional(t.String({ maxLength: 500 })),
+  version: t.Optional(t.String({ maxLength: 20 })),
+  graphData: t.Optional(t.Unknown()),
+  isTemplate: t.Optional(t.Boolean()),
+  isPublic: t.Optional(t.Boolean()),
+});
+
+export const CloneScriptBody = t.Object({
+  name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+  gameId: t.Optional(t.String()),
+});
+
+export const ScriptResponse = t.Object({
+  id: t.String(),
+  teamId: t.String(),
+  gameId: t.Nullable(t.String()),
+  name: t.String(),
+  slug: t.String(),
+  description: t.Nullable(t.String()),
+  version: t.String(),
+  isTemplate: t.Boolean(),
+  isPublic: t.Boolean(),
+  createdBy: t.Nullable(t.String()),
+  createdAt: t.String(),
+  updatedAt: t.String(),
+});
+
+export const ScriptDetailResponse = t.Composite([
+  ScriptResponse,
+  t.Object({
+    graphData: t.Unknown(),
+  }),
+]);
+
 // ==================== Auth Models ====================
 
 export const AuthMeResponse = t.Object({
@@ -229,6 +327,12 @@ export type CreateTeamBodyType = Static<typeof CreateTeamBody>;
 export type UpdateTeamBodyType = Static<typeof UpdateTeamBody>;
 export type CreateGameBodyType = Static<typeof CreateGameBody>;
 export type UpdateGameBodyType = Static<typeof UpdateGameBody>;
+export type GameModeManifestBodyType = Static<typeof GameModeManifestBody>;
 export type TeamInviteBodyType = Static<typeof TeamInviteBody>;
 export type CreateWorldProjectBodyType = Static<typeof CreateWorldProjectBody>;
 export type UpdateWorldProjectBodyType = Static<typeof UpdateWorldProjectBody>;
+export type CreateGameModuleBodyType = Static<typeof CreateGameModuleBody>;
+export type UpdateGameModuleBodyType = Static<typeof UpdateGameModuleBody>;
+export type CreateScriptBodyType = Static<typeof CreateScriptBody>;
+export type UpdateScriptBodyType = Static<typeof UpdateScriptBody>;
+export type CloneScriptBodyType = Static<typeof CloneScriptBody>;

@@ -23,16 +23,24 @@ export interface AuthMeResponse {
   teams: AuthTeamMembership[];
 }
 
+export interface GameModeManifestResponse {
+  playerController: string;
+  camera: string;
+  inputContext: string;
+  pawn: string;
+}
+
 export interface GameResponse {
   id: string;
   teamId: string;
   name: string;
   slug: string;
   description: string | null;
-  serverUrl: string | null;
-  clientUrl: string | null;
+  moduleId: string;
+  gameMode: GameModeManifestResponse;
+  stagingServerUrl: string | null;
+  productionServerUrl: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
 export interface WorldProjectSummary {
@@ -70,6 +78,40 @@ export async function fetchCurrentUser(): Promise<AuthMeResponse> {
 export async function fetchTeamGames(teamId: string): Promise<GameResponse[]> {
   const res = await apiFetch(`/api/teams/${teamId}/games`);
   if (!res.ok) throw new Error(`Failed to fetch games: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchGame(
+  teamId: string,
+  gameId: string,
+): Promise<GameResponse> {
+  const res = await apiFetch(`/api/teams/${teamId}/games/${gameId}`);
+  if (!res.ok) throw new Error(`Failed to fetch game: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Partial update for a game record. `gameMode` is validated server-side
+ * against the allowlist in `asset-forge/server/utils/gameModeRegistry.ts`.
+ */
+export async function updateGame(
+  teamId: string,
+  gameId: string,
+  patch: {
+    name?: string;
+    description?: string;
+    gameMode?: GameModeManifestResponse;
+  },
+): Promise<GameResponse> {
+  const res = await apiFetch(`/api/teams/${teamId}/games/${gameId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Failed to update game: ${res.status} ${msg}`);
+  }
   return res.json();
 }
 

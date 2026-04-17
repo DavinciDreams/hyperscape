@@ -43,6 +43,12 @@ import React, { useMemo, useState, useCallback, useDeferredValue } from "react";
 import type { PaletteCategory, PaletteItem } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
 import { EntityThumbnail } from "./EntityThumbnail";
+import {
+  buildModulePalette,
+  type ModulePaletteCategory,
+} from "../../../gameModules/utils/buildModulePalette";
+import { hexToTailwindAccent } from "../../../gameModules/utils/hexToTailwindAccent";
+import { resolveLucideIcon } from "../../../gameModules/utils/lucideIconMap";
 
 /** Category display config */
 interface CategoryConfig {
@@ -259,9 +265,10 @@ const CATEGORIES: CategoryConfig[] = [
 ];
 
 export const EntityPalette = React.memo(function EntityPalette() {
-  const { state, actions } = useWorldStudio();
+  const { state, actions, activeModule } = useWorldStudio();
   const { manifests, tools } = state;
   const activePlacement = tools.activePlacement;
+  const isHyperscape = activeModule.id === "hyperscape";
 
   const [expandedCategory, setExpandedCategory] =
     useState<PaletteCategory | null>(null);
@@ -649,34 +656,74 @@ export const EntityPalette = React.memo(function EntityPalette() {
     return map;
   }, [manifests]);
 
-  // Filter items by search
-  const filteredItems = useMemo(() => {
-    if (!deferredSearch.trim()) return paletteItems;
+  // Build palette from GameModule schema for non-Hyperscape modules
+  const modulePalette = useMemo((): ModulePaletteCategory[] | null => {
+    if (isHyperscape) return null;
+    return buildModulePalette(activeModule);
+  }, [isHyperscape, activeModule]);
+
+  // Unified category list + item map for rendering
+  const effectiveCategories = useMemo(() => {
+    if (modulePalette) {
+      // Dynamic module mode — derive categories from module palette
+      return modulePalette.map((cat) => {
+        const accent = hexToTailwindAccent(cat.color);
+        const IconComponent = resolveLucideIcon(cat.icon);
+        return {
+          id: cat.id as PaletteCategory,
+          label: cat.label,
+          icon: <IconComponent size={13} />,
+          description: cat.description,
+          color: accent,
+          items: cat.items.map(
+            (item): PaletteItem => ({
+              id: item.id,
+              name: item.name,
+              category: cat.id as PaletteCategory,
+              description: item.description,
+              manifestData: item.defaults,
+              entityTypeId: item.entityTypeId,
+            }),
+          ),
+        };
+      });
+    }
+    // Hyperscape mode — use hardcoded CATEGORIES with manifest-driven items
+    return CATEGORIES.map((cat) => ({
+      ...cat,
+      items: paletteItems.get(cat.id) ?? [],
+    }));
+  }, [modulePalette, paletteItems]);
+
+  // Filter categories and items by search
+  const filteredCategories = useMemo(() => {
+    if (!deferredSearch.trim()) return effectiveCategories;
 
     const query = deferredSearch.toLowerCase();
-    const filtered = new Map<PaletteCategory, PaletteItem[]>();
-
-    paletteItems.forEach((items, category) => {
-      const matching = items.filter(
-        (item) =>
-          item.name.toLowerCase().includes(query) ||
-          item.description?.toLowerCase().includes(query),
-      );
-      if (matching.length > 0) {
-        filtered.set(category, matching);
-      }
-    });
-
-    return filtered;
-  }, [paletteItems, deferredSearch]);
+    return effectiveCategories
+      .map((cat) => ({
+        ...cat,
+        items: cat.items.filter(
+          (item) =>
+            item.name.toLowerCase().includes(query) ||
+            item.description?.toLowerCase().includes(query),
+        ),
+      }))
+      .filter((cat) => cat.items.length > 0);
+  }, [effectiveCategories, deferredSearch]);
 
   const handleCategoryToggle = useCallback((categoryId: PaletteCategory) => {
     setExpandedCategory((prev) => (prev === categoryId ? null : categoryId));
   }, []);
 
   const handleItemClick = useCallback(
-    (item: PaletteItem) => {
-      actions.startPlacement(item.category, item.id, item.name);
+    (item: PaletteItem & { entityTypeId?: string }) => {
+      actions.startPlacement(
+        item.category,
+        item.id,
+        item.name,
+        item.entityTypeId,
+      );
       // Track recent placements
       setRecentPlacements((prev) => {
         const key = `${item.category}:${item.id}`;
@@ -716,8 +763,8 @@ export const EntityPalette = React.memo(function EntityPalette() {
     [actions],
   );
 
-  // Loading state
-  if (manifests.loading) {
+  // Loading state (only relevant for Hyperscape manifest-driven palette)
+  if (isHyperscape && manifests.loading) {
     return (
       <div className="flex flex-col h-full">
         <PaletteHeader viewMode={viewMode} onViewModeChange={setViewMode} />
@@ -734,8 +781,8 @@ export const EntityPalette = React.memo(function EntityPalette() {
     );
   }
 
-  // Error state
-  if (manifests.error) {
+  // Error state (only relevant for Hyperscape)
+  if (isHyperscape && manifests.error) {
     return (
       <div className="flex flex-col h-full">
         <PaletteHeader viewMode={viewMode} onViewModeChange={setViewMode} />
@@ -799,11 +846,9 @@ export const EntityPalette = React.memo(function EntityPalette() {
 
       {/* Category list */}
       <div className="flex-1 overflow-y-auto scrollbar-thin px-1.5 py-1.5 space-y-1">
-        {CATEGORIES.map((category) => {
-          const items = filteredItems.get(category.id);
-          if (searchQuery && !items) return null;
-
-          const itemCount = items?.length ?? 0;
+        {filteredCategories.map((category) => {
+          const items = category.items;
+          const itemCount = items.length;
           const isExpanded = expandedCategory === category.id;
 
           return (

@@ -66,6 +66,7 @@
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-webgl": "^4.22.0",
     "@tensorflow/tfjs-backend-webgpu": "^4.22.0",
+    "@xyflow/react": "^12.10.2",
     "ai": "^6.0.116",
     "chalk": "^4.1.2",
     "clsx": "^2.0.0",
@@ -89,6 +90,7 @@
     "tailwind-merge": "^3.3.1",
     "three": "0.183.2",
     "three-mesh-bvh": "^0.9.1",
+    "zod": "^4.3.6",
     "zustand": "^5.0.6"
   },
   "devDependencies": {

@@ -16,6 +16,7 @@ import {
   PositionEditor,
   InfoRow,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   teleport: PlacedTeleport;
@@ -230,6 +231,14 @@ export function TeleportProperties({ teleport }: Props) {
           onChange={(position) => update({ position })}
         />
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={teleport.id}
+        stateKey="teleports"
+        stateRoot="extendedLayers"
+        entityData={teleport as unknown as Record<string, unknown>}
+      />
     </>
   );
 }

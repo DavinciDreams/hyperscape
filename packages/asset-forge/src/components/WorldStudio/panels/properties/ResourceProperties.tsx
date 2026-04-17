@@ -19,6 +19,7 @@ import {
   SliderInput,
   InfoRow,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   resource: PlacedResource;
@@ -150,6 +151,16 @@ export const ResourceProperties = React.memo(function ResourceProperties({
           unit="°"
         />
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={resource.id}
+        stateKey="resources"
+        stateRoot="extendedLayers"
+        entityData={resource as unknown as Record<string, unknown>}
+        tracksSource
+        entityCategory="resource"
+      />
     </>
   );
 });

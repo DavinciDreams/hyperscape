@@ -18,6 +18,7 @@ import {
   OverridableField,
 } from "./PropertyControls";
 import { TransformSection } from "./TransformSection";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   entityData: Record<string, unknown>;
@@ -287,6 +288,15 @@ export function GameResourceProperties({ entityData }: Props) {
           <TransformSection position={pos} readOnly />
         </PropertySection>
       )}
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={entityId}
+        stateKey="resourceOverrides"
+        stateRoot="manifestOverrides"
+        entityData={entityData}
+        entityCategory="gameResource"
+      />
     </>
   );
 }

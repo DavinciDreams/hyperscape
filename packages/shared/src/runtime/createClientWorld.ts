@@ -109,6 +109,12 @@ import { waitForPhysX } from "../physics/PhysXManager";
 
 // RPG systems are registered via SystemLoader to keep them modular
 import { registerSystems } from "../systems/shared";
+import {
+  HYPERSCAPE_DEFAULT_MANIFEST,
+  gameModeRegistry,
+  registerAlternateGameModes,
+  registerHyperscapeGameMode,
+} from "../gameMode";
 import { ParticleSystem } from "../systems/shared/presentation/ParticleSystem";
 
 // Test utilities exposed to browser console
@@ -538,6 +544,19 @@ export function createClientWorld() {
       systemsLoadedResolve();
     }
   })();
+
+  // GameMode stash (Phase 3.1). Read-only metadata — nothing in Hyperscape
+  // gameplay consults this; PlayerLocal, InteractionRouter, and
+  // ClientCameraSystem remain the authoritative path. PIE reads it to
+  // decide which controllers to instantiate in the editor viewport.
+  // `register` overwrites on duplicate, so multiple createClientWorld
+  // calls in one process (tests, HMR) are safe.
+  registerHyperscapeGameMode(gameModeRegistry);
+  registerAlternateGameModes(gameModeRegistry);
+  world.gameMode = gameModeRegistry.resolve(HYPERSCAPE_DEFAULT_MANIFEST, {
+    world,
+    runtime: "client",
+  });
 
   return world;
 }

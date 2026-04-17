@@ -22,6 +22,11 @@
       "types": "./src/world/world.d.ts",
       "import": "./build/world.js",
       "default": "./build/world.js"
+    },
+    "./runtime": {
+      "types": "./build/runtime/pie.d.ts",
+      "import": "./build/runtime-pie.js",
+      "default": "./build/runtime-pie.js"
     }
   },
   "homepage": "https://github.com/HyperscapeAI/hyperscape#readme",

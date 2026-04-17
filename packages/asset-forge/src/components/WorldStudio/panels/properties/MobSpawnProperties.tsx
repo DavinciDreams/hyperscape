@@ -19,6 +19,7 @@ import {
   SliderInput,
   InfoRow,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   mobSpawn: PlacedMobSpawn;
@@ -203,6 +204,20 @@ export const MobSpawnProperties = React.memo(function MobSpawnProperties({
           })}
         </PropertySection>
       )}
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={mobSpawn.id}
+        stateKey="mobSpawns"
+        stateRoot="extendedLayers"
+        tracksSource
+        entityData={{
+          ...(mobSpawn as unknown as Record<string, unknown>),
+          level: stats?.level,
+        }}
+        description="Visual event graph for spawn behavior triggers"
+        entityCategory="mobSpawn"
+      />
 
       {/* No manifest warning */}
       {!manifestMob && state.manifests.loaded && (

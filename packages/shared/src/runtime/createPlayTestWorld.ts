@@ -18,6 +18,22 @@
 // Note: This module is self-contained — no dependency on the full World/ECS stack.
 // Future expansion will integrate with the World class for full RPG system support.
 
+import {
+  PIEScriptRunner,
+  type PIEDebugEntry,
+  type PIEDebugSink,
+} from "./PIEScriptRunner";
+import type { RuntimeScriptGraph } from "../systems/shared/scripting/ScriptGraphInterpreter";
+import type { GameMode, GameModeManifest } from "../gameMode/GameMode";
+import {
+  HYPERSCAPE_DEFAULT_MANIFEST,
+  gameModeRegistry,
+  registerAlternateGameModes,
+  registerHyperscapeGameMode,
+} from "../gameMode";
+
+export type { PIEDebugEntry, PIEDebugSink } from "./PIEScriptRunner";
+
 // ---------------------------------------------------------------------------
 // PIE Network Stub
 // ---------------------------------------------------------------------------
@@ -71,6 +87,16 @@ export interface PIEEntity {
   stationType?: string;
   /** NPC-specific: NPC type */
   npcType?: string;
+  /** Optional behavior graph attached to this entity (PIE-only). */
+  behaviorGraph?: RuntimeScriptGraph;
+  /**
+   * Per-entity proximity-trigger state.
+   * `true` = player is currently within `proximityRadius`; used to debounce
+   * `player:nearby` so the trigger fires once per enter, not every tick.
+   */
+  _playerNearby?: boolean;
+  /** Distance at which `player:nearby` fires. Defaults to 5 metres. */
+  proximityRadius?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +112,8 @@ export interface PlayTestWorldOptions {
     position: { x: number; y: number; z: number };
     spawnRadius: number;
     maxCount: number;
+    /** Optional behavior graph; applied to every spawned mob in this group. */
+    behaviorGraph?: RuntimeScriptGraph;
   }>;
   /** NPC data from manifest */
   npcs?: Array<{
@@ -93,6 +121,7 @@ export interface PlayTestWorldOptions {
     type: string;
     name: string;
     position: { x: number; y: number; z: number };
+    behaviorGraph?: RuntimeScriptGraph;
   }>;
   /** Resource data from manifest */
   resources?: Array<{
@@ -101,15 +130,26 @@ export interface PlayTestWorldOptions {
     resourceType: string;
     name: string;
     position: { x: number; y: number; z: number };
+    behaviorGraph?: RuntimeScriptGraph;
   }>;
   /** Station data from manifest */
   stations?: Array<{
     id: string;
     type: string;
     position: { x: number; y: number; z: number };
+    behaviorGraph?: RuntimeScriptGraph;
   }>;
   /** Player spawn position */
   playerSpawn?: { x: number; y: number; z: number };
+  /** Optional sink that receives every script debug entry. */
+  debugSink?: PIEDebugSink;
+  /**
+   * GameMode manifest for this session. Omit to use the Hyperscape
+   * default (click-to-walk + orbit + hyperscape-default input). The
+   * manifest id determines which controller the consumer (usePIESession)
+   * activates for the viewport.
+   */
+  gameMode?: GameModeManifest;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,9 +165,22 @@ export class PlayTestWorld {
   private _tickCount = 0;
   private _isRunning = false;
   private _networkStub = new PIENetworkStub();
+  /** Script runtime — created lazily on first start(). */
+  private _scripts: PIEScriptRunner | null = null;
+  /** Default proximity radius (metres) for `player:nearby`. */
+  private static readonly DEFAULT_PROXIMITY_RADIUS = 5;
 
   /** Player entity (always exists while PIE is active) */
   player: PIEEntity | null = null;
+
+  /**
+   * Resolved GameMode for the active session. Null before `start()` or
+   * after `stop()`. Consumers (usePIESession) branch on `gameMode.id`
+   * to decide which viewport controller to activate — click-to-walk
+   * (matches the live Hyperscape client) or an alternate WASD/topdown
+   * controller registered by a downstream game.
+   */
+  gameMode: GameMode | null = null;
 
   /** Network stub for systems that check world.network */
   get network(): PIENetworkStub {
@@ -138,6 +191,11 @@ export class PlayTestWorld {
     return this._isRunning;
   }
 
+  /** Access the script runner (null before start() / after stop()). */
+  get scripts(): PIEScriptRunner | null {
+    return this._scripts;
+  }
+
   /**
    * Initialize the PIE world with manifest data.
    * Spawns all entities from the provided options.
@@ -146,6 +204,33 @@ export class PlayTestWorld {
     this._isRunning = true;
     this._tickCount = 0;
     this.entities.clear();
+
+    // Resolve GameMode. Defaults to Hyperscape's click-to-walk composition
+    // so PIE behaves the same as the live client out of the box. A
+    // downstream game supplies its own manifest (e.g. wasd-default) once
+    // registered in the shared gameModeRegistry.
+    // `register` overwrites on duplicate, safe for repeat start() calls.
+    registerHyperscapeGameMode(gameModeRegistry);
+    registerAlternateGameModes(gameModeRegistry);
+    const manifest = options.gameMode ?? HYPERSCAPE_DEFAULT_MANIFEST;
+    this.gameMode = gameModeRegistry.resolve(manifest, {
+      // PlayTestWorld is not a full `World`; the context.world field is
+      // kept optional at the controller level (InteractionRouter and
+      // ClientCameraSystem cannot run inside PIE today). The mode acts
+      // as metadata here — usePIESession reads `mode.id` to branch.
+      world: this as unknown as import("../core/World").World,
+      runtime: "pie",
+    });
+
+    // Spin up the scripting runtime. Entity lookup resolves to the entity's
+    // mutable record so action handlers can read live position / rotation.
+    this._scripts = new PIEScriptRunner({
+      entityLookup: (id) => {
+        const e = this.entities.get(id);
+        return e ? (e as unknown as Record<string, unknown>) : null;
+      },
+      debugSink: options.debugSink,
+    });
 
     // Spawn player
     const spawn = options.playerSpawn ?? { x: 0, y: 2, z: 0 };
@@ -179,8 +264,12 @@ export class PlayTestWorld {
             patrolCenter: { x: ms.position.x, z: ms.position.z },
             patrolRadius: ms.spawnRadius,
             moveTarget: null,
+            behaviorGraph: ms.behaviorGraph,
           };
           this.entities.set(entity.id, entity);
+          if (ms.behaviorGraph) {
+            this._scripts!.loadGraph(entity.id, ms.behaviorGraph);
+          }
         }
       }
     }
@@ -195,8 +284,12 @@ export class PlayTestWorld {
           rotation: 0,
           name: npc.name,
           npcType: npc.type,
+          behaviorGraph: npc.behaviorGraph,
         };
         this.entities.set(entity.id, entity);
+        if (npc.behaviorGraph) {
+          this._scripts!.loadGraph(entity.id, npc.behaviorGraph);
+        }
       }
     }
 
@@ -210,8 +303,12 @@ export class PlayTestWorld {
           rotation: 0,
           name: res.name,
           resourceType: res.resourceType,
+          behaviorGraph: res.behaviorGraph,
         };
         this.entities.set(entity.id, entity);
+        if (res.behaviorGraph) {
+          this._scripts!.loadGraph(entity.id, res.behaviorGraph);
+        }
       }
     }
 
@@ -225,8 +322,12 @@ export class PlayTestWorld {
           rotation: 0,
           name: station.type,
           stationType: station.type,
+          behaviorGraph: station.behaviorGraph,
         };
         this.entities.set(entity.id, entity);
+        if (station.behaviorGraph) {
+          this._scripts!.loadGraph(entity.id, station.behaviorGraph);
+        }
       }
     }
 
@@ -245,6 +346,35 @@ export class PlayTestWorld {
   tick(deltaTime: number): void {
     if (!this._isRunning) return;
     this._tickCount++;
+
+    // Drive the script runtime — resumes any delayed continuations.
+    this._scripts?.tick(deltaTime);
+
+    // Emit player-proximity triggers (debounced via _playerNearby flag).
+    if (this.player && this._scripts) {
+      const px = this.player.position.x;
+      const pz = this.player.position.z;
+      for (const entity of this.entities.values()) {
+        if (entity.type === "player") continue;
+        // Only emit for entities that have a graph; saves work otherwise.
+        if (!entity.behaviorGraph) continue;
+        const radius =
+          entity.proximityRadius ?? PlayTestWorld.DEFAULT_PROXIMITY_RADIUS;
+        const dx = entity.position.x - px;
+        const dz = entity.position.z - pz;
+        const within = dx * dx + dz * dz <= radius * radius;
+        if (within && !entity._playerNearby) {
+          entity._playerNearby = true;
+          this._scripts.emit("player:nearby", {
+            entityId: entity.id,
+            playerId: this.player.id,
+            distance: Math.sqrt(dx * dx + dz * dz),
+          });
+        } else if (!within && entity._playerNearby) {
+          entity._playerNearby = false;
+        }
+      }
+    }
 
     for (const entity of this.entities.values()) {
       // Mob patrol AI — simple wander behavior
@@ -293,9 +423,28 @@ export class PlayTestWorld {
    */
   stop(): void {
     this._isRunning = false;
+    this._scripts?.stop();
+    this._scripts = null;
     this.player = null;
+    this.gameMode = null;
     this.entities.clear();
     console.log("[PIE] Stopped");
+  }
+
+  /**
+   * Fire `entity:interacted` for the given entity. Called from the editor
+   * viewport when the user clicks a marker while PIE is active. The event
+   * name matches `trigger/onInteract`'s subscription in TriggerEvaluator.
+   */
+  interactWith(entityId: string): void {
+    if (!this._scripts || !this.player) return;
+    const entity = this.entities.get(entityId);
+    if (!entity) return;
+    this._scripts.emit("entity:interacted", {
+      entityId,
+      playerId: this.player.id,
+      npcId: entity.type === "npc" ? entity.id : undefined,
+    });
   }
 }
 

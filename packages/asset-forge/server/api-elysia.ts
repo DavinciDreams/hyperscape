@@ -59,6 +59,8 @@ import { ProcgenPresetService } from "./services/ProcgenPresetService";
 import { TeamService } from "./services/TeamService";
 import { AuditLogService } from "./services/AuditLogService";
 import { WorldProjectService } from "./services/WorldProjectService";
+import { GameModuleService } from "./services/GameModuleService";
+import { ScriptService } from "./services/ScriptService";
 
 // World data routes
 import { worldTreeRoutes } from "./routes/world-trees";
@@ -70,6 +72,8 @@ import { createTeamRoutes, createInviteAcceptRoute } from "./routes/teams";
 import { createGameRoutes } from "./routes/games";
 import { createWorldProjectRoutes } from "./routes/world-projects";
 import { createDeploymentRoutes } from "./routes/deployments";
+import { createModuleRoutes } from "./routes/modules";
+import { createScriptRoutes } from "./routes/scripts";
 
 // Database initialization (auto-Docker when USE_LOCAL_POSTGRES=true)
 import { initializeDatabase } from "./db/db";
@@ -131,6 +135,8 @@ const procgenPresetService = new ProcgenPresetService();
 const teamService = new TeamService();
 const auditLogService = new AuditLogService();
 const worldProjectService = new WorldProjectService();
+const gameModuleService = new GameModuleService();
+const scriptService = new ScriptService();
 
 // Armor Pipeline services
 const shellTextureService = new ShellTextureService({
@@ -271,6 +277,11 @@ const app = new Elysia()
             name: "World Projects",
             description:
               "World project CRUD, locking, snapshots, and deployments",
+          },
+          {
+            name: "Game Modules",
+            description:
+              "Custom GameModule definitions — entity types, palettes, markers, and terrain config",
           },
         ],
         components: {
@@ -447,6 +458,8 @@ const app = new Elysia()
   .use(
     createDeploymentRoutes(teamService, worldProjectService, auditLogService),
   )
+  .use(createModuleRoutes(teamService, gameModuleService, auditLogService))
+  .use(createScriptRoutes(teamService, scriptService, auditLogService))
   // Armor pipeline (POC-2: shell texturing)
   .use(createArmorPipelineRoutes(shellTextureService))
   // Tripo pipeline (Tripo 3D AI)

@@ -173,6 +173,31 @@ async function buildLibrary() {
   // instead of world.js when both exist in the same directory.
   // Type resolution uses package.json "types" → src/world/world.d.ts.
 
+  // Build PIE (Play-In-Editor) runtime — narrow entry consumed by World Studio.
+  // Bundling separately keeps asset-forge from pulling the whole shared graph
+  // (createClientWorld, createServerWorld, …) into its TypeScript program.
+  console.log('Building runtime-pie.js (Play-In-Editor runtime)...')
+  const ctxPie = await esbuild.context({
+    entryPoints: ['src/runtime/pie.ts'],
+    outfile: 'build/runtime-pie.js',
+    platform: 'neutral',
+    format: 'esm',
+    bundle: true,
+    treeShaking: true,
+    minify: false,
+    sourcemap: true,
+    packages: 'external',
+    target: 'esnext',
+    loader: {
+      '.ts': 'ts',
+      '.tsx': 'tsx',
+    },
+    plugins: [typescriptPlugin],
+  })
+  await ctxPie.rebuild()
+  await ctxPie.dispose()
+  console.log('✓ runtime-pie.js built successfully')
+
   console.log('✓ All library builds completed')
 }
 

@@ -17,6 +17,7 @@ import {
   OverridableField,
 } from "./PropertyControls";
 import { TransformSection } from "./TransformSection";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   entityData: Record<string, unknown>;
@@ -158,6 +159,19 @@ export function GameMobSpawnProperties({ entityData }: Props) {
           <TransformSection position={pos} readOnly />
         </PropertySection>
       )}
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={entityId}
+        stateKey="mobSpawnOverrides"
+        stateRoot="manifestOverrides"
+        entityData={{
+          ...entityData,
+          level: (linkedNPC?._raw as { stats?: { level?: number } } | undefined)
+            ?.stats?.level,
+        }}
+        entityCategory="gameMobSpawn"
+      />
     </>
   );
 }

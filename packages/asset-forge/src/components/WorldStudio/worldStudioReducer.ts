@@ -50,6 +50,7 @@ function studioReducer(
           currentProjectId: action.projectId,
           projectName: action.name,
           projectVersion: action.version,
+          gameMode: action.gameMode,
         },
       };
 
@@ -75,6 +76,15 @@ function studioReducer(
         project: {
           ...state.project,
           projectVersion: action.version,
+        },
+      };
+
+    case "SET_GAME_MODE":
+      return {
+        ...state,
+        project: {
+          ...state.project,
+          gameMode: action.gameMode,
         },
       };
 

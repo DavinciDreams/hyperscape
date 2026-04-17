@@ -19,6 +19,7 @@ import {
   worldProjects,
   type ForgeUser,
 } from "../db/schema";
+import { DEFAULT_GAME_MODE_MANIFEST } from "../utils/gameModeRegistry";
 
 /** User context attached to authenticated requests */
 export interface ForgeAuthContext {
@@ -81,6 +82,10 @@ async function findOrCreateForgeUser(
       .update(forgeUsers)
       .set({ lastActiveAt: new Date() })
       .where(eq(forgeUsers.id, user.id));
+    // Backfill default game for any team the user owns that has zero games
+    // (guards against the prior schema-change regression where seeding a
+    // game without `gameMode` silently failed the NOT NULL constraint).
+    await ensureDefaultGameForTeams(user);
     // Backfill default world project if any games are missing one
     await ensureDefaultWorldProject(user);
     return user;
@@ -135,6 +140,7 @@ async function ensurePersonalTeam(user: ForgeUser): Promise<void> {
       name: "Hyperscape",
       slug: "hyperscape",
       description: "Default game project",
+      gameMode: DEFAULT_GAME_MODE_MANIFEST,
     })
     .returning();
 
@@ -147,6 +153,42 @@ async function ensurePersonalTeam(user: ForgeUser): Promise<void> {
     worldData: { _placeholder: true },
     createdBy: user.id,
   });
+}
+
+/**
+ * Ensure every team the user owns has at least one game. Backfills for
+ * users whose `ensurePersonalTeam` seed failed (e.g. when the schema
+ * added a required `gameMode` column and the insert wasn't updated in
+ * lockstep — leaving the team but no game).
+ */
+async function ensureDefaultGameForTeams(user: ForgeUser): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+
+  // Teams this user belongs to, with their game counts.
+  const userTeams = await db
+    .select({ teamId: teamMembers.teamId })
+    .from(teamMembers)
+    .where(eq(teamMembers.userId, user.id));
+
+  for (const { teamId } of userTeams) {
+    const existingGames = await db
+      .select({ id: games.id })
+      .from(games)
+      .where(eq(games.teamId, teamId))
+      .limit(1);
+
+    if (existingGames.length > 0) continue;
+
+    await db.insert(games).values({
+      teamId,
+      name: "Hyperscape",
+      slug: "hyperscape",
+      description: "Default game project",
+      gameMode: DEFAULT_GAME_MODE_MANIFEST,
+    });
+    console.log("[Auth] Backfilled default Hyperscape game for team", teamId);
+  }
 }
 
 /**

@@ -38,6 +38,8 @@ interface TransformGizmoOptions {
   space: TransformSpace;
   /** Whether snapping is enabled */
   snapEnabled: boolean;
+  /** Grid snap size in meters (used for translate snap increment) */
+  gridSize: number;
   /** Surface snap: keep entity Y on terrain surface during translate */
   surfaceSnap: boolean;
   /** Called when an entity is moved via the gizmo */
@@ -60,7 +62,6 @@ interface TransformGizmoOptions {
 }
 
 // Snap values — finer than default for precise positioning
-const TRANSLATE_SNAP = 0.25; // 25cm
 const ROTATE_SNAP = THREE.MathUtils.degToRad(15); // 15 degrees
 const SCALE_SNAP = 0.25;
 
@@ -178,6 +179,7 @@ export function useTransformGizmo({
   mode,
   space,
   snapEnabled,
+  gridSize,
   surfaceSnap,
   onEntityMoved,
   onEntityRotated,
@@ -395,7 +397,7 @@ export function useTransformGizmo({
     if (!controls) return;
 
     if (snapEnabled) {
-      controls.setTranslationSnap(TRANSLATE_SNAP);
+      controls.setTranslationSnap(gridSize);
       controls.setRotationSnap(ROTATE_SNAP);
       controls.setScaleSnap(SCALE_SNAP);
     } else {
@@ -403,7 +405,7 @@ export function useTransformGizmo({
       controls.setRotationSnap(null);
       controls.setScaleSnap(null);
     }
-  }, [snapEnabled]);
+  }, [snapEnabled, gridSize]);
 
   // ---- Attach / detach based on selection ----
   useEffect(() => {

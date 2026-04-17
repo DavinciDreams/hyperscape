@@ -29,6 +29,7 @@ import {
   saveWorldProject,
   acquireProjectLock,
   releaseProjectLock,
+  fetchGame,
 } from "../../../utils/worldProjectApi";
 import {
   deserializeManifestOverrides,
@@ -40,6 +41,7 @@ import {
   EMPTY_AUDIO_LAYERS,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
+import type { GameModeManifest } from "@hyperscape/shared/runtime";
 
 /**
  * Config matching the live Hyperscape game world.
@@ -217,6 +219,22 @@ export function useProjectLoader(projectId: string) {
         const project = await getWorldProject(projectId);
         if (cancelled || controller.signal.aborted) return;
 
+        // Fetch the owning game record to pick up its GameMode manifest
+        // (Phase 4). This is non-fatal — if the fetch fails, PIE falls back
+        // to the client-side Hyperscape default.
+        let gameMode: GameModeManifest | null = null;
+        try {
+          const game = await fetchGame(project.teamId, project.gameId);
+          if (game.gameMode) gameMode = game.gameMode;
+        } catch (err) {
+          console.warn(
+            "[ProjectLoader] Failed to fetch game record for gameMode; " +
+              "PIE will use the default manifest:",
+            err,
+          );
+        }
+        if (cancelled || controller.signal.aborted) return;
+
         // Check if this is a placeholder project (created at signup, no world data yet)
         const rawData = project.worldData as Record<string, unknown>;
         let world;
@@ -259,6 +277,7 @@ export function useProjectLoader(projectId: string) {
           project.id,
           project.name,
           project.version,
+          gameMode,
         );
 
         // Load world into editing state

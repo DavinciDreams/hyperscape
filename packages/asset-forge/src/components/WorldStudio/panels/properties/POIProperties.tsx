@@ -18,6 +18,7 @@ import {
   PositionEditor,
   InfoRow,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   poi: PlacedPOI;
@@ -109,6 +110,14 @@ export function POIProperties({ poi }: Props) {
           </>
         )}
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={poi.id}
+        stateKey="pois"
+        stateRoot="extendedLayers"
+        entityData={poi as unknown as Record<string, unknown>}
+      />
     </>
   );
 }

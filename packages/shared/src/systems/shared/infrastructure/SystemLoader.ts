@@ -127,6 +127,7 @@ import { generateKillToken } from "../../../utils/game/KillTokenUtils";
 // World Content Systems
 import { NPCSystem } from "..";
 import { DialogueSystem } from "..";
+import { ScriptingSystem } from "../scripting/ScriptingSystem";
 
 // Client-only visual systems
 // NOTE: Import directly from specific files to avoid circular dependency
@@ -188,6 +189,7 @@ export interface Systems {
   stationSpawner?: StationSpawnerSystem;
   itemSpawner?: ItemSpawnerSystem;
   healthRegen?: HealthRegenSystem;
+  scripting?: ScriptingSystem;
 }
 
 /**
@@ -438,6 +440,10 @@ export async function registerSystems(world: World): Promise<void> {
   // Dialogue system - handles NPC dialogue trees
   world.register("dialogue", DialogueSystem);
 
+  // Scripting system - visual scripting runtime (subscribes to trigger events,
+  // auto-loads entity behaviorGraph on spawn, processes delayed continuations)
+  world.register("scripting", ScriptingSystem);
+
   // Quest system - handles quest progression (server only)
   // Note: world.isServer isn't reliable here because ServerNetwork registers later
   // Use Node.js environment check instead (isServerEnvironment defined above)
@@ -497,6 +503,9 @@ export async function registerSystems(world: World): Promise<void> {
   if (world.isServer) {
     systems.npc = getSystem(world, "npc") as NPCSystem;
   }
+
+  // Scripting system
+  systems.scripting = getSystem(world, "scripting") as ScriptingSystem;
 
   // DYNAMIC WORLD CONTENT SYSTEMS
   systems.mobNpcSpawner = getSystem(

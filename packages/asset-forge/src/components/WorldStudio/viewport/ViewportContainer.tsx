@@ -46,6 +46,8 @@ import { useZoneProcgen } from "../hooks/useZoneProcgen";
 import { commandHistory } from "../../../editor/commands";
 import { useSelectionOutline } from "../hooks/useSelectionOutline";
 import { useTransformGizmo } from "../hooks/useTransformGizmo";
+import { useMultiTransformGizmo } from "../hooks/useMultiTransformGizmo";
+import { useSelectionStore } from "../../../editor/stores/useSelectionStore";
 import { useCameraBookmarks } from "../hooks/useCameraBookmarks";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { useContextMenu } from "../layout/useContextMenu";
@@ -57,7 +59,9 @@ import {
 import { ViewModeDropdown } from "./ViewModeDropdown";
 import { ViewportOverlayBar } from "../toolbar/ViewportOverlayBar";
 import { ViewportOverlay } from "./ViewportOverlay";
+import { PIEConsolePanel } from "./PIEConsolePanel";
 import { usePIESession } from "../hooks/usePIESession";
+import { usePIEDebugStore } from "../../../editor/stores/usePIEDebugStore";
 import { GenerateTownDialog } from "../panels/GenerateTownDialog";
 import {
   getTownSafeRadius,
@@ -74,6 +78,9 @@ import {
   type DangerSourceInfo,
 } from "../../WorldBuilder/DifficultyHeatmap";
 import type { PlacedRegion } from "../types";
+
+/** Available grid snap sizes in meters */
+const GRID_SNAP_SIZES = [0.25, 0.5, 1.0, 2.0, 4.0] as const;
 
 /**
  * Derive the selectableId used in the 3D scene from a WorldStudio selection.
@@ -128,7 +135,7 @@ function getSelectableIdFromSelection(
 }
 
 export function ViewportContainer() {
-  const { state, actions, viewportRef } = useWorldStudio();
+  const { state, actions, viewportRef, registry, dispatch } = useWorldStudio();
   const isEditing = state.builder.mode === "editing";
   // Live terrain config (from slider drags) takes priority, then editing config, then creation config.
   // This allows real-time slider updates without full scene teardown.
@@ -293,10 +300,14 @@ export function ViewportContainer() {
   const { bookmarks, addBookmark } = useCameraBookmarks(projectId);
 
   // ----- Play-In-Editor (PIE) -----
-  const { startPIE, stopPIE } = usePIESession({
+  // Forward every PIE script-runtime debug entry into the global debug store
+  // so the PIE Console panel can render them live.
+  const appendDebugEntry = usePIEDebugStore((s) => s.append);
+  const { startPIE, stopPIE, interactAtCenter } = usePIESession({
     sceneRefs: sceneRefsRef.current,
     state,
     onExit: () => actions.pieStop(),
+    onDebug: appendDebugEntry,
   });
 
   // React to PIE state changes from toolbar
@@ -309,6 +320,9 @@ export function ViewportContainer() {
     // PIE_START → start the session
     if (curr.loading && !prev.loading) {
       try {
+        // Wipe any leftover debug entries from a previous PIE run so the
+        // console reflects only the current session.
+        usePIEDebugStore.getState().clear();
         startPIE();
         actions.pieStarted();
       } catch (err) {
@@ -323,6 +337,27 @@ export function ViewportContainer() {
       stopPIE();
     }
   }, [state.pie, startPIE, stopPIE, actions]);
+
+  // While PIE is active, route left-mouse clicks to `interactAtCenter()` so
+  // the player can interact with NPCs/resources/etc. via the crosshair.
+  // The camera is in pointer-lock FPS mode, so we listen on document and
+  // raycast from the center of the screen.
+  useEffect(() => {
+    if (!state.pie.active) return;
+    const onMouseDown = (e: MouseEvent) => {
+      // Only respond to primary button — secondary buttons are reserved for
+      // camera look / context menu in other modes.
+      if (e.button !== 0) return;
+      // Pointer-lock means clicks fire while focus is on document; ignore
+      // clicks that originated on UI overlays (which set pointer-events: auto
+      // on themselves and won't be the active element if pointer-locked).
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("[data-pie-no-interact]")) return;
+      interactAtCenter();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [state.pie.active, interactAtCenter]);
 
   // When player mode exits (ESC key in viewport), sync PIE state
   const handlePlayerModeChange = useCallback(
@@ -455,9 +490,14 @@ export function ViewportContainer() {
     isEditing &&
     (activeTool === "brush" || activeTool === "place" || hasActivePlacement);
 
+  // Multi-select from Zustand store (used for interaction mode + multi-gizmo)
+  const multiSelectionForMode = useSelectionStore((s) => s.multiSelection);
+  const showMultiGizmo =
+    isEditing && activeTool === "select" && multiSelectionForMode.length > 1;
+
   useEffect(() => {
     if (!activeSceneRefs) return;
-    if (showGizmo) {
+    if (showGizmo || showMultiGizmo) {
       // Gizmo visible: left free for gizmo handles, middle = orbit, right = pan
       activeSceneRefs.setInteractionMode("gizmo");
     } else if (needsToolMode) {
@@ -465,7 +505,7 @@ export function ViewportContainer() {
     } else {
       activeSceneRefs.setInteractionMode("orbit");
     }
-  }, [activeSceneRefs, needsToolMode, showGizmo]);
+  }, [activeSceneRefs, needsToolMode, showGizmo, showMultiGizmo]);
 
   // ----- View mode sync -----
   const handleViewModeChange = useCallback(
@@ -494,6 +534,16 @@ export function ViewportContainer() {
   const handleSurfaceSnapToggle = useCallback(() => {
     setSurfaceSnap((v) => !v);
   }, []);
+
+  // ----- Grid size cycling -----
+  const gridSize = state.tools.gridSize;
+  const handleCycleGridSize = useCallback(() => {
+    const idx = GRID_SNAP_SIZES.indexOf(
+      gridSize as (typeof GRID_SNAP_SIZES)[number],
+    );
+    const nextIdx = (idx + 1) % GRID_SNAP_SIZES.length;
+    actions.setGridSize(GRID_SNAP_SIZES[nextIdx]);
+  }, [gridSize, actions]);
 
   // ----- Selection outline -----
   useSelectionOutline({
@@ -986,12 +1036,31 @@ export function ViewportContainer() {
     mode: transformMode,
     space: transformSpace,
     snapEnabled,
+    gridSize,
     surfaceSnap,
     onEntityMoved: handleEntityMoved,
     onEntityRotated: handleEntityRotated,
     onEntityScaled: handleEntityScaled,
     onDraggingChanged: undefined,
   });
+
+  // ----- Multi-select transform gizmo -----
+  const isMultiSelectActive = showMultiGizmo;
+
+  useMultiTransformGizmo({
+    sceneRefs: activeSceneRefs,
+    enabled: isMultiSelectActive,
+    mode: transformMode,
+    space: transformSpace,
+    snapEnabled,
+    gridSize,
+    onDraggingChanged: undefined,
+  });
+
+  // When multi-select is active, detach single-gizmo by ensuring showGizmo
+  // is false (already handled: showGizmo requires a single selection, while
+  // multi-select uses multiSelection from Zustand store — they are mutually
+  // exclusive by design in the selection system).
 
   // ----- Keyboard shortcuts for gizmo -----
   useEffect(() => {
@@ -1084,7 +1153,14 @@ export function ViewportContainer() {
         activeTool === "select"
       ) {
         e.preventDefault();
-        executeDelete(state, actions, selection.type, selection.id);
+        executeDelete(
+          state,
+          actions,
+          selection.type,
+          selection.id,
+          registry,
+          dispatch,
+        );
         return;
       }
 
@@ -1263,6 +1339,7 @@ export function ViewportContainer() {
   usePlacementInteraction({
     sceneRefs: activeSceneRefs,
     gridSnap: snapEnabled,
+    gridSize,
   });
 
   // Zone tile painting interaction + overlay
@@ -1549,18 +1626,24 @@ export function ViewportContainer() {
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes("application/x-entity-palette"))
+      // Accept entity palette drags
+      if (e.dataTransfer.types.includes("application/x-entity-palette")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        const pos = raycastToTerrain(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+        );
+        if (pos) {
+          actions.updatePlacementPosition(pos);
+        }
         return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "copy";
-      // Move ghost to cursor position on terrain
-      const pos = raycastToTerrain(
-        e.clientX,
-        e.clientY,
-        e.currentTarget as HTMLElement,
-      );
-      if (pos) {
-        actions.updatePlacementPosition(pos);
+      }
+      // Accept file drops (GLTF/GLB)
+      if (e.dataTransfer.types.includes("Files")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
       }
     },
     [raycastToTerrain, actions],
@@ -1568,19 +1651,59 @@ export function ViewportContainer() {
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes("application/x-entity-palette"))
+      // Handle entity palette drop
+      if (e.dataTransfer.types.includes("application/x-entity-palette")) {
+        e.preventDefault();
+        const pos = raycastToTerrain(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+        );
+        if (pos) {
+          actions.updatePlacementPosition(pos);
+        }
+        actions.confirmPlacement();
         return;
-      e.preventDefault();
-      // Final position update + confirm
-      const pos = raycastToTerrain(
-        e.clientX,
-        e.clientY,
-        e.currentTarget as HTMLElement,
-      );
-      if (pos) {
-        actions.updatePlacementPosition(pos);
       }
-      actions.confirmPlacement();
+      // Handle file drop (GLTF/GLB import)
+      if (e.dataTransfer.files.length > 0) {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        const ext = file.name.split(".").pop()?.toLowerCase();
+        if (ext !== "gltf" && ext !== "glb") {
+          console.warn("[Viewport] Only .gltf and .glb files are supported");
+          return;
+        }
+        const pos = raycastToTerrain(
+          e.clientX,
+          e.clientY,
+          e.currentTarget as HTMLElement,
+        );
+        // Upload file then create custom asset entity
+        const formData = new FormData();
+        formData.append("file", file);
+        fetch("/api/assets/upload", { method: "POST", body: formData })
+          .then((res) => res.json())
+          .then((result: { url?: string; originalName?: string }) => {
+            if (result.url) {
+              const id = `customAsset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+              actions.addCustomAsset({
+                id,
+                name: result.originalName ?? file.name,
+                assetId: result.url,
+                assetName: result.originalName ?? file.name,
+                position: pos ?? { x: 0, y: 0, z: 0 },
+                rotation: 0,
+                scale: 1,
+                modelPath: result.url,
+                properties: {},
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            console.error("[Viewport] Failed to upload asset:", err);
+          });
+      }
     },
     [raycastToTerrain, actions],
   );
@@ -1642,7 +1765,14 @@ export function ViewportContainer() {
           label: "Duplicate",
           shortcut: "⌘D",
           onClick: () => {
-            executeDuplicate(state, actions, selType, selId);
+            executeDuplicate(
+              state,
+              actions,
+              selType,
+              selId,
+              registry,
+              dispatch,
+            );
             hideContextMenu();
           },
         },
@@ -1651,7 +1781,7 @@ export function ViewportContainer() {
           shortcut: "Del",
           danger: true,
           onClick: () => {
-            executeDelete(state, actions, selType, selId);
+            executeDelete(state, actions, selType, selId, registry, dispatch);
             hideContextMenu();
           },
         },
@@ -1901,6 +2031,7 @@ export function ViewportContainer() {
           gridEnabled={gridVisible}
           snapEnabled={snapEnabled}
           surfaceSnap={surfaceSnap}
+          gridSize={gridSize}
           tileProgress={tileProgress}
           worldSizeTiles={config?.terrain.worldSize}
           tileSize={config?.terrain.tileSize}
@@ -1918,6 +2049,7 @@ export function ViewportContainer() {
           onToggleGrid={handleGridToggle}
           onToggleSnap={handleSnapToggle}
           onToggleSurfaceSnap={handleSurfaceSnapToggle}
+          onCycleGridSize={handleCycleGridSize}
         />
       )}
 
@@ -1968,6 +2100,16 @@ export function ViewportContainer() {
             <div className="absolute left-1/2 top-0 w-px h-full bg-white -translate-x-1/2" />
             <div className="absolute top-1/2 left-0 w-full h-px bg-white -translate-y-1/2" />
           </div>
+        </div>
+      )}
+
+      {/* PIE debug console — bottom-right of viewport while PIE is active */}
+      {state.pie.active && (
+        <div
+          data-pie-no-interact
+          className="absolute bottom-3 right-3 z-20 pointer-events-none"
+        >
+          <PIEConsolePanel />
         </div>
       )}
 

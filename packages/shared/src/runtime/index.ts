@@ -18,7 +18,46 @@ export {
   PlayTestWorld,
   type PlayTestWorldOptions,
   type PIEEntity,
+  type PIEDebugEntry,
+  type PIEDebugSink,
 } from "./createPlayTestWorld";
+
+export {
+  PIEScriptRunner,
+  type PIEDebugLevel,
+  type PIEScriptRunnerOptions,
+  type PIEEntityLookup,
+} from "./PIEScriptRunner";
+
+// Re-export the runtime ScriptGraph shape so consumers (e.g. World Studio)
+// can attach behavior graphs without deep-importing into the scripting subtree.
+export type { RuntimeScriptGraph } from "../systems/shared/scripting/ScriptGraphInterpreter";
+
+// Re-export GameMode surface PIE consumers need to drive the runtime /
+// Simulate-vs-Play branch in usePIESession. Deeper registry manipulation
+// still goes through `@hyperscape/shared/gameMode` barrel.
+export type {
+  GameMode,
+  GameModeManifest,
+  GameModeContext,
+} from "../gameMode/GameMode";
+export {
+  HYPERSCAPE_DEFAULT_MANIFEST,
+  HYPERSCAPE_PAWN_ID,
+} from "../gameMode/HyperscapeGameMode";
+export { CLICK_TO_WALK_CONTROLLER_ID } from "../gameMode/controllers/ClickToWalkPlayerController";
+export { ORBIT_CAMERA_CONTROLLER_ID } from "../gameMode/cameras/OrbitCameraController";
+export {
+  GameModeRegistry,
+  gameModeRegistry,
+} from "../gameMode/GameModeRegistry";
+export { registerHyperscapeGameMode } from "../gameMode/HyperscapeGameMode";
+export {
+  FPS_DEFAULT_MANIFEST,
+  TOP_DOWN_DEFAULT_MANIFEST,
+  WASD_DEFAULT_MANIFEST,
+  registerAlternateGameModes,
+} from "../gameMode/AlternateGameModes";
 
 // Re-export editor systems and types
 export {

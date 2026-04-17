@@ -33,6 +33,7 @@ import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type {
   ExtendedWorldLayers,
   ActivePlacement,
+  AudioLayers,
   PlacedNPC,
   PlacedSpawnPoint,
   PlacedTeleport,
@@ -43,6 +44,8 @@ import type {
   PlacedWaterBody,
   PlacedDangerSource,
 } from "../types";
+import type { EntityTypeRegistry } from "../../../gameModules/EntityTypeRegistry";
+import type { MarkerConfig } from "../../../gameModules/GameModule";
 
 // ============== MARKER COLORS ==============
 
@@ -143,6 +146,70 @@ export function getMarkerGeometry(type: string): THREE.BufferGeometry {
 
   MARKER_GEOMETRY_CACHE.set(type, geo);
   return geo;
+}
+
+/**
+ * Get marker geometry from a GameModule MarkerConfig.
+ * Falls back to the type-based cache when possible, otherwise creates a new geometry.
+ */
+export function getMarkerGeometryFromConfig(
+  config: MarkerConfig,
+): THREE.BufferGeometry {
+  const scale = config.scale ?? 1;
+  const yOffset = config.yOffset ?? 0;
+  let geo: THREE.BufferGeometry;
+
+  switch (config.shape) {
+    case "capsule":
+      geo = new THREE.CapsuleGeometry(0.3 * scale, 0.8 * scale, 4, 8);
+      geo.translate(0, 0.7 * scale + yOffset, 0);
+      break;
+    case "cylinder":
+      geo = new THREE.CylinderGeometry(
+        0.4 * scale,
+        0.4 * scale,
+        1.2 * scale,
+        8,
+      );
+      geo.translate(0, 0.6 * scale + yOffset, 0);
+      break;
+    case "sphere":
+      geo = new THREE.SphereGeometry(0.5 * scale, 8, 6);
+      geo.translate(0, 0.5 * scale + yOffset, 0);
+      break;
+    case "cube":
+      geo = new THREE.BoxGeometry(0.8 * scale, 0.8 * scale, 0.8 * scale);
+      geo.translate(0, 0.4 * scale + yOffset, 0);
+      break;
+    case "billboard":
+      geo = new THREE.PlaneGeometry(0.8 * scale, 0.8 * scale);
+      geo.translate(0, 1.0 * scale + yOffset, 0);
+      break;
+    default:
+      geo = new THREE.BoxGeometry(0.5 * scale, 0.5 * scale, 0.5 * scale);
+      geo.translate(0, 0.25 * scale + yOffset, 0);
+  }
+
+  return geo;
+}
+
+/**
+ * Get marker color for an entity type. Uses hardcoded MARKER_COLORS first,
+ * falls back to registry schema color, then defaults to gray.
+ */
+export function getMarkerColor(
+  type: string,
+  registry?: EntityTypeRegistry,
+): number {
+  if (MARKER_COLORS[type as MarkerType])
+    return MARKER_COLORS[type as MarkerType];
+  if (registry) {
+    const schema = registry.get(type) ?? registry.getBySelectionType(type);
+    if (schema) {
+      return parseInt(schema.color.replace("#", ""), 16) || 0x888888;
+    }
+  }
+  return 0x888888;
 }
 
 /** Dispose all cached marker geometries (call on hook unmount) */
@@ -453,6 +520,23 @@ export function disposeGhostObject(
 
 // ============== SYNC EXTENDED LAYERS ==============
 
+/** State keys handled by the hardcoded sync passes below. */
+const HANDLED_STATE_KEYS = new Set([
+  "npcs",
+  "spawnPoints",
+  "teleports",
+  "mobSpawns",
+  "resources",
+  "stations",
+  "pois",
+  "waterBodies",
+  "dangerSources",
+  "mines",
+  "customAssets",
+  "regions",
+  "wildernessBoundary",
+]);
+
 /**
  * Diff extended layers state against current markers and create/remove as needed.
  * Pure scene-graph mutation — no React state involved.
@@ -461,6 +545,8 @@ export function syncExtendedLayers(
   layers: ExtendedWorldLayers,
   sync: SyncState,
   refs: TerrainSceneRefs,
+  registry?: EntityTypeRegistry,
+  audioLayers?: AudioLayers,
 ): void {
   if (sync.disposed) return;
 
@@ -629,6 +715,92 @@ export function syncExtendedLayers(
   layers.dangerSources.forEach((ds: PlacedDangerSource) => {
     upsertMarker(ds.id, "dangerSource", ds.name, ds.position);
   });
+
+  // Generic sync pass: iterate all registry entity types not handled above
+  if (registry) {
+    for (const schema of registry.getAll()) {
+      if (HANDLED_STATE_KEYS.has(schema.storage.stateKey)) continue;
+      if (!schema.spatial) continue;
+
+      const root =
+        schema.storage.stateRoot === "audioLayers" ? audioLayers : layers;
+      if (!root) continue;
+
+      const arr = (root as Record<string, unknown>)[schema.storage.stateKey] as
+        | Array<{
+            id: string;
+            name?: string;
+            position?: { x: number; y: number; z: number };
+            rotation?: number;
+          }>
+        | undefined;
+      if (!Array.isArray(arr)) continue;
+
+      const color = parseInt(schema.color.replace("#", ""), 16) || 0x888888;
+      for (const entity of arr) {
+        if (!entity.position) continue;
+        activeIds.add(entity.id);
+        const existing = sync.markers.get(entity.id);
+        if (existing) {
+          existing.group.position.set(
+            entity.position.x,
+            entity.position.y,
+            entity.position.z,
+          );
+          if (entity.rotation != null)
+            existing.group.rotation.y = entity.rotation;
+        } else {
+          const label = createLabelSprite(entity.name ?? schema.name);
+          const group = new THREE.Group();
+
+          // Create marker from schema config
+          const geo = getMarkerGeometryFromConfig(schema.marker);
+          const mat = new MeshStandardNodeMaterial();
+          mat.color = new THREE.Color(color);
+          mat.emissive = new THREE.Color(color);
+          mat.emissiveIntensity = 0.3;
+          mat.roughness = 0.7;
+          mat.metalness = 0.2;
+          const mesh = new THREE.Mesh(geo, mat);
+          group.add(mesh);
+          group.add(label);
+          group.position.set(
+            entity.position.x,
+            entity.position.y,
+            entity.position.z,
+          );
+          if (entity.rotation != null) group.rotation.y = entity.rotation;
+          group.name = `entity-${schema.selectionType}-${entity.id}`;
+
+          const selectData = {
+            selectable: true,
+            selectableType: "entity" as const,
+            selectableId: entity.id,
+            entityType: schema.selectionType,
+            entityId: entity.id,
+            isExtendedLayer: true,
+          };
+          group.userData = selectData;
+          group.traverse((child) => {
+            if (child instanceof THREE.Mesh) child.userData = { ...selectData };
+          });
+
+          stageAddition(group, overlay, () => {
+            refs.addSelectable(group);
+          });
+
+          sync.markers.set(entity.id, {
+            id: entity.id,
+            type: schema.selectionType,
+            mesh,
+            label,
+            group,
+            hasRealModel: false,
+          });
+        }
+      }
+    }
+  }
 
   // Teleport network connection lines
   syncTeleportLines(layers, sync, refs);

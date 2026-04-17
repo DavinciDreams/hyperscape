@@ -58,6 +58,7 @@ import {
   Zap,
   AlertTriangle,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import React, {
   useState,
   useCallback,
@@ -72,6 +73,8 @@ import { useWorldStudio } from "../WorldStudioContext";
 import { useSelectionStore } from "../../../editor/stores/useSelectionStore";
 import { useManifestValidation } from "../hooks/useManifestValidation";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
+import { resolveLucideIcon } from "../../../gameModules/utils/lucideIconMap";
+import type { EntityTypeRegistry } from "../../../gameModules/EntityTypeRegistry";
 import { useContextMenu } from "../layout/useContextMenu";
 import {
   executeDuplicate,
@@ -285,6 +288,28 @@ const TYPE_ICON_COLORS: Record<string, string> = {
   customAssets: "#2dd4bf",
   folder: "#c4a24e",
 };
+
+/** Resolve icon for a node type — hardcoded map first, then registry fallback. */
+function getTypeIcon(
+  nodeType: string,
+  registry: EntityTypeRegistry,
+): LucideIcon {
+  if (TYPE_ICONS[nodeType]) return TYPE_ICONS[nodeType];
+  const schema =
+    registry.get(nodeType) ?? registry.getBySelectionType(nodeType);
+  return schema ? resolveLucideIcon(schema.icon) : Package;
+}
+
+/** Resolve icon color for a node type — hardcoded map first, then registry fallback. */
+function getTypeIconColor(
+  nodeType: string,
+  registry: EntityTypeRegistry,
+): string {
+  if (TYPE_ICON_COLORS[nodeType]) return TYPE_ICON_COLORS[nodeType];
+  const schema =
+    registry.get(nodeType) ?? registry.getBySelectionType(nodeType);
+  return schema ? schema.color : "#888888";
+}
 
 /** UE5-style filled triangle arrow for expand/collapse */
 function ExpandArrow({ expanded }: { expanded: boolean }) {
@@ -547,6 +572,7 @@ interface OutlinerNodeProps {
   multiSelectedIds: Set<string>;
   visibilityMap: VisibilityMap;
   validationIssueIds: Set<string>;
+  registry: EntityTypeRegistry;
   onToggle: (nodeId: string) => void;
   onSelect: (node: HierarchyNode, e: React.MouseEvent) => void;
   onDoubleClick: (node: HierarchyNode) => void;
@@ -563,6 +589,7 @@ function OutlinerNode({
   multiSelectedIds,
   visibilityMap,
   validationIssueIds,
+  registry,
   onToggle,
   onSelect,
   onDoubleClick,
@@ -577,8 +604,8 @@ function OutlinerNode({
   const isSelected = selectedId != null && selectedId === nodeDataId;
   const isMultiSelected = multiSelectedIds.has(nodeDataId);
   const hasChildren = node.children && node.children.length > 0;
-  const Icon = TYPE_ICONS[node.type] ?? Globe;
-  const iconColor = TYPE_ICON_COLORS[node.type] ?? "#7c8fa6";
+  const Icon = getTypeIcon(node.type, registry);
+  const iconColor = getTypeIconColor(node.type, registry);
   const isVisible = visibilityMap.get(node.id) !== false;
   const hasValidationIssue = nodeDataId
     ? validationIssueIds.has(nodeDataId)
@@ -678,6 +705,7 @@ function OutlinerNode({
               multiSelectedIds={multiSelectedIds}
               visibilityMap={visibilityMap}
               validationIssueIds={validationIssueIds}
+              registry={registry}
               onToggle={onToggle}
               onSelect={onSelect}
               onDoubleClick={onDoubleClick}
@@ -695,7 +723,7 @@ function OutlinerNode({
 // ============== OUTLINER PANEL ==============
 
 export const OutlinerPanel = React.memo(function OutlinerPanel() {
-  const { state, actions, computed } = useWorldStudio();
+  const { state, actions, computed, registry, dispatch } = useWorldStudio();
   const multiSelection = useSelectionStore((store) => store.multiSelection);
   const addToMulti = useSelectionStore((store) => store.addToMultiSelection);
   const removeFromMulti = useSelectionStore(
@@ -1075,7 +1103,14 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
           icon: Copy,
           shortcut: "\u2318D",
           onClick: () => {
-            executeDuplicate(state, actions, nodeType, nodeId);
+            executeDuplicate(
+              state,
+              actions,
+              nodeType,
+              nodeId,
+              registry,
+              dispatch,
+            );
             hideContextMenu();
           },
         },
@@ -1085,7 +1120,7 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
           shortcut: "Del",
           danger: true,
           onClick: () => {
-            executeDelete(state, actions, nodeType, nodeId);
+            executeDelete(state, actions, nodeType, nodeId, registry, dispatch);
             hideContextMenu();
           },
         },
@@ -1360,7 +1395,7 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
                       size={11}
                       className="flex-shrink-0"
                       style={{
-                        color: TYPE_ICON_COLORS[layer.types[0]] ?? "#7c8fa6",
+                        color: getTypeIconColor(layer.types[0], registry),
                       }}
                     />
                     <span className={!isLayerVisible ? "opacity-50" : ""}>
@@ -1480,6 +1515,7 @@ export const OutlinerPanel = React.memo(function OutlinerPanel() {
             multiSelectedIds={multiSelectedIds}
             visibilityMap={visibilityMap}
             validationIssueIds={validationIssueIds}
+            registry={registry}
             onToggle={handleToggle}
             onSelect={handleSelect}
             onDoubleClick={handleDoubleClick}

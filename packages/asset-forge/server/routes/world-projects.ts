@@ -10,6 +10,7 @@ import { WorldProjectService } from "../services/WorldProjectService";
 import { AuditLogService } from "../services/AuditLogService";
 import * as WS from "../models/world-studio.models";
 import * as Models from "../models";
+import { validateEmbeddedGraphs } from "../utils/scriptGraphValidator";
 
 export const createWorldProjectRoutes = (
   teamService: TeamService,
@@ -201,6 +202,17 @@ export const createWorldProjectRoutes = (
               return { error: "project:edit permission required" };
             }
 
+            // Validate any embedded behaviorGraph objects before persisting
+            if (body.worldData) {
+              const graphValidation = validateEmbeddedGraphs(body.worldData);
+              if (!graphValidation.valid) {
+                set.status = 400;
+                return {
+                  error: `Invalid behavior graph: ${graphValidation.errors[0]}`,
+                };
+              }
+            }
+
             try {
               const project = await worldProjectService.save(
                 projectId,
@@ -243,6 +255,7 @@ export const createWorldProjectRoutes = (
             body: WS.UpdateWorldProjectBody,
             response: {
               200: WS.WorldProjectResponse,
+              400: Models.ErrorResponse,
               403: Models.ErrorResponse,
               404: Models.ErrorResponse,
               409: Models.ErrorResponse,
@@ -416,6 +429,17 @@ export const createWorldProjectRoutes = (
               return { error: "project:edit permission required" };
             }
 
+            // Validate any embedded behaviorGraph objects in manifest snapshot
+            const graphValidation = validateEmbeddedGraphs(
+              body.manifestSnapshot,
+            );
+            if (!graphValidation.valid) {
+              set.status = 400;
+              return {
+                error: `Invalid behavior graph in manifest: ${graphValidation.errors[0]}`,
+              };
+            }
+
             const project = await worldProjectService.createSnapshot(
               projectId,
               body.manifestSnapshot as Record<string, unknown>,
@@ -443,6 +467,7 @@ export const createWorldProjectRoutes = (
             }),
             response: {
               200: WS.WorldProjectResponse,
+              400: Models.ErrorResponse,
               403: Models.ErrorResponse,
               404: Models.ErrorResponse,
               500: Models.ErrorResponse,

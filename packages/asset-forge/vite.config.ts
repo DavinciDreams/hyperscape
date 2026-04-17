@@ -125,6 +125,12 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../shared/src/constants/TreeTypes.ts",
         ),
+        // PIE runtime barrel (createPlayTestWorld + PIEScriptRunner).
+        // Must come BEFORE the general @hyperscape/shared alias.
+        "@hyperscape/shared/runtime": path.resolve(
+          __dirname,
+          "../shared/build/runtime-pie.js",
+        ),
         // Use client-only build of shared to exclude server-side modules (fs-extra, etc.)
         "@hyperscape/shared": path.resolve(
           __dirname,

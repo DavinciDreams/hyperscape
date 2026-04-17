@@ -20,7 +20,7 @@ import {
 import React, { useState, useCallback, useRef, useEffect } from "react";
 
 import { ErrorBoundary } from "../common/ErrorBoundary";
-import { useWorldStudio } from "./WorldStudioContext";
+import { useWorldStudio, useStudioProject } from "./WorldStudioContext";
 import { useManifestLoader } from "./hooks/useManifestLoader";
 import { useWorldStudioShortcuts } from "./hooks/useWorldStudioShortcuts";
 import { useProjectLoader } from "./hooks/useProjectLoader";
@@ -41,6 +41,9 @@ import { MainToolbar, type RightPanelTab } from "./toolbar/MainToolbar";
 import { StatusBar } from "./toolbar/StatusBar";
 import { ViewportContainer } from "./viewport/ViewportContainer";
 import { ToastContainer } from "./layout/ToastNotifications";
+import { ScriptEditorPanel } from "../../scripting/panels/ScriptEditorPanel";
+import { ScriptEditorProvider } from "./ScriptEditorContext";
+import type { ScriptGraph } from "../../scripting/types";
 
 // ---------------------------------------------------------------------------
 // Constants & localStorage helpers
@@ -245,8 +248,9 @@ interface WorldStudioLayoutProps {
 }
 
 export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
-  const { state } = useWorldStudio();
+  const { state, dispatch } = useWorldStudio();
   const activeTool = state.tools.activeTool;
+  const { currentTeamId, currentGameId } = useStudioProject();
 
   // Persisted layout state
   const [layout, setLayout] = useState<LayoutPersistence>(loadLayout);
@@ -259,6 +263,80 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
       return next;
     });
   }, []);
+
+  // Script editor modal state
+  const [scriptEditorState, setScriptEditorState] = useState<{
+    open: boolean;
+    fieldKey: string;
+    entityId: string;
+    stateKey: string;
+    stateRoot: "extendedLayers" | "audioLayers" | "manifestOverrides";
+    tracksSource?: boolean;
+    initialGraph?: ScriptGraph;
+    entityContext?: import("./ScriptEditorContext").ScriptEditorEntityContext;
+  }>({
+    open: false,
+    fieldKey: "",
+    entityId: "",
+    stateKey: "",
+    stateRoot: "extendedLayers",
+  });
+
+  const handleOpenScriptEditor = useCallback(
+    (
+      entityId: string,
+      stateKey: string,
+      stateRoot: "extendedLayers" | "audioLayers" | "manifestOverrides",
+      tracksSource: boolean | undefined,
+      fieldKey: string,
+      graph: ScriptGraph | undefined,
+      entityContext?: import("./ScriptEditorContext").ScriptEditorEntityContext,
+    ) => {
+      setScriptEditorState({
+        open: true,
+        fieldKey,
+        entityId,
+        stateKey,
+        stateRoot,
+        tracksSource,
+        initialGraph: graph,
+        entityContext,
+      });
+    },
+    [],
+  );
+
+  const handleCloseScriptEditor = useCallback(
+    (savedGraph?: ScriptGraph) => {
+      if (savedGraph && scriptEditorState.entityId) {
+        if (scriptEditorState.stateRoot === "manifestOverrides") {
+          // Manifest entities use SET_MANIFEST_OVERRIDE to merge the graph into the override
+          dispatch({
+            type: "SET_MANIFEST_OVERRIDE",
+            overrideType: scriptEditorState.stateKey as
+              | "npcOverrides"
+              | "mobSpawnOverrides"
+              | "resourceOverrides"
+              | "stationOverrides"
+              | "storeOverrides",
+            entityId: scriptEditorState.entityId,
+            data: { [scriptEditorState.fieldKey]: savedGraph },
+          });
+        } else {
+          dispatch({
+            type: "ENTITY_UPDATE",
+            stateKey: scriptEditorState.stateKey,
+            stateRoot: scriptEditorState.stateRoot,
+            id: scriptEditorState.entityId,
+            updates: { [scriptEditorState.fieldKey]: savedGraph },
+            trackSource: scriptEditorState.tracksSource,
+          });
+        }
+      }
+      setScriptEditorState((prev) => ({ ...prev, open: false }));
+    },
+    [dispatch, scriptEditorState],
+  );
 
   // Hooks
   useProjectLoader(projectId);
@@ -380,86 +458,101 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-2.75rem)] bg-bg-primary overflow-hidden">
-      {/* Top toolbar */}
-      <MainToolbar
-        leftPanelOpen={layout.leftOpen}
-        rightPanelOpen={layout.rightOpen}
-        activeRightTab={layout.rightTab}
-        onToggleLeft={toggleLeft}
-        onToggleRight={toggleRight}
-        onSetRightTab={setRightTab}
-      />
+    <ScriptEditorProvider onOpen={handleOpenScriptEditor}>
+      <div className="flex flex-col h-[calc(100vh-2.75rem)] bg-bg-primary overflow-hidden">
+        {/* Top toolbar */}
+        <MainToolbar
+          leftPanelOpen={layout.leftOpen}
+          rightPanelOpen={layout.rightOpen}
+          activeRightTab={layout.rightTab}
+          onToggleLeft={toggleLeft}
+          onToggleRight={toggleRight}
+          onSetRightTab={setRightTab}
+        />
 
-      {/* Three-panel body */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* ====== LEFT SIDEBAR ====== */}
-        {layout.leftOpen && (
-          <>
-            <div
-              className="flex-shrink-0 bg-bg-secondary overflow-hidden flex flex-col border-r border-border-primary"
-              style={{
-                width: layout.leftWidth,
-                borderTop: "1px solid var(--surface-highlight)",
-              }}
-            >
-              <ErrorBoundary fallback={<PanelError label="Left panel" />}>
-                {renderLeftPanel()}
+        {/* Three-panel body */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* ====== LEFT SIDEBAR ====== */}
+          {layout.leftOpen && (
+            <>
+              <div
+                className="flex-shrink-0 bg-bg-secondary overflow-hidden flex flex-col border-r border-border-primary"
+                style={{
+                  width: layout.leftWidth,
+                  borderTop: "1px solid var(--surface-highlight)",
+                }}
+              >
+                <ErrorBoundary fallback={<PanelError label="Left panel" />}>
+                  {renderLeftPanel()}
+                </ErrorBoundary>
+              </div>
+              <ResizeDivider onDrag={handleLeftResize} direction="horizontal" />
+            </>
+          )}
+
+          {/* ====== CENTER: Viewport + Bottom Panel ====== */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Viewport area */}
+            <div className="flex-1 flex flex-col overflow-hidden relative">
+              <ErrorBoundary fallback={<ViewportError />}>
+                <ViewportContainer />
               </ErrorBoundary>
             </div>
-            <ResizeDivider onDrag={handleLeftResize} direction="horizontal" />
-          </>
-        )}
 
-        {/* ====== CENTER: Viewport + Bottom Panel ====== */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Viewport area */}
-          <div className="flex-1 flex flex-col overflow-hidden relative">
-            <ErrorBoundary fallback={<ViewportError />}>
-              <ViewportContainer />
+            {/* Bottom panel (Validation / Console / History) */}
+            <ErrorBoundary fallback={<PanelError label="Bottom panel" />}>
+              <BottomPanel />
             </ErrorBoundary>
           </div>
 
-          {/* Bottom panel (Validation / Console / History) */}
-          <ErrorBoundary fallback={<PanelError label="Bottom panel" />}>
-            <BottomPanel />
-          </ErrorBoundary>
+          {/* ====== RIGHT SIDEBAR (Tabbed) ====== */}
+          {layout.rightOpen && (
+            <>
+              <ResizeDivider
+                onDrag={handleRightResize}
+                direction="horizontal"
+              />
+              <div
+                className="flex-shrink-0 bg-bg-secondary overflow-hidden flex flex-col border-l border-border-primary"
+                style={{
+                  width: layout.rightWidth,
+                  borderTop: "1px solid var(--surface-highlight)",
+                }}
+              >
+                {/* Tab bar */}
+                <RightPanelTabs
+                  activeTab={layout.rightTab}
+                  onSetTab={(tab) => updateLayout({ rightTab: tab })}
+                />
+                {/* Tab content */}
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  <ErrorBoundary
+                    resetKey={`${layout.rightTab}-${state.builder.editing.selection?.id ?? "none"}`}
+                  >
+                    {renderRightContent()}
+                  </ErrorBoundary>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* ====== RIGHT SIDEBAR (Tabbed) ====== */}
-        {layout.rightOpen && (
-          <>
-            <ResizeDivider onDrag={handleRightResize} direction="horizontal" />
-            <div
-              className="flex-shrink-0 bg-bg-secondary overflow-hidden flex flex-col border-l border-border-primary"
-              style={{
-                width: layout.rightWidth,
-                borderTop: "1px solid var(--surface-highlight)",
-              }}
-            >
-              {/* Tab bar */}
-              <RightPanelTabs
-                activeTab={layout.rightTab}
-                onSetTab={(tab) => updateLayout({ rightTab: tab })}
-              />
-              {/* Tab content */}
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <ErrorBoundary
-                  resetKey={`${layout.rightTab}-${state.builder.editing.selection?.id ?? "none"}`}
-                >
-                  {renderRightContent()}
-                </ErrorBoundary>
-              </div>
-            </div>
-          </>
-        )}
+        {/* Status bar */}
+        <StatusBar />
+
+        {/* Toast notifications (portal) */}
+        <ToastContainer />
+
+        {/* Script editor modal overlay */}
+        <ScriptEditorPanel
+          open={scriptEditorState.open}
+          onClose={handleCloseScriptEditor}
+          initialGraph={scriptEditorState.initialGraph}
+          entityContext={scriptEditorState.entityContext}
+          teamId={currentTeamId}
+          gameId={currentGameId}
+        />
       </div>
-
-      {/* Status bar */}
-      <StatusBar />
-
-      {/* Toast notifications (portal) */}
-      <ToastContainer />
-    </div>
+    </ScriptEditorProvider>
   );
 }

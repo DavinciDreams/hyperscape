@@ -490,6 +490,66 @@ export const createAssetRoutes = (
                 "Uploads a VRM file for an asset. (Auth optional - authenticated users get ownership tracking)",
             },
           },
+        )
+
+        // Upload GLTF/GLB file for custom asset placement
+        .post(
+          "/upload",
+          async ({ request }) => {
+            const formData = await request.formData();
+            const file = formData.get("file") as File | null;
+
+            if (!file) {
+              return { error: "No file provided" };
+            }
+
+            const ext = path.extname(file.name).toLowerCase();
+            if (ext !== ".gltf" && ext !== ".glb") {
+              return { error: "Only .gltf and .glb files are supported" };
+            }
+
+            // Save to assets directory
+            const uploadsDir = path.join(
+              rootDir,
+              "public",
+              "uploads",
+              "custom-assets",
+            );
+            if (!fs.existsSync(uploadsDir)) {
+              fs.mkdirSync(uploadsDir, { recursive: true });
+            }
+
+            const timestamp = Date.now();
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+            const filename = `${timestamp}_${safeName}`;
+            const filePath = path.join(uploadsDir, filename);
+
+            const buffer = Buffer.from(await file.arrayBuffer());
+            fs.writeFileSync(filePath, buffer);
+
+            const url = `/uploads/custom-assets/${filename}`;
+            const fileSizeKB = Math.round(buffer.length / 1024);
+
+            console.log(
+              `[Assets] Custom asset uploaded: ${filename} (${fileSizeKB}KB)`,
+            );
+
+            return {
+              url,
+              filename,
+              originalName: file.name,
+              size: buffer.length,
+              message: `Custom asset uploaded: ${file.name} (${fileSizeKB}KB)`,
+            };
+          },
+          {
+            detail: {
+              tags: ["Assets"],
+              summary: "Upload GLTF/GLB custom asset",
+              description:
+                "Upload a .gltf or .glb file for use as a custom asset in the World Studio editor.",
+            },
+          },
         ),
   );
 };

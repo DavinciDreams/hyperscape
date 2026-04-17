@@ -22,6 +22,20 @@
       "when": 1743120000000,
       "tag": "0002_world_studio_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776326400000,
+      "tag": "0003_games_game_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776326500000,
+      "tag": "0004_games_module_id_and_game_modules_scripts",
+      "breakpoints": true
     }
   ]
 }

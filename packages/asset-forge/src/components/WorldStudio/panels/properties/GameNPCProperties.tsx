@@ -15,8 +15,10 @@ import {
   Package,
   MessageSquare,
   Mic,
+  Plus,
+  Trash2,
 } from "lucide-react";
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
 import type { NPCManifestOverride, ManifestItem } from "../../types";
 import { useWorldStudio } from "../../WorldStudioContext";
@@ -28,8 +30,10 @@ import {
   Toggle,
   OverridableField,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 import { TransformSection } from "./TransformSection";
 import { GameStoreEditor } from "./GameStoreEditor";
+import { DialogueEditor } from "./DialogueEditor";
 
 interface Props {
   entityData: Record<string, unknown>;
@@ -138,10 +142,71 @@ export function GameNPCProperties({ entityData }: Props) {
     [override, entityId, actions],
   );
 
+  // Helper: set a whole top-level section (for drops, dialogue)
+  const setSection = useCallback(
+    (section: string, value: unknown) => {
+      const existing = override ?? ({ entityId } as Record<string, unknown>);
+      actions.setManifestOverride("npcOverrides", entityId, {
+        ...existing,
+        [section]: value,
+      });
+    },
+    [override, entityId, actions],
+  );
+
+  // Helper: reset an entire section
+  const resetSection = useCallback(
+    (section: string) => {
+      if (!override) return;
+      const updated = { ...override } as Record<string, unknown>;
+      delete updated[section];
+      const keys = Object.keys(updated).filter((k) => k !== "entityId");
+      if (keys.length === 0) {
+        actions.clearManifestOverride("npcOverrides", entityId);
+      } else {
+        actions.setManifestOverride("npcOverrides", entityId, updated);
+      }
+    },
+    [override, entityId, actions],
+  );
+
   const pos = entityData.position as
     | { x: number; y: number; z: number }
     | undefined;
   const drops = raw?.drops as Record<string, unknown> | undefined;
+
+  // Merged dialogue (override wins)
+  const mergedDialogue = useMemo(() => {
+    if (override?.dialogue) return override.dialogue;
+    if (!raw?.dialogue) return undefined;
+    return raw.dialogue as NPCManifestOverride["dialogue"];
+  }, [override?.dialogue, raw?.dialogue]);
+
+  // Drop tier handlers
+  const handleSetDropTier = useCallback(
+    (tier: string, tierDrops: Array<Record<string, unknown>>) => {
+      const currentDrops = (override?.drops ?? drops ?? {}) as Record<
+        string,
+        unknown
+      >;
+      setSection("drops", { ...currentDrops, [tier]: tierDrops });
+    },
+    [override?.drops, drops, setSection],
+  );
+
+  const handleResetDropTier = useCallback(
+    (tier: string) => {
+      if (!override?.drops) return;
+      const updatedDrops = { ...override.drops } as Record<string, unknown>;
+      delete updatedDrops[tier];
+      if (Object.keys(updatedDrops).length > 0) {
+        setSection("drops", updatedDrops);
+      } else {
+        resetSection("drops");
+      }
+    },
+    [override?.drops, setSection, resetSection],
+  );
 
   // Get store info
   const storeId = entityData.storeId as string | undefined;
@@ -412,13 +477,54 @@ export function GameNPCProperties({ entityData }: Props) {
         </OverridableField>
       </PropertySection>
 
-      {/* Drops with resolved item names */}
-      {drops && (
-        <DropTableSection drops={drops} items={state.manifests.items} />
+      {/* Drops — editable */}
+      {(drops || override?.drops) && (
+        <DropTableEditor
+          baseDrops={drops ?? {}}
+          overrideDrops={override?.drops}
+          items={state.manifests.items}
+          onSetTier={handleSetDropTier}
+          onResetTier={handleResetDropTier}
+        />
       )}
 
       {/* Linked Store — full editable store editor */}
       {storeId && <GameStoreEditor storeId={storeId} />}
+
+      {/* Dialogue — editable */}
+      {mergedDialogue ? (
+        <DialogueEditor
+          dialogue={mergedDialogue}
+          isOverridden={override?.dialogue !== undefined}
+          onUpdate={(d) => setSection("dialogue", d)}
+          onReset={() => resetSection("dialogue")}
+          persistKey="game-npc-dialogue"
+        />
+      ) : (
+        <PropertySection
+          title="Dialogue"
+          icon={<MessageSquare size={10} />}
+          defaultOpen={false}
+        >
+          <button
+            className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] rounded border border-dashed border-border-primary text-text-tertiary hover:text-text-secondary hover:border-text-tertiary transition-colors"
+            onClick={() =>
+              setSection("dialogue", {
+                entryNodeId: "greeting",
+                nodes: [
+                  {
+                    id: "greeting",
+                    text: "Hello, adventurer!",
+                    responses: [],
+                  },
+                ],
+              })
+            }
+          >
+            <Plus size={10} /> Create Dialogue
+          </button>
+        </PropertySection>
+      )}
 
       {/* Transform */}
       {pos && (
@@ -436,13 +542,6 @@ export function GameNPCProperties({ entityData }: Props) {
         <div className="space-y-1">
           <button
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-bg-tertiary hover:bg-primary/10 hover:text-primary text-text-secondary rounded-md border border-border-primary transition-colors w-full"
-            onClick={() => console.log("[Action] Edit Dialogue for", entityId)}
-          >
-            <MessageSquare size={12} className="flex-shrink-0" />
-            <span>Edit Dialogue</span>
-          </button>
-          <button
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs bg-bg-tertiary hover:bg-primary/10 hover:text-primary text-text-secondary rounded-md border border-border-primary transition-colors w-full"
             onClick={() => console.log("[Action] Generate Voice for", entityId)}
           >
             <Mic size={12} className="flex-shrink-0" />
@@ -450,11 +549,29 @@ export function GameNPCProperties({ entityData }: Props) {
           </button>
         </div>
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={entityId}
+        stateKey="npcOverrides"
+        stateRoot="manifestOverrides"
+        entityData={{
+          ...entityData,
+          hasDialogueTree: !!(
+            mergedDialogue?.nodes && mergedDialogue.nodes.length > 0
+          ),
+        }}
+        entityCategory="gameNPC"
+        entityContext={{
+          identifier: entityId,
+          dialogue: mergedDialogue,
+        }}
+      />
     </>
   );
 }
 
-// ============== Drop Table Section ==============
+// ============== Drop Table Editor ==============
 
 const TIER_LABELS: Record<string, string> = {
   always: "Always",
@@ -467,17 +584,23 @@ const TIER_LABELS: Record<string, string> = {
 const TIER_COLORS: Record<string, string> = {
   always: "text-text-secondary",
   common: "text-text-secondary",
-  uncommon: "text-green-400",
-  rare: "text-blue-400",
-  veryRare: "text-purple-400",
+  uncommon: "text-success",
+  rare: "text-info",
+  veryRare: "text-primary-light",
 };
 
-function DropTableSection({
-  drops,
+function DropTableEditor({
+  baseDrops,
+  overrideDrops,
   items,
+  onSetTier,
+  onResetTier,
 }: {
-  drops: Record<string, unknown>;
+  baseDrops: Record<string, unknown>;
+  overrideDrops?: NPCManifestOverride["drops"];
   items: ManifestItem[];
+  onSetTier: (tier: string, drops: Array<Record<string, unknown>>) => void;
+  onResetTier: (tier: string) => void;
 }) {
   const resolveItemName = useCallback(
     (itemId: string): string => {
@@ -494,18 +617,17 @@ function DropTableSection({
       persistKey="game-npc-drops"
       defaultOpen={false}
     >
-      {/* Default drop */}
-      {drops.defaultDrop != null &&
+      {/* Default drop (read-only) */}
+      {baseDrops.defaultDrop != null &&
         (() => {
-          const dd = drops.defaultDrop as Record<string, unknown>;
-          const itemId = String(dd.itemId ?? "");
+          const dd = baseDrops.defaultDrop as Record<string, unknown>;
           return (
             <div className="py-1 border-b border-border-primary/30">
               <div className="text-[9px] font-semibold text-text-tertiary uppercase tracking-wider mb-0.5">
                 Default
               </div>
               <div className="flex items-center gap-1 text-[10px] text-text-secondary">
-                <span>{resolveItemName(itemId)}</span>
+                <span>{resolveItemName(String(dd.itemId ?? ""))}</span>
                 {dd.quantity != null && (
                   <span className="text-text-tertiary">
                     ×{String(dd.quantity)}
@@ -516,48 +638,138 @@ function DropTableSection({
           );
         })()}
 
-      {/* Tiered drops */}
+      {/* Tiered drops — editable */}
       {(["always", "common", "uncommon", "rare", "veryRare"] as const).map(
         (tier) => {
-          const tierItems = drops[tier] as
+          const baseItems =
+            (baseDrops[tier] as Array<Record<string, unknown>> | undefined) ??
+            [];
+          const ovrItems = overrideDrops?.[tier] as
             | Array<Record<string, unknown>>
             | undefined;
-          if (!tierItems || tierItems.length === 0) return null;
+          const isOverridden = ovrItems !== undefined;
+          const currentItems = ovrItems ?? baseItems;
+
+          if (currentItems.length === 0 && !isOverridden) return null;
+
+          const handleUpdateDrop = (
+            idx: number,
+            field: string,
+            value: unknown,
+          ) => {
+            const newDrops = currentItems.map((d, i) =>
+              i === idx ? { ...d, [field]: value } : { ...d },
+            );
+            onSetTier(tier, newDrops);
+          };
+
+          const handleDeleteDrop = (idx: number) => {
+            onSetTier(
+              tier,
+              currentItems.filter((_, i) => i !== idx).map((d) => ({ ...d })),
+            );
+          };
+
+          const handleAddDrop = () => {
+            onSetTier(tier, [
+              ...currentItems.map((d) => ({ ...d })),
+              { itemId: "coins", minQuantity: 1, maxQuantity: 1, chance: 0.5 },
+            ]);
+          };
+
           return (
             <div
               key={tier}
-              className="py-1 border-b border-border-primary/30 last:border-0"
+              className="py-1.5 border-b border-border-primary/30 last:border-0"
             >
-              <div
-                className={`text-[9px] font-semibold uppercase tracking-wider mb-0.5 ${TIER_COLORS[tier] ?? "text-text-tertiary"}`}
-              >
-                {TIER_LABELS[tier] ?? tier} ({tierItems.length})
+              <div className="flex items-center justify-between mb-1">
+                <div
+                  className={`text-[9px] font-semibold uppercase tracking-wider flex items-center gap-1 ${TIER_COLORS[tier] ?? "text-text-tertiary"}`}
+                >
+                  {TIER_LABELS[tier] ?? tier} ({currentItems.length})
+                  {isOverridden && (
+                    <span className="text-primary text-[8px]">●</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  {isOverridden && (
+                    <button
+                      className="text-[8px] text-text-tertiary hover:text-text-secondary transition-colors px-1"
+                      onClick={() => onResetTier(tier)}
+                      title="Reset to base"
+                    >
+                      ⟲
+                    </button>
+                  )}
+                  <button
+                    className="p-0.5 rounded text-text-tertiary hover:text-primary transition-colors"
+                    onClick={handleAddDrop}
+                    title="Add drop"
+                  >
+                    <Plus size={10} />
+                  </button>
+                </div>
               </div>
-              {tierItems.map((drop, idx) => {
+
+              {currentItems.map((drop, idx) => {
                 const itemId = String(drop.itemId ?? "");
-                const qty = drop.quantity ?? drop.minQuantity;
-                const maxQty = drop.maxQuantity;
-                const chance = drop.chance as number | undefined;
+                const minQty = Number(drop.minQuantity ?? drop.quantity ?? 1);
+                const maxQty = Number(drop.maxQuantity ?? drop.quantity ?? 1);
+                const chance = Number(drop.chance ?? 1);
                 return (
                   <div
-                    key={`${tier}-${idx}`}
-                    className="flex items-center justify-between text-[10px] py-0.5"
+                    key={idx}
+                    className="py-1 pl-1 group border-b border-border-primary/20 last:border-0"
                   >
-                    <span className="text-text-secondary truncate">
-                      {resolveItemName(itemId)}
-                    </span>
-                    <span className="text-text-tertiary flex-shrink-0 ml-1">
-                      {qty != null && maxQty != null && maxQty !== qty
-                        ? `${qty}–${maxQty}`
-                        : qty != null
-                          ? `×${qty}`
-                          : ""}
-                      {chance != null && (
-                        <span className="ml-1">
-                          {(chance * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </span>
+                    <div className="flex items-center gap-1 mb-0.5">
+                      <span className="text-[10px] text-text-secondary truncate flex-1">
+                        {resolveItemName(itemId)}
+                      </span>
+                      <button
+                        className="p-0.5 rounded text-text-tertiary opacity-0 group-hover:opacity-100 hover:text-error transition-all"
+                        onClick={() => handleDeleteDrop(idx)}
+                        title="Remove drop"
+                      >
+                        <Trash2 size={9} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <TextInput
+                        label=""
+                        value={itemId}
+                        onChange={(v) => handleUpdateDrop(idx, "itemId", v)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 mt-0.5">
+                      <DragNumberInput
+                        label="Min"
+                        value={minQty}
+                        onChange={(v) =>
+                          handleUpdateDrop(idx, "minQuantity", v)
+                        }
+                        min={1}
+                        max={9999}
+                        step={1}
+                      />
+                      <DragNumberInput
+                        label="Max"
+                        value={maxQty}
+                        onChange={(v) =>
+                          handleUpdateDrop(idx, "maxQuantity", v)
+                        }
+                        min={1}
+                        max={9999}
+                        step={1}
+                      />
+                      <DragNumberInput
+                        label="Chance"
+                        value={chance}
+                        onChange={(v) => handleUpdateDrop(idx, "chance", v)}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                      />
+                    </div>
                   </div>
                 );
               })}

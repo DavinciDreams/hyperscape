@@ -19,6 +19,7 @@ import {
   OverridableField,
 } from "./PropertyControls";
 import { TransformSection } from "./TransformSection";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   entityData: Record<string, unknown>;
@@ -113,6 +114,13 @@ export function GameStationProperties({ entityData }: Props) {
             <TransformSection position={pos} readOnly />
           </PropertySection>
         )}
+        <BehaviorScriptSection
+          entityId={entityId}
+          stateKey="stationOverrides"
+          stateRoot="manifestOverrides"
+          entityData={entityData}
+          entityCategory="gameStation"
+        />
       </>
     );
   }
@@ -260,6 +268,15 @@ export function GameStationProperties({ entityData }: Props) {
           <TransformSection position={pos} readOnly />
         </PropertySection>
       )}
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={entityId}
+        stateKey="stationOverrides"
+        stateRoot="manifestOverrides"
+        entityData={entityData}
+        entityCategory="gameStation"
+      />
     </>
   );
 }

@@ -17,6 +17,7 @@ import {
   SliderInput,
   InfoRow,
 } from "./PropertyControls";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
 
 interface Props {
   dangerSource: PlacedDangerSource;
@@ -96,6 +97,14 @@ export function DangerSourceProperties({ dangerSource }: Props) {
         />
         <InfoRow label="Zero at" value={`${dangerSource.radius}m`} />
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={dangerSource.id}
+        stateKey="dangerSources"
+        stateRoot="extendedLayers"
+        entityData={dangerSource as unknown as Record<string, unknown>}
+      />
     </>
   );
 }

@@ -673,6 +673,77 @@ export class PlacePrefabCommand implements Command {
   }
 }
 
+// ============== BATCH PASTE COMMAND ==============
+
+export interface BatchPasteEntry {
+  entityId: string;
+  entityType: string;
+  entityData: Record<string, unknown>;
+  onPlace: (data: Record<string, unknown>) => void;
+  onRemove: (id: string) => void;
+}
+
+/**
+ * Undoable command for pasting copied entities (Ctrl+V).
+ * Similar to PlacePrefabCommand but semantically distinct for history labeling.
+ */
+export class BatchPasteCommand implements Command {
+  readonly type = "BatchPaste";
+  readonly channel = "entities" as const;
+  private entries: BatchPasteEntry[];
+
+  constructor(entries: BatchPasteEntry[]) {
+    this.entries = entries;
+  }
+
+  execute(): void {
+    for (const entry of this.entries) {
+      entry.onPlace(entry.entityData);
+    }
+  }
+
+  undo(): void {
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      this.entries[i].onRemove(this.entries[i].entityId);
+    }
+  }
+}
+
+// ============== BATCH TRANSFORM COMMAND ==============
+
+export interface BatchTransformEntry {
+  entityId: string;
+  oldPosition: { x: number; y: number; z: number };
+  newPosition: { x: number; y: number; z: number };
+  onPositionChange: (position: { x: number; y: number; z: number }) => void;
+}
+
+/**
+ * Undoable command for transforming multiple selected entities at once.
+ * Used by multi-select transform gizmo.
+ */
+export class BatchTransformCommand implements Command {
+  readonly type = "BatchTransform";
+  readonly channel = "entities" as const;
+  private entries: BatchTransformEntry[];
+
+  constructor(entries: BatchTransformEntry[]) {
+    this.entries = entries;
+  }
+
+  execute(): void {
+    for (const entry of this.entries) {
+      entry.onPositionChange(entry.newPosition);
+    }
+  }
+
+  undo(): void {
+    for (const entry of this.entries) {
+      entry.onPositionChange(entry.oldPosition);
+    }
+  }
+}
+
 // ============== SINGLETON ==============
 
 /** Global command history instance for the editor */

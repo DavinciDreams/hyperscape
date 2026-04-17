@@ -19,7 +19,12 @@ import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import { queueDisposal } from "../utils/deferredGpuDisposal";
 
 import type { WorldStudioState } from "../WorldStudioContext";
-import type { ExtendedWorldLayers, ActivePlacement } from "../types";
+import type {
+  ExtendedWorldLayers,
+  ActivePlacement,
+  AudioLayers,
+} from "../types";
+import type { EntityTypeRegistry } from "../../../gameModules/EntityTypeRegistry";
 
 import {
   type SyncState,
@@ -39,6 +44,8 @@ interface SyncOptions {
   sceneRefs: TerrainSceneRefs | null;
   studioState: WorldStudioState;
   onSelectEntity?: (type: string, id: string) => void;
+  /** Entity type registry for generic module entity markers */
+  registry?: EntityTypeRegistry;
 }
 
 /**
@@ -49,6 +56,7 @@ export function useEditorWorldSync({
   sceneRefs,
   studioState,
   onSelectEntity,
+  registry,
 }: SyncOptions) {
   const syncRef = useRef<SyncState>(createInitialSyncState());
 
@@ -60,13 +68,20 @@ export function useEditorWorldSync({
   const onSelectEntityRef = useRef(onSelectEntity);
   onSelectEntityRef.current = onSelectEntity;
 
+  // Keep stable ref to registry
+  const registryRef = useRef(registry);
+  registryRef.current = registry;
+
   // Sync extended layer entities
-  const handleSyncLayers = useCallback((layers: ExtendedWorldLayers) => {
-    const sync = syncRef.current;
-    const refs = sceneRefsRef.current;
-    if (!refs || sync.disposed) return;
-    syncExtendedLayers(layers, sync, refs);
-  }, []);
+  const handleSyncLayers = useCallback(
+    (layers: ExtendedWorldLayers, audioLayers?: AudioLayers) => {
+      const sync = syncRef.current;
+      const refs = sceneRefsRef.current;
+      if (!refs || sync.disposed) return;
+      syncExtendedLayers(layers, sync, refs, registryRef.current, audioLayers);
+    },
+    [],
+  );
 
   // Sync ghost placement preview
   const handleSyncGhost = useCallback((placement: ActivePlacement | null) => {
@@ -78,8 +93,8 @@ export function useEditorWorldSync({
 
   // Sync extended layers when they change
   useEffect(() => {
-    handleSyncLayers(studioState.extendedLayers);
-  }, [studioState.extendedLayers, handleSyncLayers]);
+    handleSyncLayers(studioState.extendedLayers, studioState.audioLayers);
+  }, [studioState.extendedLayers, studioState.audioLayers, handleSyncLayers]);
 
   // Sync ghost placement
   useEffect(() => {

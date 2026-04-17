@@ -15,186 +15,33 @@
 import { useRef, useCallback, useEffect } from "react";
 import * as THREE from "three/webgpu";
 
-// PIE types and factory — local to asset-forge to avoid shared package rebuild.
-// The canonical factory lives in @hyperscape/shared/runtime/createPlayTestWorld.ts
-// and will be used once shared is rebuilt.
+// PIE world + script runtime live in @hyperscape/shared.
+// The runtime uses the same ScriptGraphInterpreter as the production server
+// so behavior graphs run identically inside PIE and in-game.
+import {
+  createPlayTestWorld,
+  PlayTestWorld,
+  type PIEEntity,
+  type PlayTestWorldOptions,
+  type PIEDebugEntry,
+  type RuntimeScriptGraph,
+  type GameModeManifest,
+  HYPERSCAPE_DEFAULT_MANIFEST,
+  CLICK_TO_WALK_CONTROLLER_ID,
+} from "@hyperscape/shared/runtime";
+import type { ScriptGraph } from "../../../scripting/types";
 
-interface PIEEntity {
-  id: string;
-  type: "player" | "mob" | "npc" | "resource" | "station";
-  position: { x: number; y: number; z: number };
-  rotation: number;
-  name: string;
-  patrolCenter?: { x: number; z: number };
-  patrolRadius?: number;
-  moveTarget?: { x: number; z: number } | null;
-  mobId?: string;
-  resourceType?: string;
-  stationType?: string;
-  npcType?: string;
-}
-
-interface PlayTestWorldOptions {
-  mobSpawns?: Array<{
-    id: string;
-    mobId: string;
-    name: string;
-    position: { x: number; y: number; z: number };
-    spawnRadius: number;
-    maxCount: number;
-  }>;
-  npcs?: Array<{
-    id: string;
-    type: string;
-    name: string;
-    position: { x: number; y: number; z: number };
-  }>;
-  resources?: Array<{
-    id: string;
-    resourceId: string;
-    resourceType: string;
-    name: string;
-    position: { x: number; y: number; z: number };
-  }>;
-  playerSpawn?: { x: number; y: number; z: number };
-}
-
-class PlayTestWorld {
-  readonly entities = new Map<string, PIEEntity>();
-  private _tickCount = 0;
-  private _isRunning = false;
-  player: PIEEntity | null = null;
-
-  get isRunning(): boolean {
-    return this._isRunning;
-  }
-
-  start(options: PlayTestWorldOptions): void {
-    this._isRunning = true;
-    this._tickCount = 0;
-    this.entities.clear();
-
-    const spawn = options.playerSpawn ?? { x: 0, y: 2, z: 0 };
-    this.player = {
-      id: "pie-player",
-      type: "player",
-      position: { ...spawn },
-      rotation: 0,
-      name: "Player",
-    };
-    this.entities.set(this.player.id, this.player);
-
-    if (options.mobSpawns) {
-      for (const ms of options.mobSpawns) {
-        for (let i = 0; i < ms.maxCount; i++) {
-          const angle = (i / ms.maxCount) * Math.PI * 2;
-          const dist = ms.spawnRadius * 0.5;
-          const entity: PIEEntity = {
-            id: `mob_${ms.id}_${i}`,
-            type: "mob",
-            position: {
-              x: ms.position.x + Math.cos(angle) * dist,
-              y: ms.position.y,
-              z: ms.position.z + Math.sin(angle) * dist,
-            },
-            rotation: angle,
-            name: ms.name,
-            mobId: ms.mobId,
-            patrolCenter: { x: ms.position.x, z: ms.position.z },
-            patrolRadius: ms.spawnRadius,
-            moveTarget: null,
-          };
-          this.entities.set(entity.id, entity);
-        }
-      }
-    }
-
-    if (options.npcs) {
-      for (const npc of options.npcs) {
-        const entity: PIEEntity = {
-          id: `npc_${npc.id}`,
-          type: "npc",
-          position: { ...npc.position },
-          rotation: 0,
-          name: npc.name,
-          npcType: npc.type,
-        };
-        this.entities.set(entity.id, entity);
-      }
-    }
-
-    if (options.resources) {
-      for (const res of options.resources) {
-        const entity: PIEEntity = {
-          id: `resource_${res.id}`,
-          type: "resource",
-          position: { ...res.position },
-          rotation: 0,
-          name: res.name,
-          resourceType: res.resourceType,
-        };
-        this.entities.set(entity.id, entity);
-      }
-    }
-
-    console.log(`[PIE] Started with ${this.entities.size} entities`);
-  }
-
-  tick(deltaTime: number): void {
-    if (!this._isRunning) return;
-    this._tickCount++;
-
-    for (const entity of this.entities.values()) {
-      // Mob patrol AI
-      if (entity.type === "mob" && entity.patrolCenter) {
-        if (!entity.moveTarget || this._tickCount % 180 === 0) {
-          const angle = Math.random() * Math.PI * 2;
-          const dist = Math.random() * entity.patrolRadius!;
-          entity.moveTarget = {
-            x: entity.patrolCenter.x + Math.cos(angle) * dist,
-            z: entity.patrolCenter.z + Math.sin(angle) * dist,
-          };
-        }
-        if (entity.moveTarget) {
-          const dx = entity.moveTarget.x - entity.position.x;
-          const dz = entity.moveTarget.z - entity.position.z;
-          const distSq = dx * dx + dz * dz;
-          if (distSq > 0.25) {
-            const speed = 2 * deltaTime;
-            const d = Math.sqrt(distSq);
-            entity.position.x += (dx / d) * speed;
-            entity.position.z += (dz / d) * speed;
-            entity.rotation = Math.atan2(dx, dz);
-          } else {
-            entity.moveTarget = null;
-          }
-        }
-      }
-
-      // NPC face-toward-player
-      if (entity.type === "npc" && this.player) {
-        const dx = this.player.position.x - entity.position.x;
-        const dz = this.player.position.z - entity.position.z;
-        if (dx * dx + dz * dz < 100) {
-          entity.rotation = Math.atan2(dx, dz);
-        }
-      }
-    }
-  }
-
-  stop(): void {
-    this._isRunning = false;
-    this.player = null;
-    this.entities.clear();
-    console.log("[PIE] Stopped");
-  }
-}
-
-function createPlayTestWorld(): PlayTestWorld {
-  return new PlayTestWorld();
-}
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type { WorldStudioState } from "../worldStudioTypes";
+
+/**
+ * Cast an editor `ScriptGraph` to the runtime's `RuntimeScriptGraph`.
+ * The two types are structurally identical for runtime fields; the editor's
+ * `ScriptNode.position` is an extra field the runtime ignores.
+ */
+function toRuntimeGraph(g: ScriptGraph): RuntimeScriptGraph {
+  return g as unknown as RuntimeScriptGraph;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -257,6 +104,11 @@ interface UsePIESessionOptions {
   state: WorldStudioState;
   /** Called when PIE exits (e.g., user presses ESC) */
   onExit: () => void;
+  /**
+   * Receives every script-runtime debug entry while PIE is active.
+   * Wired by `WorldStudioLayout` to a PIE Console panel.
+   */
+  onDebug?: (entry: PIEDebugEntry) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +119,7 @@ export function usePIESession({
   sceneRefs,
   state,
   onExit,
+  onDebug,
 }: UsePIESessionOptions) {
   const sessionRef = useRef<PIESessionState>({
     world: null,
@@ -279,6 +132,10 @@ export function usePIESession({
   // Track the onExit callback in a ref to avoid stale closures
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+
+  // Track the debug sink in a ref so updates don't restart PIE.
+  const onDebugRef = useRef(onDebug);
+  onDebugRef.current = onDebug;
 
   // Track sceneRefs in a ref
   const sceneRefsRef = useRef(sceneRefs);
@@ -308,7 +165,27 @@ export function usePIESession({
     // Collect entity data from manifests
     const gameEntities = state.gameEntities;
     const extendedLayers = state.extendedLayers;
+    const overrides = state.manifestOverrides;
     const offset = refs.worldCenterOffset;
+
+    // Behavior-graph lookup helpers — return the editor-side ScriptGraph cast
+    // to the runtime shape (the runtime ignores the editor's `position` field).
+    const npcGraph = (typeId: string) => {
+      const g = overrides.npcOverrides.get(typeId)?.behaviorGraph;
+      return g ? toRuntimeGraph(g) : undefined;
+    };
+    const mobGraph = (spawnId: string) => {
+      const g = overrides.mobSpawnOverrides.get(spawnId)?.behaviorGraph;
+      return g ? toRuntimeGraph(g) : undefined;
+    };
+    const resGraph = (resId: string) => {
+      const g = overrides.resourceOverrides.get(resId)?.behaviorGraph;
+      return g ? toRuntimeGraph(g) : undefined;
+    };
+    const stationGraph = (stationId: string) => {
+      const g = overrides.stationOverrides.get(stationId)?.behaviorGraph;
+      return g ? toRuntimeGraph(g) : undefined;
+    };
 
     // Gather mob spawns from extended layers (hand-placed + procgen)
     const mobSpawns = extendedLayers.mobSpawns.map((ms) => ({
@@ -322,6 +199,7 @@ export function usePIESession({
       },
       spawnRadius: ms.spawnRadius,
       maxCount: ms.maxCount,
+      behaviorGraph: mobGraph(ms.id),
     }));
 
     // Gather NPCs (GameEntityInfo has position: {x, z} — no y)
@@ -334,6 +212,7 @@ export function usePIESession({
         y: 0, // Will be corrected to terrain height by the PIE world
         z: npc.position.z + offset,
       },
+      behaviorGraph: npcGraph(npc.entityId),
     }));
 
     // Gather resources
@@ -347,6 +226,19 @@ export function usePIESession({
         y: res.position.y,
         z: res.position.z + offset,
       },
+      behaviorGraph: resGraph(res.id),
+    }));
+
+    // Gather stations
+    const stations = extendedLayers.stations.map((st) => ({
+      id: st.id,
+      type: st.stationType,
+      position: {
+        x: st.position.x + offset,
+        y: st.position.y,
+        z: st.position.z + offset,
+      },
+      behaviorGraph: stationGraph(st.id),
     }));
 
     // Player spawn: use camera's current XZ position at terrain height
@@ -358,8 +250,26 @@ export function usePIESession({
       z: camPos.z,
     };
 
-    // Start the PIE world
-    world.start({ mobSpawns, npcs, resources, playerSpawn });
+    // Start the PIE world. Debug entries flow up to the optional sink so
+    // the PIE Console panel can render them.
+    // GameMode manifest selects the viewport controller. Phase 4 persists
+    // this per-game; `state.project.gameMode` is populated from the games
+    // API (`fetchGame`) when the project loads. Legacy games or offline
+    // projects fall back to the built-in Hyperscape click-to-walk + orbit
+    // composition.
+    const manifest: GameModeManifest =
+      state.project.gameMode ?? HYPERSCAPE_DEFAULT_MANIFEST;
+
+    const startOptions: PlayTestWorldOptions = {
+      mobSpawns,
+      npcs,
+      resources,
+      stations,
+      playerSpawn,
+      debugSink: (entry: PIEDebugEntry) => onDebugRef.current?.(entry),
+      gameMode: manifest,
+    };
+    world.start(startOptions);
 
     // Create a group to hold all PIE markers
     const markerGroup = new THREE.Group();
@@ -384,8 +294,29 @@ export function usePIESession({
     session.markerGroup = markerGroup;
     session.lastTime = performance.now();
 
-    // Enter player mode (WASD + mouse look)
-    refs.enterPlayerMode();
+    // Branch on (pieMode, gameMode id):
+    //   - Simulate: WASD fly-cam regardless of GameMode. The editor
+    //     camera possesses nothing; designers move freely.
+    //   - Play + click-to-walk: eventually instantiate
+    //     ClickToWalkPlayerController + OrbitCameraController against
+    //     the PIE world. Needs InteractionRouter + ClientCameraSystem
+    //     wiring in PlayTestWorld; until that lands we fall through to
+    //     the fly-cam so PIE remains functional.
+    //   - Play + unknown id: alternate manifests registered by
+    //     downstream games (Phase 5). Fly-cam fallback so the editor
+    //     never hangs on an unrecognised controller.
+    const pieMode = state.pie.mode;
+    const modeId = world.gameMode?.id ?? CLICK_TO_WALK_CONTROLLER_ID;
+    if (pieMode === "simulate") {
+      refs.enterPlayerMode();
+    } else if (modeId === CLICK_TO_WALK_CONTROLLER_ID) {
+      // TODO(gamemode-phase-4): instantiate ClickToWalkPlayerController
+      // + OrbitCameraController here once PlayTestWorld hosts the
+      // InteractionRouter + ClientCameraSystem surface.
+      refs.enterPlayerMode();
+    } else {
+      refs.enterPlayerMode();
+    }
 
     // Start the tick loop
     const tickLoop = (time: number) => {
@@ -418,7 +349,12 @@ export function usePIESession({
     session.animationId = requestAnimationFrame(tickLoop);
 
     console.log("[PIE] Session started");
-  }, [state.gameEntities, state.extendedLayers]);
+  }, [
+    state.gameEntities,
+    state.extendedLayers,
+    state.pie.mode,
+    state.project.gameMode,
+  ]);
 
   /**
    * Stop the PIE session.
@@ -432,6 +368,44 @@ export function usePIESession({
     }
   }, []);
 
+  /**
+   * Raycast from screen-center against PIE markers and fire `entity:interact`
+   * on the first hit. Called by ViewportContainer when the user clicks while
+   * PIE is active (the camera is in pointer-lock FPS mode, so cursor pos =
+   * center of viewport).
+   *
+   * Returns the entity id that was interacted with, or null if nothing hit.
+   */
+  const interactAtCenter = useCallback((): string | null => {
+    const refs = sceneRefsRef.current;
+    const session = sessionRef.current;
+    if (!refs || !session.world || !session.markerGroup) return null;
+
+    // Pointer-lock mode: ray from the center of the camera (NDC origin).
+    const ndc = new THREE.Vector2(0, 0);
+    refs.raycaster.setFromCamera(ndc, refs.camera);
+    const hits = refs.raycaster.intersectObjects(
+      session.markerGroup.children,
+      false,
+    );
+    if (hits.length === 0) return null;
+
+    // Walk up to the marker mesh that carries `userData.pieEntity` —
+    // intersectObjects returns the actual mesh, but be defensive.
+    for (const hit of hits) {
+      let obj: THREE.Object3D | null = hit.object;
+      while (obj && !(obj as THREE.Object3D).userData?.pieEntity) {
+        obj = obj.parent;
+      }
+      const entityId = obj?.userData?.entityId as string | undefined;
+      if (entityId) {
+        session.world.interactWith(entityId);
+        return entityId;
+      }
+    }
+    return null;
+  }, []);
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
@@ -443,7 +417,7 @@ export function usePIESession({
     };
   }, []);
 
-  return { startPIE, stopPIE };
+  return { startPIE, stopPIE, interactAtCenter };
 }
 
 // ---------------------------------------------------------------------------

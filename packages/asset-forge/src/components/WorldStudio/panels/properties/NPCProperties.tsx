@@ -13,10 +13,12 @@ import {
   Heart,
   Shield,
   Sparkles,
+  Plus,
 } from "lucide-react";
 import React, { useCallback, useMemo } from "react";
 
 import type { PlacedNPC } from "../../../WorldBuilder/types";
+import type { NPCManifestOverride } from "../../types";
 import { useWorldStudio } from "../../WorldStudioContext";
 import { useAIGeneration } from "../../hooks/useAIGeneration";
 import { ItemReference } from "../ItemPicker";
@@ -28,6 +30,8 @@ import {
   InfoRow,
 } from "./PropertyControls";
 import { StoreEditor } from "./StoreEditor";
+import { BehaviorScriptSection } from "./BehaviorScriptSection";
+import { DialogueEditor } from "./DialogueEditor";
 
 interface Props {
   npc: PlacedNPC;
@@ -49,6 +53,34 @@ export const NPCProperties = React.memo(function NPCProperties({ npc }: Props) {
     () => state.manifests.npcs.find((n) => n.id === npc.npcTypeId),
     [state.manifests.npcs, npc.npcTypeId],
   );
+
+  // Override from state (keyed by manifest npcTypeId — shared across all
+  // placements of this NPC type; consistent with GameNPCProperties)
+  const override = state.manifestOverrides.npcOverrides.get(npc.npcTypeId);
+
+  const setDialogueSection = useCallback(
+    (value: NPCManifestOverride["dialogue"]) => {
+      const existing =
+        override ?? ({ entityId: npc.npcTypeId } as Record<string, unknown>);
+      actions.setManifestOverride("npcOverrides", npc.npcTypeId, {
+        ...existing,
+        dialogue: value,
+      });
+    },
+    [override, npc.npcTypeId, actions],
+  );
+
+  const resetDialogueSection = useCallback(() => {
+    if (!override) return;
+    const updated = { ...override } as Record<string, unknown>;
+    delete updated.dialogue;
+    const keys = Object.keys(updated).filter((k) => k !== "entityId");
+    if (keys.length === 0) {
+      actions.clearManifestOverride("npcOverrides", npc.npcTypeId);
+    } else {
+      actions.setManifestOverride("npcOverrides", npc.npcTypeId, updated);
+    }
+  }, [override, npc.npcTypeId, actions]);
 
   // Look up linked store
   const linkedStore = useMemo(
@@ -88,9 +120,11 @@ export const NPCProperties = React.memo(function NPCProperties({ npc }: Props) {
         veryRare?: Array<{ itemId: string; chance: number }>;
       }
     | undefined;
-  const dialogue = rawData?.dialogue as
-    | { entryNodeId?: string; nodes?: Array<{ id: string; text: string }> }
-    | undefined;
+  // Merged dialogue (override wins over base manifest)
+  const mergedDialogue = useMemo(() => {
+    if (override?.dialogue) return override.dialogue;
+    return rawData?.dialogue as NPCManifestOverride["dialogue"] | undefined;
+  }, [override?.dialogue, rawData?.dialogue]);
 
   return (
     <>
@@ -238,33 +272,41 @@ export const NPCProperties = React.memo(function NPCProperties({ npc }: Props) {
         </PropertySection>
       )}
 
-      {/* Manifest: Dialogue */}
-      {dialogue?.nodes && dialogue.nodes.length > 0 && (
-        <PropertySection
-          title="Dialogue"
-          icon={<MessageSquare size={10} />}
-          defaultOpen={false}
-        >
-          <InfoRow label="Entry Node" value={dialogue.entryNodeId ?? "—"} />
-          <InfoRow label="Nodes" value={dialogue.nodes.length} />
-          <div className="mt-1 space-y-0.5">
-            {dialogue.nodes.slice(0, 5).map((node) => (
-              <div
-                key={node.id}
-                className="text-[10px] text-text-tertiary pl-2 truncate"
-              >
-                <span className="text-text-secondary">{node.id}:</span>{" "}
-                {node.text.slice(0, 60)}
-                {node.text.length > 60 && "..."}
-              </div>
-            ))}
-            {dialogue.nodes.length > 5 && (
-              <div className="text-[10px] text-text-tertiary italic pl-2">
-                +{dialogue.nodes.length - 5} more nodes
-              </div>
-            )}
-          </div>
-        </PropertySection>
+      {/* Dialogue — editable (routed through npcOverrides on the manifest type) */}
+      {mergedDialogue ? (
+        <DialogueEditor
+          dialogue={mergedDialogue}
+          isOverridden={override?.dialogue !== undefined}
+          onUpdate={(d) => setDialogueSection(d)}
+          onReset={resetDialogueSection}
+          persistKey="npc-dialogue"
+        />
+      ) : (
+        manifestNPC && (
+          <PropertySection
+            title="Dialogue"
+            icon={<MessageSquare size={10} />}
+            defaultOpen={false}
+          >
+            <button
+              className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] rounded border border-dashed border-border-primary text-text-tertiary hover:text-text-secondary hover:border-text-tertiary transition-colors"
+              onClick={() =>
+                setDialogueSection({
+                  entryNodeId: "greeting",
+                  nodes: [
+                    {
+                      id: "greeting",
+                      text: "Hello, adventurer!",
+                      responses: [],
+                    },
+                  ],
+                })
+              }
+            >
+              <Plus size={10} /> Create Dialogue
+            </button>
+          </PropertySection>
+        )
       )}
 
       {/* Manifest: Linked Store (editable) */}
@@ -290,7 +332,7 @@ export const NPCProperties = React.memo(function NPCProperties({ npc }: Props) {
           </button>
           <button
             className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] bg-primary/10 text-primary hover:bg-primary/20 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            disabled={ai.isGenerating || !dialogue?.nodes?.length}
+            disabled={ai.isGenerating || !mergedDialogue?.nodes?.length}
             onClick={() => ai.generateVoice(npc.npcTypeId)}
           >
             <Sparkles size={10} />
@@ -304,6 +346,24 @@ export const NPCProperties = React.memo(function NPCProperties({ npc }: Props) {
             )}
         </div>
       </PropertySection>
+
+      {/* Behavior Script */}
+      <BehaviorScriptSection
+        entityId={npc.id}
+        stateKey="npcs"
+        stateRoot="extendedLayers"
+        entityData={{
+          ...(npc as unknown as Record<string, unknown>),
+          hasDialogueTree: !!(
+            mergedDialogue?.nodes && mergedDialogue.nodes.length > 0
+          ),
+        }}
+        entityCategory="npc"
+        entityContext={{
+          identifier: npc.npcTypeId,
+          dialogue: mergedDialogue,
+        }}
+      />
 
       {/* No manifest data warning */}
       {!manifestNPC && state.manifests.loaded && (

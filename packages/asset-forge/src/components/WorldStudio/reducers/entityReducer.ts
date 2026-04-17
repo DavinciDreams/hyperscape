@@ -130,7 +130,10 @@ function addEntityGeneric(
   root?: StateRoot,
 ): WorldStudioState {
   const arr = getGenericArray(state, key, root);
-  if (!arr) return state;
+  if (!arr) {
+    // Auto-initialize array for dynamic module entity types
+    return setGenericArray(state, key, root, [entity]);
+  }
   return setGenericArray(state, key, root, [...arr, entity]);
 }
 

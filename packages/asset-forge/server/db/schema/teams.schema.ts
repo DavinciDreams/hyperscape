@@ -10,6 +10,7 @@ import {
   integer,
   timestamp,
   unique,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 import { forgeUsers } from "./forge-users.schema";
@@ -63,6 +64,29 @@ export const games = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     description: text("description"),
+
+    // Game module reference (default: Hyperscape built-in module)
+    moduleId: text("module_id").notNull().default("hyperscape"),
+
+    /**
+     * GameMode manifest (UE5-inspired player controller / camera / input /
+     * pawn selection). Resolved at runtime by `gameModeRegistry`. Defaults
+     * on insert to the Hyperscape manifest via the `game_mode` server
+     * default; schema-level default lives in the migration because Drizzle
+     * JSON defaults on insert require a SQL literal.
+     *
+     * Shape: `{ playerController, camera, inputContext, pawn }` — all
+     * strings, each validated against the registry's registered ids at the
+     * route layer (see `server/utils/gameModeRegistry.ts`).
+     */
+    gameMode: jsonb("game_mode")
+      .$type<{
+        playerController: string;
+        camera: string;
+        inputContext: string;
+        pawn: string;
+      }>()
+      .notNull(),
 
     // Server connection info
     stagingServerUrl: text("staging_server_url"),

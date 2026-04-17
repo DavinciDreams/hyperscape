@@ -56,6 +56,9 @@ export const selectTransformSpace = (
   state: WorldStudioState,
 ): GizmoTransformSpace => state.tools.transformSpace;
 
+export const selectGridSize = (state: WorldStudioState): number =>
+  state.tools.gridSize;
+
 export const selectActivePlacement = (
   state: WorldStudioState,
 ): ActivePlacement | null => state.tools.activePlacement;
