@@ -39,10 +39,10 @@ concurrency:
 
 env:
   CLOUDFLARE_ACCOUNT_ID: 50ad2052bbc6ca528d6993a689b419a4
-  # Production uses hyperscape-assets bucket
-  # Staging uses hyperscape-assets-staging bucket (create this in Cloudflare R2)
-  R2_BUCKET_PRODUCTION: hyperscape-assets
-  R2_BUCKET_STAGING: hyperscape-assets-staging
+  # Production uses hyperia-assets bucket
+  # Staging uses hyperia-assets-staging bucket (create this in Cloudflare R2)
+  R2_BUCKET_PRODUCTION: hyperia-assets
+  R2_BUCKET_STAGING: hyperia-assets-staging
 
 jobs:
   deploy-assets:

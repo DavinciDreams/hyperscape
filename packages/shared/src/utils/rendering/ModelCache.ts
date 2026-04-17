@@ -62,7 +62,7 @@ interface CachedModel {
 
 // ─── Processed Model Cache (IndexedDB) ───────────────────────────────────────
 
-const PROCESSED_DB_NAME = "hyperscape-processed-models";
+const PROCESSED_DB_NAME = "hyperia-processed-models";
 const PROCESSED_STORE_NAME = "models";
 const PROCESSED_CACHE_VERSION = 6;
 
@@ -168,7 +168,7 @@ export class ModelCache {
   private processedDBReady: Promise<boolean> | null = null;
 
   private constructor() {
-    // Use our own GLTFLoader to ensure we get pure THREE.Object3D (not Hyperscape Nodes)
+    // Use our own GLTFLoader to ensure we get pure THREE.Object3D (not Hyperia Nodes)
     this.gltfLoader = new GLTFLoader();
     // Enable meshopt decoder for compressed GLB files (EXT_meshopt_compression)
     this.gltfLoader.setMeshoptDecoder(MeshoptDecoder);
@@ -1161,8 +1161,8 @@ export class ModelCache {
    * Load a model (with caching)
    * Returns a cloned scene ready to use with materials properly set up
    *
-   * NOTE: This returns pure THREE.Object3D, NOT Hyperscape Nodes!
-   * Use world.loader.load('model', url) if you need Hyperscape Nodes.
+   * NOTE: This returns pure THREE.Object3D, NOT Hyperia Nodes!
+   * Use world.loader.load('model', url) if you need Hyperia Nodes.
    *
    * @param path - Model path (can be asset:// URL or absolute URL)
    * @param world - World instance for URL resolution and material setup
@@ -1225,7 +1225,7 @@ export class ModelCache {
       // CRITICAL: Verify cached scene is pure THREE.Object3D
       if ("ctx" in cached.scene || "isDirty" in cached.scene) {
         console.error(
-          "[ModelCache] Cached model is a Hyperscape Node, not THREE.Object3D! Clearing cache...",
+          "[ModelCache] Cached model is a Hyperia Node, not THREE.Object3D! Clearing cache...",
         );
         this.cache.delete(resolvedPath);
         // Retry load with fresh GLTFLoader
@@ -1445,17 +1445,17 @@ export class ModelCache {
           return cachedModel;
         }
 
-        // CRITICAL: Verify we got a pure THREE.Object3D, not a Hyperscape Node
+        // CRITICAL: Verify we got a pure THREE.Object3D, not a Hyperia Node
         if ("ctx" in gltf.scene || "isDirty" in gltf.scene) {
           console.error(
-            "[ModelCache] ERROR: GLTFLoader returned Hyperscape Node instead of THREE.Object3D!",
+            "[ModelCache] ERROR: GLTFLoader returned Hyperia Node instead of THREE.Object3D!",
           );
           console.error(
             "[ModelCache] Scene type:",
             gltf.scene.constructor.name,
           );
           throw new Error(
-            "ModelCache received Hyperscape Node - this indicates a loader system conflict",
+            "ModelCache received Hyperia Node - this indicates a loader system conflict",
           );
         }
 
@@ -1497,11 +1497,11 @@ export class ModelCache {
         try {
           const extras = (
             gltf.parser?.json as {
-              extras?: { hyperscape?: { collision?: ModelCollisionData } };
+              extras?: { hyperia?: { collision?: ModelCollisionData } };
             }
           )?.extras;
-          if (extras?.hyperscape?.collision) {
-            collision = extras.hyperscape.collision;
+          if (extras?.hyperia?.collision) {
+            collision = extras.hyperia.collision;
           }
         } catch {
           // No collision data in this model - that's fine
@@ -1545,15 +1545,13 @@ export class ModelCache {
 
     // FINAL VALIDATION: Ensure we're returning pure THREE.Object3D
     if ("ctx" in clonedScene || "isDirty" in clonedScene) {
-      console.error(
-        "[ModelCache] CRITICAL: Cloned scene is a Hyperscape Node!",
-      );
+      console.error("[ModelCache] CRITICAL: Cloned scene is a Hyperia Node!");
       console.error(
         "[ModelCache] This should never happen. Scene type:",
         clonedScene.constructor.name,
       );
       throw new Error(
-        "ModelCache clone produced Hyperscape Node instead of THREE.Object3D",
+        "ModelCache clone produced Hyperia Node instead of THREE.Object3D",
       );
     }
 
@@ -1809,7 +1807,7 @@ export class ModelCache {
 
   /**
    * Clear the cache (useful for hot reload)
-   * Should be called when code is rebuilt to prevent stale Hyperscape Nodes
+   * Should be called when code is rebuilt to prevent stale Hyperia Nodes
    * IMPORTANT: Disposes geometries to prevent GPU memory leaks
    */
   clear(): void {

@@ -1367,7 +1367,7 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
             padding: `${p.inner}px`,
             marginTop: compactPanel ? 16 : 22,
             background:
-              theme.name === "hyperscape"
+              theme.name === "hyperia"
                 ? "linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.12) 100%)"
                 : theme.colors.slot.filled,
             border: inCombat

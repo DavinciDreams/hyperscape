@@ -143,7 +143,7 @@ function DeploymentHistoryEntry({ record }: { record: DeploymentRecord }) {
         import.meta.env.VITE_API_URL ||
         import.meta.env.VITE_GAME_SERVER_URL ||
         "http://localhost:5555";
-      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperia-admin";
 
       try {
         const resp = await fetch(
@@ -364,7 +364,7 @@ export function DeploymentPanel() {
         import.meta.env.VITE_API_URL ||
         import.meta.env.VITE_GAME_SERVER_URL ||
         "http://localhost:5555";
-      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperia-admin";
 
       // Convert Map to plain object for JSON serialization
       const manifestsObj: Record<string, unknown> = {};
@@ -541,7 +541,7 @@ export function DeploymentPanel() {
         import.meta.env.VITE_API_URL ||
         import.meta.env.VITE_GAME_SERVER_URL ||
         "http://localhost:5555";
-      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperscape-admin";
+      const adminCode = import.meta.env.VITE_ADMIN_CODE ?? "hyperia-admin";
 
       try {
         const resp = await fetch(`${serverUrl}/api/deploy/production`, {

@@ -42,16 +42,16 @@ export type {
   GameModeContext,
 } from "../gameMode/GameMode";
 export {
-  HYPERSCAPE_DEFAULT_MANIFEST,
-  HYPERSCAPE_PAWN_ID,
-} from "../gameMode/HyperscapeGameMode";
+  HYPERIA_DEFAULT_MANIFEST,
+  HYPERIA_PAWN_ID,
+} from "../gameMode/HyperiaGameMode";
 export { CLICK_TO_WALK_CONTROLLER_ID } from "../gameMode/controllers/ClickToWalkPlayerController";
 export { ORBIT_CAMERA_CONTROLLER_ID } from "../gameMode/cameras/OrbitCameraController";
 export {
   GameModeRegistry,
   gameModeRegistry,
 } from "../gameMode/GameModeRegistry";
-export { registerHyperscapeGameMode } from "../gameMode/HyperscapeGameMode";
+export { registerHyperiaGameMode } from "../gameMode/HyperiaGameMode";
 export {
   FPS_DEFAULT_MANIFEST,
   TOP_DOWN_DEFAULT_MANIFEST,

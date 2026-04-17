@@ -1,6 +1,6 @@
 /**
  * @hyperforge/procgen/building
- * Procedural building and town generation for Hyperscape
+ * Procedural building and town generation for Hyperia
  *
  * NOTE: Viewer components (BuildingViewer, TownViewer, NavigationVisualizer)
  * are NOT exported here to avoid pulling in @hyperforge/shared dependency.

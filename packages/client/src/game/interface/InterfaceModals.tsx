@@ -356,7 +356,7 @@ export function FullscreenWorldMap({
             justifyContent: "center",
             padding: 16,
             background:
-              theme.name === "hyperscape"
+              theme.name === "hyperia"
                 ? "linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(0, 0, 0, 0.14) 100%)"
                 : "transparent",
             overflow: "visible",
@@ -474,7 +474,7 @@ export function FullscreenWorldMap({
               style={{
                 padding: "2px 8px",
                 background:
-                  theme.name === "hyperscape"
+                  theme.name === "hyperia"
                     ? "rgba(255, 255, 255, 0.06)"
                     : theme.colors.background.tertiary,
                 borderRadius: theme.borderRadius.sm,

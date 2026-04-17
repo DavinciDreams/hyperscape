@@ -111,11 +111,11 @@
     "biome",
     "3d"
   ],
-  "author": "Hyperscape Team",
+  "author": "Hyperia Team",
   "license": "GPL-3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/HyperscapeAI/hyperscape.git",
+    "url": "https://github.com/HyperiaAI/hyperia.git",
     "directory": "packages/tree-gen"
   },
   "engines": {

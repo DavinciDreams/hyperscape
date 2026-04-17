@@ -8,7 +8,7 @@
  * a key is a configuration change, not a code change.
  *
  * Phase 1 scope: interface + binding shape. Concrete contexts
- * (`hyperscape-default`, `wasd-default`, `fps-default`) land in Phase 2.
+ * (`hyperia-default`, `wasd-default`, `fps-default`) land in Phase 2.
  *
  * @public
  */
@@ -61,7 +61,7 @@ export interface InputBinding {
  * system when its PlayerController attaches, deactivated on detach.
  */
 export interface InputContext {
-  /** Unique id — e.g. `"hyperscape-default"`, `"fps-default"`. */
+  /** Unique id — e.g. `"hyperia-default"`, `"fps-default"`. */
   readonly id: string;
 
   /** Action name → list of physical bindings. */

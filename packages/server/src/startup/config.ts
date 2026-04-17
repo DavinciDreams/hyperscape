@@ -189,8 +189,8 @@ export interface ServerConfig {
   /** Icons directory path (generated sprite PNGs) */
   iconsDir: string;
 
-  /** Hyperscape root directory */
-  hyperscapeRoot: string;
+  /** Hyperia root directory */
+  hyperiaRoot: string;
 
   /** Built-in assets directory */
   builtInAssetsDir: string;
@@ -398,7 +398,7 @@ export async function loadConfig(): Promise<ServerConfig> {
   // Resolve paths correctly for both dev and build
   // Built: __dirname is .../packages/server/dist (single bundled file) → go up 1 level
   // Dev: __dirname is .../packages/server/src/startup → go up 2 levels
-  let hyperscapeRoot: string;
+  let hyperiaRoot: string;
   if (
     __dirname.endsWith("/dist") ||
     __dirname.includes("/dist/") ||
@@ -406,13 +406,13 @@ export async function loadConfig(): Promise<ServerConfig> {
     __dirname.includes("/build/")
   ) {
     // Built version: bundled to dist/index.js, go up 1 level to packages/server/
-    hyperscapeRoot = path.join(__dirname, "..");
+    hyperiaRoot = path.join(__dirname, "..");
   } else if (__dirname.includes("/server/src/")) {
     // Dev version: go up from server/src/startup/ to packages/server/
-    hyperscapeRoot = path.join(__dirname, "../..");
+    hyperiaRoot = path.join(__dirname, "../..");
   } else {
     // Fallback: assume we're 1 level deep (like dist/ or build/)
-    hyperscapeRoot = path.join(__dirname, "..");
+    hyperiaRoot = path.join(__dirname, "..");
   }
 
   // Environment variables with defaults
@@ -445,19 +445,19 @@ export async function loadConfig(): Promise<ServerConfig> {
   // Resolve world and assets directories
   const worldDir = path.isAbsolute(WORLD)
     ? WORLD
-    : path.join(hyperscapeRoot, WORLD);
+    : path.join(hyperiaRoot, WORLD);
 
   // Manifests directory - local cache for CDN-fetched manifests
-  const manifestsDir = path.join(hyperscapeRoot, "world/assets/manifests");
+  const manifestsDir = path.join(hyperiaRoot, "world/assets/manifests");
 
   // Icons directory - generated sprite PNGs for item icons
-  const iconsDir = path.join(hyperscapeRoot, "world/assets/icons");
+  const iconsDir = path.join(hyperiaRoot, "world/assets/icons");
 
   // Use root assets directory (not per-world assets)
   // This is the main assets folder at workspace root: /assets/
-  const workspaceRoot = path.resolve(hyperscapeRoot, "../..");
+  const workspaceRoot = path.resolve(hyperiaRoot, "../..");
   const assetsDir = path.join(workspaceRoot, "assets");
-  const builtInAssetsDir = path.join(hyperscapeRoot, "src/world/assets");
+  const builtInAssetsDir = path.join(hyperiaRoot, "src/world/assets");
 
   // Create world and manifests folders if needed
   await fs.ensureDir(worldDir);
@@ -477,9 +477,9 @@ export async function loadConfig(): Promise<ServerConfig> {
     assetsDir,
     manifestsDir,
     iconsDir,
-    hyperscapeRoot,
+    hyperiaRoot,
     builtInAssetsDir,
-    __dirname: hyperscapeRoot, // Package root (for public/ access)
+    __dirname: hyperiaRoot, // Package root (for public/ access)
     useLocalPostgres: USE_LOCAL_POSTGRES,
     databaseUrl: DATABASE_URL,
     cdnUrl: CDN_URL,

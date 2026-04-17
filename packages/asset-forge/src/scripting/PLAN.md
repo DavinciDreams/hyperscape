@@ -438,4 +438,4 @@ Out of scope (deferred):
 - Discovery-grounded plan with file/line refs:
   `packages/asset-forge/src/scripting/UPGRADE_PLAN.md`
 - Project memory:
-  `~/.claude/projects/-Users-lucid-development-hyperscape/memory/project_scripting_system.md`
+  `~/.claude/projects/-Users-lucid-development-hyperia/memory/project_scripting_system.md`

@@ -60,7 +60,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
 
   // Check if this is spectator mode (from embedded config)
   const isSpectatorMode = (() => {
-    const config = window.__HYPERSCAPE_CONFIG__;
+    const config = window.__HYPERIA_CONFIG__;
     return config?.mode === "spectator";
   })();
 
@@ -118,7 +118,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
   useEffect(() => {
     // Get the target entity ID for spectators
     const getSpectatorTargetId = () => {
-      const config = window.__HYPERSCAPE_CONFIG__;
+      const config = window.__HYPERIA_CONFIG__;
       return config?.followEntity || config?.characterId;
     };
 
@@ -425,8 +425,8 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
       playerId: player?.id || null,
     };
     (
-      window as Window & { __HYPERSCAPE_LOADING__?: typeof loadingState }
-    ).__HYPERSCAPE_LOADING__ = loadingState;
+      window as Window & { __HYPERIA_LOADING__?: typeof loadingState }
+    ).__HYPERIA_LOADING__ = loadingState;
   }, [
     ready,
     loadingComplete,

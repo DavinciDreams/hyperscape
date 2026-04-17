@@ -4,12 +4,12 @@
   "type": "module",
   "private": true,
   "main": "dist/index.js",
-  "homepage": "https://github.com/HyperscapeAI/hyperscape#readme",
+  "homepage": "https://github.com/HyperiaAI/hyperia#readme",
   "bugs": {
-    "url": "https://github.com/HyperscapeAI/hyperscape/issues"
+    "url": "https://github.com/HyperiaAI/hyperia/issues"
   },
   "keywords": [
-    "hyperscape",
+    "hyperia",
     "3d",
     "components",
     "virtual-worlds",
@@ -71,7 +71,7 @@
     "@fastify/rate-limit": "^10.1.1",
     "@fastify/static": "^8.0.1",
     "@fastify/websocket": "^11.0.1",
-    "@hyperforge/plugin-hyperscape": "workspace:*",
+    "@hyperforge/plugin-hyperia": "workspace:*",
     "@hyperforge/shared": "workspace:*",
     "@hyperforge/web3": "workspace:*",
     "@livekit/rtc-node": "^0.13.24",

@@ -1,26 +1,26 @@
 # GameMode System — Plan & Status
 
-UE5-inspired abstraction that lets each Hyperscape-family game declare its own
+UE5-inspired abstraction that lets each Hyperia-family game declare its own
 player controller, camera, input context, and pawn. Both the live client and
 the World Studio PIE runtime resolve the same `GameMode` from a per-game
 manifest, eliminating the current drift where PIE uses a WASD fly-cam while
 the shipped game is click-to-walk.
 
-> **Why this exists.** Hyperscape was built first; World Studio came second.
+> **Why this exists.** Hyperia was built first; World Studio came second.
 > Today `PlayerLocal` hardcodes OSRS-style click-to-walk and `PlayTestWorld`
 > re-implements a parallel WASD loop. Adding a second game (top-down shooter,
 > Diablo-like, FPS, platformer) is impossible without an abstraction to pick
 > between. World Studio's larger goal is to be a multi-game AI studio, with
-> Hyperscape as the first GameMode — not the only playable one.
+> Hyperia as the first GameMode — not the only playable one.
 
 ---
 
 ## Non-goals & invariants (zero-regression contract)
 
-The shipped Hyperscape game must play **byte-for-byte identically** at
+The shipped Hyperia game must play **byte-for-byte identically** at
 every phase boundary. Concretely:
 
-1. **Facade, don't extract.** Existing Hyperscape systems are canonical.
+1. **Facade, don't extract.** Existing Hyperia systems are canonical.
    GameMode classes are thin adapters that *delegate* to them. We never
    copy `ClientCameraSystem`'s orbit math, `InteractionRouter`'s click
    routing, or `PlayerLocal`'s character loop into the GameMode module.
@@ -28,20 +28,20 @@ every phase boundary. Concretely:
    stop — that's duplication.
 
 2. **PlayerLocal is the pawn, untouched.** `PlayerLocal.ts` (3124 lines)
-   stays the body for the Hyperscape GameMode. No phase rewrites it.
+   stays the body for the Hyperia GameMode. No phase rewrites it.
    Where the original plan said "PlayerLocal.init() consumes
    `gameMode.createPlayerController(ctx)`", the revised approach is for
    the world bootstrap to resolve the GameMode *around* PlayerLocal,
    not inside it. See Phase 3 below.
 
-3. **The Hyperscape GameMode is a lookup, not a rewrite.** For the live
-   client, `HyperscapeGameMode` essentially says "this game uses
+3. **The Hyperia GameMode is a lookup, not a rewrite.** For the live
+   client, `HyperiaGameMode` essentially says "this game uses
    InteractionRouter + ClientCameraSystem + the existing ClientInput
    bindings — here's a handle to each." Swapping to a different
    GameMode swaps which *existing* systems get wired, or installs new
-   ones for new game types. It never forks Hyperscape's gameplay code.
+   ones for new game types. It never forks Hyperia's gameplay code.
 
-4. **No `gameMode/` imports in Hyperscape gameplay systems.** Combat,
+4. **No `gameMode/` imports in Hyperia gameplay systems.** Combat,
    skills, inventory, networking, etc. do not import from
    `packages/shared/src/gameMode/`. The GameMode module only touches
    the input/camera/controller seam. This is enforced by a one-line
@@ -49,7 +49,7 @@ every phase boundary. Concretely:
 
 5. **Alternate GameModes are additive.** `WASDPlayerController`,
    `FirstPersonCameraController`, etc. are *new* code for *new* games.
-   They don't replace Hyperscape's path — they run parallel when a
+   They don't replace Hyperia's path — they run parallel when a
    different manifest is resolved.
 
 6. **PIE parity first.** The first observable benefit is PIE Play-mode
@@ -64,7 +64,7 @@ every phase boundary. Concretely:
 | Copy orbit-math out of `ClientCameraSystem` into `OrbitCameraController`. | `OrbitCameraController.getCamera()` returns `world.camera`; `attach()` emits the existing `CAMERA_SET_TARGET` event. |
 | Re-implement raycast→MOVE_TO in `ClickToWalkPlayerController`. | Controller is a marker class; the world still has the real `InteractionRouter` registered by `createClientWorld`. |
 | Add an EventBus listener in `PlayerLocal` for a new `gameMode:input` event. | No PlayerLocal changes. World bootstrap stashes the resolved GameMode on `world.gameMode` for read-only discovery. |
-| Create a `hyperscape-default` InputContext that re-binds Move/Look via `world.controls.bind()`. | Context is declarative (action → binding list). `activate()` is a no-op because `ClientInput` already owns those bindings. |
+| Create a `hyperia-default` InputContext that re-binds Move/Look via `world.controls.bind()`. | Context is declarative (action → binding list). `activate()` is a no-op because `ClientInput` already owns those bindings. |
 
 ---
 
@@ -83,7 +83,7 @@ every phase boundary. Concretely:
 |-------|-------|--------|
 | 0 | Architecture discovery | ✅ |
 | 1 | Extract interfaces (`GameMode` / `PlayerController` / `CameraController` / `InputContext` / `GameModeRegistry`) | ✅ |
-| 2 | Migrate current Hyperscape behavior behind the interfaces (zero behavior change) | ✅ |
+| 2 | Migrate current Hyperia behavior behind the interfaces (zero behavior change) | ✅ |
 | 3 | PIE consumes the GameMode contract instead of its own WASD loop | ✅ |
 | 4 | Per-game manifest — persist GameMode on the game record + server route | ✅ |
 | 5 | Second + third controller/camera implementations (WASD, FirstPerson) to prove pluggability | ✅ |
@@ -116,7 +116,7 @@ game. Our PIE should do the same.
 packages/shared/src/gameMode/
   GameMode.ts                        # interface + factory contract
   GameModeRegistry.ts                # name → factory lookup; default + overrides
-  HyperscapeGameMode.ts              # default composition: click-to-walk + orbit cam
+  HyperiaGameMode.ts              # default composition: click-to-walk + orbit cam
   controllers/
     PlayerController.ts              # base interface (tick / applyInputContext / dispose)
     ClickToWalkPlayerController.ts   # raycast click → MOVE_TO / INTERACT intent
@@ -124,12 +124,12 @@ packages/shared/src/gameMode/
     TopDownPlayerController.ts       # click-to-move with fixed-angle camera
   cameras/
     CameraController.ts              # base interface (follow / transform / zoom)
-    OrbitCameraController.ts         # extracted from current Hyperscape camera
+    OrbitCameraController.ts         # extracted from current Hyperia camera
     FirstPersonCameraController.ts
     FixedAngleCameraController.ts    # Diablo/OSRS fixed pitch + zoom
   input/
     InputContext.ts                  # InputMappingContext analogue (action → binding)
-    defaultContexts.ts               # hyperscape-default, wasd-default, fps-default
+    defaultContexts.ts               # hyperia-default, wasd-default, fps-default
   pawns/
     Pawn.ts                          # pawn lifecycle hooks (spawn / possess / unpossess)
   __tests__/
@@ -142,11 +142,11 @@ Game manifest declares its GameMode (stored on the asset-forge game record):
 
 ```jsonc
 {
-  "name": "Hyperscape",
+  "name": "Hyperia",
   "gameMode": {
     "playerController": "click-to-walk",
     "camera": "orbit",
-    "inputContext": "hyperscape-default",
+    "inputContext": "hyperia-default",
     "pawn": "humanoid-rpg"
   }
 }
@@ -178,7 +178,7 @@ Key findings:
 - **`PlayTestWorld` (430 lines)** is the PIE runtime. It currently owns a
   raw WASD loop; Phase 3 replaces that loop with a GameMode-resolved stack.
 - **No existing abstraction**: nothing in the repo today distinguishes
-  "how the player moves in this game" from "how the Hyperscape player moves."
+  "how the player moves in this game" from "how the Hyperia player moves."
 
 ---
 
@@ -277,9 +277,9 @@ export class GameModeRegistry {
 
 ---
 
-## Phase 2 — Migrate Hyperscape behavior ✅
+## Phase 2 — Migrate Hyperia behavior ✅
 
-Goal: the shipped game runs through `HyperscapeGameMode` but plays
+Goal: the shipped game runs through `HyperiaGameMode` but plays
 **identically**. This is a refactor, not a feature.
 
 **Status (2026-04-16):** complete. Adapter layer landed in Phase 2
@@ -299,26 +299,26 @@ Completed:
   through the existing `CAMERA_SET_TARGET` event. Detach intentionally
   does not null out target (matches legacy teardown; payload doesn't
   accept null).
-- `HyperscapeGameMode` composition — factory + opt-in
-  `registerHyperscapeGameMode(registry)` helper.
-- `hyperscape-default` InputContext declaring Move / Look / Interact
+- `HyperiaGameMode` composition — factory + opt-in
+  `registerHyperiaGameMode(registry)` helper.
+- `hyperia-default` InputContext declaring Move / Look / Interact
   / Run / Jump bindings; `activate` / `deactivate` are no-op because
-  `ClientInput` already owns native Hyperscape bindings.
-- 23 passing unit tests (registry + HyperscapeGameMode composition +
+  `ClientInput` already owns native Hyperia bindings.
+- 23 passing unit tests (registry + HyperiaGameMode composition +
   lifecycle + idempotency).
 - Barrel exports updated; zero production code imports `gameMode/` yet.
 
 Deferred to Phase 3:
-- `createClientWorld` calls `registerHyperscapeGameMode` + resolves
-  `HYPERSCAPE_DEFAULT_MANIFEST` at startup.
+- `createClientWorld` calls `registerHyperiaGameMode` + resolves
+  `HYPERIA_DEFAULT_MANIFEST` at startup.
 - `PlayerLocal.init()` consumes `gameMode.createPlayerController(ctx)`
   and delegates input/camera wiring through the resolved controller.
 - Playwright smoke test for behavior parity.
 
-### 2.1 `HyperscapeGameMode`
+### 2.1 `HyperiaGameMode`
 
 Composes: `ClickToWalkPlayerController` + `OrbitCameraController` +
-`hyperscape-default` InputContext + humanoid pawn id.
+`hyperia-default` InputContext + humanoid pawn id.
 
 ### 2.2 `ClickToWalkPlayerController` — facade, not extract
 
@@ -353,9 +353,9 @@ the resolved GameMode on `world.gameMode` for read-only discovery.
 ### 2.5 Acceptance
 
 - [x] `gameMode/` compiles clean under `tsc --noEmit`.
-- [x] Unit tests cover registry + HyperscapeGameMode composition +
+- [x] Unit tests cover registry + HyperiaGameMode composition +
       controller/camera lifecycle + idempotency (23 passing).
-- [x] Zero production imports of `gameMode/` — Hyperscape gameplay
+- [x] Zero production imports of `gameMode/` — Hyperia gameplay
       code is untouched (`grep -r "from.*gameMode" packages/ == 0`).
 - [x] Adapter classes delegate to existing systems; no copied math
       or routing logic.
@@ -367,12 +367,12 @@ the resolved GameMode on `world.gameMode` for read-only discovery.
 Completed 2026-04-16. All three sub-phases landed:
 
 - **3.1 Live client stash** — `createClientWorld` registers and resolves
-  `HYPERSCAPE_DEFAULT_MANIFEST`, stashes result on `world.gameMode`. Zero
+  `HYPERIA_DEFAULT_MANIFEST`, stashes result on `world.gameMode`. Zero
   diff on PlayerLocal / InteractionRouter / ClientCameraSystem.
 - **3.2 PIE resolve + branch** — `PlayTestWorld` accepts an optional
   `gameMode` manifest in options, resolves it, and stashes on
   `this.gameMode`. `usePIESession` threads
-  `HYPERSCAPE_DEFAULT_MANIFEST` into `startOptions` and branches on the
+  `HYPERIA_DEFAULT_MANIFEST` into `startOptions` and branches on the
   resolved controller id (currently both branches fall through to the
   editor fly-cam; native click-to-walk-in-PIE wiring is deferred to
   Phase 4 where the PIE InteractionRouter host lands).
@@ -400,17 +400,17 @@ live client gets a one-line manifest stash for discoverability.
 
 ### 3.1 Live client — register + stash, zero gameplay impact
 
-- `createClientWorld` calls `registerHyperscapeGameMode(gameModeRegistry)`.
+- `createClientWorld` calls `registerHyperiaGameMode(gameModeRegistry)`.
 - After `PlayerLocal` is instantiated (unchanged), the bootstrap does:
   ```ts
   world.gameMode = gameModeRegistry.resolve(
-    HYPERSCAPE_DEFAULT_MANIFEST,
+    HYPERIA_DEFAULT_MANIFEST,
     { world, runtime: "client" },
   );
   ```
-- `world.gameMode` is read-only; nothing in Hyperscape gameplay reads it.
+- `world.gameMode` is read-only; nothing in Hyperia gameplay reads it.
   PIE will.
-- **Acceptance:** grep Hyperscape gameplay systems — `world.gameMode`
+- **Acceptance:** grep Hyperia gameplay systems — `world.gameMode`
   references must be zero outside `createClientWorld`, PIE, and
   optional diagnostics.
 
@@ -419,7 +419,7 @@ live client gets a one-line manifest stash for discoverability.
 Today `PlayTestWorld` owns its own WASD loop. The fix is **not** to
 copy click-to-walk into PIE; it's to:
 
-- Have PIE register the same Hyperscape systems the live client uses
+- Have PIE register the same Hyperia systems the live client uses
   (`InteractionRouter`, `ClientCameraSystem`, `ClientInput`) when the
   resolved manifest calls for them.
 - The WASD loop PIE uses today becomes the implementation for a
@@ -478,7 +478,7 @@ Goal: GameMode choice persists on the server.
   `.$type<GameModeManifest>()` typing
   (`packages/asset-forge/server/db/schema/teams.schema.ts`).
 - Migration `0003_games_game_mode.sql` backfills existing rows with
-  the Hyperscape default via SQL `DEFAULT` then drops the default so
+  the Hyperia default via SQL `DEFAULT` then drops the default so
   future inserts pass the manifest explicitly through Drizzle.
 - Journal entry `0003_games_game_mode` registered.
 
@@ -497,7 +497,7 @@ Goal: GameMode choice persists on the server.
   run the manifest through `validateGameModeManifest()` and return a
   structured 400 with the known-ids list on rejection.
 - `TeamService.createGame` accepts an optional manifest and defaults
-  to the Hyperscape quartet when omitted.
+  to the Hyperia quartet when omitted.
 
 ### 4.3 Client read path ✅
 
@@ -512,7 +512,7 @@ Goal: GameMode choice persists on the server.
   best-effort — a warn is logged and `null` is stored if the game
   record is unavailable.
 - `hooks/usePIESession.ts` reads
-  `state.project.gameMode ?? HYPERSCAPE_DEFAULT_MANIFEST` and passes
+  `state.project.gameMode ?? HYPERIA_DEFAULT_MANIFEST` and passes
   that into `world.start({ gameMode })`, replacing the hardcoded
   default. `state.project.gameMode` added to the `startPIE` callback
   deps.
@@ -520,8 +520,8 @@ Goal: GameMode choice persists on the server.
 ### 4.4 Acceptance
 
 - [x] Migration file + journal entry committed; default manifest is the
-      Hyperscape quartet; existing rows get backfilled via SQL literal.
-- [x] POST with no `gameMode` inserts the Hyperscape default (see
+      Hyperia quartet; existing rows get backfilled via SQL literal.
+- [x] POST with no `gameMode` inserts the Hyperia default (see
       `TeamService.createGame` and the route fallback).
 - [x] POST/PUT with a `gameMode` round-trip through
       `validateGameModeManifest` — unknown ids are rejected with 400.
@@ -548,7 +548,7 @@ Goal: GameMode choice persists on the server.
 - `resolveCamera()` / `resolveInputContext()` switch over manifest ids — throws on unknown so bad manifests surface at resolve time.
 - Barrel `gameMode/index.ts` re-exports all new ids, classes, contexts, manifests, and `registerAlternateGameModes`.
 - Server allowlist `asset-forge/server/utils/gameModeRegistry.ts` extended: adds `wasd`/`top-down` playerControllers, `first-person`/`fixed-angle` cameras, `wasd-default`/`fps-default`/`topdown-default` input contexts, `humanoid-kinematic`/`cursor-avatar` pawns.
-- Boot registration: both `createClientWorld` and `createPlayTestWorld` now call `registerAlternateGameModes(gameModeRegistry)` alongside `registerHyperscapeGameMode`.
+- Boot registration: both `createClientWorld` and `createPlayTestWorld` now call `registerAlternateGameModes(gameModeRegistry)` alongside `registerHyperiaGameMode`.
 
 **Zero-regression verified:**
 ```
@@ -568,19 +568,19 @@ $ git diff --stat HEAD -- \
 ## Phase 5 — Prove pluggability (original plan below) ⬜ (superseded)
 
 Goal: ship at least two additional controller/camera combos to
-validate the abstraction isn't Hyperscape-shaped.
+validate the abstraction isn't Hyperia-shaped.
 
 **Invariant:** alternate controllers are *new* code paths. They
 never modify `InteractionRouter`, `ClientCameraSystem`, or `PlayerLocal`.
-When a Hyperscape manifest resolves, the alternate controllers are
-dormant; when a WASD manifest resolves, the Hyperscape stack is dormant.
+When a Hyperia manifest resolves, the alternate controllers are
+dormant; when a WASD manifest resolves, the Hyperia stack is dormant.
 
 ### 5.1 `WASDPlayerController`
 
 - Keyboard WASD → movement vector → `CharacterMove` intent.
 - Installs its own `ClientInput` bindings via the `wasd-default`
   InputContext's `activate()`. These bindings coexist with the
-  hyperscape-default set; only one InputContext is active at a time.
+  hyperia-default set; only one InputContext is active at a time.
 - Shares the pawn (PlayerLocal's character controller) for humanoid
   games. For non-humanoid games a new Pawn implementation lands here.
 
@@ -590,7 +590,7 @@ dormant; when a WASD manifest resolves, the Hyperscape stack is dormant.
   scene camera), but `tick()` runs the FPS look math locally because
   `ClientCameraSystem`'s orbit math is wrong for FPS.
 - This is *not* duplication — it's an alternate implementation for a
-  different behavior. `ClientCameraSystem` stays intact for Hyperscape;
+  different behavior. `ClientCameraSystem` stays intact for Hyperia;
   FPS games swap in this controller instead.
 - When this controller is active, `ClientCameraSystem`'s per-frame
   update should be either (a) not added to the world, or (b) bypassed
@@ -608,7 +608,7 @@ dormant; when a WASD manifest resolves, the Hyperscape stack is dormant.
 - [ ] Creating a new asset-forge game with `{ playerController: "wasd",
       camera: "first-person", inputContext: "fps-default" }` produces a
       playable FPS-style session in PIE with no editor code changes.
-- [ ] Switching back to Hyperscape defaults returns click-to-walk.
+- [ ] Switching back to Hyperia defaults returns click-to-walk.
 - [ ] `git diff packages/shared/src/systems/client/InteractionRouter.ts`
       is empty throughout Phase 5.
 - [ ] `git diff packages/shared/src/systems/client/ClientCameraSystem.ts`
@@ -666,7 +666,7 @@ registered GameMode must:
 - Each controller passes the `PlayerController` interface shape (duck-type).
 - Registry round-trips every registered id.
 
-**Status:** 18 tests added covering all 4 canonical modes (hyperscape,
+**Status:** 18 tests added covering all 4 canonical modes (hyperia,
 wasd, fps, top-down). Each mode is resolved via a fresh
 `GameModeRegistry`, and `createPlayerController` /
 `createCameraController` / `createInputContext` are asserted to return
@@ -722,7 +722,7 @@ exhaustive. All 22 tests pass.
 - [x] PIE roundtrip tests pass (`packages/shared`, 5 tests).
 - [x] Drift tests pass (`packages/asset-forge`, 22 tests).
 - [x] Full GameMode suite green: 46 tests across 4 files.
-- [x] Every controller + camera is exercised (hyperscape
+- [x] Every controller + camera is exercised (hyperia
       click-to-walk + orbit, wasd + orbit, wasd + first-person,
       top-down + fixed-angle) — contract asserts factory shape, PIE
       roundtrip asserts real input → observable pawn movement.
@@ -734,7 +734,7 @@ exhaustive. All 22 tests pass.
 
 ## Key decisions (captured 2026-04-16)
 
-- **GameMode is per-game, not per-world.** A Hyperscape game can have
+- **GameMode is per-game, not per-world.** A Hyperia game can have
   many worlds/scenes sharing one GameMode. World-level override is a
   future extension, not a v1 requirement.
 - **Per-player override is v2.** The UE5 pattern of pushing an alternate
@@ -743,7 +743,7 @@ exhaustive. All 22 tests pass.
   per-game defaults.
 - **Simulate vs Play in PIE.** Ships in Phase 3. Level designers need
   to position cameras without engaging the game's controller.
-- **`PlayerLocal` stays as the Hyperscape pawn.** 3124 lines, but already
+- **`PlayerLocal` stays as the Hyperia pawn.** 3124 lines, but already
   delegates internally. The GameMode contract becomes the bus those
   sub-controllers plug into.
 - **`InteractionRouter` stays intact.** Phase 2 wraps its click-intent
@@ -763,14 +763,14 @@ exhaustive. All 22 tests pass.
 - `packages/shared/src/runtime/createPlayTestWorld.ts` — PIE runtime (Phase 3 target).
 - `packages/asset-forge/src/components/WorldStudio/hooks/usePIESession.ts` — PIE lifecycle.
 - `packages/asset-forge/server/routes/games.ts` — where GameMode manifest lives server-side (Phase 4).
-- `/Users/lucid/.claude/projects/-Users-lucid-development-hyperscape/memory/project_gamemode_system.md` — top-level memory.
+- `/Users/lucid/.claude/projects/-Users-lucid-development-hyperia/memory/project_gamemode_system.md` — top-level memory.
 
 ---
 
 ## Critical path
 
 1. **Phase 1** unblocks everything (interfaces).
-2. **Phase 2** must land before Phase 3 (PIE needs a working Hyperscape GameMode to resolve).
+2. **Phase 2** must land before Phase 3 (PIE needs a working Hyperia GameMode to resolve).
 3. **Phase 4** and **Phase 5** are parallelizable once Phase 3 is done.
 4. **Phase 6** depends on Phase 4 (manifest must exist before the UI can edit it).
 5. **Phase 7** ships incrementally — unit tests per phase, integration tests in Phase 7.
@@ -785,7 +785,7 @@ the phase risks regression or duplication.
 ### 1. Gameplay code untouched outside the seam
 
 ```bash
-# Hyperscape gameplay systems must NOT import gameMode/
+# Hyperia gameplay systems must NOT import gameMode/
 grep -r "from.*gameMode" packages/shared/src/systems/
 # Expected: zero matches. The GameMode module only touches the
 # input/camera/controller seam at world-bootstrap time.

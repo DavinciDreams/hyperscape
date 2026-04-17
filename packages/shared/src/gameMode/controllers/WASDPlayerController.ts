@@ -1,12 +1,12 @@
 /**
- * WASDPlayerController — keyboard-driven movement for non-Hyperscape games.
+ * WASDPlayerController — keyboard-driven movement for non-Hyperia games.
  *
  * Phase 5.1 alternate controller. Kinematic: reads WASD (plus Shift to
  * run, Space to jump) and writes directly to `pawn.object.position`.
  * Does NOT consult `InteractionRouter`, `ClientCameraSystem`, or
  * `PlayerLocal` — this is a parallel, opt-in code path.
  *
- * **Invariant:** when this controller is attached, the Hyperscape
+ * **Invariant:** when this controller is attached, the Hyperia
  * click-to-walk stack is dormant (a different GameMode was selected).
  * Swapping between the two is a per-game manifest change, not a
  * runtime mode toggle inside one game.

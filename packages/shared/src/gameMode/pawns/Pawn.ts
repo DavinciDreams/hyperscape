@@ -2,7 +2,7 @@
  * Pawn — the physical body a PlayerController drives.
  *
  * Mirrors UE5's `APawn` / `ACharacter`: encapsulates a transform and a
- * movement/collision component. Hyperscape's `PlayerLocal` is *the* pawn
+ * movement/collision component. Hyperia's `PlayerLocal` is *the* pawn
  * today; future pawn types (e.g. a top-down cursor avatar or an FPS
  * capsule without a visible mesh) can implement this interface to plug
  * into alternate GameModes.

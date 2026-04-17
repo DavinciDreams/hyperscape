@@ -356,7 +356,7 @@ export function LoadingScreen({
 
       {/* Logo and Loading Bar */}
       <div className="loading-logo-container">
-        <img src="/images/logo.png" alt="Hyperscape" className="loading-logo" />
+        <img src="/images/logo.png" alt="Hyperia" className="loading-logo" />
 
         {/* Loading Progress */}
         <div className="loading-center-progress">

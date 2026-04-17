@@ -2,7 +2,7 @@
  * Built-in InputContexts shipped with the core package.
  *
  * Contexts included:
- * - `hyperscape-default` (Phase 2) — click-to-walk with optional WASD.
+ * - `hyperia-default` (Phase 2) — click-to-walk with optional WASD.
  * - `wasd-default` (Phase 5) — pure keyboard locomotion.
  * - `fps-default` (Phase 5) — WASD + mouse-look.
  * - `topdown-default` (Phase 5) — click-to-move with a fixed camera.
@@ -29,10 +29,10 @@ function freezeBindings(
   return Object.freeze(map);
 }
 
-export const HYPERSCAPE_DEFAULT_CONTEXT_ID = "hyperscape-default";
+export const HYPERIA_DEFAULT_CONTEXT_ID = "hyperia-default";
 
 /**
- * Canonical Hyperscape bindings. Click-to-walk + WASD-optional.
+ * Canonical Hyperia bindings. Click-to-walk + WASD-optional.
  *
  * `Move` is a *click* intent here, not a directional vector — the
  * `ClickToWalkPlayerController` consumes the mouse position raycast and
@@ -40,7 +40,7 @@ export const HYPERSCAPE_DEFAULT_CONTEXT_ID = "hyperscape-default";
  * the existing `PlayerCharacterController` accepts keyboard nudges for
  * edge cases (tutorials, locked cameras).
  */
-export const HYPERSCAPE_DEFAULT_BINDINGS: Record<string, InputBinding[]> =
+export const HYPERIA_DEFAULT_BINDINGS: Record<string, InputBinding[]> =
   freezeBindings({
     Move: [
       { kind: "mouse", source: "left" },
@@ -59,14 +59,14 @@ export const HYPERSCAPE_DEFAULT_BINDINGS: Record<string, InputBinding[]> =
   });
 
 /**
- * Factory for the Hyperscape default input context. Callers receive a
+ * Factory for the Hyperia default input context. Callers receive a
  * fresh instance — the bindings table itself is frozen and shared.
  */
-export function createHyperscapeDefaultContext(): InputContext {
+export function createHyperiaDefaultContext(): InputContext {
   return {
-    id: HYPERSCAPE_DEFAULT_CONTEXT_ID,
-    actions: HYPERSCAPE_DEFAULT_BINDINGS,
-    // No-op: ClientInput already owns Hyperscape's native bindings.
+    id: HYPERIA_DEFAULT_CONTEXT_ID,
+    actions: HYPERIA_DEFAULT_BINDINGS,
+    // No-op: ClientInput already owns Hyperia's native bindings.
     // The context is declarative for now; Phase 5 contexts that don't
     // map onto native ClientInput behavior will install real bindings.
     activate: (_world: World) => {
@@ -153,7 +153,7 @@ export const TOPDOWN_DEFAULT_CONTEXT_ID = "topdown-default";
 
 /**
  * Click-to-move with a fixed-angle camera. Same action shape as the
- * Hyperscape default but without the orbit-camera Look binding.
+ * Hyperia default but without the orbit-camera Look binding.
  */
 export const TOPDOWN_DEFAULT_BINDINGS: Record<string, InputBinding[]> =
   freezeBindings({

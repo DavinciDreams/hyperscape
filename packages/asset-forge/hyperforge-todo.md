@@ -1,11 +1,11 @@
 # World Studio
 
-- All tree placement from world studio should be same in hyperscape staging
-- All mobs placement from world studio should be same in hyperscape staging
-- All npc placement from world studio should be same in hyperscape staging
-- All resource placement from world studio should be same in hyperscape staging
-- All stations placement from world studio should be same in hyperscape staging
-- All bridge/docks/landmark placement from world studio should be same in hyperscape staging
+- All tree placement from world studio should be same in hyperia staging
+- All mobs placement from world studio should be same in hyperia staging
+- All npc placement from world studio should be same in hyperia staging
+- All resource placement from world studio should be same in hyperia staging
+- All stations placement from world studio should be same in hyperia staging
+- All bridge/docks/landmark placement from world studio should be same in hyperia staging
 - Hook up AI generation pipeline to World Studio for adding new assets 
 - Landmarks need to be improved 
 - Bring in TCM changes and adjust accordingly

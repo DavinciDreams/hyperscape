@@ -190,7 +190,7 @@ export class TeamService {
       productionServerUrl?: string;
       productionAssetsPath?: string;
       /**
-       * GameMode manifest. Omit to use the Hyperscape default. The route
+       * GameMode manifest. Omit to use the Hyperia default. The route
        * validates this against the registry before passing it here.
        */
       gameMode?: {
@@ -218,7 +218,7 @@ export class TeamService {
         gameMode: data.gameMode ?? {
           playerController: "click-to-walk",
           camera: "orbit",
-          inputContext: "hyperscape-default",
+          inputContext: "hyperia-default",
           pawn: "humanoid-rpg",
         },
       })

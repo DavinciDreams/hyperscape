@@ -71,7 +71,7 @@ export async function loadPhysXWasmForNode(): Promise<Buffer> {
   // Fall back to CDN fetch with caching
 
   // Check cache first
-  const cacheDir = join(tmpdir(), "hyperscape-cache");
+  const cacheDir = join(tmpdir(), "hyperia-cache");
   const cachePath = join(cacheDir, "physx-js-webidl.wasm");
 
   if (existsSync(cachePath)) {

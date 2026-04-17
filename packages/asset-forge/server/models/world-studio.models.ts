@@ -71,7 +71,7 @@ export const CreateGameBody = t.Object({
   stagingAssetsPath: t.Optional(t.String()),
   productionServerUrl: t.Optional(t.String()),
   productionAssetsPath: t.Optional(t.String()),
-  /** Optional GameMode manifest. Omit to use the Hyperscape default. */
+  /** Optional GameMode manifest. Omit to use the Hyperia default. */
   gameMode: t.Optional(GameModeManifestBody),
 });
 

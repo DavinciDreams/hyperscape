@@ -376,10 +376,10 @@ function formatTime(ms) {
 }
 
 async function runMatchmaker() {
-  // Set HYPERSCAPE_SERVER_URL before importing the plugin so its static config
+  // Set HYPERIA_SERVER_URL before importing the plugin so its static config
   // picks up the uWS port instead of defaulting to the Fastify HTTP port.
-  if (!process.env.HYPERSCAPE_SERVER_URL) {
-    process.env.HYPERSCAPE_SERVER_URL = opts.url;
+  if (!process.env.HYPERIA_SERVER_URL) {
+    process.env.HYPERIA_SERVER_URL = opts.url;
   }
 
   const { ElizaDuelMatchmaker } = await loadMatchmaker();

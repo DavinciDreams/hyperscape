@@ -1,6 +1,6 @@
 # World Studio Master Plan: Three.js/WebGPU UE5 Game Engine
 
-**Goal:** Asset Forge = the full game building pipeline (like Unreal Editor). Hyperscape = the live production game (like a shipped UE5 title). World Studio is the world editor module within Asset Forge, but the entire Asset Forge platform is the unified authoring environment.
+**Goal:** Asset Forge = the full game building pipeline (like Unreal Editor). Hyperia = the live production game (like a shipped UE5 title). World Studio is the world editor module within Asset Forge, but the entire Asset Forge platform is the unified authoring environment.
 
 **Current state:** ~70% of the pieces exist. The critical gaps are broken export pipelines, disconnected tools, and no gameplay preview. This plan fixes every gap to reach 10/10.
 
@@ -40,7 +40,7 @@
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   HYPERSCAPE (Live Game)                     │
+│                   HYPERIA (Live Game)                     │
 │                                                             │
 │  Game Server (Fastify + ECS + PhysX + WebSockets)           │
 │  Game Client (Three.js WebGPU + React + ECS)                │
@@ -416,6 +416,6 @@ After all phases, Asset Forge becomes:
 - **Deploy pipeline**: One-click staging → preview → production deployment with diffs, approval, rollback. Like UE5 Cook + Package but for a live service game.
 - **Visual parity**: Shadows, post-processing, fog — editor matches game. WYSIWYG.
 
-The game loop: **Author in Asset Forge → Test with PIE → Deploy to Hyperscape → Players play.**
+The game loop: **Author in Asset Forge → Test with PIE → Deploy to Hyperia → Players play.**
 
 That's a 10/10 Three.js/WebGPU game engine.

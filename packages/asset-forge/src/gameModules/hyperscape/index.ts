@@ -1,1 +1,0 @@
-export { HyperscapeModule } from "./HyperscapeModule";

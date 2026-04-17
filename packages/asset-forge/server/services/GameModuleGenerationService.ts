@@ -195,12 +195,12 @@ capsule, cylinder, sphere, cube, billboard, model
 ### Valid Lucide Icon Names (use these only):
 User, Users, Skull, Gem, MapPin, Sword, Shield, Heart, Star, Flag, Box, Zap, Flame, TreePine, Mountain, Building2, Music, Volume2, Bell, Globe, Map, Landmark, AlertTriangle, Waves, Package, Hexagon, Circle, Square, Triangle, Target, Crosshair, Eye, Camera, Layers, Grid, Compass, Navigation, Route, Waypoints, Home, Castle, Crown, Wand2, Sparkles, Rocket, Car, Plane, Ship, Anchor, Key, Lock, Unlock, Gift, Coins, Wallet, ShoppingBag, Wrench, Hammer, Paintbrush, Palette, Leaf, Flower, Sun, Moon, Cloud, Snowflake, Droplet, Wind
 
-### Example (trimmed Hyperscape module):
+### Example (trimmed Hyperia module):
 
 \`\`\`json
 {
-  "id": "hyperscape",
-  "name": "Hyperscape",
+  "id": "hyperia",
+  "name": "Hyperia",
   "version": "0.2.0",
   "paletteCategories": [
     { "id": "npcs", "label": "NPCs", "icon": "Users", "description": "Non-player characters" },

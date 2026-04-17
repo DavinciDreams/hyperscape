@@ -2803,7 +2803,7 @@ export class BuildingRenderingSystem extends SystemBase {
   private _localPlayerId: string | null = null;
 
   /** Storage key for roof auto-hide setting */
-  private static readonly ROOF_SETTING_KEY = "hyperscape:autoHideRoofs";
+  private static readonly ROOF_SETTING_KEY = "hyperia:autoHideRoofs";
 
   /** Dynamic impostor atlas (slot-based, max 16 buildings) */
   private dynamicAtlas: DynamicBuildingImpostorAtlas | null = null;

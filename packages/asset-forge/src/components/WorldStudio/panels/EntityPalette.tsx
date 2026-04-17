@@ -268,7 +268,7 @@ export const EntityPalette = React.memo(function EntityPalette() {
   const { state, actions, activeModule } = useWorldStudio();
   const { manifests, tools } = state;
   const activePlacement = tools.activePlacement;
-  const isHyperscape = activeModule.id === "hyperscape";
+  const isHyperia = activeModule.id === "hyperia";
 
   const [expandedCategory, setExpandedCategory] =
     useState<PaletteCategory | null>(null);
@@ -656,11 +656,11 @@ export const EntityPalette = React.memo(function EntityPalette() {
     return map;
   }, [manifests]);
 
-  // Build palette from GameModule schema for non-Hyperscape modules
+  // Build palette from GameModule schema for non-Hyperia modules
   const modulePalette = useMemo((): ModulePaletteCategory[] | null => {
-    if (isHyperscape) return null;
+    if (isHyperia) return null;
     return buildModulePalette(activeModule);
-  }, [isHyperscape, activeModule]);
+  }, [isHyperia, activeModule]);
 
   // Unified category list + item map for rendering
   const effectiveCategories = useMemo(() => {
@@ -688,7 +688,7 @@ export const EntityPalette = React.memo(function EntityPalette() {
         };
       });
     }
-    // Hyperscape mode — use hardcoded CATEGORIES with manifest-driven items
+    // Hyperia mode — use hardcoded CATEGORIES with manifest-driven items
     return CATEGORIES.map((cat) => ({
       ...cat,
       items: paletteItems.get(cat.id) ?? [],
@@ -763,8 +763,8 @@ export const EntityPalette = React.memo(function EntityPalette() {
     [actions],
   );
 
-  // Loading state (only relevant for Hyperscape manifest-driven palette)
-  if (isHyperscape && manifests.loading) {
+  // Loading state (only relevant for Hyperia manifest-driven palette)
+  if (isHyperia && manifests.loading) {
     return (
       <div className="flex flex-col h-full">
         <PaletteHeader viewMode={viewMode} onViewModeChange={setViewMode} />
@@ -781,8 +781,8 @@ export const EntityPalette = React.memo(function EntityPalette() {
     );
   }
 
-  // Error state (only relevant for Hyperscape)
-  if (isHyperscape && manifests.error) {
+  // Error state (only relevant for Hyperia)
+  if (isHyperia && manifests.error) {
     return (
       <div className="flex flex-col h-full">
         <PaletteHeader viewMode={viewMode} onViewModeChange={setViewMode} />

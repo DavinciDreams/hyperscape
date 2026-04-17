@@ -1,5 +1,5 @@
 /**
- * OrbitCameraController — Hyperscape's default camera.
+ * OrbitCameraController — Hyperia's default camera.
  *
  * Phase 2 is a *facade*: the real orbit + follow + cinematic-duel logic
  * lives in `ClientCameraSystem` (3054 lines). This controller exposes
@@ -66,7 +66,7 @@ export class OrbitCameraController implements CameraController {
     // Intentionally do NOT emit CAMERA_SET_TARGET with null — the event
     // payload doesn't accept null and the existing ClientCameraSystem
     // retains its last target until another one is set. This matches
-    // the Hyperscape teardown behavior today.
+    // the Hyperia teardown behavior today.
     this.pawn = null;
     this.attached = false;
   }

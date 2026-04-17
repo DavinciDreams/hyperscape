@@ -697,7 +697,7 @@ export const EMPTY_EXTENDED_LAYERS: ExtendedWorldLayers = {
 
 /** Category in the entity palette.
  * Relaxed to `string` to support dynamic GameModule categories.
- * Hyperscape categories retain their literal values for type safety in existing code. */
+ * Hyperia categories retain their literal values for type safety in existing code. */
 export type PaletteCategory = string;
 
 /** Template item from a manifest */

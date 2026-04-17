@@ -101,7 +101,7 @@ import type { ManifestOverrides } from "./types";
 
 import type { GameModule } from "../../gameModules/GameModule";
 import { EntityTypeRegistry } from "../../gameModules/EntityTypeRegistry";
-import { HyperscapeModule } from "../../gameModules/hyperscape";
+import { HyperiaModule } from "../../gameModules/hyperia";
 import { useStoreSync } from "../../editor/stores/useStoreSync";
 
 // Import from extracted modules
@@ -614,7 +614,7 @@ const WorldStudioDispatchContext =
 
 interface WorldStudioProviderProps {
   children: ReactNode;
-  /** Active game module — defaults to HyperscapeModule */
+  /** Active game module — defaults to HyperiaModule */
   module?: GameModule;
 }
 
@@ -628,8 +628,8 @@ export function WorldStudioProvider({
   );
   const viewportRef = useRef<ViewportCallbacks>({});
 
-  // Accept module prop, default to Hyperscape
-  const activeModule = module ?? HyperscapeModule;
+  // Accept module prop, default to Hyperia
+  const activeModule = module ?? HyperiaModule;
 
   // Build entity type registry for the active game module
   const registry = useMemo(

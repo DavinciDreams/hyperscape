@@ -3,7 +3,7 @@
  *
  * A GameModule declares entity types, palette categories, outliner layers,
  * and terrain config for a specific game built in the World Studio editor.
- * Hyperscape is the first (and currently only) game module.
+ * Hyperia is the first (and currently only) game module.
  *
  * Pure types — no runtime code.
  */
@@ -12,7 +12,7 @@
 
 /** Top-level game module definition. */
 export interface GameModule {
-  /** Unique identifier (e.g. "hyperscape") */
+  /** Unique identifier (e.g. "hyperia") */
   id: string;
   /** Human-readable display name */
   name: string;

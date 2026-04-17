@@ -1,12 +1,12 @@
 /**
- * Hyperscape Server - Main entry point for the game server
+ * Hyperia Server - Main entry point for the game server
  *
- * This is the primary server file that initializes and runs the Hyperscape multiplayer game server.
+ * This is the primary server file that initializes and runs the Hyperia multiplayer game server.
  * It orchestrates all startup modules in the correct sequence.
  *
  * **Server Architecture**:
  * ```
- * Client (Browser) ←→ Fastify HTTP Server ←→ Hyperscape World (ECS)
+ * Client (Browser) ←→ Fastify HTTP Server ←→ Hyperia World (ECS)
  *                          ↓                        ↓
  *                    WebSocket Handler        Game Systems
  *                          ↓                   (Combat, Inventory, etc.)
@@ -19,7 +19,7 @@
  * 1. Load polyfills (make Node.js browser-compatible for Three.js)
  * 2. Load configuration (environment variables, paths)
  * 3. Initialize database (Docker PostgreSQL, Drizzle ORM, migrations)
- * 4. Create Hyperscape World (ECS with all systems)
+ * 4. Create Hyperia World (ECS with all systems)
  * 5. Set up HTTP server (Fastify with static files)
  * 6. Register API routes (health, status, actions, uploads)
  * 7. Register WebSocket endpoint (multiplayer)

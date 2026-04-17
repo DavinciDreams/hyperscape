@@ -2,14 +2,14 @@
  * GameSettingsDialog — GameMode picker for the current game.
  *
  * Phase 6.1 of the GameMode plan. Four dropdowns let a non-technical user
- * swap between click-to-walk + orbit (Hyperscape default), WASD + first-
+ * swap between click-to-walk + orbit (Hyperia default), WASD + first-
  * person (FPS), or click-to-move + fixed-angle (top-down) without touching
  * code. Save PUTs to `/api/teams/:teamId/games/:gameId` and dispatches
  * `setGameMode` so PIE's next Play tick picks up the new manifest.
  *
  * The option lists here mirror the server-side allowlist in
  * `asset-forge/server/utils/gameModeRegistry.ts` and the client-side
- * registry seeded by `registerHyperscapeGameMode` +
+ * registry seeded by `registerHyperiaGameMode` +
  * `registerAlternateGameModes`. If those change, update this file too.
  */
 
@@ -29,7 +29,7 @@ interface GameSettingsDialogProps {
 // --- Option lists (mirror server allowlist) --------------------------------
 
 const PLAYER_CONTROLLER_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "click-to-walk", label: "Click-to-walk (Hyperscape)" },
+  { value: "click-to-walk", label: "Click-to-walk (Hyperia)" },
   { value: "wasd", label: "WASD keyboard" },
   { value: "top-down", label: "Top-down click-to-move" },
 ];
@@ -41,7 +41,7 @@ const CAMERA_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 const INPUT_CONTEXT_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "hyperscape-default", label: "Hyperscape default" },
+  { value: "hyperia-default", label: "Hyperia default" },
   { value: "wasd-default", label: "WASD" },
   { value: "fps-default", label: "FPS (WASD + mouse-look)" },
   { value: "topdown-default", label: "Top-down" },
@@ -56,7 +56,7 @@ const PAWN_OPTIONS: Array<{ value: string; label: string }> = [
 const DEFAULT_MANIFEST: GameModeManifest = {
   playerController: "click-to-walk",
   camera: "orbit",
-  inputContext: "hyperscape-default",
+  inputContext: "hyperia-default",
   pawn: "humanoid-rpg",
 };
 

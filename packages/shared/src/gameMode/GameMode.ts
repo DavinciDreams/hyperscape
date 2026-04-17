@@ -1,5 +1,5 @@
 /**
- * GameMode — top-level abstraction that declares *how* a Hyperscape-family
+ * GameMode — top-level abstraction that declares *how* a Hyperia-family
  * game is played.
  *
  * A `GameMode` composes a `PlayerController`, `CameraController`,
@@ -31,7 +31,7 @@ export interface GameModeManifest {
   playerController: string;
   /** Registered `CameraController.id` — e.g. `"orbit"`, `"first-person"`. */
   camera: string;
-  /** Registered `InputContext.id` — e.g. `"hyperscape-default"`, `"fps-default"`. */
+  /** Registered `InputContext.id` — e.g. `"hyperia-default"`, `"fps-default"`. */
   inputContext: string;
   /** Registered pawn type — e.g. `"humanoid-rpg"`. */
   pawn: string;

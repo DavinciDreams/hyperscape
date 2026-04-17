@@ -1,7 +1,7 @@
 /**
  * Game Modules Schema
  * Stores custom GameModule definitions (JSON) per team.
- * Built-in modules (e.g. Hyperscape) are NOT stored in this table — they are
+ * Built-in modules (e.g. Hyperia) are NOT stored in this table — they are
  * returned as synthetic entries by the API.
  */
 

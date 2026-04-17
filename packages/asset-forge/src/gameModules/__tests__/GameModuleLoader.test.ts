@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadGameModule, ModuleValidationError } from "../GameModuleLoader";
 import { EntityTypeRegistry } from "../EntityTypeRegistry";
-import { HyperscapeModule } from "../hyperscape";
+import { HyperiaModule } from "../hyperia";
 import { buildModulePalette } from "../utils/buildModulePalette";
 
 // ============== Minimal valid module fixture ==============
@@ -84,11 +84,11 @@ describe("loadGameModule", () => {
     expect(mod.entityTypes[0].id).toBe("coin");
   });
 
-  it("loads the HyperscapeModule (round-trip through JSON)", () => {
+  it("loads the HyperiaModule (round-trip through JSON)", () => {
     // Simulate JSON serialization/deserialization
-    const json = JSON.parse(JSON.stringify(HyperscapeModule));
+    const json = JSON.parse(JSON.stringify(HyperiaModule));
     const mod = loadGameModule(json);
-    expect(mod.id).toBe("hyperscape");
+    expect(mod.id).toBe("hyperia");
     expect(mod.entityTypes.length).toBeGreaterThanOrEqual(15);
   });
 
@@ -180,10 +180,10 @@ describe("loadGameModule", () => {
 // ============== EntityTypeRegistry tests ==============
 
 describe("EntityTypeRegistry", () => {
-  const registry = new EntityTypeRegistry(HyperscapeModule);
+  const registry = new EntityTypeRegistry(HyperiaModule);
 
-  it("indexes all Hyperscape entity types", () => {
-    expect(registry.getAll().length).toBe(HyperscapeModule.entityTypes.length);
+  it("indexes all Hyperia entity types", () => {
+    expect(registry.getAll().length).toBe(HyperiaModule.entityTypes.length);
   });
 
   it("looks up by type ID", () => {
@@ -277,8 +277,8 @@ describe("buildModulePalette", () => {
     expect(cats[0].items[0].name).toBe("Coin");
   });
 
-  it("builds categories for HyperscapeModule", () => {
-    const cats = buildModulePalette(HyperscapeModule);
+  it("builds categories for HyperiaModule", () => {
+    const cats = buildModulePalette(HyperiaModule);
     expect(cats.length).toBeGreaterThanOrEqual(8);
     const catIds = cats.map((c) => c.id);
     expect(catIds).toContain("npcs");

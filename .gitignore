@@ -83,7 +83,7 @@ tmp/
 # Exception: asset-forge component directory should be tracked
 !packages/asset-forge/src/components/Assets/
 
-# 3D Models and Avatars - cloned from HyperscapeAI/assets repo via ensure-assets.mjs
+# 3D Models and Avatars - cloned from HyperiaAI/assets repo via ensure-assets.mjs
 packages/server/world/assets/
 packages/client/src/public/models/
 packages/client/dist/models/
@@ -148,4 +148,4 @@ test-node-options.js
 packages/server/scripts/test-fastify-static.mjs
 
 # Local server state
-packages/server/.hyperscape-storage.json
+packages/server/.hyperia-storage.json

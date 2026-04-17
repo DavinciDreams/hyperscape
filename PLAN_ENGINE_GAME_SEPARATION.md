@@ -56,12 +56,12 @@
 
 - **Platform / monorepo root:** `hyperforge` (unscoped, private)
 - **Engine:** `@hyperforge/engine` (scoped, publishable)
-- **Game (was Hyperscape):** `hyperia` (unscoped, brand-forward, publishable as template)
+- **Game (was Hyperia):** `hyperia` (unscoped, brand-forward, publishable as template)
 - **Studio (was asset-forge):** `@hyperforge/studio`
 - **Second game:** `@hyperforge/demo-arena`
 - **All other infra:** `@hyperforge/*` (server, client, procgen, physx-js-webidl, docs-site, types)
 
-The `@hyperscape/*` scope sweep is **done** — every package.json, import, tsconfig, turbo.json, CI workflow, and doc now uses `@hyperforge/*`. The `Hyperscape → Hyperia` code-content rename (class names like `HyperscapeService` → `HyperiaService`, service identifiers, user-facing copy) is a **separate follow-up batch**, executed after the scope rename commit lands cleanly.
+The `@hyperia/*` scope sweep is **done** — every package.json, import, tsconfig, turbo.json, CI workflow, and doc now uses `@hyperforge/*`. The `Hyperia → Hyperia` code-content rename (class names like `HyperiaService` → `HyperiaService`, service identifiers, user-facing copy) is a **separate follow-up batch**, executed after the scope rename commit lands cleanly.
 
 ---
 

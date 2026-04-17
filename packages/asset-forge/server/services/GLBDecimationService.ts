@@ -440,8 +440,8 @@ export class GLBDecimationService {
 
     // Update asset info
     gltf.asset.generator = options.stripSkeleton
-      ? "Hyperscape GLB Decimation Service (Static LOD)"
-      : "Hyperscape GLB Decimation Service";
+      ? "Hyperia GLB Decimation Service (Static LOD)"
+      : "Hyperia GLB Decimation Service";
 
     const outputBuffer = this.buildGLB(gltf, newBinary);
 

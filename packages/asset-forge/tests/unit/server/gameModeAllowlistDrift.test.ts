@@ -27,11 +27,11 @@ import {
   validateGameModeManifest,
 } from "../../../server/utils/gameModeRegistry";
 
-// Mirrors packages/shared/src/gameMode/HyperscapeGameMode.ts + AlternateGameModes.ts.
-const HYPERSCAPE_DEFAULT_MANIFEST = {
+// Mirrors packages/shared/src/gameMode/HyperiaGameMode.ts + AlternateGameModes.ts.
+const HYPERIA_DEFAULT_MANIFEST = {
   playerController: "click-to-walk",
   camera: "orbit",
-  inputContext: "hyperscape-default",
+  inputContext: "hyperia-default",
   pawn: "humanoid-rpg",
 } as const;
 
@@ -58,7 +58,7 @@ const TOP_DOWN_DEFAULT_MANIFEST = {
 
 describe("GameMode allowlist drift", () => {
   const canonical = [
-    { label: "hyperscape", manifest: HYPERSCAPE_DEFAULT_MANIFEST },
+    { label: "hyperia", manifest: HYPERIA_DEFAULT_MANIFEST },
     { label: "wasd", manifest: WASD_DEFAULT_MANIFEST },
     { label: "fps", manifest: FPS_DEFAULT_MANIFEST },
     { label: "top-down", manifest: TOP_DOWN_DEFAULT_MANIFEST },
@@ -90,7 +90,7 @@ describe("GameMode allowlist drift", () => {
     const err = validateGameModeManifest({
       playerController: "definitely-not-real",
       camera: "orbit",
-      inputContext: "hyperscape-default",
+      inputContext: "hyperia-default",
       pawn: "humanoid-rpg",
     });
     expect(err).not.toBeNull();
@@ -109,7 +109,7 @@ describe("GameMode allowlist drift", () => {
     expect([...KNOWN_INPUT_CONTEXT_IDS].sort()).toEqual(
       [
         "fps-default",
-        "hyperscape-default",
+        "hyperia-default",
         "topdown-default",
         "wasd-default",
       ].sort(),

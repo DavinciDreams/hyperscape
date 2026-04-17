@@ -13,13 +13,13 @@
  *
  * @technical-debt
  * These tests use MockWorld and MockQuestRepository which violates the project's
- * "NO MOCKS" policy. This should be refactored to use real Hyperscape instances
+ * "NO MOCKS" policy. This should be refactored to use real Hyperia instances
  * with Playwright for true integration testing. The current implementation tests
  * the QuestSystem logic correctly but doesn't validate real database operations
  * or network message handling. See: .cursor/rules/testing.mdc
  *
  * Priority: Medium | Effort: High
- * Tracking: https://github.com/HyperscapeAI/hyperscape/issues/702
+ * Tracking: https://github.com/HyperiaAI/hyperia/issues/702
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";

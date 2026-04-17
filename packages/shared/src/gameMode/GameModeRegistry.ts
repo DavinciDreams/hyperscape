@@ -10,8 +10,8 @@
  * ```ts
  * import { gameModeRegistry } from "@hyperforge/shared";
  *
- * gameModeRegistry.register("hyperscape", (manifest, ctx) =>
- *   new HyperscapeGameMode(manifest, ctx),
+ * gameModeRegistry.register("hyperia", (manifest, ctx) =>
+ *   new HyperiaGameMode(manifest, ctx),
  * );
  *
  * const mode = gameModeRegistry.resolve(

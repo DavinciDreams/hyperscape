@@ -81,7 +81,7 @@
       ],
       "cache": true
     },
-    "plugin-hyperscape#build": {
+    "plugin-hyperia#build": {
       "dependsOn": [
         "^build",
         "shared#build"

@@ -705,7 +705,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
               top: contextMenu.y,
               zIndex: zIndex.contextMenu,
               background:
-                theme.name === "hyperscape"
+                theme.name === "hyperia"
                   ? "linear-gradient(180deg, rgba(44, 36, 24, 0.98) 0%, rgba(18, 15, 11, 0.98) 100%)"
                   : `linear-gradient(180deg, ${theme.colors.background.tertiary} 0%, ${theme.colors.background.secondary} 100%)`,
               border: `1px solid ${theme.colors.border.default}`,

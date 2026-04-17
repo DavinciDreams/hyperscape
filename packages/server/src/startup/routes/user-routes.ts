@@ -125,7 +125,7 @@ const RESERVED_USERNAMES = new Set([
   "help",
   "official",
   // Game-related
-  "hyperscape",
+  "hyperia",
   "player",
   "npc",
   "bot",

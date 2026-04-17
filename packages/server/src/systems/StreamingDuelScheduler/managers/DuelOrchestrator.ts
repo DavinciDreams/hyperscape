@@ -3479,7 +3479,7 @@ export class DuelOrchestrator {
 
     // Clear ALL combat-related entity data fields. The `ct` (serialized
     // combatTarget) and `attackTarget` fields are checked by
-    // EmbeddedHyperscapeService.getGameState() — leaving them stale causes
+    // EmbeddedHyperiaService.getGameState() — leaving them stale causes
     // agents to think they're still in combat and return "idle" from every
     // behavior tick instead of moving or attacking.
     (entity.data as AgentCombatData).combatTarget = null;

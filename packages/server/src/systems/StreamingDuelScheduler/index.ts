@@ -364,7 +364,7 @@ export class StreamingDuelScheduler {
   private deriveStreamingDuelKeyHex(cycleId: string): string {
     return crypto
       .createHash("sha256")
-      .update(`hyperscape-streaming-duel:${cycleId}`)
+      .update(`hyperia-streaming-duel:${cycleId}`)
       .digest("hex");
   }
 

@@ -1,5 +1,5 @@
 /**
- * ClickToWalkPlayerController — Hyperscape's default controller.
+ * ClickToWalkPlayerController — Hyperia's default controller.
  *
  * Phase 2 is a *facade*: the real raycast + server-intent routing still
  * lives in `InteractionRouter` (27-file surface, 16 registered

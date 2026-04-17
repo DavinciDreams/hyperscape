@@ -151,7 +151,7 @@ async function resetLocalStreamingCaches(): Promise<void> {
       const cacheKeys = await window.caches.keys();
       const streamingCacheKeys = cacheKeys.filter(
         (cacheKey) =>
-          cacheKey.startsWith("workbox") || cacheKey.startsWith("hyperscape"),
+          cacheKey.startsWith("workbox") || cacheKey.startsWith("hyperia"),
       );
       if (streamingCacheKeys.length > 0) {
         await Promise.all(

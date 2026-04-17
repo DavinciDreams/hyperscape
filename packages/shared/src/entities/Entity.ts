@@ -1375,7 +1375,7 @@ export class Entity implements IEntity {
     }
 
     // Use ModelCache to load with caching
-    // ModelCache uses its own GLTFLoader to ensure pure THREE.Object3D (not Hyperscape Nodes)
+    // ModelCache uses its own GLTFLoader to ensure pure THREE.Object3D (not Hyperia Nodes)
     const { scene } = await modelCache.loadModel(this.config.model, this.world);
 
     // Clear existing mesh first

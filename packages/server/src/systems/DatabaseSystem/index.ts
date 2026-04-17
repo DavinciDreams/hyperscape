@@ -1,7 +1,7 @@
 /**
  * DatabaseSystem - Server-side database operations for persistent game state
  *
- * This system provides a comprehensive interface for all database operations in Hyperscape.
+ * This system provides a comprehensive interface for all database operations in Hyperia.
  * It uses PostgreSQL with Drizzle ORM for type-safe queries and migrations.
  *
  * Architecture (Refactored):
@@ -110,7 +110,7 @@ export type IsolationLevel =
 /**
  * DatabaseSystem class
  *
- * Extends SystemBase to integrate with Hyperscape's ECS architecture.
+ * Extends SystemBase to integrate with Hyperia's ECS architecture.
  * Acts as a facade that delegates to domain-specific repositories.
  */
 export class DatabaseSystem extends SystemBase {

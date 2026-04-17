@@ -5,7 +5,7 @@
   "main": "build/framework.js",
   "types": "build/framework.d.ts",
   "bin": {
-    "hyperscape": "build/cli.js"
+    "hyperia": "build/cli.js"
   },
   "exports": {
     ".": {
@@ -29,12 +29,12 @@
       "default": "./build/runtime-pie.js"
     }
   },
-  "homepage": "https://github.com/HyperscapeAI/hyperscape#readme",
+  "homepage": "https://github.com/HyperiaAI/hyperia#readme",
   "bugs": {
-    "url": "https://github.com/HyperscapeAI/hyperscape/issues"
+    "url": "https://github.com/HyperiaAI/hyperia/issues"
   },
   "keywords": [
-    "hyperscape",
+    "hyperia",
     "3d",
     "components",
     "virtual-worlds",
@@ -59,7 +59,7 @@
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "docs:extract": "echo 'TSDoc extraction happens at root level via TypeDoc'",
-    "cap:init": "cap init 'Hyperscape' 'com.hyperscape.app' --web-dir build/public",
+    "cap:init": "cap init 'Hyperia' 'com.hyperia.app' --web-dir build/public",
     "cap:sync": "cap sync",
     "cap:sync:ios": "cap sync ios",
     "cap:sync:android": "cap sync android",

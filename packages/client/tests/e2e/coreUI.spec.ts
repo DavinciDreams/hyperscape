@@ -8,7 +8,7 @@
  * - Toast notifications
  * - Connection indicator states
  *
- * Per project rules: Uses real Hyperscape instances with Playwright
+ * Per project rules: Uses real Hyperia instances with Playwright
  *
  * @packageDocumentation
  */
@@ -98,9 +98,9 @@ test.describe("Loading Screen", () => {
       .waitForFunction(
         () => {
           const win = window as unknown as {
-            __HYPERSCAPE_LOADING__?: { ready?: boolean };
+            __HYPERIA_LOADING__?: { ready?: boolean };
           };
-          return win.__HYPERSCAPE_LOADING__?.ready === true;
+          return win.__HYPERIA_LOADING__?.ready === true;
         },
         { timeout: 60000 },
       )
@@ -109,7 +109,7 @@ test.describe("Loading Screen", () => {
       });
 
     // After loading, check that the game canvas exists
-    const canvas = page.locator("#hyperscape-world-canvas, canvas").first();
+    const canvas = page.locator("#hyperia-world-canvas, canvas").first();
     await expect(canvas).toBeVisible({ timeout: 30000 });
   });
 });

@@ -1,7 +1,7 @@
 /**
  * `@hyperforge/shared/gameMode` — public barrel for the GameMode system.
  *
- * UE5-inspired abstraction that lets each Hyperscape-family game declare
+ * UE5-inspired abstraction that lets each Hyperia-family game declare
  * its own player controller, camera, input context, and pawn. See
  * `packages/shared/src/gameMode/PLAN.md` for the phased migration plan.
  *
@@ -32,7 +32,7 @@ export type {
 } from "./input/InputContext";
 export type { Pawn } from "./pawns/Pawn";
 
-// Phase 2 — Hyperscape default composition
+// Phase 2 — Hyperia default composition
 export {
   CLICK_TO_WALK_CONTROLLER_ID,
   ClickToWalkPlayerController,
@@ -42,16 +42,16 @@ export {
   OrbitCameraController,
 } from "./cameras/OrbitCameraController";
 export {
-  HYPERSCAPE_DEFAULT_BINDINGS,
-  HYPERSCAPE_DEFAULT_CONTEXT_ID,
-  createHyperscapeDefaultContext,
+  HYPERIA_DEFAULT_BINDINGS,
+  HYPERIA_DEFAULT_CONTEXT_ID,
+  createHyperiaDefaultContext,
 } from "./input/defaultContexts";
 export {
-  HYPERSCAPE_DEFAULT_MANIFEST,
-  HYPERSCAPE_PAWN_ID,
-  createHyperscapeGameMode,
-  registerHyperscapeGameMode,
-} from "./HyperscapeGameMode";
+  HYPERIA_DEFAULT_MANIFEST,
+  HYPERIA_PAWN_ID,
+  createHyperiaGameMode,
+  registerHyperiaGameMode,
+} from "./HyperiaGameMode";
 
 // Phase 5 — alternate controllers, cameras, and manifests
 export {

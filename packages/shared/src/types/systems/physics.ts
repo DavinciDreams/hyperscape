@@ -2,7 +2,7 @@
  * physics.ts - PhysX Type Definitions and Re-exports
  *
  * Centralized type definitions for the PhysX physics engine integration.
- * This file provides TypeScript types for all PhysX APIs used in Hyperscape.
+ * This file provides TypeScript types for all PhysX APIs used in Hyperia.
  *
  * **Type Organization:**
  * - Core types: PxVec3, PxQuat, PxTransform (math/transforms)

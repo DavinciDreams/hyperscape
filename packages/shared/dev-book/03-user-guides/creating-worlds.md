@@ -6,7 +6,7 @@
 
 ## World Types
 
-Hyperscape supports three world types for different use cases.
+Hyperia supports three world types for different use cases.
 
 ---
 

@@ -65,13 +65,13 @@ export const games = pgTable(
     slug: text("slug").notNull(),
     description: text("description"),
 
-    // Game module reference (default: Hyperscape built-in module)
-    moduleId: text("module_id").notNull().default("hyperscape"),
+    // Game module reference (default: Hyperia built-in module)
+    moduleId: text("module_id").notNull().default("hyperia"),
 
     /**
      * GameMode manifest (UE5-inspired player controller / camera / input /
      * pawn selection). Resolved at runtime by `gameModeRegistry`. Defaults
-     * on insert to the Hyperscape manifest via the `game_mode` server
+     * on insert to the Hyperia manifest via the `game_mode` server
      * default; schema-level default lives in the migration because Drizzle
      * JSON defaults on insert require a SQL literal.
      *

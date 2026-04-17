@@ -1,7 +1,7 @@
 -- GameMode manifest (UE5-inspired player controller / camera / input / pawn).
 -- Adds a JSON column on `games` so each game declares which controller/camera
 -- stack the client and PIE should resolve. Existing rows backfill to the
--- Hyperscape default manifest (click-to-walk + orbit + hyperscape-default +
+-- Hyperia default manifest (click-to-walk + orbit + hyperia-default +
 -- humanoid-rpg).
 --
 -- See `packages/shared/src/gameMode/PLAN.md` Phase 4.
@@ -10,7 +10,7 @@ ALTER TABLE "games"
   ADD COLUMN "game_mode" jsonb NOT NULL DEFAULT '{
     "playerController": "click-to-walk",
     "camera": "orbit",
-    "inputContext": "hyperscape-default",
+    "inputContext": "hyperia-default",
     "pawn": "humanoid-rpg"
   }'::jsonb;
 

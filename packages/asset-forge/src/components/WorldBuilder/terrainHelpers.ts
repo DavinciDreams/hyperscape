@@ -233,7 +233,7 @@ export function createTemplateGeometry(
 export function createTerrainMaterial(): THREE.Material & {
   terrainUniforms: TerrainUniforms;
 } {
-  // Use the ACTUAL game terrain shader — same code that renders in Hyperscape.
+  // Use the ACTUAL game terrain shader — same code that renders in Hyperia.
   // "One system, two contexts" — packedAttributes + disabled game-only features.
   const material = createGameTerrainMaterial({
     packedAttributes: true, // Editor packs biome weights into vec4+vec2

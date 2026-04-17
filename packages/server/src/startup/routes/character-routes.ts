@@ -120,7 +120,7 @@ export function registerCharacterRoutes(
   /**
    * POST /api/characters/db
    *
-   * Create a character in the Hyperscape database.
+   * Create a character in the Hyperia database.
    * This endpoint is separate from the file-saving endpoint above.
    *
    * Request body:

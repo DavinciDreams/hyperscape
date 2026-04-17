@@ -1,6 +1,6 @@
 # Duel Arena Oracle Deployment
 
-This is the standalone duel arena oracle path inside Hyperscape. It is separate from betting and prediction market flows.
+This is the standalone duel arena oracle path inside Hyperia. It is separate from betting and prediction market flows.
 
 ## Components
 
@@ -66,7 +66,7 @@ Core toggles:
 DUEL_ARENA_ORACLE_ENABLED=true
 DUEL_ARENA_ORACLE_PROFILE=testnet
 DUEL_ARENA_ORACLE_METADATA_BASE_URL=https://your-domain.example/api/duel-arena/oracle
-DUEL_ARENA_ORACLE_STORE_PATH=/var/lib/hyperscape/duel-arena-oracle/records.json
+DUEL_ARENA_ORACLE_STORE_PATH=/var/lib/hyperia/duel-arena-oracle/records.json
 ```
 
 Profiles:

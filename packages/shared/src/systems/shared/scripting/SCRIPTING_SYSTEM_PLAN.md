@@ -589,7 +589,7 @@ On each tick during the timeline's duration, update the variable and execute the
 
 ### 6A. Convert Existing Game Behaviors to Editable Graphs
 
-Create 12-15 new templates representing real Hyperscape gameplay patterns:
+Create 12-15 new templates representing real Hyperia gameplay patterns:
 
 | Template | Game Behavior | Nodes Used |
 |----------|--------------|------------|

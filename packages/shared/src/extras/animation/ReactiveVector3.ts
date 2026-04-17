@@ -2,7 +2,7 @@
  * ReactiveVector3.ts - Change-Detecting Vector3
  *
  * A THREE.Vector3 subclass that provides change detection callbacks.
- * Used in Hyperscape's Node system to automatically update transforms when position changes.
+ * Used in Hyperia's Node system to automatically update transforms when position changes.
  *
  * Why Reactive:
  * - Nodes need to update their matrix when position/scale changes

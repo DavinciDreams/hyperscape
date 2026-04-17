@@ -15,8 +15,8 @@
  *    in the client, so reject at the edge.
  *
  * Keep the ids here in **lockstep** with whichever manifests the
- * client registers at boot. Today that is just `HyperscapeGameMode`
- * (see `packages/shared/src/gameMode/HyperscapeGameMode.ts`). Phase 5
+ * client registers at boot. Today that is just `HyperiaGameMode`
+ * (see `packages/shared/src/gameMode/HyperiaGameMode.ts`). Phase 5
  * will add `wasd`, `first-person`, etc. — extend the allowlists when
  * those land.
  */
@@ -32,7 +32,7 @@ export interface GameModeManifest {
 export const DEFAULT_GAME_MODE_MANIFEST: GameModeManifest = {
   playerController: "click-to-walk",
   camera: "orbit",
-  inputContext: "hyperscape-default",
+  inputContext: "hyperia-default",
   pawn: "humanoid-rpg",
 };
 
@@ -55,7 +55,7 @@ export const KNOWN_CAMERA_IDS = new Set<string>([
 
 /** InputContext ids the server accepts. */
 export const KNOWN_INPUT_CONTEXT_IDS = new Set<string>([
-  "hyperscape-default",
+  "hyperia-default",
   "wasd-default",
   "fps-default",
   "topdown-default",

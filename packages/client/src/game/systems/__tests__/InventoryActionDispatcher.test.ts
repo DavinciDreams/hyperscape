@@ -4,7 +4,7 @@
  * Tests for centralized inventory action dispatching.
  *
  * Note: These tests use minimal mock objects for unit testing the dispatcher logic.
- * For full integration tests, use Playwright with real Hyperscape instances.
+ * For full integration tests, use Playwright with real Hyperia instances.
  *
  * The mock -> World casts require `as unknown as` because the mock is a minimal
  * subset that doesn't structurally overlap with the full World type.

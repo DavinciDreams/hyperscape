@@ -2494,12 +2494,12 @@ export class TerrainSystem extends System {
           if (typeof window === "undefined") return undefined;
           const cfg = (
             window as Window & {
-              __HYPERSCAPE_CONFIG__?: {
+              __HYPERIA_CONFIG__?: {
                 followEntity?: string;
                 characterId?: string;
               };
             }
-          ).__HYPERSCAPE_CONFIG__;
+          ).__HYPERIA_CONFIG__;
           return cfg?.followEntity || cfg?.characterId;
         })();
 
@@ -8134,12 +8134,12 @@ export class TerrainSystem extends System {
     const isEmbeddedSpectator = (() => {
       if (typeof window === "undefined") return false;
       const win = window as Window & {
-        __HYPERSCAPE_EMBEDDED__?: boolean;
-        __HYPERSCAPE_CONFIG__?: { mode?: string };
+        __HYPERIA_EMBEDDED__?: boolean;
+        __HYPERIA_CONFIG__?: { mode?: string };
       };
       return (
-        win.__HYPERSCAPE_EMBEDDED__ === true &&
-        win.__HYPERSCAPE_CONFIG__?.mode === "spectator"
+        win.__HYPERIA_EMBEDDED__ === true &&
+        win.__HYPERIA_CONFIG__?.mode === "spectator"
       );
     })();
     // world.isServer can be false during early bootstrap (before network mode

@@ -3,7 +3,7 @@
   "version": "0.13.0",
   "type": "module",
   "private": true,
-  "description": "Hyperscape native desktop and mobile app powered by Tauri v2",
+  "description": "Hyperia native desktop and mobile app powered by Tauri v2",
   "scripts": {
     "dev": "tauri dev",
     "build": "CI=true tauri build --no-bundle",

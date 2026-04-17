@@ -44,10 +44,10 @@ import { useWorldStudio } from "../WorldStudioContext";
 import type { GameModeManifest } from "@hyperforge/shared/runtime";
 
 /**
- * Config matching the live Hyperscape game world.
+ * Config matching the live Hyperia game world.
  * Seed 0, 100x100 tiles (10km x 10km), uses the game's exact terrain pipeline.
  */
-const HYPERSCAPE_GAME_WORLD_CONFIG: WorldCreationConfig = {
+const HYPERIA_GAME_WORLD_CONFIG: WorldCreationConfig = {
   seed: 0,
   preset: null,
   useGamePipeline: true,
@@ -221,7 +221,7 @@ export function useProjectLoader(projectId: string) {
 
         // Fetch the owning game record to pick up its GameMode manifest
         // (Phase 4). This is non-fatal — if the fetch fails, PIE falls back
-        // to the client-side Hyperscape default.
+        // to the client-side Hyperia default.
         let gameMode: GameModeManifest | null = null;
         try {
           const game = await fetchGame(project.teamId, project.gameId);
@@ -239,13 +239,13 @@ export function useProjectLoader(projectId: string) {
         const rawData = project.worldData as Record<string, unknown>;
         let world;
         if (rawData?._placeholder) {
-          // Generate the Hyperscape game world on first open
+          // Generate the Hyperia game world on first open
           const generated = await new Promise<
             ReturnType<typeof generateWorldFromConfig>
           >((resolve, reject) => {
             setTimeout(() => {
               try {
-                resolve(generateWorldFromConfig(HYPERSCAPE_GAME_WORLD_CONFIG));
+                resolve(generateWorldFromConfig(HYPERIA_GAME_WORLD_CONFIG));
               } catch (err) {
                 reject(err);
               }

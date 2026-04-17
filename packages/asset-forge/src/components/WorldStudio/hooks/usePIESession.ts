@@ -26,7 +26,7 @@ import {
   type PIEDebugEntry,
   type RuntimeScriptGraph,
   type GameModeManifest,
-  HYPERSCAPE_DEFAULT_MANIFEST,
+  HYPERIA_DEFAULT_MANIFEST,
   CLICK_TO_WALK_CONTROLLER_ID,
 } from "@hyperforge/shared/runtime";
 import type { ScriptGraph } from "../../../scripting/types";
@@ -255,10 +255,10 @@ export function usePIESession({
     // GameMode manifest selects the viewport controller. Phase 4 persists
     // this per-game; `state.project.gameMode` is populated from the games
     // API (`fetchGame`) when the project loads. Legacy games or offline
-    // projects fall back to the built-in Hyperscape click-to-walk + orbit
+    // projects fall back to the built-in Hyperia click-to-walk + orbit
     // composition.
     const manifest: GameModeManifest =
-      state.project.gameMode ?? HYPERSCAPE_DEFAULT_MANIFEST;
+      state.project.gameMode ?? HYPERIA_DEFAULT_MANIFEST;
 
     const startOptions: PlayTestWorldOptions = {
       mobSpawns,

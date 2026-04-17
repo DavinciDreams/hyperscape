@@ -663,7 +663,7 @@ function LootWindowPanelContent({
                 className="text-white px-4 py-2 rounded text-sm"
                 style={{
                   background:
-                    theme.name === "hyperscape"
+                    theme.name === "hyperia"
                       ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
                       : theme.colors.background.tertiary,
                   border: `1px solid ${theme.colors.border.default}40`,
@@ -714,7 +714,7 @@ export function LootWindowPanel(props: LootWindowPanelProps) {
           className="text-white px-4 py-2 rounded text-sm"
           style={{
             background:
-              theme.name === "hyperscape"
+              theme.name === "hyperia"
                 ? "linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.16) 100%)"
                 : theme.colors.background.tertiary,
             border: `1px solid ${theme.colors.border.default}40`,

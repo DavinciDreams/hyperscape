@@ -188,7 +188,7 @@ export function buildWorldContextPrompt(
 
 /**
  * Extract an EntitySummary from the raw state layers.
- * Works with both typed Hyperscape layers and dynamic module layers.
+ * Works with both typed Hyperia layers and dynamic module layers.
  */
 export function extractEntitySummary(
   extendedLayers: Record<string, unknown>,

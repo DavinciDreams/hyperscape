@@ -5,18 +5,18 @@
 -- into a migration, so GET /api/teams/:teamId/games returns an error and the
 -- editor's "New World" button is left disabled (no selectedGameId).
 --
--- Backfill existing rows with the default "hyperscape" module so the NOT NULL
+-- Backfill existing rows with the default "hyperia" module so the NOT NULL
 -- constraint is satisfiable. New rows get the default via the column default
 -- (we keep the default in place so application code does not need to pass
 -- moduleId on every insert).
 
 ALTER TABLE "games"
-  ADD COLUMN "module_id" text NOT NULL DEFAULT 'hyperscape';
+  ADD COLUMN "module_id" text NOT NULL DEFAULT 'hyperia';
 
 --> statement-breakpoint
 
 -- Game Modules table: stores custom GameModule JSON definitions per team.
--- Built-in modules (e.g. Hyperscape) are NOT stored here — they are
+-- Built-in modules (e.g. Hyperia) are NOT stored here — they are
 -- returned as synthetic entries by the API.
 CREATE TABLE "game_modules" (
   "id" text PRIMARY KEY NOT NULL,

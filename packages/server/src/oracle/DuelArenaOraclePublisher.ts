@@ -86,7 +86,7 @@ function prefixedHex(value: string): Hex {
 function hashParticipant(participantId: string): string {
   return crypto
     .createHash("sha256")
-    .update(`hyperscape:duel-arena:participant:${participantId}`)
+    .update(`hyperia:duel-arena:participant:${participantId}`)
     .digest("hex");
 }
 

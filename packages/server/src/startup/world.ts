@@ -1,7 +1,7 @@
 /**
  * World Module - Game world initialization and entity loading
  *
- * Handles creation of the Hyperscape ECS world, system registration,
+ * Handles creation of the Hyperia ECS world, system registration,
  * world configuration, and entity loading from world.json.
  *
  * Responsibilities:
@@ -52,7 +52,7 @@ interface WorldConfig {
 }
 
 /**
- * Initialize Hyperscape world with systems and entities
+ * Initialize Hyperia world with systems and entities
  *
  * This function creates the game world, registers all server systems,
  * configures world settings, initializes the ECS, and loads entities

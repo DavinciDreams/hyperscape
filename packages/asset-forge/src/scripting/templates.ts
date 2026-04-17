@@ -1,5 +1,5 @@
 /**
- * Script Templates — Premade ScriptGraph instances for common Hyperscape patterns.
+ * Script Templates — Premade ScriptGraph instances for common Hyperia patterns.
  *
  * Each template is a factory function returning a fresh ScriptGraph
  * with wired nodes and edges. Used by the "New from Template" picker.

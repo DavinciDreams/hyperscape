@@ -6,8 +6,8 @@
  * overridden at runtime by /env.js.
  *
  * In production builds (vite build):
- *   - GAME_API_URL = https://hyperscape-production.up.railway.app
- *   - GAME_WS_URL = wss://hyperscape-production.up.railway.app/ws
+ *   - GAME_API_URL = https://hyperia-production.up.railway.app
+ *   - GAME_WS_URL = wss://hyperia-production.up.railway.app/ws
  *   - CDN_URL = https://assets.hyperscape.club
  *
  * In development (vite dev):
@@ -33,9 +33,9 @@ const LOCAL_DEV_ELIZAOS_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_API_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_WS_URL = "ws://localhost:5556/ws";
 const LOCAL_DEV_CDN_URL = "http://localhost:5555/game-assets";
-const PRODUCTION_ELIZAOS_URL = "https://hyperscape-production.up.railway.app";
-const PRODUCTION_GAME_API_URL = "https://hyperscape-production.up.railway.app";
-const PRODUCTION_GAME_WS_URL = "wss://hyperscape-production.up.railway.app/ws";
+const PRODUCTION_ELIZAOS_URL = "https://hyperia-production.up.railway.app";
+const PRODUCTION_GAME_API_URL = "https://hyperia-production.up.railway.app";
+const PRODUCTION_GAME_WS_URL = "wss://hyperia-production.up.railway.app/ws";
 const PRODUCTION_CDN_URL = "https://assets.hyperscape.club";
 
 export type ApiConfigResolutionInput = {
@@ -228,9 +228,9 @@ export function resolveRuntimeAssetUrl(assetPath: string): string {
 }
 
 // =============================================================================
-// ElizaOS AI Agent Server (embedded in Hyperscape server)
+// ElizaOS AI Agent Server (embedded in Hyperia server)
 // =============================================================================
-// ElizaOS agent routes are now served directly from the Hyperscape game server.
+// ElizaOS agent routes are now served directly from the Hyperia game server.
 // No separate ElizaOS process needed - routes are at /api/agents, /api/agents/:id, etc.
 
 let resolvedApiConfig = getCurrentResolvedApiConfig();
@@ -240,7 +240,7 @@ export let ELIZAOS_URL: string = resolvedApiConfig.elizaOsUrl;
 export let ELIZAOS_API: string = `${ELIZAOS_URL}/api`;
 
 // =============================================================================
-// Hyperscape Game Server
+// Hyperia Game Server
 // =============================================================================
 // These are replaced at build time by Vite's define feature
 

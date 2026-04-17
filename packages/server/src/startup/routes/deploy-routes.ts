@@ -150,7 +150,7 @@ function validateManifests(manifests: Record<string, unknown>): {
 }
 
 /** Resolved admin code — set once in registerDeployRoutes from config */
-let resolvedAdminCode = "hyperscape-admin";
+let resolvedAdminCode = "hyperia-admin";
 
 /** Simple admin auth check (reuses same x-admin-code pattern as admin-routes) */
 function checkAdminAuth(request: FastifyRequest, reply: FastifyReply): boolean {
@@ -172,7 +172,7 @@ export function registerDeployRoutes(
   world?: World,
 ): void {
   // Use admin code from server config (matches ADMIN_CODE env var)
-  resolvedAdminCode = config.adminCode || "hyperscape-admin";
+  resolvedAdminCode = config.adminCode || "hyperia-admin";
 
   // Initialize directory paths
   const manifestsParent = path.dirname(config.manifestsDir);

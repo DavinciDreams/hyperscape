@@ -131,7 +131,7 @@ export interface StudioProjectState {
   /**
    * GameMode manifest fetched from the game record (Phase 4). Null until a
    * project is loaded, or if the API response did not include one (legacy
-   * games). Callers should fall back to `HYPERSCAPE_DEFAULT_MANIFEST`.
+   * games). Callers should fall back to `HYPERIA_DEFAULT_MANIFEST`.
    */
   gameMode: GameModeManifest | null;
 }
@@ -238,7 +238,7 @@ export const DEFAULT_VIEWPORT_OVERLAYS: StudioViewportOverlays = {
  * - `simulate`: editor fly-cam, no pawn possession. Level designers move
  *   freely; game input (WASD + mouse look) drives the editor camera.
  * - `play`: the resolved GameMode's controller stack possesses the pawn.
- *   For Hyperscape this is click-to-walk + orbit camera.
+ *   For Hyperia this is click-to-walk + orbit camera.
  */
 export type PIEMode = "simulate" | "play";
 

@@ -1,7 +1,7 @@
 /**
  * Embedded Game Client - Spectator Viewport for AI Agents
  *
- * Renders the Hyperscape game in embedded mode for viewing agents play in real-time.
+ * Renders the Hyperia game in embedded mode for viewing agents play in real-time.
  * Auto-connects with embedded configuration and sets up spectator camera.
  */
 
@@ -565,7 +565,7 @@ export function EmbeddedGameClient() {
 
     if (!embeddedConfig) {
       setError("No embedded configuration found");
-      logger.error("[EmbeddedGameClient] Missing window.__HYPERSCAPE_CONFIG__");
+      logger.error("[EmbeddedGameClient] Missing window.__HYPERIA_CONFIG__");
       return;
     }
 
@@ -598,13 +598,10 @@ export function EmbeddedGameClient() {
           }
         };
 
-        window.addEventListener(
-          "hyperscape:auth-ready",
-          handleSpectatorAuthReady,
-        );
+        window.addEventListener("hyperia:auth-ready", handleSpectatorAuthReady);
         return () => {
           window.removeEventListener(
-            "hyperscape:auth-ready",
+            "hyperia:auth-ready",
             handleSpectatorAuthReady,
           );
           if (cleanupRef.current) {
@@ -646,9 +643,9 @@ export function EmbeddedGameClient() {
                 characterId,
                 followEntity: characterId,
               };
-              if (window.__HYPERSCAPE_CONFIG__) {
-                window.__HYPERSCAPE_CONFIG__.characterId = characterId;
-                window.__HYPERSCAPE_CONFIG__.followEntity = characterId;
+              if (window.__HYPERIA_CONFIG__) {
+                window.__HYPERIA_CONFIG__.characterId = characterId;
+                window.__HYPERIA_CONFIG__.followEntity = characterId;
               }
               setConfig(updatedConfig);
               return;
@@ -665,7 +662,7 @@ export function EmbeddedGameClient() {
               "[EmbeddedGameClient] Timeout waiting for agent to connect",
             );
             setError(
-              "Waiting for agent to connect to Hyperscape... Please ensure the agent is running.",
+              "Waiting for agent to connect to Hyperia... Please ensure the agent is running.",
             );
           }
         };
@@ -697,13 +694,10 @@ export function EmbeddedGameClient() {
           }
         };
 
-        window.addEventListener(
-          "hyperscape:auth-ready",
-          handleSpectatorAuthReady,
-        );
+        window.addEventListener("hyperia:auth-ready", handleSpectatorAuthReady);
         return () => {
           window.removeEventListener(
-            "hyperscape:auth-ready",
+            "hyperia:auth-ready",
             handleSpectatorAuthReady,
           );
           if (cleanupRef.current) {
@@ -732,7 +726,7 @@ export function EmbeddedGameClient() {
     };
 
     // Listen for auth-ready event (fired when postMessage delivers the token)
-    window.addEventListener("hyperscape:auth-ready", handleAuthReady);
+    window.addEventListener("hyperia:auth-ready", handleAuthReady);
 
     // Set a timeout - if no token received within 10 seconds, show error
     const timeoutId = setTimeout(() => {
@@ -747,7 +741,7 @@ export function EmbeddedGameClient() {
 
     // Cleanup on unmount
     return () => {
-      window.removeEventListener("hyperscape:auth-ready", handleAuthReady);
+      window.removeEventListener("hyperia:auth-ready", handleAuthReady);
       clearTimeout(timeoutId);
       if (cleanupRef.current) {
         cleanupRef.current();
@@ -962,7 +956,7 @@ export function EmbeddedGameClient() {
             </>
           ) : (
             <>
-              <h2>Loading Hyperscape Viewport...</h2>
+              <h2>Loading Hyperia Viewport...</h2>
               <p>Initializing viewport</p>
             </>
           )}
@@ -974,7 +968,7 @@ export function EmbeddedGameClient() {
   // Build WebSocket URL WITHOUT authentication token in URL
   // SECURITY: authToken is NOT included in URL (leaks via logs, browser history, referrer headers)
   // Instead, ClientNetwork sends authentication as first message after connection opens
-  // The auth credentials are passed via window.__HYPERSCAPE_CONFIG__ which ClientNetwork reads
+  // The auth credentials are passed via window.__HYPERIA_CONFIG__ which ClientNetwork reads
   const wsUrl = (() => {
     const url = new URL(config.wsUrl, window.location.href);
     if (config.mode === "spectator") {

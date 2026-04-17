@@ -40,7 +40,7 @@ import {
 
 const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
   (
-    process.env.HYPERSCAPE_TRUSTED_DUEL_BOT_ACCOUNT_IDS ||
+    process.env.HYPERIA_TRUSTED_DUEL_BOT_ACCOUNT_IDS ||
     "eliza-duel-bots-account"
   )
     .split(",")
@@ -77,13 +77,13 @@ async function _createElizaOSAgent(
     // Generate ElizaOS character template
     const username = name.toLowerCase().replace(/\s+/g, "_");
     const characterTemplate = {
-      id: characterId, // Use same ID as Hyperscape character
+      id: characterId, // Use same ID as Hyperia character
       name,
       username,
-      system: `You are ${name}, ${isAgent ? "an AI agent" : "a character"} in Hyperscape, a 3D multiplayer RPG. ${isAgent ? "You can autonomously move around the world, fight enemies, gather resources, manage your inventory, and interact with other players." : "You are controlled by a human player but can also operate autonomously when needed."} You are adventurous, strategic, and always ready for new challenges.`,
+      system: `You are ${name}, ${isAgent ? "an AI agent" : "a character"} in Hyperia, a 3D multiplayer RPG. ${isAgent ? "You can autonomously move around the world, fight enemies, gather resources, manage your inventory, and interact with other players." : "You are controlled by a human player but can also operate autonomously when needed."} You are adventurous, strategic, and always ready for new challenges.`,
 
       bio: [
-        `I am ${name}, ${isAgent ? "an AI agent" : "a character"} in the world of Hyperscape.`,
+        `I am ${name}, ${isAgent ? "an AI agent" : "a character"} in the world of Hyperia.`,
         isAgent
           ? "I autonomously navigate 3D environments, engage in combat, and interact with other players."
           : "I can be controlled by my human player or operate autonomously when needed.",
@@ -92,7 +92,7 @@ async function _createElizaOSAgent(
       ],
 
       topics: [
-        "hyperscape",
+        "hyperia",
         "gaming",
         "rpg",
         "combat strategies",
@@ -112,15 +112,15 @@ async function _createElizaOSAgent(
 
       plugins: [
         "@elizaos/plugin-sql", // Database operations
-        "@hyperforge/plugin-hyperscape", // Hyperscape game integration
+        "@hyperforge/plugin-hyperia", // Hyperia game integration
       ],
 
       settings: {
         secrets: {
-          HYPERSCAPE_CHARACTER_ID: characterId,
-          HYPERSCAPE_SERVER_URL:
+          HYPERIA_CHARACTER_ID: characterId,
+          HYPERIA_SERVER_URL:
             process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl(),
-          HYPERSCAPE_ACCOUNT_ID: accountId, // Link to user's account
+          HYPERIA_ACCOUNT_ID: accountId, // Link to user's account
           wallet,
         },
         avatar,
@@ -177,7 +177,7 @@ async function _createElizaOSAgent(
       error instanceof Error ? error.message : String(error),
     );
     // Don't fail character creation if ElizaOS agent creation fails
-    // The character is already in Hyperscape DB
+    // The character is already in Hyperia DB
   }
 }
 

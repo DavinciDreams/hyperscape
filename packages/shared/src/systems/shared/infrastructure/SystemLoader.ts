@@ -193,7 +193,7 @@ export interface Systems {
 }
 
 /**
- * Register all systems with a Hyperscape world
+ * Register all systems with a Hyperia world
  * This is the main entry point called by the bootstrap
  */
 export async function registerSystems(world: World): Promise<void> {

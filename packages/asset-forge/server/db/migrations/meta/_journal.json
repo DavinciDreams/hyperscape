@@ -36,6 +36,13 @@
       "when": 1776326500000,
       "tag": "0004_games_module_id_and_game_modules_scripts",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776413000000,
+      "tag": "0005_hyperscape_to_hyperia_rename",
+      "breakpoints": true
     }
   ]
 }

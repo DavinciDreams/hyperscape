@@ -137,8 +137,8 @@ async function ensurePersonalTeam(user: ForgeUser): Promise<void> {
     .insert(games)
     .values({
       teamId: team.id,
-      name: "Hyperscape",
-      slug: "hyperscape",
+      name: "Hyperia",
+      slug: "hyperia",
       description: "Default game project",
       gameMode: DEFAULT_GAME_MODE_MANIFEST,
     })
@@ -148,7 +148,7 @@ async function ensurePersonalTeam(user: ForgeUser): Promise<void> {
   await db.insert(worldProjects).values({
     teamId: team.id,
     gameId: game.id,
-    name: "Hyperscape",
+    name: "Hyperia",
     description: "Default game world",
     worldData: { _placeholder: true },
     createdBy: user.id,
@@ -182,12 +182,12 @@ async function ensureDefaultGameForTeams(user: ForgeUser): Promise<void> {
 
     await db.insert(games).values({
       teamId,
-      name: "Hyperscape",
-      slug: "hyperscape",
+      name: "Hyperia",
+      slug: "hyperia",
       description: "Default game project",
       gameMode: DEFAULT_GAME_MODE_MANIFEST,
     });
-    console.log("[Auth] Backfilled default Hyperscape game for team", teamId);
+    console.log("[Auth] Backfilled default Hyperia game for team", teamId);
   }
 }
 
@@ -218,7 +218,7 @@ async function ensureDefaultWorldProject(user: ForgeUser): Promise<void> {
       await db.insert(worldProjects).values({
         teamId,
         gameId,
-        name: "Hyperscape",
+        name: "Hyperia",
         description: "Default game world",
         worldData: { _placeholder: true },
         createdBy: user.id,

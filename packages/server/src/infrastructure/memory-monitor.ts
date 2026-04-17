@@ -2,7 +2,7 @@
  * Memory Monitoring Infrastructure
  *
  * Provides comprehensive memory monitoring, leak detection, and profiling tools
- * for the Hyperscape server. Features include:
+ * for the Hyperia server. Features include:
  *
  * - Real-time memory tracking with trend analysis
  * - Collection size monitoring (Maps, Sets, Arrays)

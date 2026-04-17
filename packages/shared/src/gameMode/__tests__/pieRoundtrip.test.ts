@@ -19,7 +19,7 @@
  * Covers:
  * - WASD manifest: keyboard → pawn position delta.
  * - Top-down manifest: viewport pointerdown → pawn walks toward hit.
- * - Hyperscape (click-to-walk) manifest: tick is a facade no-op (the
+ * - Hyperia (click-to-walk) manifest: tick is a facade no-op (the
  *   real `InteractionRouter` owns routing), so position stays put —
  *   this asserts the facade doesn't accidentally gain behavior.
  */
@@ -29,9 +29,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { GameModeRegistry } from "../GameModeRegistry";
 import {
-  HYPERSCAPE_DEFAULT_MANIFEST,
-  registerHyperscapeGameMode,
-} from "../HyperscapeGameMode";
+  HYPERIA_DEFAULT_MANIFEST,
+  registerHyperiaGameMode,
+} from "../HyperiaGameMode";
 import {
   TOP_DOWN_DEFAULT_MANIFEST,
   WASD_DEFAULT_MANIFEST,
@@ -78,7 +78,7 @@ describe("PIE roundtrip — manifest drives pawn", () => {
 
   beforeEach(() => {
     registry = new GameModeRegistry();
-    registerHyperscapeGameMode(registry);
+    registerHyperiaGameMode(registry);
     registerAlternateGameModes(registry);
   });
 
@@ -176,7 +176,7 @@ describe("PIE roundtrip — manifest drives pawn", () => {
   it("click-to-walk manifest: tick is a facade no-op (InteractionRouter owns routing)", () => {
     const world = makeWorldStub();
     const ctx: GameModeContext = { world, runtime: "pie" };
-    const mode = registry.resolve(HYPERSCAPE_DEFAULT_MANIFEST, ctx);
+    const mode = registry.resolve(HYPERIA_DEFAULT_MANIFEST, ctx);
     const pc = mode.createPlayerController(ctx);
     const ic = mode.createInputContext(ctx);
     const pawn = makePawnStub();
@@ -206,11 +206,11 @@ describe("PIE roundtrip — manifest drives pawn", () => {
     const world = makeWorldStub();
     const ctx: GameModeContext = { world, runtime: "pie" };
 
-    const hyperscapeMode = registry.resolve(HYPERSCAPE_DEFAULT_MANIFEST, ctx);
+    const hyperiaMode = registry.resolve(HYPERIA_DEFAULT_MANIFEST, ctx);
     const wasdMode = registry.resolve(WASD_DEFAULT_MANIFEST, ctx);
     const topDownMode = registry.resolve(TOP_DOWN_DEFAULT_MANIFEST, ctx);
 
-    expect(hyperscapeMode.createPlayerController(ctx).id).toBe("click-to-walk");
+    expect(hyperiaMode.createPlayerController(ctx).id).toBe("click-to-walk");
     expect(wasdMode.createPlayerController(ctx).id).toBe("wasd");
     expect(topDownMode.createPlayerController(ctx).id).toBe("top-down");
   });

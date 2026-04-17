@@ -1,7 +1,7 @@
 /**
  * initializeModuleLayers — Creates empty state arrays for a GameModule's entity types.
  *
- * For Hyperscape, produces identical shape to EMPTY_EXTENDED_LAYERS / EMPTY_AUDIO_LAYERS.
+ * For Hyperia, produces identical shape to EMPTY_EXTENDED_LAYERS / EMPTY_AUDIO_LAYERS.
  * For custom modules, creates additional arrays for any state keys not already present.
  */
 

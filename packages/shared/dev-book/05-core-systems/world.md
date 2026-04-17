@@ -194,7 +194,7 @@ world.destroy();
 
 ## Fixed Timestep Game Loop
 
-Hyperscape uses a **fixed timestep** for physics simulation to ensure deterministic, stable results.
+Hyperia uses a **fixed timestep** for physics simulation to ensure deterministic, stable results.
 
 ### How It Works
 
@@ -801,7 +801,7 @@ The World class:
 - **Extensible:** Add custom systems and entities
 - **Type-Safe:** Full TypeScript support
 
-The World is the foundation of every Hyperscape game and provides a clean, unified API for game development.
+The World is the foundation of every Hyperia game and provides a clean, unified API for game development.
 
 ---
 

@@ -186,4 +186,4 @@ GPL-3.0 (matching the original tree-gen)
 
 - Original Python implementation: [tree-gen](https://github.com/ChrisP-Ghub/tree-gen)
 - Algorithm: Weber & Penn "Creation and Rendering of Realistic Trees"
-- TypeScript port: Hyperscape Team
+- TypeScript port: Hyperia Team

@@ -11,7 +11,7 @@ export type {
   TerrainModuleConfig,
 } from "./GameModule";
 export { EntityTypeRegistry } from "./EntityTypeRegistry";
-export { HyperscapeModule } from "./hyperscape";
+export { HyperiaModule } from "./hyperia";
 export {
   loadGameModule,
   loadGameModuleFromUrl,

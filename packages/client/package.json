@@ -3,12 +3,12 @@
   "version": "0.13.0",
   "type": "module",
   "private": true,
-  "homepage": "https://github.com/HyperscapeAI/hyperscape#readme",
+  "homepage": "https://github.com/HyperiaAI/hyperia#readme",
   "bugs": {
-    "url": "https://github.com/HyperscapeAI/hyperscape/issues"
+    "url": "https://github.com/HyperiaAI/hyperia/issues"
   },
   "keywords": [
-    "hyperscape",
+    "hyperia",
     "3d",
     "components",
     "virtual-worlds",

@@ -6,7 +6,7 @@
  * This controller expects the consumer to ensure `ClientCameraSystem`
  * is either not added to the world or is otherwise not driving
  * `world.camera` — when a first-person manifest resolves, the
- * Hyperscape camera stack is dormant.
+ * Hyperia camera stack is dormant.
  *
  * Behavior:
  * - Positions `world.camera` at the pawn's head height (pawn.y + EYE_HEIGHT).

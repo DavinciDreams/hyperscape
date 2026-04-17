@@ -4,9 +4,9 @@
 
 ---
 
-## Create Your First Hyperscape World
+## Create Your First Hyperia World
 
-This guide will walk you through creating a simple multiplayer 3D world with Hyperscape Shared in under 10 minutes.
+This guide will walk you through creating a simple multiplayer 3D world with Hyperia Shared in under 10 minutes.
 
 ---
 
@@ -23,8 +23,8 @@ This guide will walk you through creating a simple multiplayer 3D world with Hyp
 ### Create Project Directory
 
 ```bash
-mkdir my-hyperscape-game
-cd my-hyperscape-game
+mkdir my-hyperia-game
+cd my-hyperia-game
 npm init -y
 ```
 
@@ -84,7 +84,7 @@ Create `index.html`:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Hyperscape Game</title>
+  <title>My Hyperia Game</title>
   <style>
     body {
       margin: 0;
@@ -536,7 +536,7 @@ console.log('Game running! Use WASD to move.');
 
 Congratulations! You've created:
 
-- ✅ 3D world with Hyperscape
+- ✅ 3D world with Hyperia
 - ✅ Ground plane and lighting
 - ✅ Player character
 - ✅ WASD movement
@@ -644,7 +644,7 @@ await avatar.load();
 - [Installation Guide](installation.md) - Detailed setup
 - [User Guides](../03-user-guides/creating-worlds.md) - Deep dives
 - [API Reference](../12-api-reference/world-api.md) - Complete API docs
-- [Examples](https://github.com/hyperscape/examples) - More examples
+- [Examples](https://github.com/hyperia/examples) - More examples
 
 ---
 

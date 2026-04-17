@@ -204,7 +204,7 @@ export function disablePerformanceMock(): void {
 }
 
 // ============================================================================
-// @HYPERSCAPE/SHARED SETUP
+// @HYPERIA/SHARED SETUP
 // ============================================================================
 
 // Tests rely on real @hyperforge/shared implementation; item data can be

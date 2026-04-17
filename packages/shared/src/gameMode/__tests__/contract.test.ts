@@ -9,7 +9,7 @@
  *   and editor drift checks key off ids).
  * - The `InputContext` must expose a frozen `actions` binding map.
  *
- * This test registers BOTH the Hyperscape default mode AND the Phase 5
+ * This test registers BOTH the Hyperia default mode AND the Phase 5
  * alternate modes, then walks each registered id, resolves its mode
  * with a minimal World stub, and asserts the contract.
  */
@@ -19,9 +19,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 import { GameModeRegistry } from "../GameModeRegistry";
 import {
-  HYPERSCAPE_DEFAULT_MANIFEST,
-  registerHyperscapeGameMode,
-} from "../HyperscapeGameMode";
+  HYPERIA_DEFAULT_MANIFEST,
+  registerHyperiaGameMode,
+} from "../HyperiaGameMode";
 import {
   FPS_DEFAULT_MANIFEST,
   TOP_DOWN_DEFAULT_MANIFEST,
@@ -57,7 +57,7 @@ describe("GameMode contract — registered modes", () => {
 
   beforeEach(() => {
     registry = new GameModeRegistry();
-    registerHyperscapeGameMode(registry);
+    registerHyperiaGameMode(registry);
     registerAlternateGameModes(registry);
     ctx = {
       world: makeWorldStub(),
@@ -67,8 +67,8 @@ describe("GameMode contract — registered modes", () => {
 
   const cases: Array<{ name: string; manifest: GameModeManifest }> = [
     {
-      name: "hyperscape default (click-to-walk + orbit)",
-      manifest: HYPERSCAPE_DEFAULT_MANIFEST,
+      name: "hyperia default (click-to-walk + orbit)",
+      manifest: HYPERIA_DEFAULT_MANIFEST,
     },
     { name: "wasd + orbit", manifest: WASD_DEFAULT_MANIFEST },
     { name: "wasd + first-person (FPS)", manifest: FPS_DEFAULT_MANIFEST },
@@ -128,7 +128,7 @@ describe("GameMode contract — registered modes", () => {
       // above, keyed by playerController id.
       const manifest =
         id === "click-to-walk"
-          ? HYPERSCAPE_DEFAULT_MANIFEST
+          ? HYPERIA_DEFAULT_MANIFEST
           : id === "wasd"
             ? WASD_DEFAULT_MANIFEST
             : id === "top-down"

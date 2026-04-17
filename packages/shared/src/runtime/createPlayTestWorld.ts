@@ -26,10 +26,10 @@ import {
 import type { RuntimeScriptGraph } from "../systems/shared/scripting/ScriptGraphInterpreter";
 import type { GameMode, GameModeManifest } from "../gameMode/GameMode";
 import {
-  HYPERSCAPE_DEFAULT_MANIFEST,
+  HYPERIA_DEFAULT_MANIFEST,
   gameModeRegistry,
   registerAlternateGameModes,
-  registerHyperscapeGameMode,
+  registerHyperiaGameMode,
 } from "../gameMode";
 
 export type { PIEDebugEntry, PIEDebugSink } from "./PIEScriptRunner";
@@ -144,8 +144,8 @@ export interface PlayTestWorldOptions {
   /** Optional sink that receives every script debug entry. */
   debugSink?: PIEDebugSink;
   /**
-   * GameMode manifest for this session. Omit to use the Hyperscape
-   * default (click-to-walk + orbit + hyperscape-default input). The
+   * GameMode manifest for this session. Omit to use the Hyperia
+   * default (click-to-walk + orbit + hyperia-default input). The
    * manifest id determines which controller the consumer (usePIESession)
    * activates for the viewport.
    */
@@ -177,7 +177,7 @@ export class PlayTestWorld {
    * Resolved GameMode for the active session. Null before `start()` or
    * after `stop()`. Consumers (usePIESession) branch on `gameMode.id`
    * to decide which viewport controller to activate — click-to-walk
-   * (matches the live Hyperscape client) or an alternate WASD/topdown
+   * (matches the live Hyperia client) or an alternate WASD/topdown
    * controller registered by a downstream game.
    */
   gameMode: GameMode | null = null;
@@ -205,14 +205,14 @@ export class PlayTestWorld {
     this._tickCount = 0;
     this.entities.clear();
 
-    // Resolve GameMode. Defaults to Hyperscape's click-to-walk composition
+    // Resolve GameMode. Defaults to Hyperia's click-to-walk composition
     // so PIE behaves the same as the live client out of the box. A
     // downstream game supplies its own manifest (e.g. wasd-default) once
     // registered in the shared gameModeRegistry.
     // `register` overwrites on duplicate, safe for repeat start() calls.
-    registerHyperscapeGameMode(gameModeRegistry);
+    registerHyperiaGameMode(gameModeRegistry);
     registerAlternateGameModes(gameModeRegistry);
-    const manifest = options.gameMode ?? HYPERSCAPE_DEFAULT_MANIFEST;
+    const manifest = options.gameMode ?? HYPERIA_DEFAULT_MANIFEST;
     this.gameMode = gameModeRegistry.resolve(manifest, {
       // PlayTestWorld is not a full `World`; the context.world field is
       // kept optional at the controller level (InteractionRouter and

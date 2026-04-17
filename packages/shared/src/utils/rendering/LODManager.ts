@@ -74,7 +74,7 @@ const DEFAULT_OPTIONS: Required<LODGenerationOptions> = {
   forceRegenerate: false,
 };
 
-const DB_NAME = "hyperscape-lods";
+const DB_NAME = "hyperia-lods";
 const STORE_NAME = "lod-bundles";
 const CACHE_VERSION = 1;
 

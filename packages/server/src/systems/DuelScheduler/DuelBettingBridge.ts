@@ -44,7 +44,7 @@ const config = {
 
   /** Base URL for duel metadata */
   metadataBaseUrl:
-    process.env.DUEL_METADATA_BASE_URL || "https://hyperscape.game/api/duels",
+    process.env.DUEL_METADATA_BASE_URL || "https://hyperia.game/api/duels",
 };
 
 // ============================================================================
@@ -1210,9 +1210,7 @@ export class DuelBettingBridge {
    * Generate a 32-byte round seed from duel ID
    */
   private generateRoundSeed(duelId: string): string {
-    const hash = createHash("sha256")
-      .update(`hyperscape:duel:${duelId}`)
-      .digest();
+    const hash = createHash("sha256").update(`hyperia:duel:${duelId}`).digest();
     return hash.toString("hex");
   }
 
@@ -1225,7 +1223,7 @@ export class DuelBettingBridge {
     loserId: string,
   ): string {
     const hash = createHash("sha256")
-      .update(`hyperscape:result:${duelId}:${winnerId}:${loserId}`)
+      .update(`hyperia:result:${duelId}:${winnerId}:${loserId}`)
       .digest();
     return hash.toString("hex");
   }

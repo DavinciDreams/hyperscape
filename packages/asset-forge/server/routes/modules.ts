@@ -1,7 +1,7 @@
 /**
  * Game Module Routes — CRUD for custom GameModule definitions within teams
  *
- * Built-in modules (Hyperscape) are returned as synthetic entries in list/get
+ * Built-in modules (Hyperia) are returned as synthetic entries in list/get
  * responses but are not stored in the database and cannot be modified or deleted.
  *
  * All routes require authentication and team membership.
@@ -16,7 +16,7 @@ import {
   loadGameModule,
   ModuleValidationError,
 } from "../../src/gameModules/GameModuleLoader";
-import { HyperscapeModule } from "../../src/gameModules/hyperscape/HyperscapeModule";
+import { HyperiaModule } from "../../src/gameModules/hyperia/HyperiaModule";
 import * as WS from "../models/world-studio.models";
 import * as Models from "../models";
 import type { GameModuleRow } from "../db/schema";
@@ -62,15 +62,15 @@ function formatModuleDetailRow(row: GameModuleRow) {
   };
 }
 
-/** Build the synthetic Hyperscape entry for list/get responses. */
-function buildHyperscapeSyntheticEntry(teamId: string) {
+/** Build the synthetic Hyperia entry for list/get responses. */
+function buildHyperiaSyntheticEntry(teamId: string) {
   const now = new Date().toISOString();
   return {
-    id: "hyperscape",
+    id: "hyperia",
     teamId,
-    name: HyperscapeModule.name,
-    slug: "hyperscape",
-    version: HyperscapeModule.version,
+    name: HyperiaModule.name,
+    slug: "hyperia",
+    version: HyperiaModule.version,
     isBuiltin: true,
     createdBy: null,
     createdAt: now,
@@ -78,10 +78,10 @@ function buildHyperscapeSyntheticEntry(teamId: string) {
   };
 }
 
-function buildHyperscapeDetailEntry(teamId: string) {
+function buildHyperiaDetailEntry(teamId: string) {
   return {
-    ...buildHyperscapeSyntheticEntry(teamId),
-    moduleData: HyperscapeModule,
+    ...buildHyperiaSyntheticEntry(teamId),
+    moduleData: HyperiaModule,
   };
 }
 
@@ -113,8 +113,8 @@ export const createModuleRoutes = (
             const dbModules = await gameModuleService.listForTeam(teamId);
             const formatted = dbModules.map(formatModuleRow);
 
-            // Prepend the built-in Hyperscape module as a synthetic entry
-            return [buildHyperscapeSyntheticEntry(teamId), ...formatted];
+            // Prepend the built-in Hyperia module as a synthetic entry
+            return [buildHyperiaSyntheticEntry(teamId), ...formatted];
           },
           {
             params: t.Object({ teamId: t.String() }),
@@ -126,7 +126,7 @@ export const createModuleRoutes = (
               tags: ["Game Modules"],
               summary: "List game modules for a team",
               description:
-                "Returns all custom modules plus the built-in Hyperscape module.",
+                "Returns all custom modules plus the built-in Hyperia module.",
               security: [{ BearerAuth: [] }],
             },
           },
@@ -143,9 +143,9 @@ export const createModuleRoutes = (
               return { error: "Not a member of this team" };
             }
 
-            // Handle built-in Hyperscape module
-            if (moduleId === "hyperscape") {
-              return buildHyperscapeDetailEntry(teamId);
+            // Handle built-in Hyperia module
+            if (moduleId === "hyperia") {
+              return buildHyperiaDetailEntry(teamId);
             }
 
             const row = await gameModuleService.getById(moduleId);
@@ -205,11 +205,11 @@ export const createModuleRoutes = (
             const slug = slugify(name);
             const version = body.version || validatedModule.version || "1.0.0";
 
-            // Prevent collision with the built-in "hyperscape" slug
-            if (slug === "hyperscape") {
+            // Prevent collision with the built-in "hyperia" slug
+            if (slug === "hyperia") {
               set.status = 409;
               return {
-                error: 'Slug "hyperscape" is reserved for the built-in module',
+                error: 'Slug "hyperia" is reserved for the built-in module',
               };
             }
 
@@ -286,7 +286,7 @@ export const createModuleRoutes = (
             }
 
             // Prevent editing built-in modules
-            if (moduleId === "hyperscape") {
+            if (moduleId === "hyperia") {
               set.status = 403;
               return { error: "Built-in modules cannot be modified" };
             }
@@ -321,11 +321,10 @@ export const createModuleRoutes = (
             let newSlug: string | undefined;
             if (body.name !== undefined) {
               newSlug = slugify(body.name);
-              if (newSlug === "hyperscape") {
+              if (newSlug === "hyperia") {
                 set.status = 409;
                 return {
-                  error:
-                    'Slug "hyperscape" is reserved for the built-in module',
+                  error: 'Slug "hyperia" is reserved for the built-in module',
                 };
               }
               if (newSlug !== existing.slug) {
@@ -401,7 +400,7 @@ export const createModuleRoutes = (
             }
 
             // Prevent deleting built-in modules
-            if (moduleId === "hyperscape") {
+            if (moduleId === "hyperia") {
               set.status = 403;
               return { error: "Built-in modules cannot be deleted" };
             }

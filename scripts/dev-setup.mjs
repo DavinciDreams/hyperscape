@@ -28,7 +28,7 @@ const colors = {
 
 console.log(`${colors.bright}${colors.cyan}
 ╔═══════════════════════════════════════════╗
-║   Hyperscape Development Setup            ║
+║   Hyperia Development Setup            ║
 ╚═══════════════════════════════════════════╝
 ${colors.reset}`)
 

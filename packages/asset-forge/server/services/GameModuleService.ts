@@ -2,7 +2,7 @@
  * Game Module Service
  * CRUD operations for custom GameModule definitions stored in PostgreSQL.
  *
- * Built-in modules (e.g. Hyperscape) are NOT stored in the database — the
+ * Built-in modules (e.g. Hyperia) are NOT stored in the database — the
  * route layer injects them as synthetic entries.
  */
 

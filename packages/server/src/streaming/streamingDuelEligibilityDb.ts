@@ -1,6 +1,6 @@
 /**
  * Dashboard `agent_mappings.streaming_duel_eligible` lookup shared by
- * StreamingDuelScheduler and EmbeddedHyperscapeService so spawn + matchmaking
+ * StreamingDuelScheduler and EmbeddedHyperiaService so spawn + matchmaking
  * stay consistent.
  */
 import {
@@ -11,7 +11,7 @@ import {
 import { errMsg } from "../shared/errMsg.js";
 
 /**
- * Whether this agent may use the **duel lobby ring** as their EmbeddedHyperscape
+ * Whether this agent may use the **duel lobby ring** as their EmbeddedHyperia
  * spawn / fast DB-skip path.
  *
  * Stricter than matchmaking: without a DB we cannot read the dashboard toggle, so

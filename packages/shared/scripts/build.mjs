@@ -205,7 +205,7 @@ async function buildLibrary() {
  * Generate TypeScript Declaration Files
  *
  * Always runs regardless of --no-typecheck, because downstream packages
- * (e.g. plugin-hyperscape) need framework.d.ts to compile.
+ * (e.g. plugin-hyperia) need framework.d.ts to compile.
  */
 async function generateDeclarations() {
   console.log('Generating TypeScript declarations...')

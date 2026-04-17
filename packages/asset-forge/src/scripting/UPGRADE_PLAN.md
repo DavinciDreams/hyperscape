@@ -62,7 +62,7 @@
 
 - ❌ Do NOT invent `scripting:*` events — runtime uses real game events.
 - ❌ Do NOT add a second system registration for `ScriptingSystem` — it's already registered.
-- ❌ Do NOT use mocks in tests (project rule: real Hyperscape instances).
+- ❌ Do NOT use mocks in tests (project rule: real Hyperia instances).
 - ❌ Do NOT use `any` — ESLint rejects.
 - ❌ Do NOT create `_v2.ts` variants — revise existing files.
 - ❌ Do NOT use Zod for Elysia route validation — use TypeBox (`t.*`). Zod is reserved for AI output schemas.
@@ -407,9 +407,9 @@ Call at `addGraph()` — run the compiled form at execute time. Keep source `Scr
 
 ---
 
-## Phase 7 — Pre-built game scripts from real Hyperscape behavior (Pre-built 6→9.5)
+## Phase 7 — Pre-built game scripts from real Hyperia behavior (Pre-built 6→9.5)
 
-**Goal**: Convert real Hyperscape patterns into editable template graphs that users can fork.
+**Goal**: Convert real Hyperia patterns into editable template graphs that users can fork.
 
 Per-pattern task: read the real system, then build a graph in `packages/asset-forge/src/scripting/templates.ts` that reproduces its behavior using only allowlisted nodes. Each template must round-trip through the validator cleanly.
 
@@ -527,7 +527,7 @@ Run each and expect empty results:
 ### 9.3 Manual validation
 - Open World Studio, select each entity type (mob spawn, NPC, station, resource, store), click "Edit Default Script" — each shows a meaningful graph with no red nodes, no validation errors, no orphan warnings.
 - Save, reload, verify persistence.
-- Deploy to a test Hyperscape instance, observe goblins respawning on 21s cadence driven by a graph (match against hand-rolled baseline).
+- Deploy to a test Hyperia instance, observe goblins respawning on 21s cadence driven by a graph (match against hand-rolled baseline).
 
 ### 9.4 Memory update
 After completion, save a project memory entry noting:

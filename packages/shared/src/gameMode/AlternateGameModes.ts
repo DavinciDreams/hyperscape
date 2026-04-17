@@ -9,7 +9,7 @@
  * these ids produces a GameMode whose `create*` methods hand back the
  * matching alternate controllers.
  *
- * **Invariant:** when any of these modes resolve, the Hyperscape
+ * **Invariant:** when any of these modes resolve, the Hyperia
  * `InteractionRouter` + `ClientCameraSystem` + `PlayerLocal` stack is
  * dormant. The alternate controllers are new, parallel code paths.
  *
@@ -42,11 +42,11 @@ import type { GameMode, GameModeContext, GameModeManifest } from "./GameMode";
 import type { GameModeRegistry } from "./GameModeRegistry";
 import {
   FPS_DEFAULT_CONTEXT_ID,
-  HYPERSCAPE_DEFAULT_CONTEXT_ID,
+  HYPERIA_DEFAULT_CONTEXT_ID,
   TOPDOWN_DEFAULT_CONTEXT_ID,
   WASD_DEFAULT_CONTEXT_ID,
   createFPSDefaultContext,
-  createHyperscapeDefaultContext,
+  createHyperiaDefaultContext,
   createTopDownDefaultContext,
   createWASDDefaultContext,
 } from "./input/defaultContexts";
@@ -81,7 +81,7 @@ export const TOP_DOWN_DEFAULT_MANIFEST: GameModeManifest = Object.freeze({
 
 /**
  * Pick the camera controller factory declared by the manifest. Supports
- * orbit (Hyperscape default — used when a WASD manifest chooses orbit),
+ * orbit (Hyperia default — used when a WASD manifest chooses orbit),
  * first-person, and fixed-angle. Throws for unrecognised ids so bad
  * manifests surface at resolve time, not at first tick.
  */
@@ -110,8 +110,8 @@ function resolveCamera(
  */
 function resolveInputContext(manifest: GameModeManifest): InputContext {
   switch (manifest.inputContext) {
-    case HYPERSCAPE_DEFAULT_CONTEXT_ID:
-      return createHyperscapeDefaultContext();
+    case HYPERIA_DEFAULT_CONTEXT_ID:
+      return createHyperiaDefaultContext();
     case WASD_DEFAULT_CONTEXT_ID:
       return createWASDDefaultContext();
     case FPS_DEFAULT_CONTEXT_ID:
@@ -183,7 +183,7 @@ export function createTopDownGameMode(
 
 /**
  * Opt-in registration for the Phase 5 alternate modes. Callers mirror
- * `registerHyperscapeGameMode(registry)` — both the live client and PIE
+ * `registerHyperiaGameMode(registry)` — both the live client and PIE
  * call this at boot to make `wasd` and `top-down` playerController ids
  * resolvable.
  */
