@@ -2635,9 +2635,24 @@ export class RTMPBridge {
 
   /** Quiet window after a write error during which markHealthyDestinationsConnected refuses to re-flip a destination to connected=true. */
   private static readonly DESTINATION_WRITE_ERROR_QUIET_WINDOW_MS = 10_000;
+  /** Encoder output bitrate (kbps) below which we treat delivery as dark, once FFmpeg has been running long enough for the buffer to settle. */
+  private static readonly DESTINATION_MIN_HEALTHY_BITRATE_KBPS = 100;
+  /** Skip the bitrate-floor check for the first N ms of bridge uptime so initial I-frame burst doesn't trip it. */
+  private static readonly DESTINATION_BITRATE_GRACE_MS = 15_000;
 
   private markHealthyDestinationsConnected(): void {
     const now = Date.now();
+    // Encoder output running but pushing near-zero kbps AFTER the startup
+    // grace window means the tee/fifo muxer is silently dropping output —
+    // destinations are dark even though `frame=` progress keeps advancing.
+    const bridgeUptimeMs = this.startTime > 0 ? now - this.startTime : 0;
+    const encoderBitrate = this.ffmpegOutputBitrateKbps;
+    const bitrateStarved =
+      bridgeUptimeMs > RTMPBridge.DESTINATION_BITRATE_GRACE_MS &&
+      encoderBitrate != null &&
+      Number.isFinite(encoderBitrate) &&
+      encoderBitrate < RTMPBridge.DESTINATION_MIN_HEALTHY_BITRATE_KBPS;
+
     for (const destination of this.status.destinations) {
       if (destination.error) continue;
       // An `frame=` / `fps=` progress line from FFmpeg only proves the
@@ -2655,6 +2670,7 @@ export class RTMPBridge {
       ) {
         continue;
       }
+      if (bitrateStarved) continue;
       destination.connected = true;
     }
   }
