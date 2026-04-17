@@ -154,6 +154,50 @@ export const WEBCODECS_CAPTURE_SCRIPT = `
 
     const encoderCandidates = [
       {
+        codec: 'avc1.64002A', // H.264 High Profile, Level 4.2 (1080p60)
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'constant',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
+        codec: 'avc1.64002A',
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'variable',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
+        codec: 'avc1.640028', // H.264 High Profile, Level 4.0 (1080p30)
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'constant',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
+        codec: 'avc1.640028',
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'variable',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
         codec: 'avc1.64001F', // H.264 High Profile, Level 3.1
         width: canvas.width,
         height: canvas.height,
@@ -490,6 +534,50 @@ export const WEBCODECS_EXPOSED_CAPTURE_SCRIPT = `
     });
 
     const encoderCandidates = [
+      {
+        codec: 'avc1.64002A', // H.264 High Profile, Level 4.2 (1080p60)
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'constant',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
+        codec: 'avc1.64002A',
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'variable',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
+        codec: 'avc1.640028', // H.264 High Profile, Level 4.0 (1080p30)
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'constant',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
+      {
+        codec: 'avc1.640028',
+        width: canvas.width,
+        height: canvas.height,
+        bitrate: VIDEO_BITRATE,
+        bitrateMode: 'variable',
+        framerate: TARGET_FPS,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
+        avc: { format: 'annexb' }
+      },
       {
         codec: 'avc1.64001F',
         width: canvas.width,

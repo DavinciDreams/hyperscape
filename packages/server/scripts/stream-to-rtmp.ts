@@ -24,6 +24,7 @@
  *
  * Environment Variables:
  *   STREAM_CAPTURE_MODE      - 'cdp' (default), 'webcodecs', or 'mediarecorder' (debug)
+ *   STREAM_ALLOW_WEBCODECS_CLOUDFLARE - 'true' to allow WebCodecs on cloudflare_live ingest
  *   STREAM_CAPTURE_HEADLESS  - 'true' for headless (default: false for better GPU rendering)
  *   STREAM_CAPTURE_CHANNEL   - Browser channel ('chrome', 'msedge', etc.)
  *   STREAM_CAPTURE_ANGLE     - ANGLE backend (default: metal on macOS, vulkan elsewhere)
@@ -123,7 +124,14 @@ function resolveEffectiveCaptureMode(
 ): "cdp" | "mediarecorder" | "webcodecs" {
   const requestedMode = resolveRequestedCaptureMode(env);
   const ingest = resolveStreamIngestSettings(env);
-  if (requestedMode === "webcodecs" && ingest.profile === "cloudflare_live") {
+  const allowWebCodecsForCloudflare = /^(1|true|yes|on)$/i.test(
+    env.STREAM_ALLOW_WEBCODECS_CLOUDFLARE || "",
+  );
+  if (
+    requestedMode === "webcodecs" &&
+    ingest.profile === "cloudflare_live" &&
+    !allowWebCodecsForCloudflare
+  ) {
     return "cdp";
   }
   return requestedMode;
