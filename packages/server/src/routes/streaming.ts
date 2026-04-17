@@ -1688,7 +1688,21 @@ export function registerStreamingRoutes(
           : Number.POSITIVE_INFINITY;
       const recentDuels = scheduler
         .getRecentDuels(historyLimit)
-        .filter((duel) => duel.finishedAt <= cutoff);
+        .filter((duel) => duel.finishedAt <= cutoff)
+        // Strip oracle-proof fields. They are persisted on RecentDuelEntry
+        // for the keeper-only /api/streaming/results/:duelId catch-up path
+        // (bearer-auth). Leaking them on this public, unauthenticated handler
+        // would defeat that auth boundary — a caller could harvest proofs
+        // from this endpoint and skip the bearer check entirely.
+        .map(
+          ({
+            duelKeyHex: _k,
+            duelEndTime: _e,
+            seed: _s,
+            replayHash: _r,
+            ...publicEntry
+          }) => publicEntry,
+        );
       const delayedUpdatedAt =
         STREAMING_PUBLIC_DELAY_MS > 0
           ? (getLatestEligibleReplayFrame()?.emittedAt ?? Date.now())
