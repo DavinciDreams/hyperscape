@@ -32,9 +32,9 @@ const fs = require("fs");
 // /root/hyperscape-secrets.env survives reboots. The /tmp path remains as a
 // transitional fallback for deploy scripts that haven't migrated.
 const SECRETS_FILES = [
-  "/root/hyperscape-secrets.env",
   "/tmp/hyperscape-secrets.env",
   require("path").join(__dirname, ".env.production"),
+  "/root/hyperscape-secrets.env",
 ];
 for (const secretsPath of SECRETS_FILES) {
   try {
