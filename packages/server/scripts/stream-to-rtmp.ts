@@ -816,6 +816,14 @@ function mapRendererReasonToSourceDegradedReason(
   ) {
     return "capture_stalled";
   }
+  // Renderer reported low encoder FPS: the compositor-to-FFmpeg pipeline
+  // is producing below-target cadence. Previously this fell through to
+  // `null`, leaving `sourceRuntime.ready=true` even while the downstream
+  // broadcast path was starving. Route it through `encoder_stalled` so
+  // the top-level readiness surface stays honest.
+  if (normalized === "encoder_fps_low") {
+    return "encoder_stalled";
+  }
   return null;
 }
 
@@ -919,16 +927,35 @@ function resolveSourceRuntimeSnapshot(
   );
   const visualChangeStale = sourceVisualChangeIsStale(nowMs);
 
+  // Any destination with a recent fatal-write error is authoritative
+  // evidence the broadcast path is dark — don't trust FFmpeg's
+  // `frame=` progress alone.
+  const DESTINATION_ERROR_RECENT_MS = 15_000;
+  const lastDestErrorAt = bridge.getLastDestinationWriteErrorAt?.() ?? null;
+  const destinationRecentlyErrored =
+    lastDestErrorAt != null &&
+    nowMs - lastDestErrorAt < DESTINATION_ERROR_RECENT_MS;
+  // Encoder falling behind real-time — the stream will drift from live,
+  // and Cloudflare will refuse to promote the input to live until cadence
+  // recovers. Threshold at 0.9 leaves a little slack for normal jitter.
+  const encoderSpeed = bridge.getEncoderSpeed?.() ?? null;
+  const encoderBelowRealtime =
+    encoderSpeed != null && Number.isFinite(encoderSpeed) && encoderSpeed < 0.9;
+
   let degradedReason: StreamSourceDegradedReason | null = null;
   if (captureNavigationAbortInFlight) {
     degradedReason = "unexpected_navigation";
   } else if (!browser || !page || page.isClosed()) {
     degradedReason = "browser_missing";
+  } else if (destinationRecentlyErrored) {
+    degradedReason = "destination_disconnected";
   } else if (rendererReason) {
     degradedReason = rendererReason;
   } else if (visualChangeStale) {
     degradedReason = "capture_stalled";
   } else if (bridgeStatus.ffmpegRunning !== true) {
+    degradedReason = "encoder_stalled";
+  } else if (encoderBelowRealtime) {
     degradedReason = "encoder_stalled";
   } else if (
     (captureMode === "cdp" || captureMode === "x11_nvenc") &&

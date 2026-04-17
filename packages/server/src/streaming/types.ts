@@ -59,6 +59,15 @@ export interface DestinationStatus {
   error?: string;
   bytesWritten: number;
   startedAt?: number;
+  /**
+   * Wallclock ms of the most recent fatal write-error attributed to this
+   * destination (slave-muxer failure, av_interleaved_write_frame error,
+   * RTMPS session invalidated, etc.). Used to prevent the "FFmpeg
+   * is still emitting `frame=` progress so everything must be OK" false
+   * positive from flipping `connected` back to `true` while the RTMP
+   * destination is actually dark.
+   */
+  lastWriteErrorAt?: number | null;
 }
 
 /** Overall streaming status */

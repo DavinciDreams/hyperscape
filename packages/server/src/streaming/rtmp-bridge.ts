@@ -189,6 +189,15 @@ export class RTMPBridge {
   private lastEncoderFrameCount = 0;
   /** Wallclock timestamp of the most recent `frame=` advance observed in FFmpeg stderr */
   private lastEncoderFrameAt: number | null = null;
+  /**
+   * Most recent `speed=N.NNx` value parsed from FFmpeg stderr. Values < 1.0
+   * mean the encoder is running slower than real-time — a reliable early
+   * warning that RTMP upstream is backed up or the input pipeline is
+   * starving the encoder. Null until FFmpeg emits its first progress line.
+   */
+  private ffmpegSpeedX: number | null = null;
+  /** Most recent `bitrate=N.Nkbits/s` value parsed from FFmpeg stderr (kbps). */
+  private ffmpegOutputBitrateKbps: number | null = null;
   /** Whether client socket reads are paused due to FFmpeg backpressure */
   private clientSocketPaused = false;
   /** Recent CDP frame arrival diagnostics */
@@ -2582,6 +2591,7 @@ export class RTMPBridge {
   private markDestinationsFromMessage(msg: string): void {
     const trimmed = msg.trim();
     const normalized = trimmed.toLowerCase();
+    const now = Date.now();
     let matched = false;
 
     for (const destination of this.status.destinations) {
@@ -2608,6 +2618,7 @@ export class RTMPBridge {
       ) {
         destination.connected = false;
         destination.error = trimmed;
+        destination.lastWriteErrorAt = now;
         matched = true;
       }
     }
@@ -2617,15 +2628,57 @@ export class RTMPBridge {
       if (destination) {
         destination.connected = false;
         destination.error = trimmed;
+        destination.lastWriteErrorAt = now;
       }
     }
   }
 
+  /** Quiet window after a write error during which markHealthyDestinationsConnected refuses to re-flip a destination to connected=true. */
+  private static readonly DESTINATION_WRITE_ERROR_QUIET_WINDOW_MS = 10_000;
+
   private markHealthyDestinationsConnected(): void {
+    const now = Date.now();
     for (const destination of this.status.destinations) {
       if (destination.error) continue;
+      // An `frame=` / `fps=` progress line from FFmpeg only proves the
+      // encoder is running. It does NOT prove the RTMP destination is
+      // accepting bytes — FFmpeg will keep emitting progress lines while
+      // its tee/fifo muxer is silently dropping packets. If a fatal
+      // write error was observed in the recent past, leave `connected`
+      // alone so the upstream health surface reports the real outage
+      // until we have positive evidence (a new, clean progress run
+      // after the quiet window elapses) that delivery has recovered.
+      if (
+        destination.lastWriteErrorAt != null &&
+        now - destination.lastWriteErrorAt <
+          RTMPBridge.DESTINATION_WRITE_ERROR_QUIET_WINDOW_MS
+      ) {
+        continue;
+      }
       destination.connected = true;
     }
+  }
+
+  /** Most recent `speed=N.NNx` parsed from FFmpeg stderr, or null before first progress line. Values below 1.0 indicate the encoder is falling behind real-time. */
+  getEncoderSpeed(): number | null {
+    return this.ffmpegSpeedX;
+  }
+
+  /** Most recent encoder output bitrate in kbps, or null before first progress line. */
+  getEncoderOutputBitrateKbps(): number | null {
+    return this.ffmpegOutputBitrateKbps;
+  }
+
+  /** Wallclock ms of the most recent destination write error, across all destinations. Null if none have been recorded since bridge start. */
+  getLastDestinationWriteErrorAt(): number | null {
+    let latest: number | null = null;
+    for (const dest of this.status.destinations) {
+      if (dest.lastWriteErrorAt == null) continue;
+      if (latest == null || dest.lastWriteErrorAt > latest) {
+        latest = dest.lastWriteErrorAt;
+      }
+    }
+    return latest;
   }
 
   /**
@@ -2798,6 +2851,29 @@ export class RTMPBridge {
       ) {
         this.lastEncoderFrameCount = parsedFrame;
         this.lastEncoderFrameAt = Date.now();
+      }
+    }
+
+    // Parse `speed=0.25x` — encoder keeping up with real-time when >= ~1.0.
+    // Sustained speed < 1.0 means the encoder is falling behind (either
+    // RTMP upstream is backed up or the input pipeline is starving it),
+    // and Cloudflare will refuse to promote the input to live.
+    const speedMatch = msg.match(/speed=\s*([0-9]+(?:\.[0-9]+)?)x/i);
+    if (speedMatch) {
+      const parsedSpeed = Number.parseFloat(speedMatch[1] || "");
+      if (Number.isFinite(parsedSpeed)) {
+        this.ffmpegSpeedX = parsedSpeed;
+      }
+    }
+
+    // Parse `bitrate=4123.5kbits/s` — encoder output bitrate.
+    const bitrateMatch = msg.match(
+      /bitrate=\s*([0-9]+(?:\.[0-9]+)?)\s*kbits\/s/i,
+    );
+    if (bitrateMatch) {
+      const parsedBitrate = Number.parseFloat(bitrateMatch[1] || "");
+      if (Number.isFinite(parsedBitrate)) {
+        this.ffmpegOutputBitrateKbps = parsedBitrate;
       }
     }
 
