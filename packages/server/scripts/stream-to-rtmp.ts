@@ -272,6 +272,12 @@ const SOURCE_VISUAL_CHANGE_STALE_MS = Math.max(
   5_000,
   parseIntegerSetting(process.env.STREAM_SOURCE_VISUAL_CHANGE_STALE_MS, 10_000),
 );
+const INGEST_SETTINGS = resolveStreamIngestSettings(process.env);
+const WEBCODECS_VIDEO_BITRATE_BPS =
+  parseIntegerSetting(
+    process.env.STREAM_VIDEO_BITRATE_KBPS,
+    INGEST_SETTINGS.profile === "cloudflare_live" ? 4_800 : 6_000,
+  ) * 1_000;
 const SOURCE_DEGRADED_RESTART_POLLS = Math.max(
   2,
   parseIntegerSetting(process.env.STREAM_SOURCE_DEGRADED_RESTART_POLLS, 6),
@@ -1824,7 +1830,7 @@ async function startLegacyCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   const captureScript = generateCaptureScript({
     bridgeUrl: BRIDGE_URL,
     fps: TARGET_FPS,
-    bitrate: 6000000,
+    bitrate: WEBCODECS_VIDEO_BITRATE_BPS,
   });
 
   const ensureCaptureRunning = async (reason: string) => {
@@ -1900,7 +1906,8 @@ async function startWebCodecsCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   const captureScript = generateWebCodecsCaptureScript({
     bridgeUrl: BRIDGE_URL,
     fps: TARGET_FPS,
-    bitrate: 6000000,
+    bitrate: WEBCODECS_VIDEO_BITRATE_BPS,
+    gopFrames: INGEST_SETTINGS.gopFrames,
   });
 
   const ensureCaptureRunning = async (reason: string) => {
@@ -2003,7 +2010,8 @@ async function startWebCodecsExposedCapture(
 
   const captureScript = generateWebCodecsExposedCaptureScript({
     fps: TARGET_FPS,
-    bitrate: 6000000,
+    bitrate: WEBCODECS_VIDEO_BITRATE_BPS,
+    gopFrames: INGEST_SETTINGS.gopFrames,
   });
 
   const ensureCaptureRunning = async (reason: string) => {
