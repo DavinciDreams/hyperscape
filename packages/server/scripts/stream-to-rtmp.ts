@@ -109,8 +109,28 @@ const STREAM_CAPTURE_PRESERVE_STREAM_ROUTE = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_PRESERVE_STREAM_ROUTE || "",
 );
 
+function resolveRequestedCaptureMode(
+  env: NodeJS.ProcessEnv = process.env,
+): "cdp" | "mediarecorder" | "webcodecs" {
+  return (env.STREAM_CAPTURE_MODE?.trim() || "cdp") as
+    | "cdp"
+    | "mediarecorder"
+    | "webcodecs";
+}
+
+function resolveEffectiveCaptureMode(
+  env: NodeJS.ProcessEnv = process.env,
+): "cdp" | "mediarecorder" | "webcodecs" {
+  const requestedMode = resolveRequestedCaptureMode(env);
+  const ingest = resolveStreamIngestSettings(env);
+  if (requestedMode === "webcodecs" && ingest.profile === "cloudflare_live") {
+    return "cdp";
+  }
+  return requestedMode;
+}
+
 function normalizeCaptureGameUrl(rawUrl: string): string {
-  if ((process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") !== "cdp") {
+  if (resolveEffectiveCaptureMode(process.env) !== "cdp") {
     return rawUrl;
   }
 
@@ -170,10 +190,8 @@ let externalStatusWriteErrored = false;
  * Capture mode: 'cdp' is the production default, 'webcodecs' is the automatic
  * fallback, and 'mediarecorder' remains an explicit operator/debug mode.
  */
-const CAPTURE_MODE = (process.env.STREAM_CAPTURE_MODE?.trim() || "cdp") as
-  | "cdp"
-  | "mediarecorder"
-  | "webcodecs";
+const REQUESTED_CAPTURE_MODE = resolveRequestedCaptureMode(process.env);
+const CAPTURE_MODE = resolveEffectiveCaptureMode(process.env);
 const STREAM_CAPTURE_HEADLESS = process.env.STREAM_CAPTURE_HEADLESS === "true";
 const requestedCaptureChannel =
   process.env.STREAM_CAPTURE_CHANNEL?.trim() || "";
@@ -315,6 +333,12 @@ const CDP_EVERY_NTH_FRAME = Math.max(
     Math.max(1, Math.round(60 / Math.max(1, TARGET_FPS))),
   ),
 );
+
+if (REQUESTED_CAPTURE_MODE !== CAPTURE_MODE) {
+  console.warn(
+    `[Main] Overriding STREAM_CAPTURE_MODE=${REQUESTED_CAPTURE_MODE} to ${CAPTURE_MODE} for ${INGEST_SETTINGS.profile} ingest so canonical delivery uses server-side encoding`,
+  );
+}
 
 // ── CDP Frame Rate Tracking ────────────────────────────────────────────────
 

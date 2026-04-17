@@ -1478,7 +1478,10 @@ export class RTMPBridge {
       encoder = "h264_nvenc";
     }
 
-    const targetBitrate = this.config.videoBitrate;
+    const targetBitrate =
+      ingestSettings.profile === "cloudflare_live"
+        ? Math.max(this.config.videoBitrate, 6_000)
+        : this.config.videoBitrate;
     const maxrate =
       ingestSettings.profile === "cloudflare_live"
         ? targetBitrate
