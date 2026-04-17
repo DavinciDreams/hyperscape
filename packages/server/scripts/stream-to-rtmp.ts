@@ -111,11 +111,7 @@ const STREAM_CAPTURE_PRESERVE_STREAM_ROUTE = /^(1|true|yes|on)$/i.test(
   process.env.STREAM_CAPTURE_PRESERVE_STREAM_ROUTE || "",
 );
 
-type RequestedCaptureMode =
-  | "cdp"
-  | "mediarecorder"
-  | "webcodecs"
-  | "x11_nvenc";
+type RequestedCaptureMode = "cdp" | "mediarecorder" | "webcodecs" | "x11_nvenc";
 
 function resolveRequestedCaptureMode(
   env: NodeJS.ProcessEnv = process.env,
@@ -301,7 +297,10 @@ const XVFB_60HZ_MODELINES: Record<
   },
 };
 
-function resolveXvfb60HzMode(width: number, height: number): {
+function resolveXvfb60HzMode(
+  width: number,
+  height: number,
+): {
   modeName: string;
   modeline: string;
 } | null {
@@ -2133,7 +2132,16 @@ async function startWebCodecsExposedCapture(
     }
 
     if (!state.hasCanvas) return;
-    if (state.hasControl && state.recording && state.wsConnected) return;
+    // Exposed-function variant: the in-page script streams NALUs via
+    // page.exposeFunction('__streamNALU') (no WebSocket at all). Under
+    // that transport `status.wsConnected` stays false forever, so gating
+    // the "already running" short-circuit on wsConnected always re-injects
+    // — correctness-wise harmless (injection is idempotent) but
+    // semantically the wrong readiness signal for this path. Accept
+    // `hasControl && recording` as sufficient; the bridge-side bytes-
+    // received signal is the authoritative liveness check and lives in
+    // waitForCaptureTraffic.
+    if (state.hasControl && state.recording) return;
 
     console.log(
       `[Main] WebCodecs/Exposed capture inactive (reason=${reason}), injecting script...`,
@@ -2255,8 +2263,16 @@ async function waitForCaptureTraffic(
   while (Date.now() < deadline) {
     const captureStatus = await refreshBrowserCaptureStatusSnapshot();
     const bridgeStats = bridge.getStats();
-    const captureActive =
-      captureStatus?.recording === true && captureStatus?.wsConnected === true;
+    // The readiness contract used to gate on `recording && wsConnected &&
+    // bytesReceived > 0`. The `wsConnected` requirement is wrong for the
+    // exposed-function variant (startWebCodecsExposedCapture calls
+    // bridge.startWebCodecsDirect() which doesn't open a WebSocket at all
+    // — data flows via page.exposeFunction('__streamNALU')). Under that
+    // path `wsConnected` stays false forever and the gate can never pass.
+    // `bytesReceived > 0` is the authoritative "bridge is producing
+    // frames" signal regardless of transport, so gate on that plus
+    // recording.
+    const captureActive = captureStatus?.recording === true;
     const hasTraffic = bridgeStats.bytesReceived > 0;
 
     if (captureActive && hasTraffic) {
@@ -2891,38 +2907,74 @@ async function main() {
           !recovered &&
           cdpRecoveryFailures >= CAPTURE_RECOVERY_MAX_FAILURES
         ) {
-          console.warn(
-            "[Main] Falling back to WebCodecs capture mode after CDP stall.",
-          );
-          try {
-            // Clear any existing watchdog before starting a new one.
-            if (captureWatchdog) {
-              clearInterval(captureWatchdog);
-              captureWatchdog = null;
+          // When the operator explicitly configured STREAM_CAPTURE_MODE=cdp
+          // (or the Cloudflare-live guardrail has forced the effective mode
+          // to cdp), silently flipping to WebCodecs after repeated CDP
+          // stalls masks the real failure and enters a broken recovery
+          // loop — the WebCodecs path has its own readiness failure modes
+          // (exposed-function vs WebSocket, bytesReceived=0) which then
+          // flip back to CDP, etc. Instead escalate: full browser restart,
+          // and if that also fails, exit so the supervisor respawns us in
+          // the configured mode cleanly.
+          if (CAPTURE_MODE === "cdp") {
+            console.warn(
+              "[Main] CDP stall exceeded recovery threshold; escalating to full browser restart (STREAM_CAPTURE_MODE=cdp, not falling back to webcodecs).",
+            );
+            try {
+              await withTimeout(
+                browserRestart("cdp_stall_persistent"),
+                CAPTURE_RECOVERY_TIMEOUT_MS + 10_000,
+                "Browser restart for persistent CDP stall",
+              );
+              cdpRecoveryFailures = 0;
+              lastCdpBytesReceived = bridge.getStats().bytesReceived;
+              recordSourceRecovery("cdp_stall_browser_restart");
+              console.log(
+                "[Main] Browser restart after persistent CDP stall complete",
+              );
+            } catch (restartErr) {
+              console.error(
+                "[Main] Browser restart for persistent CDP stall failed:",
+                errMsg(restartErr),
+              );
+              // Supervisor respawn is the last line of defense; pm2 will
+              // bring us back up with the configured CAPTURE_MODE.
+              void shutdown(1);
             }
-            await withTimeout(
-              stopCdpCapture(),
-              5_000,
-              "Stop stalled CDP capture",
-            ).catch(() => undefined);
-            await bridge.stop();
-            bridge.startSpectatorServer(SPECTATOR_PORT);
-            activeCaptureMode = await startActiveCapture("webcodecs");
-            cdpRecoveryFailures = 0;
-            recordSourceRecovery(
-              activeCaptureMode === "webcodecs"
-                ? "cdp_stall_fallback_to_webcodecs"
-                : "cdp_stall_recovered_via_cdp_fallback",
+          } else {
+            console.warn(
+              "[Main] Falling back to WebCodecs capture mode after CDP stall.",
             );
-            console.log(
-              `[Main] Capture recovery after CDP stall settled on ${activeCaptureMode}`,
-            );
-          } catch (fallbackErr) {
-            console.error(
-              "[Main] WebCodecs fallback failed:",
-              errMsg(fallbackErr),
-            );
-            void shutdown(1);
+            try {
+              // Clear any existing watchdog before starting a new one.
+              if (captureWatchdog) {
+                clearInterval(captureWatchdog);
+                captureWatchdog = null;
+              }
+              await withTimeout(
+                stopCdpCapture(),
+                5_000,
+                "Stop stalled CDP capture",
+              ).catch(() => undefined);
+              await bridge.stop();
+              bridge.startSpectatorServer(SPECTATOR_PORT);
+              activeCaptureMode = await startActiveCapture("webcodecs");
+              cdpRecoveryFailures = 0;
+              recordSourceRecovery(
+                activeCaptureMode === "webcodecs"
+                  ? "cdp_stall_fallback_to_webcodecs"
+                  : "cdp_stall_recovered_via_cdp_fallback",
+              );
+              console.log(
+                `[Main] Capture recovery after CDP stall settled on ${activeCaptureMode}`,
+              );
+            } catch (fallbackErr) {
+              console.error(
+                "[Main] WebCodecs fallback failed:",
+                errMsg(fallbackErr),
+              );
+              void shutdown(1);
+            }
           }
         }
       }
