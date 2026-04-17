@@ -262,6 +262,32 @@ const VIEWPORT = {
   height: parseEvenDimension(process.env.STREAM_CAPTURE_HEIGHT, 720),
 };
 
+const XVFB_60HZ_MODELINES: Record<
+  string,
+  {
+    modeName: string;
+    modeline: string;
+  }
+> = {
+  "1280x720": {
+    modeName: "1280x720_60.00",
+    modeline:
+      '"1280x720_60.00" 74.50 1280 1344 1472 1664 720 723 728 748 -hsync +vsync',
+  },
+  "1920x1080": {
+    modeName: "1920x1080_60.00",
+    modeline:
+      '"1920x1080_60.00" 173.00 1920 2048 2248 2576 1080 1083 1088 1120 -hsync +vsync',
+  },
+};
+
+function resolveXvfb60HzMode(width: number, height: number): {
+  modeName: string;
+  modeline: string;
+} | null {
+  return XVFB_60HZ_MODELINES[`${width}x${height}`] ?? null;
+}
+
 let browser: Browser | null = null;
 let page: Page | null = null;
 let cdpSession: CDPSession | null = null;
@@ -2299,13 +2325,20 @@ async function main() {
         console.log(
           `[Main] Xvfb display ${display} is at 0 Hz — applying 60 Hz modeline`,
         );
-        const modeline =
-          '"1280x720_60.00" 74.50 1280 1344 1472 1664 720 723 728 748 -hsync +vsync';
-        execSync(
-          `DISPLAY=${display} xrandr --newmode ${modeline} 2>/dev/null; DISPLAY=${display} xrandr --addmode screen 1280x720_60.00 2>/dev/null; DISPLAY=${display} xrandr --output screen --mode 1280x720_60.00 2>/dev/null`,
-          { timeout: 5000 },
-        );
-        console.log(`[Main] Xvfb display ${display} set to 60 Hz`);
+        const mode = resolveXvfb60HzMode(VIEWPORT.width, VIEWPORT.height);
+        if (!mode) {
+          console.warn(
+            `[Main] No known 60 Hz modeline for ${VIEWPORT.width}x${VIEWPORT.height}; leaving Xvfb mode unchanged`,
+          );
+        } else {
+          execSync(
+            `DISPLAY=${display} xrandr --newmode ${mode.modeline} 2>/dev/null; DISPLAY=${display} xrandr --addmode screen ${mode.modeName} 2>/dev/null; DISPLAY=${display} xrandr --output screen --mode ${mode.modeName} 2>/dev/null`,
+            { timeout: 5000 },
+          );
+          console.log(
+            `[Main] Xvfb display ${display} set to 60 Hz at ${VIEWPORT.width}x${VIEWPORT.height}`,
+          );
+        }
       } else {
         console.log(
           `[Main] Xvfb display ${display} already has a non-zero refresh rate`,
