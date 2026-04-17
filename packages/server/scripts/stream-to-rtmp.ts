@@ -2136,19 +2136,91 @@ async function main() {
   // ── Tiered recovery functions ──────────────────────────────────────
   // See plan: warm-boot-tiered-recovery for full design rationale.
 
+  async function stopActiveCapture(
+    mode: ActiveCaptureMode,
+    options: { preserveBridgeProcessing?: boolean } = {},
+  ): Promise<boolean> {
+    if (captureWatchdog) {
+      clearInterval(captureWatchdog);
+      captureWatchdog = null;
+    }
+
+    latestBrowserCaptureStatus = null;
+
+    if (mode === "cdp") {
+      await stopCdpCapture();
+      if (options.preserveBridgeProcessing) {
+        await bridge.stopProcessing();
+        return false;
+      }
+      await bridge.stop();
+      return true;
+    }
+
+    await stopInPageCaptureControl();
+    await bridge.stop();
+    return true;
+  }
+
+  async function startActiveCapture(
+    mode: ActiveCaptureMode,
+    options: { restartSpectatorServer?: boolean } = {},
+  ): Promise<void> {
+    if (options.restartSpectatorServer) {
+      bridge.startSpectatorServer(SPECTATOR_PORT);
+    }
+
+    if (mode === "cdp") {
+      await startCdpCapture(bridge);
+      return;
+    }
+
+    if (mode === "webcodecs") {
+      captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
+      return;
+    }
+
+    captureWatchdog = (await startLegacyCapture(bridge)) ?? null;
+  }
+
+  async function closeBrowserForRestart(): Promise<void> {
+    if (page) {
+      try {
+        await page.evaluate(() => {
+          (
+            window as unknown as { __captureControl__?: { stop: () => void } }
+          ).__captureControl__?.stop?.();
+        });
+      } catch {
+        // Page might already be closed
+      }
+    }
+
+    if (browser) {
+      await browser.close();
+      browser = null;
+    }
+
+    page = null;
+    latestBrowserCaptureStatus = null;
+    latestSceneUrl = null;
+    latestActiveBundle = null;
+  }
+
   /**
    * Tier 2: warm restart — reload the page but keep the browser alive.
    * IndexedDB VRM cache and WebGPU shader cache survive, cutting recovery
-   * from ~90s (cold) to ~15s. CDP session and FFmpeg are recreated.
+   * from ~90s (cold) to ~15s. The active capture pipeline is recreated.
    */
   async function warmRestart(reason: string): Promise<void> {
     console.log(`[Main] Warm restart (Tier 2): ${reason}`);
-    await stopCdpCapture();
-    bridge.stopFFmpeg();
+    const restartSpectatorServer = await stopActiveCapture(activeCaptureMode, {
+      preserveBridgeProcessing: activeCaptureMode === "cdp",
+    });
     // DON'T close browser — IndexedDB + WebGPU cache survive
-    if (pageRef) {
+    if (page) {
       try {
-        await pageRef.goto(selectedGameUrl || GAME_URL_CANDIDATES[0], {
+        await page.goto(selectedGameUrl || GAME_URL_CANDIDATES[0], {
           waitUntil: "domcontentloaded",
           timeout: 30_000,
         });
@@ -2160,9 +2232,11 @@ async function main() {
       throw new Error("No page reference for warm restart");
     }
     launchTime = Date.now();
-    await startCdpCapture(bridge);
-    // Reset tier counters on successful warm restart
+    await startActiveCapture(activeCaptureMode, { restartSpectatorServer });
+    // Reset consecutive-failure counters on successful warm restart.
     tier1Failures = 0;
+    tier2Failures = 0;
+    tier3Failures = 0;
     console.log("[Main] Warm restart complete");
   }
 
@@ -2173,15 +2247,15 @@ async function main() {
    */
   async function browserRestart(reason: string): Promise<void> {
     console.log(`[Main] Browser restart (Tier 3): ${reason}`);
-    await stopCdpCapture();
-    bridge.stopFFmpeg();
-    await cleanup();
+    const restartSpectatorServer = await stopActiveCapture(activeCaptureMode);
+    await closeBrowserForRestart();
     await setupBrowser(false); // reuse selectedGameUrl
     launchTime = Date.now();
-    await startCdpCapture(bridge);
-    // Reset all tier counters on successful browser restart
+    await startActiveCapture(activeCaptureMode, { restartSpectatorServer });
+    // Reset all consecutive-failure counters on successful browser restart.
     tier1Failures = 0;
     tier2Failures = 0;
+    tier3Failures = 0;
     console.log("[Main] Browser restart complete");
   }
 
@@ -2312,7 +2386,10 @@ async function main() {
             degradedReason === "canvas_missing";
           const isTier3Reason = degradedReason === "browser_missing";
 
-          if (isTier1Reason && tier1Failures < 3) {
+          const shouldUseTier1 =
+            isTier1Reason && activeCaptureMode === "cdp" && tier1Failures < 3;
+
+          if (shouldUseTier1) {
             tier1Failures += 1;
             console.log(
               `[Main] Tier 1 recovery (FFmpeg restart ${tier1Failures}/3): ${degradedReason}`,
@@ -2320,6 +2397,9 @@ async function main() {
             void bridge
               .restartFFmpegDirect()
               .then(() => {
+                tier1Failures = 0;
+                tier2Failures = 0;
+                tier3Failures = 0;
                 startCdpFramePump(bridge);
               })
               .catch((err) => {
@@ -2330,9 +2410,16 @@ async function main() {
                 tier1Failures = 3; // force escalation on next poll
               });
           } else if (
-            (isTier2Reason || (isTier1Reason && tier1Failures >= 3)) &&
+            (isTier2Reason ||
+              (isTier1Reason &&
+                (activeCaptureMode !== "cdp" || tier1Failures >= 3))) &&
             tier2Failures < 3
           ) {
+            if (isTier1Reason && activeCaptureMode !== "cdp") {
+              console.log(
+                `[Main] Tier 1 FFmpeg-only recovery skipped for ${activeCaptureMode} capture; escalating to warm restart.`,
+              );
+            }
             tier2Failures += 1;
             tier1Failures = 0;
             console.log(
