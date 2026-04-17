@@ -200,10 +200,16 @@ const sharedProductionEnv = {
   STREAM_CAPTURE_HEADLESS: "false",
   STREAM_CAPTURE_CHANNEL: "chrome-beta",
   STREAM_CAPTURE_ANGLE: "vulkan",
-  STREAM_CAPTURE_WIDTH: "1280",
-  STREAM_CAPTURE_HEIGHT: "720",
-  STREAM_OUTPUT_WIDTH: process.env.STREAM_OUTPUT_WIDTH || "1280",
-  STREAM_OUTPUT_HEIGHT: process.env.STREAM_OUTPUT_HEIGHT || "720",
+  STREAM_CAPTURE_WIDTH: process.env.STREAM_CAPTURE_WIDTH || "1280",
+  STREAM_CAPTURE_HEIGHT: process.env.STREAM_CAPTURE_HEIGHT || "720",
+  STREAM_OUTPUT_WIDTH:
+    process.env.STREAM_OUTPUT_WIDTH ||
+    process.env.STREAM_CAPTURE_WIDTH ||
+    "1280",
+  STREAM_OUTPUT_HEIGHT:
+    process.env.STREAM_OUTPUT_HEIGHT ||
+    process.env.STREAM_CAPTURE_HEIGHT ||
+    "720",
   FFMPEG_HWACCEL:
     process.env.FFMPEG_HWACCEL ||
     (process.platform === "linux"
