@@ -275,6 +275,13 @@ const SOURCE_DEGRADED_RESTART_POLLS = Math.max(
   2,
   parseIntegerSetting(process.env.STREAM_SOURCE_DEGRADED_RESTART_POLLS, 6),
 );
+const PAGE_READINESS_STALL_MS = Math.max(
+  30_000,
+  parseIntegerSetting(
+    process.env.STREAM_SOURCE_PAGE_READINESS_STALL_MS,
+    5 * 60_000,
+  ),
+);
 const FATAL_WRITE_PAGE_STALL_THRESHOLD_MS = Math.max(
   2_000,
   Math.min(5_000, Math.floor(SOURCE_CAPTURE_STALL_MS / 2)),
@@ -2129,6 +2136,7 @@ async function main() {
   let cdpRecoveryInFlight = false;
   let cdpRecoveryFailures = 0;
   let sourceDegradedPolls = 0;
+  let pageNotReadySinceMs: number | null = null;
   let tier1Failures = 0; // FFmpeg-only restart failures
   let tier2Failures = 0; // Warm restart (page reload) failures
   let tier3Failures = 0; // Browser restart failures
@@ -2166,6 +2174,7 @@ async function main() {
     mode: ActiveCaptureMode,
     options: { restartSpectatorServer?: boolean } = {},
   ): Promise<void> {
+    pageNotReadySinceMs = null;
     if (options.restartSpectatorServer) {
       bridge.startSpectatorServer(SPECTATOR_PORT);
     }
@@ -2336,19 +2345,29 @@ async function main() {
           activeCaptureMode,
         );
         const degradedReason = sourceRuntime?.degradedReason ?? null;
+        const nowMs = Date.now();
         const withinLaunchGrace =
-          Date.now() - launchTime <
+          nowMs - launchTime <
           Math.max(CDP_STARTUP_TIMEOUT_MS, SOURCE_CAPTURE_STALL_MS);
+        if (degradedReason === "page_not_ready") {
+          pageNotReadySinceMs = pageNotReadySinceMs ?? nowMs;
+        } else {
+          pageNotReadySinceMs = null;
+        }
+        const pageNotReadyStalled =
+          degradedReason === "page_not_ready" &&
+          pageNotReadySinceMs != null &&
+          nowMs - pageNotReadySinceMs >= PAGE_READINESS_STALL_MS;
         const shouldRestartForDegradation =
           !withinLaunchGrace &&
-          // Keep scene readiness as a health gate, not a restart trigger. A
-          // live capture can render a degraded/loading scene while terrain,
-          // camera, or avatar data converges.
+          // Keep scene readiness as a health gate during normal convergence,
+          // but escalate if it remains stuck beyond a bounded stall window.
           (degradedReason === "browser_missing" ||
             degradedReason === "unexpected_navigation" ||
             degradedReason === "capture_stalled" ||
             degradedReason === "encoder_stalled" ||
-            degradedReason === "manifest_stale");
+            degradedReason === "manifest_stale" ||
+            pageNotReadyStalled);
         if (shouldRestartForDegradation) {
           sourceDegradedPolls += 1;
         } else {
