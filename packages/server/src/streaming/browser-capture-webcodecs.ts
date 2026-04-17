@@ -151,8 +151,6 @@ export const WEBCODECS_CAPTURE_SCRIPT = `
       }
     });
 
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-
     const encoderConfig = {
       codec: 'avc1.42E01F', // H.264 Baseline, Level 3.1
       width: canvas.width,
@@ -162,11 +160,6 @@ export const WEBCODECS_CAPTURE_SCRIPT = `
       latencyMode: 'realtime', // Important for live streaming
       avc: { format: 'annexb' } // CRITICAL: forces inline SPS/PPS headers
     };
-
-    // Mac VideoToolbox hardware encoder handles high bitrate well, others might need tuning
-    if (!isMac) {
-       // Optional fallback tweaks for other platforms
-    }
 
     try {
         const support = await VideoEncoder.isConfigSupported(encoderConfig);
@@ -299,4 +292,266 @@ export function generateWebCodecsCaptureScript(config: {
     window.__VIDEO_BITRATE__ = ${config.bitrate};
   `;
   return preamble + WEBCODECS_CAPTURE_SCRIPT;
+}
+
+/**
+ * WebCodecs capture variant that uses Playwright page.exposeFunction() instead
+ * of WebSocket to send H.264 NAL units from the browser to Node. This bypasses
+ * the Bun/ws WebSocket handshake timeout issue on headless Linux.
+ *
+ * The browser calls window.__streamNALU(base64) which is a direct IPC channel
+ * through Playwright's CDP bindings — no network stack involved.
+ */
+export const WEBCODECS_EXPOSED_CAPTURE_SCRIPT = `
+(function() {
+  if (window.__captureControl__) {
+    try {
+      const s = window.__captureControl__.getStatus();
+      if (s && s.recording) {
+        console.log('[WebCodecs/Exposed] Already active, skipping re-injection');
+        return;
+      }
+    } catch(e) {}
+  }
+
+  const TARGET_FPS = window.__TARGET_FPS__ || 30;
+  const VIDEO_BITRATE = window.__VIDEO_BITRATE__ || 6000000;
+
+  if (typeof window.__streamNALU !== 'function') {
+    console.error('[WebCodecs/Exposed] window.__streamNALU not exposed — exposeFunction() must be called first');
+    return;
+  }
+
+  console.log('[WebCodecs/Exposed] Starting direct Playwright bridge capture...');
+  console.log('[WebCodecs/Exposed] Target:', TARGET_FPS, 'fps @', VIDEO_BITRATE, 'bps');
+
+  const canvas = document.querySelector('canvas');
+  if (!canvas) {
+    console.error('[WebCodecs/Exposed] No canvas element found!');
+    return;
+  }
+
+  console.log('[WebCodecs/Exposed] Found canvas:', canvas.width, 'x', canvas.height);
+
+  let stream = null;
+  let encoder = null;
+  let processor = null;
+  let frameReader = null;
+
+  let chunkCount = 0;
+  let bytesSent = 0;
+  let startTime = 0;
+  let lastFrameTime = 0;
+  let stopped = false;
+
+  let captureFps = 0;
+  let frameCountForFps = 0;
+  let lastFpsCalcTime = Date.now();
+
+  // Batch small NALUs to reduce IPC overhead: accumulate up to ~32KB or 16ms
+  let pendingBuffer = null;
+  let pendingSize = 0;
+  let flushTimer = null;
+  const BATCH_THRESHOLD = 32768;
+  const BATCH_FLUSH_MS = 16;
+
+  function flushPending() {
+    if (pendingBuffer && pendingSize > 0) {
+      const toSend = new Uint8Array(pendingBuffer.buffer, 0, pendingSize);
+      // Convert to base64 for exposeFunction (binary not supported)
+      const base64 = btoa(String.fromCharCode.apply(null, toSend));
+      window.__streamNALU(base64).catch(() => {});
+    }
+    pendingBuffer = null;
+    pendingSize = 0;
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+  }
+
+  function sendNALU(buffer) {
+    const data = new Uint8Array(buffer);
+    bytesSent += data.length;
+    chunkCount++;
+    frameCountForFps++;
+    lastFrameTime = Date.now();
+
+    const now = Date.now();
+    if (now - lastFpsCalcTime >= 1000) {
+      captureFps = frameCountForFps;
+      frameCountForFps = 0;
+      lastFpsCalcTime = now;
+    }
+
+    // For large chunks (keyframes), send immediately
+    if (data.length > BATCH_THRESHOLD) {
+      flushPending();
+      const base64 = btoa(String.fromCharCode.apply(null, data));
+      window.__streamNALU(base64).catch(() => {});
+      return;
+    }
+
+    // Accumulate small chunks
+    if (!pendingBuffer || pendingSize + data.length > 65536) {
+      flushPending();
+      pendingBuffer = new Uint8Array(65536);
+      pendingSize = 0;
+    }
+    pendingBuffer.set(data, pendingSize);
+    pendingSize += data.length;
+
+    if (pendingSize >= BATCH_THRESHOLD) {
+      flushPending();
+    } else if (!flushTimer) {
+      flushTimer = setTimeout(flushPending, BATCH_FLUSH_MS);
+    }
+  }
+
+  async function startEncoding() {
+    if (encoder && encoder.state !== 'closed') {
+      console.warn('[WebCodecs/Exposed] Encoder already active');
+      return;
+    }
+
+    if (!stream) {
+      try {
+        stream = canvas.captureStream(TARGET_FPS);
+        console.log('[WebCodecs/Exposed] Created canvas stream at', TARGET_FPS, 'fps');
+      } catch (err) {
+        console.error('[WebCodecs/Exposed] Failed to capture canvas stream:', err);
+        return;
+      }
+    }
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) {
+      console.error('[WebCodecs/Exposed] No video track in stream!');
+      return;
+    }
+
+    encoder = new VideoEncoder({
+      output: (chunk) => {
+        if (stopped) return;
+        const buffer = new ArrayBuffer(chunk.byteLength);
+        chunk.copyTo(buffer);
+        sendNALU(buffer);
+      },
+      error: (e) => {
+        console.error('[WebCodecs/Exposed] VideoEncoder error:', e);
+      }
+    });
+
+    const encoderConfig = {
+      codec: 'avc1.42E01F',
+      width: canvas.width,
+      height: canvas.height,
+      bitrate: VIDEO_BITRATE,
+      framerate: TARGET_FPS,
+      latencyMode: 'realtime',
+      avc: { format: 'annexb' }
+    };
+
+    try {
+      const support = await VideoEncoder.isConfigSupported(encoderConfig);
+      if (!support.supported) {
+        console.error('[WebCodecs/Exposed] Configuration not supported:', encoderConfig);
+        return;
+      }
+      encoder.configure(encoderConfig);
+      console.log('[WebCodecs/Exposed] Encoder configured:', JSON.stringify(encoderConfig));
+    } catch(e) {
+      console.error('[WebCodecs/Exposed] Failed to configure encoder:', e);
+      return;
+    }
+
+    startTime = Date.now();
+
+    try {
+      processor = new MediaStreamTrackProcessor({ track: videoTrack });
+      frameReader = processor.readable.getReader();
+
+      const readFrame = async () => {
+        if (!encoder || encoder.state === 'closed' || stopped) return;
+
+        try {
+          const { done, value: frame } = await frameReader.read();
+          if (done) {
+            console.log('[WebCodecs/Exposed] Track ended');
+            return;
+          }
+
+          if (encoder.encodeQueueSize > 5) {
+            frame.close();
+          } else {
+            const keyFrame = (chunkCount % TARGET_FPS) === 0;
+            encoder.encode(frame, { keyFrame });
+            frame.close();
+          }
+
+          readFrame();
+        } catch (e) {
+          console.error('[WebCodecs/Exposed] Frame read error:', e);
+        }
+      };
+
+      readFrame();
+      console.log('[WebCodecs/Exposed] Hardware encoding loop started');
+    } catch(e) {
+      console.error('[WebCodecs/Exposed] Failed to start frame processor:', e);
+    }
+  }
+
+  function stopEncoding() {
+    if (frameReader) {
+      frameReader.cancel();
+      frameReader = null;
+    }
+    if (encoder && encoder.state !== 'closed') {
+      encoder.close();
+    }
+    encoder = null;
+    flushPending();
+  }
+
+  function stop() {
+    console.log('[WebCodecs/Exposed] Stopping...');
+    stopped = true;
+    stopEncoding();
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+  }
+
+  function getStatus() {
+    return {
+      recording: encoder && encoder.state === 'configured',
+      wsConnected: true, // Always "connected" since we use exposeFunction
+      chunkCount,
+      bytesSent,
+      uptime: startTime > 0 ? Date.now() - startTime : 0,
+      lastChunkAt: lastFrameTime > 0 ? lastFrameTime : null,
+      lastChunkAgeMs: lastFrameTime > 0 ? Date.now() - lastFrameTime : null,
+      lastChunkMs: lastFrameTime > 0 ? Date.now() - lastFrameTime : 0,
+      captureFps,
+      encodeQueue: encoder ? encoder.encodeQueueSize : 0
+    };
+  }
+
+  window.__captureControl__ = { stop, getStatus };
+
+  startEncoding();
+})();
+`;
+
+export function generateWebCodecsExposedCaptureScript(config: {
+  fps: number;
+  bitrate: number;
+}): string {
+  const preamble = `
+    window.__TARGET_FPS__ = ${config.fps};
+    window.__VIDEO_BITRATE__ = ${config.bitrate};
+  `;
+  return preamble + WEBCODECS_EXPOSED_CAPTURE_SCRIPT;
 }

@@ -55,6 +55,7 @@ import {
   startRTMPBridge,
   generateCaptureScript,
   generateWebCodecsCaptureScript,
+  generateWebCodecsExposedCaptureScript,
 } from "../src/streaming/index.js";
 import {
   resolveStreamDeliveryInfo,
@@ -1949,6 +1950,110 @@ async function startWebCodecsCapture(bridge: ReturnType<typeof getRTMPBridge>) {
   }, 5000);
 }
 
+// ── WebCodecs Exposed-Function Capture ──────────────────────────────────────
+// Bypasses WebSocket entirely: the browser calls window.__streamNALU(base64)
+// which is a direct Playwright IPC channel to this Node process. This is a
+// workaround for a Bun/ws WebSocket handshake timeout seen on headless Linux
+// that leaves the standard WebCodecs-over-WebSocket path unable to connect.
+
+async function startWebCodecsExposedCapture(
+  bridge: ReturnType<typeof getRTMPBridge>,
+) {
+  if (!page) return;
+
+  // Start FFmpeg in H.264 stream-copy mode without a WebSocket server.
+  // Data flows via page.exposeFunction() → writeToFfmpegRaw().
+  bridge.startWebCodecsDirect();
+
+  // Expose the IPC function BEFORE injecting the capture script.
+  // page.exposeFunction survives page reloads (it's a CDP binding).
+  try {
+    await page.exposeFunction("__streamNALU", (base64: string) => {
+      try {
+        const buf = Buffer.from(base64, "base64");
+        bridge.writeToFfmpegRaw(buf);
+      } catch {
+        // Ignore transient write errors — FFmpeg restart handles recovery
+      }
+    });
+    console.log("[Main] Exposed __streamNALU function to browser");
+  } catch (err) {
+    if (String(err).includes("already")) {
+      console.log("[Main] __streamNALU already exposed (warm restart)");
+    } else {
+      console.error("[Main] Failed to expose __streamNALU:", err);
+      return;
+    }
+  }
+
+  const captureScript = generateWebCodecsExposedCaptureScript({
+    fps: TARGET_FPS,
+    bitrate: 6000000,
+  });
+
+  const ensureCaptureRunning = async (reason: string) => {
+    if (!page || page.isClosed()) return;
+
+    let state: {
+      hasCanvas: boolean;
+      hasControl: boolean;
+      recording: boolean;
+      wsConnected: boolean;
+    };
+    try {
+      state = await page.evaluate(() => {
+        const control = (
+          window as unknown as {
+            __captureControl__?: { getStatus: () => unknown };
+          }
+        ).__captureControl__;
+        const status = (control?.getStatus?.() || {}) as {
+          recording?: boolean;
+          wsConnected?: boolean;
+        };
+        return {
+          hasCanvas: document.querySelector("canvas") !== null,
+          hasControl: Boolean(control),
+          recording: status.recording === true,
+          wsConnected: status.wsConnected === true,
+        };
+      });
+    } catch (err) {
+      if (isTransientPageEvalError(err)) return;
+      throw err;
+    }
+
+    if (!state.hasCanvas) return;
+    if (state.hasControl && state.recording && state.wsConnected) return;
+
+    console.log(
+      `[Main] WebCodecs/Exposed capture inactive (reason=${reason}), injecting script...`,
+    );
+    try {
+      await page.evaluate(captureScript);
+      await page.waitForTimeout(1500);
+    } catch (err) {
+      if (isTransientPageEvalError(err)) return;
+      throw err;
+    }
+  };
+
+  try {
+    await ensureCaptureRunning("initial");
+  } catch (err) {
+    console.warn(
+      "[Main] Initial WebCodecs/Exposed capture injection failed:",
+      err,
+    );
+  }
+
+  return setInterval(() => {
+    void ensureCaptureRunning("watchdog").catch((err) => {
+      console.warn("[Main] Capture watchdog error:", err);
+    });
+  }, 5000);
+}
+
 type BrowserCaptureStatus = {
   recording?: boolean;
   wsConnected?: boolean;
@@ -2299,9 +2404,30 @@ async function main() {
       }
     }
   } else if (CAPTURE_MODE === "webcodecs") {
-    // ── WebCodecs Mode: Native VideoEncoder API to FFmpeg -c:v copy ──
-    captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
-    const healthy = await waitForCaptureTraffic(bridge, 20000);
+    // ── WebCodecs Mode: try exposed-function bridge first (no WebSocket) ──
+    // The exposed-function bridge uses page.exposeFunction() instead of a
+    // WebSocket so we sidestep a Bun/ws handshake timeout seen on headless
+    // Linux. If it fails to produce media, fall back to the legacy WebSocket
+    // WebCodecs path, then to CDP screencast as a last resort.
+    console.log(
+      "[Main] WebCodecs mode: trying exposed-function bridge (bypasses WebSocket)...",
+    );
+    captureWatchdog = (await startWebCodecsExposedCapture(bridge)) ?? null;
+    let healthy = await waitForCaptureTraffic(bridge, 25_000);
+    if (!healthy) {
+      console.warn(
+        "[Main] WebCodecs/Exposed produced no media within 25s; trying WebSocket fallback...",
+      );
+      if (captureWatchdog) {
+        clearInterval(captureWatchdog);
+        captureWatchdog = null;
+      }
+      await stopInPageCaptureControl();
+      await bridge.stop();
+      bridge.startSpectatorServer(SPECTATOR_PORT);
+      captureWatchdog = (await startWebCodecsCapture(bridge)) ?? null;
+      healthy = await waitForCaptureTraffic(bridge, 20_000);
+    }
     if (!healthy) {
       console.warn(
         "[Main] WebCodecs capture produced no media within 20s; falling back to CDP screencast capture.",

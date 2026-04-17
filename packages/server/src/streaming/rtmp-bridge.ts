@@ -66,6 +66,14 @@ type FatalWriteDiagnostic = {
   uptimeMs: number;
 };
 
+type BridgeClientSocket = WebSocket & {
+  _isWebCodecs?: boolean;
+  _socket?: {
+    pause?: () => void;
+    resume?: () => void;
+  };
+};
+
 function parseEnvInt(
   rawValue: string | undefined,
   fallback: number,
@@ -136,7 +144,7 @@ export class RTMPBridge {
   private wss: WebSocketServer | null = null;
   private spectatorWss: WebSocketServer | null = null;
   private ffmpeg: ChildProcess | null = null;
-  private client: WebSocket | null = null;
+  private client: BridgeClientSocket | null = null;
   private spectatorClients: Set<WebSocket> = new Set();
   /** Cached fMP4 init segment (moov atom) — required for late joiners */
   private fmp4InitSegment: Buffer | null = null;
@@ -612,14 +620,10 @@ export class RTMPBridge {
 
   private setClientBackpressurePaused(
     paused: boolean,
-    ws: WebSocket | null = this.client,
+    ws: BridgeClientSocket | null = this.client,
   ): void {
     if (!ws) return;
-    const socket = (
-      ws as unknown as {
-        _socket?: { pause?: () => void; resume?: () => void };
-      }
-    )._socket;
+    const socket = ws._socket;
     if (!socket) return;
 
     if (paused && !this.clientSocketPaused) {
@@ -640,7 +644,7 @@ export class RTMPBridge {
 
   private setFfmpegBackpressured(
     backpressured: boolean,
-    ws: WebSocket | null = this.client,
+    ws: BridgeClientSocket | null = this.client,
   ): void {
     if (this.ffmpegBackpressured === backpressured) {
       if (!backpressured) {
@@ -752,10 +756,7 @@ export class RTMPBridge {
     if (this.ffmpeg !== targetProcess) return;
 
     const wasCdpDirectMode = this.cdpDirectMode;
-    const wasWebCodecsMode = Boolean(
-      this.client &&
-      (this.client as unknown as { _isWebCodecs?: boolean })._isWebCodecs,
-    );
+    const wasWebCodecsMode = Boolean(this.client?._isWebCodecs);
     const hadClient = Boolean(this.client);
 
     this.fatalWriteRecoveryInFlight = true;
@@ -926,7 +927,7 @@ export class RTMPBridge {
    * Write encoded media into FFmpeg stdin with backpressure handling.
    * In CDP direct mode we drop frames when backpressured to preserve low latency.
    */
-  private writeToFfmpeg(data: Buffer, sourceWs?: WebSocket): boolean {
+  private writeToFfmpeg(data: Buffer, sourceWs?: BridgeClientSocket): boolean {
     if (!this.ffmpeg?.stdin?.writable) return false;
 
     // CDP direct mode has no transport-level pause control, so drop when backed up.
@@ -947,6 +948,51 @@ export class RTMPBridge {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Start FFmpeg in H.264 stream-copy mode for the exposed-function capture
+   * bridge. Unlike startWebCodecs(), this doesn't create a WebSocket server —
+   * data arrives via writeToFfmpegRaw() called from page.exposeFunction().
+   */
+  startWebCodecsDirect(): void {
+    this.initOutputs();
+    this.cdpDirectMode = false;
+    this.status.clientConnected = true; // No WebSocket client, but data will flow
+    this.bytesReceived = 0;
+    this.droppedFrameCount = 0;
+    this.startFFmpegWebCodecs();
+    console.log(
+      "[RTMPBridge] Started FFmpeg in WebCodecs direct mode (no WebSocket, data via exposeFunction)",
+    );
+  }
+
+  /**
+   * Public entry point for writing raw H.264 NAL units from the exposed-function
+   * capture bridge. Tracks bytes received and last-data timestamps the same way
+   * the WebSocket handler does, but without a WebSocket dependency.
+   */
+  writeToFfmpegRaw(data: Buffer): boolean {
+    if (!this.ffmpeg?.stdin?.writable) return false;
+    this.bytesReceived += data.length;
+    this.lastDataReceived = Date.now();
+    return this.writeToFfmpeg(data);
+  }
+
+  /**
+   * Close the WebSocket server without stopping FFmpeg.
+   * Used by the exposed-function capture mode which starts FFmpeg via
+   * startWebCodecs() (to get the H.264 stream-copy pipeline) but doesn't
+   * need the WebSocket listener.
+   */
+  closeWebSocketServer(): void {
+    if (this.wss) {
+      this.wss.close();
+      this.wss = null;
+      console.log(
+        "[RTMPBridge] WebSocket server closed (not needed for exposed-function capture)",
+      );
     }
   }
 
@@ -2117,8 +2163,9 @@ export class RTMPBridge {
       return;
     }
 
+    const clientWs = ws as BridgeClientSocket;
     console.log("[RTMPBridge] Client connected");
-    this.client = ws;
+    this.client = clientWs;
     this.status.clientConnected = true;
     this.bytesReceived = 0;
     this.droppedFrameCount = 0;
@@ -2132,7 +2179,7 @@ export class RTMPBridge {
 
       this.bytesReceived += data.length;
       this.lastDataReceived = Date.now();
-      this.writeToFfmpeg(data, ws);
+      this.writeToFfmpeg(data, clientWs);
     });
 
     ws.on("close", () => {
@@ -2158,9 +2205,10 @@ export class RTMPBridge {
       return;
     }
 
+    const clientWs = ws as BridgeClientSocket;
     console.log("[RTMPBridge] Client connected (WebCodecs mode)");
-    this.client = ws;
-    (this.client as any)._isWebCodecs = true;
+    this.client = clientWs;
+    this.client._isWebCodecs = true;
     this.status.clientConnected = true;
     this.bytesReceived = 0;
     this.droppedFrameCount = 0;
@@ -2174,7 +2222,7 @@ export class RTMPBridge {
 
       this.bytesReceived += data.length;
       this.lastDataReceived = Date.now();
-      this.writeToFfmpeg(data, ws);
+      this.writeToFfmpeg(data, clientWs);
     });
 
     ws.on("close", () => {
@@ -2782,7 +2830,7 @@ export class RTMPBridge {
         console.log("[RTMPBridge] Attempting FFmpeg restart...");
         if (this.cdpDirectMode) {
           this.startFFmpegDirect();
-        } else if (this.client && (this.client as any)._isWebCodecs) {
+        } else if (this.client?._isWebCodecs) {
           this.startFFmpegWebCodecs();
         } else {
           this.startFFmpeg();
