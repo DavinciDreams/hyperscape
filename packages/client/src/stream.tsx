@@ -64,6 +64,10 @@ globalFlags.isServer = false;
 
 // Early CDN URL initialization to prevent PhysX WASM loading race condition
 if (typeof window !== "undefined") {
+  const searchParams = new URLSearchParams(window.location.search);
+  const isSourceCapture = ["1", "true", "yes", "on"].includes(
+    (searchParams.get("streamCapture") || "").toLowerCase(),
+  );
   const windowWithEnv = window as Window & {
     env?: {
       PUBLIC_CDN_URL?: string;
@@ -106,7 +110,9 @@ if (typeof window !== "undefined") {
   windowWithEnv.__HYPERSCAPE_CONFIG__ = {
     ...existingViewportConfig,
     mode: "stream",
-    quality: (existingViewportConfig["quality"] as string | undefined) ?? "low",
+    quality:
+      (existingViewportConfig["quality"] as string | undefined) ??
+      (isSourceCapture ? "high" : "low"),
     hiddenUI:
       (existingViewportConfig["hiddenUI"] as string[] | undefined) ?? [
         "chat",
