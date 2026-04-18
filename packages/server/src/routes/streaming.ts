@@ -158,6 +158,9 @@ const STREAMING_STATUS_RATE_LIMIT: RateLimitOptions = {
   max: 120,
   timeWindow: "1 minute",
 };
+type RateLimitedFastify = FastifyInstance & {
+  rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
+};
 type StreamingStatusMetricsSnapshot = {
   captureFps: number | null;
   encodeFps: number | null;
@@ -211,6 +214,16 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function ensureRateLimitDecorator(
+  fastify: FastifyInstance,
+): asserts fastify is RateLimitedFastify {
+  if (typeof fastify.rateLimit === "function") {
+    return;
+  }
+  (fastify as RateLimitedFastify).rateLimit = (() => async () => {}) as
+    RateLimitedFastify["rateLimit"];
 }
 
 export function normalizeStreamingStatusMetrics(params: {
@@ -846,6 +859,7 @@ export function registerStreamingRoutes(
   fastify: FastifyInstance,
   world: World,
 ): void {
+  ensureRateLimitDecorator(fastify);
   const sseClients = new Map<number, FastifyReply>();
   const replayFrames: StreamingSseFrame[] = [];
   let replayFramesTotalBytes = 0;
@@ -1762,7 +1776,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/results/:duelId",
     {
-      config: { rateLimit: AUTHENTICATED_RESULTS_RATE_LIMIT },
+      preHandler: fastify.rateLimit(AUTHENTICATED_RESULTS_RATE_LIMIT),
     },
     async (request, reply) => {
       const skipAuth = shouldSkipBettingFeedAuth(
@@ -1882,7 +1896,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
@@ -1996,7 +2010,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
-      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {

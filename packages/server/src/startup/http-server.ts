@@ -877,6 +877,20 @@ const GAME_ASSET_PROXY_RATE_LIMIT = {
   max: 240,
   timeWindow: "1 minute",
 } as const;
+type RateLimitedFastify = FastifyInstance & {
+  rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
+};
+
+function ensureRateLimitDecorator(
+  fastify: FastifyInstance,
+): asserts fastify is RateLimitedFastify {
+  if (typeof fastify.rateLimit === "function") {
+    return;
+  }
+  (fastify as RateLimitedFastify).rateLimit = (() => async () => {}) as
+    RateLimitedFastify["rateLimit"];
+}
+
 function buildGameAssetFallbackUrl(
   fallbackBaseUrl: string,
   normalizedPath: string,
@@ -912,10 +926,11 @@ function registerGameAssetsRoute(
   const fallbackRoot = fallbackBaseUrl.endsWith("/")
     ? fallbackBaseUrl
     : `${fallbackBaseUrl}/`;
+  ensureRateLimitDecorator(fastify);
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
-    config: { rateLimit: GAME_ASSET_PROXY_RATE_LIMIT },
+    preHandler: fastify.rateLimit(GAME_ASSET_PROXY_RATE_LIMIT),
     handler: async (request, reply) => {
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);

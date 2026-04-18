@@ -135,6 +135,9 @@ const CLOUDFLARE_WEBHOOK_RATE_LIMIT: RateLimitOptions = {
   timeWindow: "1 minute",
 };
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
+type RateLimitedFastify = FastifyInstance & {
+  rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
+};
 
 type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
 
@@ -151,6 +154,16 @@ function formatSseEvent(event: string, data: string, id?: number): string {
 
 function automaticFailoverEnabled(): boolean {
   return process.env.STREAM_ENABLE_AUTOMATIC_FAILOVER === "true";
+}
+
+function ensureRateLimitDecorator(
+  fastify: FastifyInstance,
+): asserts fastify is RateLimitedFastify {
+  if (typeof fastify.rateLimit === "function") {
+    return;
+  }
+  (fastify as RateLimitedFastify).rateLimit = (() => async () => {}) as
+    RateLimitedFastify["rateLimit"];
 }
 
 export function normalizeInternalAllowedOrigin(
@@ -248,6 +261,7 @@ export function registerStreamingBettingRoutes(
     getStreamingDuelScheduler: getStreamingDuelSchedulerOverride,
     getStreamCaptureStats,
   } = options;
+  ensureRateLimitDecorator(fastify);
 
   const tokenResolution = resolveBettingFeedAccessToken(process.env);
   const skipAuth = shouldSkipBettingFeedAuth(process.env);
@@ -2052,7 +2066,7 @@ export function registerStreamingBettingRoutes(
   }>(
     "/api/streaming/cloudflare/webhook",
     {
-      config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
+      preHandler: fastify.rateLimit(CLOUDFLARE_WEBHOOK_RATE_LIMIT),
     },
     handleCloudflareWebhook,
   );
