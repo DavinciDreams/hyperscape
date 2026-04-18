@@ -22,19 +22,19 @@ function loadWoodcuttingManifest(): WoodcuttingManifest {
 }
 
 describe("woodcutting manifest asset paths", () => {
-  it("uses source-of-truth flat tree model refs without runtime aliases", () => {
+  it("uses source-of-truth nested tree model refs without flat runtime aliases", () => {
     const manifest = loadWoodcuttingManifest();
     const modelVariants = manifest.trees.flatMap(
       (tree) => tree.modelVariants ?? [],
     );
-    const staleNestedTreeRefs = modelVariants.filter((modelPath) => {
+    const staleFlatTreeRefs = modelVariants.filter((modelPath) => {
       const prefix = "asset://models/trees/";
       return (
         modelPath.startsWith(prefix) &&
-        modelPath.slice(prefix.length).includes("/")
+        !modelPath.slice(prefix.length).includes("/")
       );
     });
 
-    expect(staleNestedTreeRefs).toEqual([]);
+    expect(staleFlatTreeRefs).toEqual([]);
   });
 });

@@ -248,8 +248,8 @@ describe("streaming-betting-routes", () => {
       cycle: {
         duelId: "duel-1",
         phase: "RESOLUTION",
-        winnerId: "agent-a",
-        winReason: "knockout",
+        winnerId: null,
+        winReason: null,
       },
       duelId: "duel-1",
       phase: "FIGHTING",

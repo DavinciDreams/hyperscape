@@ -78,8 +78,12 @@ export class BettingPoolManager {
     }
 
     const amount = parseFloat(bet.amount);
-    if (isNaN(amount) || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       return { success: false, error: "Invalid bet amount" };
+    }
+
+    if (!isValidSolanaWalletAddress(bet.walletAddress)) {
+      return { success: false, error: "Invalid wallet address" };
     }
 
     const betId = randomUUID();
@@ -323,4 +327,8 @@ export class BettingPoolManager {
       return [];
     }
   }
+}
+
+function isValidSolanaWalletAddress(walletAddress: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(walletAddress.trim());
 }

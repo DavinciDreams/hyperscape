@@ -277,6 +277,12 @@ export interface IEmbeddedHyperscapeService {
   /** Execute a prayer toggle command. Returns false if the prayer system was unavailable. */
   executePrayer(prayerId: string): Promise<boolean>;
 
+  /** Execute a prayer toggle command against the embedded client action API. */
+  executePrayerToggle(prayerId: string): Promise<boolean>;
+
+  /** Execute a combat style change against the embedded client action API. */
+  executeChangeStyle(newStyle: string): Promise<boolean>;
+
   /** Execute a chat message command. Returns false if the chat system was unavailable. */
   executeChat(message: string): Promise<boolean>;
 
