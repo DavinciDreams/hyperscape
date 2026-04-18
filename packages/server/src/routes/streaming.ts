@@ -1932,16 +1932,13 @@ export function registerStreamingRoutes(
   // Get RTMP bridge status
   fastify.get(
     "/api/streaming/rtmp/status",
-    {
-      preHandler: async (request, reply) => {
-        try {
-          await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
-        } catch {
-          return reply.code(429).send({ error: "Too Many Requests" });
-        }
-      },
-    },
+    {},
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
@@ -2052,16 +2049,13 @@ export function registerStreamingRoutes(
   // Get stream capture status (headless browser → HLS pipeline)
   fastify.get(
     "/api/streaming/capture/status",
-    {
-      preHandler: async (request, reply) => {
-        try {
-          await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
-        } catch {
-          return reply.code(429).send({ error: "Too Many Requests" });
-        }
-      },
-    },
+    {},
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       try {
         const persistedAuthorityState =
           await loadPersistedAuthorityStateSafely();

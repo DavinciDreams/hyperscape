@@ -433,41 +433,34 @@ export async function createHttpServer(
   if (allowPublicDebugRoute) {
     ensureRateLimitDecorator(fastify);
     // Debug endpoint to see public directory contents
-    fastify.get(
-      "/debug/public",
-      {
-        preHandler: async (request, reply) => {
-          try {
-            await PUBLIC_DEBUG_CODEQL_LIMITER.consume(request.ip);
-          } catch {
-            return reply.code(429).send({ error: "Too Many Requests" });
-          }
-        },
-      },
-      async (_req, reply) => {
-        const publicDir = path.join(config.__dirname, "public");
-        const assetsDir = path.join(publicDir, "assets");
-        let publicContents: string[] = [];
-        let assetsContents: string[] = [];
-        try {
-          publicContents = await fs.readdir(publicDir);
-        } catch (e) {
-          publicContents = [`ERROR: ${e}`];
-        }
-        try {
-          assetsContents = await fs.readdir(assetsDir);
-        } catch (e) {
-          assetsContents = [`ERROR: ${e}`];
-        }
-        return reply.send({
-          publicDir,
-          assetsDir,
-          publicContents,
-          assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
-          configDirname: config.__dirname,
-        });
-      },
-    );
+    fastify.get("/debug/public", {}, async (request, reply) => {
+      try {
+        await PUBLIC_DEBUG_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+      const publicDir = path.join(config.__dirname, "public");
+      const assetsDir = path.join(publicDir, "assets");
+      let publicContents: string[] = [];
+      let assetsContents: string[] = [];
+      try {
+        publicContents = await fs.readdir(publicDir);
+      } catch (e) {
+        publicContents = [`ERROR: ${e}`];
+      }
+      try {
+        assetsContents = await fs.readdir(assetsDir);
+      } catch (e) {
+        assetsContents = [`ERROR: ${e}`];
+      }
+      return reply.send({
+        publicDir,
+        assetsDir,
+        publicContents,
+        assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
+        configDirname: config.__dirname,
+      });
+    });
   }
 
   // SPA catch-all route - serve index.html for any unmatched routes
@@ -953,14 +946,12 @@ function registerGameAssetsRoute(
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
-    preHandler: async (request, reply) => {
+    handler: async (request, reply) => {
       try {
         await GAME_ASSETS_CODEQL_LIMITER.consume(request.ip);
       } catch {
         return reply.code(429).send({ error: "Too Many Requests" });
       }
-    },
-    handler: async (request, reply) => {
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);
       if (!normalizedPath) {
