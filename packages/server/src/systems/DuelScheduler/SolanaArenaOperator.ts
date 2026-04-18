@@ -218,8 +218,8 @@ function buildReportResultInstruction(params: {
 // ============================================================================
 
 export class SolanaArenaOperator {
-  private readonly connection: Connection;
-  private readonly reporter: Keypair;
+  private readonly connection: Connection | null;
+  private readonly reporter: Keypair | null;
   private readonly programId: PublicKey;
   private readonly oracleConfigPda: PublicKey;
   private readonly _enabled: boolean;
@@ -232,8 +232,8 @@ export class SolanaArenaOperator {
 
     if (!rpcUrl || !reporterKey) {
       this._enabled = false;
-      this.connection = null as unknown as Connection;
-      this.reporter = null as unknown as Keypair;
+      this.connection = null;
+      this.reporter = null;
       this.programId = new PublicKey(programIdStr);
       this.oracleConfigPda = PublicKey.default;
       Logger.info(
@@ -260,6 +260,19 @@ export class SolanaArenaOperator {
     return this._enabled;
   }
 
+  private requireEnabledResources(): {
+    connection: Connection;
+    reporter: Keypair;
+  } {
+    if (!this._enabled || this.connection === null || this.reporter === null) {
+      throw new Error("SolanaArenaOperator is disabled");
+    }
+    return {
+      connection: this.connection,
+      reporter: this.reporter,
+    };
+  }
+
   /**
    * Initialize a round on-chain by calling upsert_duel with BettingOpen status
    */
@@ -274,6 +287,7 @@ export class SolanaArenaOperator {
     if (!this._enabled) return null;
 
     try {
+      const { connection, reporter } = this.requireEnabledResources();
       const duelKeyBytes = hexToBytes32(roundSeedHex);
       const [duelStatePda] = findDuelStatePda(duelKeyBytes, this.programId);
 
@@ -288,7 +302,7 @@ export class SolanaArenaOperator {
       const metadataUri = `${process.env.DUEL_METADATA_BASE_URL || "https://hyperscape.game/api/duels"}/${roundSeedHex}`;
 
       const ix = buildUpsertDuelInstruction({
-        reporter: this.reporter.publicKey,
+        reporter: reporter.publicKey,
         oracleConfig: this.oracleConfigPda,
         duelState: duelStatePda,
         programId: this.programId,
@@ -311,7 +325,7 @@ export class SolanaArenaOperator {
 
       // Approximate close slot (assuming 400ms slot time)
       const slotsUntilClose = Math.ceil((bettingClosesAtMs - Date.now()) / 400);
-      const currentSlot = await this.connection.getSlot();
+      const currentSlot = await connection.getSlot();
 
       return {
         closeSlot: currentSlot + Math.max(slotsUntilClose, 1),
@@ -336,6 +350,7 @@ export class SolanaArenaOperator {
     if (!this._enabled) return null;
 
     try {
+      const { reporter } = this.requireEnabledResources();
       const duelKeyBytes = hexToBytes32(roundSeedHex);
       const [duelStatePda] = findDuelStatePda(duelKeyBytes, this.programId);
 
@@ -345,7 +360,7 @@ export class SolanaArenaOperator {
       const metadataUri = `${process.env.DUEL_METADATA_BASE_URL || "https://hyperscape.game/api/duels"}/${roundSeedHex}`;
 
       const ix = buildUpsertDuelInstruction({
-        reporter: this.reporter.publicKey,
+        reporter: reporter.publicKey,
         oracleConfig: this.oracleConfigPda,
         duelState: duelStatePda,
         programId: this.programId,
@@ -393,6 +408,7 @@ export class SolanaArenaOperator {
     if (!this._enabled) return null;
 
     try {
+      const { reporter } = this.requireEnabledResources();
       const duelKeyBytes = hexToBytes32(params.roundSeedHex);
       const [duelStatePda] = findDuelStatePda(duelKeyBytes, this.programId);
 
@@ -412,7 +428,7 @@ export class SolanaArenaOperator {
       const nowSec = BigInt(Math.floor(Date.now() / 1000));
 
       const ix = buildReportResultInstruction({
-        reporter: this.reporter.publicKey,
+        reporter: reporter.publicKey,
         oracleConfig: this.oracleConfigPda,
         duelState: duelStatePda,
         programId: this.programId,
@@ -455,24 +471,25 @@ export class SolanaArenaOperator {
   private async sendAndConfirm(
     instructions: TransactionInstruction[],
   ): Promise<string> {
+    const { connection, reporter } = this.requireEnabledResources();
     const { blockhash, lastValidBlockHeight } =
-      await this.connection.getLatestBlockhash("confirmed");
+      await connection.getLatestBlockhash("confirmed");
 
     const message = new TransactionMessage({
-      payerKey: this.reporter.publicKey,
+      payerKey: reporter.publicKey,
       recentBlockhash: blockhash,
       instructions,
     }).compileToV0Message();
 
     const tx = new VersionedTransaction(message);
-    tx.sign([this.reporter]);
+    tx.sign([reporter]);
 
-    const sig = await this.connection.sendTransaction(tx, {
+    const sig = await connection.sendTransaction(tx, {
       skipPreflight: false,
       maxRetries: 3,
     });
 
-    await this.connection.confirmTransaction(
+    await connection.confirmTransaction(
       { signature: sig, blockhash, lastValidBlockHeight },
       "confirmed",
     );
