@@ -1589,32 +1589,30 @@ async function waitForStreamReadiness(
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
 /**
- * Poll Chrome's /json/version endpoint until it returns a webSocketDebuggerUrl.
- * Chrome exposes this after it has finished bringing up its CDP browser endpoint.
- * Returns the ws:// URL suitable for `chromium.connectOverCDP()`.
+ * Poll Chrome's /json/version endpoint until it responds successfully. Chrome
+ * exposes this after the CDP browser endpoint is up. Returns the HTTP base
+ * URL (`http://127.0.0.1:<port>/`); Playwright's `chromium.connectOverCDP()`
+ * handles the WebSocket upgrade + browser-level ws URL discovery internally
+ * when given the HTTP endpoint. Passing the raw `webSocketDebuggerUrl` from
+ * /json/version has been observed to time out on this Chromium+Playwright
+ * build — use the HTTP endpoint form instead.
  */
 async function waitForChromeCdpEndpoint(
   port: number,
   timeoutMs: number,
 ): Promise<string> {
+  const httpEndpoint = `http://127.0.0.1:${port}/`;
   const deadline = Date.now() + timeoutMs;
   let lastErr: string | null = null;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+      const res = await fetch(`${httpEndpoint}json/version`);
       if (res.ok) {
-        const body = (await res.json()) as {
-          webSocketDebuggerUrl?: unknown;
-        };
-        if (
-          typeof body.webSocketDebuggerUrl === "string" &&
-          body.webSocketDebuggerUrl.length > 0
-        ) {
-          return body.webSocketDebuggerUrl;
-        }
-      } else {
-        lastErr = `http ${res.status}`;
+        // Drain body so fetch releases the socket.
+        await res.text();
+        return httpEndpoint;
       }
+      lastErr = `http ${res.status}`;
     } catch (err) {
       lastErr = errMsg(err);
     }
@@ -1736,9 +1734,7 @@ async function spawnX11NvencChromeAndConnect(): Promise<Browser> {
   x11NvencChromeProcess = child;
 
   const endpoint = await waitForChromeCdpEndpoint(port, 30_000);
-  console.log(
-    `[Main] Connecting to x11_nvenc Chrome over CDP at ${endpoint.replace(/\/devtools\/browser\/[a-f0-9-]+/i, "/devtools/browser/…")}`,
-  );
+  console.log(`[Main] Connecting to x11_nvenc Chrome over CDP at ${endpoint}`);
   return chromium.connectOverCDP(endpoint);
 }
 
