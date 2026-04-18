@@ -1998,17 +1998,26 @@ export function registerStreamingRoutes(
   );
 
   // Get RTMP bridge status
-  // Rate limit is declared as an inline object literal (not a constant
-  // reference) so CodeQL's js/missing-rate-limiting query can statically
-  // recognize it — that query follows config.rateLimit literals but has
-  // historically not resolved identifier indirection on this file's
-  // read-persisted-authority-state handlers.
+  //
+  // Rate limiting IS applied on this handler through three independent
+  // mechanisms:
+  //   1. Global @fastify/rate-limit registration in http-server.ts:374
+  //      (100 req/min per IP across the whole app)
+  //   2. Per-route preHandler: fastify.rateLimit({...}) below (120/min)
+  //   3. STREAMING_STATUS_CODEQL_LIMITER.consume() in the handler body
+  // CodeQL's js/missing-rate-limiting query still flags this route because
+  // its dataflow heuristic can't trace the rate limit across any of these
+  // entry points when the handler also calls
+  // loadPersistedAuthorityStateSafely (the "Authority" substring in the
+  // function name tags it as an auth sink). The `lgtm` suppression below
+  // acknowledges the scanner is reporting a false positive here.
   fastify.get(
     "/api/streaming/rtmp/status",
     {
       config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
       preHandler: fastify.rateLimit({ max: 120, timeWindow: "1 minute" }),
     },
+    // lgtm[js/missing-rate-limiting]
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
@@ -2123,14 +2132,17 @@ export function registerStreamingRoutes(
   );
 
   // Get stream capture status (headless browser → HLS pipeline)
-  // Inline-literal rate limit for CodeQL static detection; see comment
-  // above /rtmp/status for the reasoning.
+  // Same three-mechanism rate limiting as /rtmp/status. CodeQL's
+  // js/missing-rate-limiting flags this route for the same reason (handler
+  // calls loadPersistedAuthorityStateSafely). Suppressing the false
+  // positive inline — see the detailed rationale above /rtmp/status.
   fastify.get(
     "/api/streaming/capture/status",
     {
       config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
       preHandler: fastify.rateLimit({ max: 120, timeWindow: "1 minute" }),
     },
+    // lgtm[js/missing-rate-limiting]
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
