@@ -955,6 +955,14 @@ function resolveSourceRuntimeSnapshot(
   let degradedReason: StreamSourceDegradedReason | null = null;
   if (captureNavigationAbortInFlight) {
     degradedReason = "unexpected_navigation";
+  } else if (captureMode === "x11_nvenc") {
+    // x11_nvenc mode does not attach Playwright — Chrome is a detached
+    // child process and `browser`/`page` are null by design (see
+    // spawnX11NvencChromeProcess). Treat Chrome-child liveness as the
+    // authoritative "render browser is up" signal for this mode.
+    if (!x11NvencChromeProcess || x11NvencChromeProcess.killed) {
+      degradedReason = "browser_missing";
+    }
   } else if (!browser || !page || page.isClosed()) {
     degradedReason = "browser_missing";
   } else if (destinationRecentlyErrored) {
@@ -2741,6 +2749,18 @@ async function main() {
   }
 
   async function waitForRecoveryReadiness(reason: string): Promise<void> {
+    if (CAPTURE_MODE === "x11_nvenc") {
+      // x11_nvenc has no Playwright Page to probe. Treat the Chrome
+      // child process being alive as the readiness signal. FFmpeg's
+      // encoder-frame progression is the authoritative liveness check
+      // post-recovery (supervised elsewhere in the status loop).
+      if (!x11NvencChromeProcess || x11NvencChromeProcess.killed) {
+        throw new Error(
+          `${reason}: x11_nvenc Chrome child not running after restart`,
+        );
+      }
+      return;
+    }
     if (!page) {
       throw new Error(`${reason}: missing page after restart`);
     }
