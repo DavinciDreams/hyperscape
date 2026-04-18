@@ -314,8 +314,11 @@ export function registerStreamingBettingRoutes(
       "BETTING_FEED_ACCESS_TOKEN is unset in production; internal betting feed will fail closed",
     );
   } else if (!tokenResolution.token && skipAuth) {
-    fastify.log.warn(
-      "BETTING_FEED_SKIP_AUTH=true with no betting-feed token configured; internal betting feed auth bypass is enabled for development use only",
+    // Log at error severity so the auth-bypass state is impossible to miss
+    // even during normal startup log volume. Also log whether the oracle
+    // proof endpoint is affected — the same skipAuth flag gates it too.
+    fastify.log.error(
+      "BETTING_FEED_SKIP_AUTH=true AND NODE_ENV=development — internal betting feed AND /api/streaming/results/:duelId are serving UNAUTHENTICATED. This must never land in production.",
     );
   } else if (!tokenResolution.token && viewerTokenConfigured) {
     fastify.log.warn(

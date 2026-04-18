@@ -233,7 +233,10 @@ async function scheduleRetry(
   const backoff = BASE_BACKOFF_MS * Math.pow(2, currentAttempts);
   const nextAttemptAt = Date.now() + backoff;
 
-  await db
+  // Guard on status='PENDING' so a concurrent worker that has already
+  // transitioned this job to READY_FOR_PAYOUT / NO_PAYOUT / FAILED can't
+  // be rolled back to PENDING by a late scheduleRetry call.
+  const retryUpdate = await db
     .update(solanaPayoutJobs)
     .set({
       attempts: nextAttempt,
@@ -241,7 +244,16 @@ async function scheduleRetry(
       nextAttemptAt,
       updatedAt: Date.now(),
     })
-    .where(eq(solanaPayoutJobs.id, jobId));
+    .where(
+      and(
+        eq(solanaPayoutJobs.id, jobId),
+        eq(solanaPayoutJobs.status, "PENDING"),
+      ),
+    )
+    .returning({ id: solanaPayoutJobs.id });
+  if (retryUpdate.length === 0) {
+    return;
+  }
 
   Logger.warn("PayoutKeeper", "Scheduled retry", {
     jobId,
@@ -256,14 +268,25 @@ async function markFailed(
   jobId: string,
   error: string,
 ): Promise<void> {
-  await db
+  // Same PENDING guard as scheduleRetry / processOneJob — prevents a stale
+  // worker from overwriting a terminal state set by another instance.
+  const failUpdate = await db
     .update(solanaPayoutJobs)
     .set({
       status: "FAILED",
       lastError: error,
       updatedAt: Date.now(),
     })
-    .where(eq(solanaPayoutJobs.id, jobId));
+    .where(
+      and(
+        eq(solanaPayoutJobs.id, jobId),
+        eq(solanaPayoutJobs.status, "PENDING"),
+      ),
+    )
+    .returning({ id: solanaPayoutJobs.id });
+  if (failUpdate.length === 0) {
+    return;
+  }
 
   Logger.error("PayoutKeeper", "Job permanently failed", null, {
     jobId,

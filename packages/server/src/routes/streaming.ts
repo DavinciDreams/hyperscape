@@ -164,6 +164,30 @@ const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
   points: 120,
   duration: 60,
 });
+
+/**
+ * Standalone preHandler implementing the exact pattern CodeQL's
+ * RouteHandlerLimitedByRateLimiterFlexible class recognizes: a function taking
+ * a request parameter that calls `.consume(request.<prop>)` on an instance of
+ * a `RateLimiter*` class from `rate-limiter-flexible`. Extracted to module
+ * scope so the middleware is a separate routing-tree node that guards the
+ * handler, which is what CodeQL's `isGuardedByNode` check requires.
+ *
+ * Using this preHandler satisfies `js/missing-rate-limiting` WITHOUT relying
+ * on the `config.rateLimit` shorthand, which CodeQL's `FastifyPerRouteRateLimit`
+ * class only recognizes when the rate-limiter plugin is imported under the
+ * old unscoped name `fastify-rate-limit` (this repo uses `@fastify/rate-limit`).
+ */
+async function codeqlStatusRateLimitPreHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  try {
+    await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+  } catch {
+    await reply.code(429).send({ error: "Too Many Requests" });
+  }
+}
 type RateLimitedFastify = FastifyInstance & {
   rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
 };
@@ -970,11 +994,11 @@ export function registerStreamingRoutes(
         | null
         | undefined
     )?.getDb?.() ?? null;
-  const loadPersistedAuthorityState = () =>
+  const loadPersistedStreamState = () =>
     loadPersistedStreamingAuthorityState(getStorageDb());
-  const loadPersistedAuthorityStateSafely = async () => {
+  const loadPersistedStreamStateSafely = async () => {
     try {
-      return await loadPersistedAuthorityState();
+      return await loadPersistedStreamState();
     } catch {
       return null;
     }
@@ -1582,6 +1606,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/duel-context",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -1651,6 +1676,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/monologues",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
@@ -1685,6 +1711,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/inventory",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
@@ -1714,6 +1741,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/leaderboard",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -1749,6 +1777,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/leaderboard/details",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
@@ -1923,6 +1952,19 @@ export function registerStreamingRoutes(
         });
       }
 
+      // Audit trail: oracle-proof material (duelKeyHex, seed, replayHash) is
+      // settlement-grade data. Every successful retrieval is logged at info
+      // with caller IP + user-agent so a token compromise can be traced.
+      fastify.log.info(
+        {
+          duelId: row.duelId,
+          cycleId: row.cycleId,
+          ip: request.ip,
+          userAgent: request.headers["user-agent"] ?? null,
+        },
+        "[streaming] oracle-proof retrieval",
+      );
+
       // Legacy rows written before migration 0055 may not carry the oracle
       // proof fields. Callers must handle this by waiting and retrying —
       // the current live duel will write fresh rows with the full proof.
@@ -1980,18 +2022,20 @@ export function registerStreamingRoutes(
   );
 
   // Get RTMP bridge status
+  //
+  // Rate limiting layers: global @fastify/rate-limit plugin (100/min per IP,
+  // http-server.ts), per-route config.rateLimit (120/min), and
+  // codeqlStatusRateLimitPreHandler which invokes rate-limiter-flexible in
+  // the exact pattern CodeQL's RouteHandlerLimitedByRateLimiterFlexible
+  // class recognizes.
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+      config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      preHandler: codeqlStatusRateLimitPreHandler,
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
-      } catch {
-        return reply.code(429).send({ error: "Too Many Requests" });
-      }
-      const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
+      const persistedAuthorityState = await loadPersistedStreamStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
@@ -2099,20 +2143,17 @@ export function registerStreamingRoutes(
   );
 
   // Get stream capture status (headless browser → HLS pipeline)
+  // Same CodeQL-visible rate-limiter-flexible preHandler as /rtmp/status;
+  // see comment there for the rationale.
   fastify.get(
     "/api/streaming/capture/status",
     {
-      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+      config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      preHandler: codeqlStatusRateLimitPreHandler,
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
-        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
-      } catch {
-        return reply.code(429).send({ error: "Too Many Requests" });
-      }
-      try {
-        const persistedAuthorityState =
-          await loadPersistedAuthorityStateSafely();
+        const persistedAuthorityState = await loadPersistedStreamStateSafely();
         const capture = getStreamCapture();
         const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
         const externalSnapshot = await loadExternalRtmpStatusSnapshot(
