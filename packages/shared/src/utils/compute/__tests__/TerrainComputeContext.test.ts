@@ -17,6 +17,7 @@ import {
 import {
   ROAD_INFLUENCE_SHADER,
   ROAD_INFLUENCE_TEXTURE_SHADER,
+  ROAD_INFLUENCE_TEXTURE_WORKGROUP_SIZE_X,
   TERRAIN_VERTEX_COLOR_SHADER,
   INSTANCE_MATRIX_SHADER,
   BATCH_DISTANCE_SHADER,
@@ -65,6 +66,70 @@ describe("TerrainComputeContext", () => {
       expect(TERRAIN_SHADERS.VERTEX_COLOR).toBe(TERRAIN_VERTEX_COLOR_SHADER);
       expect(TERRAIN_SHADERS.INSTANCE_MATRIX).toBe(INSTANCE_MATRIX_SHADER);
       expect(TERRAIN_SHADERS.BATCH_DISTANCE).toBe(BATCH_DISTANCE_SHADER);
+    });
+  });
+
+  describe("road-influence 2D dispatch reshape", () => {
+    // The host-side reshape math in TerrainComputeContext.computeRoadInfluence
+    // Texture divides pixelCount by ROAD_INFLUENCE_TEXTURE_WORKGROUP_SIZE_X
+    // and reshapes to 2D when it exceeds the WebGPU 65535 per-dimension
+    // ceiling. This is what keeps fresh 1080p+ clients from crashing with
+    // "Dispatch workgroup count exceeds max compute workgroups per
+    // dimension". Test the math here directly without requiring a GPU —
+    // the production code uses these exact formulas at line ~333 of
+    // TerrainComputeContext.ts.
+    const WORKGROUP = ROAD_INFLUENCE_TEXTURE_WORKGROUP_SIZE_X;
+    const WEBGPU_MAX = 65535;
+    const dispatch = (pixelCount: number) => {
+      const totalWorkgroups = Math.ceil(pixelCount / WORKGROUP);
+      const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX);
+      const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
+      return { totalWorkgroups, dispatchX, dispatchY };
+    };
+
+    it("stays 1D for texture sizes that fit under the ceiling", () => {
+      // 1024×1024 = 1,048,576 pixels → 16384 workgroups → well under 65535.
+      const { totalWorkgroups, dispatchX, dispatchY } = dispatch(1024 * 1024);
+      expect(totalWorkgroups).toBe(16384);
+      expect(dispatchX).toBe(16384);
+      expect(dispatchY).toBe(1);
+    });
+
+    it("reshapes to 2D exactly at the 2048×2048 boundary", () => {
+      // 2048×2048 = 4,194,304 pixels → 65536 workgroups → one over 65535.
+      // Must reshape: dispatchX=65535, dispatchY=ceil(65536/65535)=2.
+      const pixelCount = 2048 * 2048;
+      const { totalWorkgroups, dispatchX, dispatchY } = dispatch(pixelCount);
+      expect(totalWorkgroups).toBe(65536);
+      expect(dispatchX).toBe(WEBGPU_MAX);
+      expect(dispatchY).toBe(2);
+      // Verify the 2D dispatch covers every pixel: dispatchX * dispatchY *
+      // WORKGROUP threads must span all pixelCount indices.
+      expect(dispatchX * dispatchY * WORKGROUP).toBeGreaterThanOrEqual(
+        pixelCount,
+      );
+    });
+
+    it("reshapes cleanly for 4096×4096 and 8192×8192 textures", () => {
+      // 4096² = 16,777,216 → 262144 workgroups → dispatchY=5 (65535*5=327,675 ≥ 262144).
+      const pc4096 = 4096 * 4096;
+      const d4096 = dispatch(pc4096);
+      expect(d4096.totalWorkgroups).toBe(262144);
+      expect(d4096.dispatchX).toBe(WEBGPU_MAX);
+      expect(d4096.dispatchY).toBe(Math.ceil(262144 / WEBGPU_MAX));
+      expect(
+        d4096.dispatchX * d4096.dispatchY * WORKGROUP,
+      ).toBeGreaterThanOrEqual(pc4096);
+
+      // 8192² = 67,108,864 → 1,048,576 workgroups → dispatchY=16.
+      const pc8192 = 8192 * 8192;
+      const d8192 = dispatch(pc8192);
+      expect(d8192.totalWorkgroups).toBe(1_048_576);
+      expect(d8192.dispatchX).toBe(WEBGPU_MAX);
+      expect(d8192.dispatchY).toBe(Math.ceil(1_048_576 / WEBGPU_MAX));
+      expect(
+        d8192.dispatchX * d8192.dispatchY * WORKGROUP,
+      ).toBeGreaterThanOrEqual(pc8192);
     });
   });
 

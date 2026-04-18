@@ -1582,6 +1582,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/duel-context",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -1651,6 +1652,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/monologues",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
@@ -1685,6 +1687,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/inventory",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
@@ -1714,6 +1717,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/leaderboard",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -1749,6 +1753,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/leaderboard/details",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
@@ -1923,6 +1928,19 @@ export function registerStreamingRoutes(
         });
       }
 
+      // Audit trail: oracle-proof material (duelKeyHex, seed, replayHash) is
+      // settlement-grade data. Every successful retrieval is logged at info
+      // with caller IP + user-agent so a token compromise can be traced.
+      fastify.log.info(
+        {
+          duelId: row.duelId,
+          cycleId: row.cycleId,
+          ip: request.ip,
+          userAgent: request.headers["user-agent"] ?? null,
+        },
+        "[streaming] oracle-proof retrieval",
+      );
+
       // Legacy rows written before migration 0055 may not carry the oracle
       // proof fields. Callers must handle this by waiting and retrying —
       // the current live duel will write fresh rows with the full proof.
@@ -1983,6 +2001,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -2102,6 +2121,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
       preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
