@@ -9,7 +9,7 @@
 
 import { ModelType } from "@elizaos/core";
 import type { AgentRuntime } from "@elizaos/core";
-import { ServerNetwork } from "../systems/ServerNetwork/index.js";
+import { ServerNetwork } from "../../../shared/src/systems/server/network/index";
 import type { EmbeddedGameState, NearbyEntityData } from "./types.js";
 import type {
   AgentInstance,

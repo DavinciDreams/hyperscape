@@ -35,7 +35,7 @@ import {
   tryResolveDashboardLlmAction,
   type ResolvedDashboardIntent,
 } from "./dashboardInterop.js";
-import { ServerNetwork } from "../systems/ServerNetwork/index.js";
+import { ServerNetwork } from "../../../shared/src/systems/server/network/index";
 import {
   ejectAgentFromCombatArena,
   recoverAgentFromDeathLoop,

@@ -196,7 +196,7 @@ import {
   handleRunecraftingAltarInteract,
 } from "../systems/ServerNetwork/handlers/processing";
 import { handleCommand } from "../systems/ServerNetwork/handlers/commands";
-import type { ServerNetwork } from "../systems/ServerNetwork/index";
+import type { ServerNetwork } from "../../../shared/src/systems/server/network/index";
 
 /**
  * Register all migrated packet handlers on the packet registry.
