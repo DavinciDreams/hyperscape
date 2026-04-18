@@ -1933,7 +1933,9 @@ export function registerStreamingRoutes(
   // Get RTMP bridge status
   fastify.get(
     "/api/streaming/rtmp/status",
-    {},
+    {
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+    },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
@@ -2050,7 +2052,9 @@ export function registerStreamingRoutes(
   // Get stream capture status (headless browser → HLS pipeline)
   fastify.get(
     "/api/streaming/capture/status",
-    {},
+    {
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+    },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
         await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
