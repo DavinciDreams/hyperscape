@@ -39,7 +39,6 @@ import {
   tilesWithinMeleeRange,
   tileChebyshevDistance,
   getItem,
-  DeathState,
   AttackType,
   WeaponType,
   type EventMap,
@@ -49,6 +48,14 @@ import {
   MobEntity,
   getRandomSpawnPoint,
 } from "@hyperforge/shared";
+import type {
+  IBroadcastManager,
+  IEventBridge,
+  IConnectionHandler,
+  IDuelStakeTransfer,
+  ISocketPubSubAdapter,
+  IServerNetworkManagerFactory,
+} from "../../../../shared/src/systems/server/network/interfaces";
 
 // Payload types (extracted to types.ts)
 import type {
@@ -62,55 +69,13 @@ import type {
   SetAutocastPayload,
   AgentGoalSyncPayload,
   AgentThoughtSyncPayload,
-  NpcInteractPayload,
-  EntityInteractPayload,
   PlayerTeleportPayload,
   PlayerMovementCancelPayload,
-  CoinAmountPayload,
-  BankOpenPayload,
-  BankDepositPayload,
-  BankWithdrawPayload,
-  BankDepositAllPayload,
-  BankMovePayload,
-  BankCreateTabPayload,
-  BankDeleteTabPayload,
-  BankMoveToTabPayload,
-  BankItemPayload,
-  BankSlotPayload,
-  BankWithdrawToEquipmentPayload,
-  BankDepositEquipmentPayload,
-  DialogueResponsePayload,
-  DialogueNpcPayload,
-  QuestIdPayload,
-  StoreOpenPayload,
-  StoreItemPayload,
-  StoreClosePayload,
-  TradeRequestPayload,
-  TradeRespondPayload,
-  TradeItemPayload,
-  TradeSlotPayload,
-  TradeSetQuantityPayload,
-  TradeIdPayload,
-  DuelChallengePayload,
-  DuelChallengeRespondPayload,
-  DuelToggleRulePayload,
-  DuelToggleEquipmentPayload,
-  DuelIdPayload,
-  DuelAddStakePayload,
-  DuelRemoveStakePayload,
-  FriendTargetNamePayload,
-  FriendRequestIdPayload,
-  FriendIdPayload,
-  IgnoreIdPayload,
-  PrivateMessagePayload,
   CorpseLootAllPayload,
 } from "./types";
 
 // Import modular components
 import {
-  handleCharacterListRequest,
-  handleCharacterCreate,
-  handleCharacterSelected,
   handleEnterWorld,
   collectInitialSyncEntities,
 } from "./character-selection";
@@ -119,110 +84,24 @@ import { MobTileMovementManager } from "./mob-tile-movement";
 import { ActionQueue } from "./action-queue";
 import { TickSystem, TickPriority } from "../TickSystem";
 import { SocketManager } from "./socket-management";
-import { BroadcastManager } from "./broadcast";
+// BroadcastManager, EventBridge, ConnectionHandler are constructed via the
+// IServerNetworkManagerFactory bridge (registered in startup/world.ts as
+// "server-network-factory"). Their concrete implementations live in server
+// because they depend on uWebSockets.js / Drizzle. ServerNetwork references
+// them only by interface.
 import { PacketPriority } from "./BandwidthBudget";
 import { SpatialIndex } from "./SpatialIndex";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
-import { EventBridge } from "./event-bridge";
 import { InitializationManager } from "./initialization";
-import { ConnectionHandler } from "./connection-handler";
 import { InteractionSessionManager } from "./InteractionSessionManager";
-import { handleChatAdded } from "./handlers/chat";
 import {
   destroyAllRateLimiters,
   getGlobalSocketRateLimiter,
   getUnknownMessageRateLimiter,
 } from "./services/SlidingWindowRateLimiter";
-import {
-  handleAttackPlayer,
-  handleChangeAttackStyle,
-  handleSetAutoRetaliate,
-} from "./handlers/combat";
-import {
-  handlePickupItem,
-  handleDropItem,
-  handleEquipItem,
-  handleUseItem,
-  handleUnequipItem,
-  handleMoveItem,
-  handleCoinPouchWithdraw,
-  handleXpLampUse,
-} from "./handlers/inventory";
-import {
-  handlePrayerToggle,
-  handlePrayerDeactivateAll,
-  handleAltarPray,
-} from "./handlers/prayer";
-import { handleSetAutocast } from "./handlers/magic";
-import { handleResourceGather } from "./handlers/resources";
-import {
-  handleActionBarSave,
-  handleActionBarLoad,
-} from "./handlers/action-bar";
-import {
-  handleBankOpen,
-  handleBankDeposit,
-  handleBankWithdraw,
-  handleBankDepositAll,
-  handleBankDepositCoins,
-  handleBankWithdrawCoins,
-  handleBankClose,
-  handleBankMove,
-  handleBankCreateTab,
-  handleBankDeleteTab,
-  handleBankMoveToTab,
-  handleBankWithdrawPlaceholder,
-  handleBankReleasePlaceholder,
-  handleBankReleaseAllPlaceholders,
-  handleBankToggleAlwaysPlaceholder,
-  handleBankWithdrawToEquipment,
-  handleBankDepositEquipment,
-  handleBankDepositAllEquipment,
-  handleRequestBankState,
-} from "./handlers/bank";
-import {
-  handleEntityModified,
-  handleEntityEvent,
-  handleEntityRemoved,
-  handleSettings,
-} from "./handlers/entities";
-import { handleCommand } from "./handlers/commands";
-import {
-  handleStoreOpen,
-  handleStoreBuy,
-  handleStoreSell,
-  handleStoreClose,
-} from "./handlers/store";
-import {
-  handleDialogueResponse,
-  handleDialogueContinue,
-  handleDialogueClose,
-} from "./handlers/dialogue";
-import {
-  handleGetQuestList,
-  handleGetQuestDetail,
-  handleQuestAccept,
-  handleQuestAbandon,
-  handleQuestComplete,
-} from "./handlers/quest";
-import {
-  handleResourceInteract,
-  handleCookingSourceInteract,
-  handleFiremakingRequest,
-  handleCookingRequest,
-  handleSmeltingSourceInteract,
-  handleProcessingSmelting,
-  handleSmithingSourceInteract,
-  handleProcessingSmithing,
-  handleCraftingSourceInteract,
-  handleProcessingCrafting,
-  handleFletchingSourceInteract,
-  handleProcessingFletching,
-  handleProcessingTanning,
-  handleRunecraftingAltarInteract,
-  type ProcessingHandlerContext,
-} from "./handlers/processing";
+import { handleAttackPlayer } from "./handlers/combat";
+import type { ProcessingHandlerContext } from "./handlers/processing";
 import { PendingAttackManager } from "./PendingAttackManager";
 import { PendingGatherManager } from "./PendingGatherManager";
 import { PendingCookManager } from "./PendingCookManager";
@@ -230,51 +109,14 @@ import { PendingTradeManager } from "./PendingTradeManager";
 import { PendingDuelChallengeManager } from "./PendingDuelChallengeManager";
 import { FollowManager } from "./FollowManager";
 import { FaceDirectionManager } from "./FaceDirectionManager";
-import { handleFollowPlayer, handleChangePlayerName } from "./handlers/player";
+import { handleFollowPlayer } from "./handlers/player";
 import {
   initHomeTeleportManager,
   getHomeTeleportManager,
-  handleHomeTeleport,
-  handleHomeTeleportCancel,
 } from "./handlers/home-teleport";
-import {
-  handleTradeRequest,
-  handleTradeRequestRespond,
-  handleTradeAddItem,
-  handleTradeRemoveItem,
-  handleTradeSetQuantity,
-  handleTradeAccept,
-  handleTradeCancelAccept,
-  handleTradeCancel,
-} from "./handlers/trade";
-import {
-  handleFriendRequest,
-  handleFriendAccept,
-  handleFriendDecline,
-  handleFriendRemove,
-  handleIgnoreAdd,
-  handleIgnoreRemove,
-  handlePrivateMessage,
-} from "./handlers/friends";
 import { TradingSystem } from "../TradingSystem";
 import { DuelSystem } from "../DuelSystem";
-import { DuelScheduler, DuelBettingBridge } from "../DuelScheduler";
-import {
-  handleDuelChallenge,
-  handleDuelChallengeRespond,
-  handleDuelToggleRule,
-  handleDuelToggleEquipment,
-  handleDuelAcceptRules,
-  handleDuelCancel,
-  handleDuelAddStake,
-  handleDuelRemoveStake,
-  handleDuelAcceptStakes,
-  handleDuelAcceptFinal,
-  handleDuelForfeit,
-} from "./handlers/duel";
-import { getDatabase } from "./handlers/common";
 import { registerDuelEventListeners } from "./duel-events";
-import type { UwsWebSocketAdapter } from "../../startup/UwsWebSocketAdapter";
 
 const DEBUG_ATTACK_MOB =
   process.env.DEBUG_ATTACK_MOB === "true" ||
@@ -327,7 +169,6 @@ function traceAttackMob(stage: string, data?: Record<string, unknown>): void {
   }
   console.log(`[AttackMobTrace] ${stage}`);
 }
-import { executeDuelStakeTransferWithRetry } from "./duel-settlement";
 
 /** Initial spawn — replaced by loadSpawnPoint() from manifests during init */
 function getDefaultSpawn(): SpawnData {
@@ -464,13 +305,51 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private followManager!: FollowManager;
   private tradingSystem!: TradingSystem;
   private duelSystem!: DuelSystem;
-  private duelScheduler!: DuelScheduler;
-  private duelBettingBridge!: DuelBettingBridge;
+  // DuelScheduler / DuelBettingBridge — no longer owned by ServerNetwork
+  // after Step 6; constructed directly in startup/world.ts.
   private actionQueue!: ActionQueue;
   private tickSystem!: TickSystem;
   private socketManager!: SocketManager;
-  private broadcastManager!: BroadcastManager;
+  private broadcastManager!: IBroadcastManager;
   private spatialIndex!: SpatialIndex;
+
+  /**
+   * PLAN_SERVERNETWORK_MIGRATION.md Step 5d alternative: packet handlers
+   * that have been migrated to the `IPacketHandlerRegistry` bridge look up
+   * their closed-over ServerNetwork-internal state through this accessor
+   * rather than through captured `this` references. Kept narrow to only
+   * the pieces migrated handlers actually read.
+   */
+  getBroadcastManager(): IBroadcastManager {
+    return this.broadcastManager;
+  }
+
+  /**
+   * Processing/skill handlers share a common context (world + pending-managers
+   * + tick system + a rate-limit gate). Exposed here so the registry-based
+   * wiring module can build a stable handler closure without touching
+   * ServerNetwork-private fields. Safe because the managers are initialized
+   * during `init()` before any packet dispatch runs.
+   */
+  getProcessingHandlerContext(): ProcessingHandlerContext {
+    return {
+      world: this.world,
+      pendingGatherManager: this.pendingGatherManager,
+      pendingCookManager: this.pendingCookManager,
+      tileMovementManager: this.tileMovementManager,
+      tickSystem: this.tickSystem,
+      canProcessRequest: this.canProcessRequest.bind(this),
+    };
+  }
+
+  /**
+   * Current game tick (monotonic counter incremented at 600ms cadence).
+   * Exposed for migrated handlers that need to timestamp actions — see
+   * home-teleport, pending-action, and combat-queue handlers.
+   */
+  getCurrentTick(): number {
+    return this.tickSystem.getCurrentTick();
+  }
 
   /**
    * Index of spectator sockets grouped by the player they're following.
@@ -479,9 +358,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private spectatorsByPlayer = new Map<string, Set<string>>();
   private saveManager!: SaveManager;
   private positionValidator!: PositionValidator;
-  private eventBridge!: EventBridge;
+  private eventBridge!: IEventBridge;
   private initializationManager!: InitializationManager;
-  private connectionHandler!: ConnectionHandler;
+  private connectionHandler!: IConnectionHandler;
   private interactionSessionManager!: InteractionSessionManager;
   private faceDirectionManager!: FaceDirectionManager;
 
@@ -599,9 +478,32 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    * Managers need access to world and database, so we initialize them
    * after world.init() sets world.db.
    */
+  /**
+   * Look up the `"server-network-factory"` bridge. Throws if it has not
+   * been registered — it must always be registered before ServerNetwork
+   * so the manager factory is available during `initializeManagers()`
+   * and `init()`.
+   */
+  private getManagerFactory(): IServerNetworkManagerFactory {
+    const factory = this.world.getSystem(
+      "server-network-factory",
+    ) as unknown as IServerNetworkManagerFactory | null;
+    if (!factory) {
+      throw new Error(
+        "[ServerNetwork] server-network-factory bridge must be registered before ServerNetwork.init()",
+      );
+    }
+    return factory;
+  }
+
   private initializeManagers(): void {
-    // Broadcast manager (needed by many others)
-    this.broadcastManager = new BroadcastManager(this.sockets);
+    // Broadcast manager (needed by many others) — created via the
+    // server-network factory bridge so ServerNetwork does not import the
+    // server-only concrete class directly. Registered in
+    // startup/world.ts before ServerNetwork.
+    this.broadcastManager = this.getManagerFactory().createBroadcastManager(
+      this.sockets,
+    );
 
     // Spatial index for interest management (sendToNearby)
     this.spatialIndex = new SpatialIndex();
@@ -1104,6 +1006,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.duelSystem,
     );
 
+    // Look up the duel-stake-transfer bridge (registered in
+    // startup/world.ts). It resolves ServerNetwork's socket accessor
+    // lazily via `world.getSystem("network")`, so no wiring is needed
+    // here.
+    const duelStakeTransfer = this.world.getSystem(
+      "duel-stake-transfer",
+    ) as unknown as IDuelStakeTransfer | null;
+    if (!duelStakeTransfer) {
+      throw new Error(
+        "[ServerNetwork] duel-stake-transfer bridge must be registered before ServerNetwork.init()",
+      );
+    }
+
     // Register duel world-event listeners before DuelSystem.init() so the duel
     // stake-settlement safety check sees the listener graph in its ready state.
     this.cleanupDuelEventListeners = registerDuelEventListeners({
@@ -1112,11 +1027,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       getSocketByPlayerId: this.getSocketByPlayerId.bind(this),
       processedDuelSettlements: this.processedDuelSettlements,
       executeDuelStakeTransferWithRetry: (winnerId, loserId, stakes, duelId) =>
-        executeDuelStakeTransferWithRetry(
-          {
-            world: this.world,
-            getSocketByPlayerId: this.getSocketByPlayerId.bind(this),
-          },
+        duelStakeTransfer.executeDuelStakeTransferWithRetry(
           winnerId,
           loserId,
           stakes,
@@ -1126,30 +1037,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.duelSystem.init();
 
-    // DuelScheduler - automated agent-vs-agent duel pairing for continuous PvP
-    // Disable it automatically when streaming duel mode owns orchestration.
-    const legacyDuelSchedulerEnabled =
-      process.env.DUEL_SCHEDULER_ENABLED !== "false" &&
-      process.env.STREAMING_DUEL_ENABLED !== "true";
-    if (legacyDuelSchedulerEnabled) {
-      this.duelScheduler = new DuelScheduler(this.world);
-      this.duelScheduler.init();
-
-      // Store duel scheduler on world for external access
-      (this.world as { duelScheduler?: DuelScheduler }).duelScheduler =
-        this.duelScheduler;
-    }
-
-    // DuelBettingBridge - connects duel results to Solana prediction markets
-    // Creates betting markets when duels are scheduled and resolves them when complete
-    // Enable via DUEL_BETTING_ENABLED=true environment variable
-    this.duelBettingBridge = new DuelBettingBridge(this.world);
-    this.duelBettingBridge.init();
-
-    // Store betting bridge on world for external access
-    (
-      this.world as { duelBettingBridge?: DuelBettingBridge }
-    ).duelBettingBridge = this.duelBettingBridge;
+    // DuelScheduler and DuelBettingBridge construction moved to
+    // startup/world.ts (post-world.init) as part of PLAN_SERVERNETWORK_MIGRATION.md
+    // Step 6. Both classes are purely fire-and-forget after construction
+    // (ServerNetwork never referenced the stored fields post-init), so
+    // keeping them outside ServerNetwork removes two more server-only
+    // imports blocking the relocation to shared.
 
     // Listen for player teleport events (used by duel system)
     this.onWorld("player:teleport", (event) => {
@@ -1763,8 +1656,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.getSocketByPlayerId.bind(this),
     );
 
-    // Event bridge
-    this.eventBridge = new EventBridge(this.world, this.broadcastManager);
+    // Event bridge — created via the server-network factory bridge.
+    this.eventBridge = this.getManagerFactory().createEventBridge(
+      this.world,
+      this.broadcastManager,
+    );
 
     // Interaction session manager (server-authoritative UI sessions)
     this.interactionSessionManager = new InteractionSessionManager(
@@ -1803,14 +1699,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Initialization manager
     this.initializationManager = new InitializationManager(this.world, this.db);
 
-    // Connection handler
-    this.connectionHandler = new ConnectionHandler(
-      this.world,
-      this.sockets,
-      this.broadcastManager,
-      this.db,
-      this.spectatorsByPlayer,
-    );
+    // Connection handler — created via the server-network factory bridge.
+    this.connectionHandler = this.getManagerFactory().createConnectionHandler({
+      world: this.world,
+      sockets: this.sockets,
+      broadcastManager: this.broadcastManager,
+      db: this
+        .db as unknown as import("../../../../shared/src/systems/server/network/interfaces").IDatabaseSystem,
+      spectatorsByPlayer: this.spectatorsByPlayer,
+    });
     this.connectionHandler.setSpatialIndex(this.spatialIndex);
 
     // Register handlers
@@ -1827,122 +1724,30 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    * Sets up the handler registry with delegates to modular handlers.
    */
   private registerHandlers(): void {
-    // Character selection handlers
-    this.handlers["characterSelected"] = (socket, data) =>
-      handleCharacterSelected(
-        socket,
-        data,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
-      );
-
     this.handlers["enterWorld"] = (socket, data) =>
       this.handleEnterWorldWithReconnect(socket, data);
 
-    // Echo game-level ping back as pong so client can measure RTT
-    this.handlers["onPing"] = (socket, data) => {
-      socket.send("pong", data);
-    };
+    // "onPing" has been migrated to the IPacketHandlerRegistry bridge —
+    // see packages/server/src/startup/packetHandlerRegistration.ts.
+    // PLAN_SERVERNETWORK_MIGRATION.md Step 5d alternative.
 
-    this.handlers["onChatAdded"] = (socket, data) =>
-      handleChatAdded(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
-      );
+    // "onChatAdded" migrated to the IPacketHandlerRegistry bridge —
+    // see packages/server/src/startup/packetHandlerRegistration.ts.
 
-    this.handlers["onCommand"] = (socket, data) =>
-      handleCommand(
-        socket,
-        data,
-        this.world,
-        this.db,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
-        this.isBuilder.bind(this),
-        this.sockets,
-      );
+    // "onCommand" migrated to the IPacketHandlerRegistry bridge —
+    // see packages/server/src/startup/packetHandlerRegistration.ts.
 
-    this.handlers["onEntityModified"] = (socket, data) =>
-      handleEntityModified(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
-      );
+    // "onEntityModified", "onEntityEvent", "onEntityRemoved", and
+    // "onSettingsModified" migrated to the IPacketHandlerRegistry bridge —
+    // see packages/server/src/startup/packetHandlerRegistration.ts.
 
-    this.handlers["onEntityEvent"] = (socket, data) =>
-      handleEntityEvent(socket, data, this.world);
-
-    this.handlers["onEntityRemoved"] = (socket, data) =>
-      handleEntityRemoved(socket, data, this.world);
-
-    this.handlers["onSettingsModified"] = (socket, data) =>
-      handleSettings(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
-      );
-
-    // Processing / skill handlers (delegated to handlers/processing.ts)
-    const processingCtx: ProcessingHandlerContext = {
-      world: this.world,
-      pendingGatherManager: this.pendingGatherManager,
-      pendingCookManager: this.pendingCookManager,
-      tileMovementManager: this.tileMovementManager,
-      tickSystem: this.tickSystem,
-      canProcessRequest: this.canProcessRequest.bind(this),
-    };
-
-    this.handlers["onResourceInteract"] = (socket, data) =>
-      handleResourceInteract(socket, data, processingCtx);
-
-    // Legacy: Direct gather (used after server has pathed player)
-    this.handlers["onResourceGather"] = (socket, data) =>
-      handleResourceGather(socket, data, this.world);
-
-    this.handlers["onCookingSourceInteract"] = (socket, data) =>
-      handleCookingSourceInteract(socket, data, processingCtx);
-
-    this.handlers["onFiremakingRequest"] = (socket, data) =>
-      handleFiremakingRequest(socket, data, processingCtx);
-    this.handlers["firemakingRequest"] = this.handlers["onFiremakingRequest"];
-
-    this.handlers["onCookingRequest"] = (socket, data) =>
-      handleCookingRequest(socket, data, processingCtx);
-    this.handlers["cookingRequest"] = this.handlers["onCookingRequest"];
-
-    this.handlers["onSmeltingSourceInteract"] = (socket, data) =>
-      handleSmeltingSourceInteract(socket, data, processingCtx);
-
-    this.handlers["onSmithingSourceInteract"] = (socket, data) =>
-      handleSmithingSourceInteract(socket, data, processingCtx);
-
-    this.handlers["onProcessingSmelting"] = (socket, data) =>
-      handleProcessingSmelting(socket, data, processingCtx);
-
-    this.handlers["onProcessingSmithing"] = (socket, data) =>
-      handleProcessingSmithing(socket, data, processingCtx);
-
-    this.handlers["onCraftingSourceInteract"] = (socket, data) =>
-      handleCraftingSourceInteract(socket, data, processingCtx);
-
-    this.handlers["onProcessingCrafting"] = (socket, data) =>
-      handleProcessingCrafting(socket, data, processingCtx);
-
-    this.handlers["onFletchingSourceInteract"] = (socket, data) =>
-      handleFletchingSourceInteract(socket, data, processingCtx);
-
-    this.handlers["onProcessingFletching"] = (socket, data) =>
-      handleProcessingFletching(socket, data, processingCtx);
-
-    this.handlers["onProcessingTanning"] = (socket, data) =>
-      handleProcessingTanning(socket, data, processingCtx);
-
-    this.handlers["onRunecraftingAltarInteract"] = (socket, data) =>
-      handleRunecraftingAltarInteract(socket, data, processingCtx);
-    this.handlers["runecraftingAltarInteract"] =
-      this.handlers["onRunecraftingAltarInteract"];
+    // Processing/skill handlers (onResourceInteract, onResourceGather,
+    // onCooking*, onFiremakingRequest, onSmelting*, onSmithing*,
+    // onProcessing*, onCrafting*, onFletching*, onRunecraftingAltarInteract,
+    // and their legacy aliases `firemakingRequest`, `cookingRequest`,
+    // `runecraftingAltarInteract`) all migrated to the
+    // IPacketHandlerRegistry bridge — see
+    // packages/server/src/startup/packetHandlerRegistration.ts.
 
     // Movement is processed immediately — pathfinding and tileMovementStart broadcast
     // happen on packet receipt, not at the next tick boundary. Walking itself still
@@ -2222,196 +2027,19 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       handleFollowPlayer(socket, data, this.world, this.followManager);
     };
 
-    this.handlers["onChangeAttackStyle"] = (socket, data) =>
-      handleChangeAttackStyle(socket, data, this.world);
+    // Combat-style toggles (onChangeAttackStyle, onSetAutoRetaliate),
+    // inventory (onPickup/Drop/Equip/Use/Unequip/Move/CoinPouchWithdraw/
+    // XpLampUse), prayer (onPrayerToggle + alias, onPrayerDeactivateAll +
+    // alias, onAltarPray + alias), magic (onSetAutocast + alias),
+    // action-bar (onActionBarSave + alias, onActionBarLoad + alias), and
+    // corpse-loot (onCorpseLootAll + alias) migrated to the
+    // IPacketHandlerRegistry bridge — see
+    // packages/server/src/startup/packetHandlerRegistration.ts.
 
-    this.handlers["onSetAutoRetaliate"] = (socket, data) =>
-      handleSetAutoRetaliate(socket, data, this.world);
-
-    // Autocast spell selection (F2P magic combat)
-    this.handlers["onSetAutocast"] = (socket, data) => {
-      const playerEntity = socket.player;
-      if (!playerEntity) return;
-
-      const payload = data as SetAutocastPayload;
-      const spellId = payload.spellId;
-
-      // Validate spell ID if provided
-      if (spellId !== null && spellId !== undefined) {
-        if (typeof spellId !== "string" || spellId.length > 50) {
-          return;
-        }
-      }
-
-      // Emit event to update player's selected spell
-      this.world.emit(EventType.PLAYER_SET_AUTOCAST, {
-        playerId: playerEntity.id,
-        spellId: spellId ?? null,
-      });
-    };
-
-    this.handlers["onPickupItem"] = (socket, data) =>
-      handlePickupItem(socket, data, this.world);
-
-    // Gravestone loot-all: client requests to loot all items from a gravestone
-    this.handlers["onCorpseLootAll"] = (socket, data) => {
-      const player = socket.player;
-      if (!player) return;
-      const payload = data as CorpseLootAllPayload;
-      if (!payload.corpseId) return;
-      this.world.emit(EventType.CORPSE_LOOT_ALL_REQUEST, {
-        corpseId: payload.corpseId,
-        playerId: player.id,
-      });
-    };
-    this.handlers["corpseLootAll"] = this.handlers["onCorpseLootAll"];
-
-    this.handlers["onDropItem"] = (socket, data) =>
-      handleDropItem(socket, data, this.world);
-
-    this.handlers["onEquipItem"] = (socket, data) =>
-      handleEquipItem(socket, data, this.world);
-
-    this.handlers["onUseItem"] = (socket, data) =>
-      handleUseItem(socket, data, this.world);
-
-    this.handlers["onUnequipItem"] = (socket, data) =>
-      handleUnequipItem(socket, data, this.world);
-
-    this.handlers["onMoveItem"] = (socket, data) =>
-      handleMoveItem(socket, data, this.world);
-
-    this.handlers["onCoinPouchWithdraw"] = (socket, data) =>
-      handleCoinPouchWithdraw(socket, data as CoinAmountPayload, this.world);
-
-    this.handlers["onXpLampUse"] = (socket, data) =>
-      handleXpLampUse(socket, data, this.world);
-
-    // Prayer handlers
-    this.handlers["onPrayerToggle"] = (socket, data) =>
-      handlePrayerToggle(socket, data, this.world);
-    this.handlers["prayerToggle"] = this.handlers["onPrayerToggle"];
-
-    this.handlers["onPrayerDeactivateAll"] = (socket, data) =>
-      handlePrayerDeactivateAll(socket, data, this.world);
-    this.handlers["prayerDeactivateAll"] =
-      this.handlers["onPrayerDeactivateAll"];
-
-    this.handlers["onAltarPray"] = (socket, data) =>
-      handleAltarPray(socket, data, this.world);
-    this.handlers["altarPray"] = this.handlers["onAltarPray"];
-
-    // Magic handlers
-    this.handlers["onSetAutocast"] = (socket, data) =>
-      handleSetAutocast(socket, data, this.world);
-    this.handlers["setAutocast"] = this.handlers["onSetAutocast"];
-
-    // Action bar handlers
-    this.handlers["onActionBarSave"] = (socket, data) =>
-      handleActionBarSave(socket, data, this.world);
-    this.handlers["actionBarSave"] = this.handlers["onActionBarSave"];
-
-    this.handlers["onActionBarLoad"] = (socket, data) =>
-      handleActionBarLoad(socket, data, this.world);
-    this.handlers["actionBarLoad"] = this.handlers["onActionBarLoad"];
-
-    // Player name change handler
-    this.handlers["changePlayerName"] = (socket, data) =>
-      handleChangePlayerName(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToAll.bind(this.broadcastManager),
-      );
-
-    // Death/respawn handlers
-    this.handlers["onRequestRespawn"] = (socket, _data) => {
-      const playerEntity = socket.player;
-      if (playerEntity) {
-        // Validate player is actually dead before allowing respawn
-        // This prevents clients from sending fake respawn requests
-        const entityData = playerEntity.data as
-          | { deathState?: DeathState }
-          | undefined;
-        const isDead =
-          entityData?.deathState === DeathState.DYING ||
-          entityData?.deathState === DeathState.DEAD;
-
-        if (!isDead) {
-          console.warn(
-            `[ServerNetwork] Rejected respawn request from ${playerEntity.id} - player is not dead`,
-          );
-          return;
-        }
-
-        console.log(
-          `[ServerNetwork] Received respawn request from player ${playerEntity.id}`,
-        );
-        this.world.emit(EventType.PLAYER_RESPAWN_REQUEST, {
-          playerId: playerEntity.id,
-        });
-      } else {
-        console.warn(
-          "[ServerNetwork] requestRespawn: no player entity on socket",
-        );
-      }
-    };
-
-    // Home teleport handlers
-    this.handlers["onHomeTeleport"] = (socket, data) =>
-      handleHomeTeleport(
-        socket,
-        data,
-        this.world,
-        this.tickSystem.getCurrentTick(),
-      );
-    this.handlers["homeTeleport"] = (socket, data) =>
-      handleHomeTeleport(
-        socket,
-        data,
-        this.world,
-        this.tickSystem.getCurrentTick(),
-      );
-
-    this.handlers["onHomeTeleportCancel"] = (socket, data) =>
-      handleHomeTeleportCancel(socket, data);
-    this.handlers["homeTeleportCancel"] = (socket, data) =>
-      handleHomeTeleportCancel(socket, data);
-
-    // Character selection handlers
-    // Support both with and without "on" prefix for client compatibility
-    this.handlers["onCharacterListRequest"] = (socket) =>
-      handleCharacterListRequest(socket, this.world);
-    this.handlers["characterListRequest"] = (socket) =>
-      handleCharacterListRequest(socket, this.world);
-
-    this.handlers["onCharacterCreate"] = (socket, data) =>
-      handleCharacterCreate(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
-      );
-    this.handlers["characterCreate"] = (socket, data) =>
-      handleCharacterCreate(
-        socket,
-        data,
-        this.world,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
-      );
-
-    this.handlers["onCharacterSelected"] = (socket, data) =>
-      handleCharacterSelected(
-        socket,
-        data,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
-      );
-    this.handlers["characterSelected"] = (socket, data) =>
-      handleCharacterSelected(
-        socket,
-        data,
-        this.broadcastManager.sendToSocket.bind(this.broadcastManager),
-      );
+    // Player name change, death/respawn, home teleport, character selection
+    // (list/create/selected) handlers
+    // have been migrated to the IPacketHandlerRegistry bridge —
+    // see packages/server/src/startup/packetHandlerRegistration.ts.
 
     this.handlers["onEnterWorld"] = (socket, data) =>
       this.handleEnterWorldWithReconnect(socket, data);
@@ -2600,492 +2228,30 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     };
 
-    // Bank handlers
-    this.handlers["onBankOpen"] = (socket, data) =>
-      handleBankOpen(socket, data as BankOpenPayload, this.world);
-
-    this.handlers["onBankDeposit"] = (socket, data) =>
-      handleBankDeposit(socket, data as BankDepositPayload, this.world);
-
-    this.handlers["onBankWithdraw"] = (socket, data) =>
-      handleBankWithdraw(socket, data as BankWithdrawPayload, this.world);
-
-    this.handlers["onBankDepositAll"] = (socket, data) =>
-      handleBankDepositAll(socket, data as BankDepositAllPayload, this.world);
-
-    this.handlers["onBankDepositCoins"] = (socket, data) =>
-      handleBankDepositCoins(socket, data as CoinAmountPayload, this.world);
-
-    this.handlers["onBankWithdrawCoins"] = (socket, data) =>
-      handleBankWithdrawCoins(socket, data as CoinAmountPayload, this.world);
-
-    this.handlers["onBankClose"] = (socket, data) =>
-      handleBankClose(socket, data, this.world);
-
-    this.handlers["onBankMove"] = (socket, data) =>
-      handleBankMove(socket, data as BankMovePayload, this.world);
-
-    // Bank tab handlers
-    this.handlers["onBankCreateTab"] = (socket, data) =>
-      handleBankCreateTab(socket, data as BankCreateTabPayload, this.world);
-
-    this.handlers["onBankDeleteTab"] = (socket, data) =>
-      handleBankDeleteTab(socket, data as BankDeleteTabPayload, this.world);
-
-    this.handlers["onBankMoveToTab"] = (socket, data) =>
-      handleBankMoveToTab(socket, data as BankMoveToTabPayload, this.world);
-
-    // Bank placeholder handlers (RS3 style: qty=0 in bank_storage)
-    this.handlers["onBankWithdrawPlaceholder"] = (socket, data) =>
-      handleBankWithdrawPlaceholder(
-        socket,
-        data as BankItemPayload,
-        this.world,
-      );
-
-    this.handlers["onBankReleasePlaceholder"] = (socket, data) =>
-      handleBankReleasePlaceholder(socket, data as BankSlotPayload, this.world);
-
-    this.handlers["onBankReleaseAllPlaceholders"] = (socket, data) =>
-      handleBankReleaseAllPlaceholders(socket, data, this.world);
-
-    this.handlers["onBankToggleAlwaysPlaceholder"] = (socket, data) =>
-      handleBankToggleAlwaysPlaceholder(socket, data, this.world);
-
-    // Bank equipment tab handlers (RS3-style equipment view)
-    this.handlers["onBankWithdrawToEquipment"] = (socket, data) =>
-      handleBankWithdrawToEquipment(
-        socket,
-        data as BankWithdrawToEquipmentPayload,
-        this.world,
-      );
-
-    this.handlers["onBankDepositEquipment"] = (socket, data) =>
-      handleBankDepositEquipment(
-        socket,
-        data as BankDepositEquipmentPayload,
-        this.world,
-      );
-
-    this.handlers["onBankDepositAllEquipment"] = (socket, data) =>
-      handleBankDepositAllEquipment(socket, data, this.world);
-
-    // Bank handler aliases without "on" prefix for client compatibility
-    // Client sends "bankDeposit", server has "onBankDeposit"
-    this.handlers["bankOpen"] = this.handlers["onBankOpen"];
-    this.handlers["bankDeposit"] = this.handlers["onBankDeposit"];
-    this.handlers["bankWithdraw"] = this.handlers["onBankWithdraw"];
-    this.handlers["bankDepositAll"] = this.handlers["onBankDepositAll"];
-    this.handlers["bankDepositCoins"] = this.handlers["onBankDepositCoins"];
-    this.handlers["bankWithdrawCoins"] = this.handlers["onBankWithdrawCoins"];
-    this.handlers["bankClose"] = this.handlers["onBankClose"];
-    this.handlers["bankMove"] = this.handlers["onBankMove"];
-    this.handlers["bankCreateTab"] = this.handlers["onBankCreateTab"];
-    this.handlers["bankDeleteTab"] = this.handlers["onBankDeleteTab"];
-    this.handlers["bankMoveToTab"] = this.handlers["onBankMoveToTab"];
-    this.handlers["bankWithdrawPlaceholder"] =
-      this.handlers["onBankWithdrawPlaceholder"];
-    this.handlers["bankReleasePlaceholder"] =
-      this.handlers["onBankReleasePlaceholder"];
-    this.handlers["bankReleaseAllPlaceholders"] =
-      this.handlers["onBankReleaseAllPlaceholders"];
-    this.handlers["bankToggleAlwaysPlaceholder"] =
-      this.handlers["onBankToggleAlwaysPlaceholder"];
-    this.handlers["bankWithdrawToEquipment"] =
-      this.handlers["onBankWithdrawToEquipment"];
-    this.handlers["bankDepositEquipment"] =
-      this.handlers["onBankDepositEquipment"];
-    this.handlers["bankDepositAllEquipment"] =
-      this.handlers["onBankDepositAllEquipment"];
-
-    // Bank state query (no bank NPC required)
-    this.handlers["onRequestBankState"] = (socket, data) =>
-      handleRequestBankState(socket, data, this.world);
-    this.handlers["requestBankState"] = this.handlers["onRequestBankState"];
-
-    // Application-level keepalive (no-op on server — its only purpose is to keep
-    // Cloudflare/reverse-proxy WebSocket connections alive by sending application data)
-    this.handlers["onKeepalive"] = () => {
-      // Intentionally empty — receiving this packet is enough to reset proxy idle timers
-    };
-    this.handlers["keepalive"] = this.handlers["onKeepalive"];
-
-    // NPC interaction handler - client clicked on NPC
-    this.handlers["onNpcInteract"] = (socket, data) => {
-      const playerEntity = socket.player;
-      if (!playerEntity) return;
-
-      const payload = data as NpcInteractPayload;
-
-      // Emit NPC_INTERACTION event for DialogueSystem to handle
-      // npcId is the entity instance ID, pass as npcEntityId for distance checking
-      this.world.emit(EventType.NPC_INTERACTION, {
-        playerId: playerEntity.id,
-        npcId: payload.npcId,
-        npc: payload.npc,
-        npcEntityId: payload.npcId,
-      });
-    };
-
-    // Dialogue handlers (with input validation)
-    this.handlers["onDialogueResponse"] = (socket, data) =>
-      handleDialogueResponse(
-        socket,
-        data as DialogueResponsePayload,
-        this.world,
-      );
-
-    this.handlers["onDialogueContinue"] = (socket, data) =>
-      handleDialogueContinue(socket, data as DialogueNpcPayload, this.world);
-
-    this.handlers["onDialogueClose"] = (socket, data) =>
-      handleDialogueClose(socket, data as DialogueNpcPayload, this.world);
-
-    // Quest handlers
-    this.handlers["onGetQuestList"] = (socket, data) =>
-      handleGetQuestList(socket, data as Record<string, unknown>, this.world);
-    this.handlers["getQuestList"] = this.handlers["onGetQuestList"];
-
-    this.handlers["onGetQuestDetail"] = (socket, data) =>
-      handleGetQuestDetail(socket, data as QuestIdPayload, this.world);
-    this.handlers["getQuestDetail"] = this.handlers["onGetQuestDetail"];
-
-    this.handlers["onQuestAccept"] = (socket, data) =>
-      handleQuestAccept(socket, data as QuestIdPayload, this.world);
-    this.handlers["questAccept"] = this.handlers["onQuestAccept"];
-
-    this.handlers["onQuestAbandon"] = (socket, data) =>
-      handleQuestAbandon(socket, data as QuestIdPayload, this.world);
-    this.handlers["questAbandon"] = this.handlers["onQuestAbandon"];
-
-    this.handlers["onQuestComplete"] = (socket, data) =>
-      handleQuestComplete(socket, data as QuestIdPayload, this.world);
-    this.handlers["questComplete"] = this.handlers["onQuestComplete"];
-
-    // Store handlers
-    this.handlers["onStoreOpen"] = (socket, data) =>
-      handleStoreOpen(socket, data as StoreOpenPayload, this.world);
-
-    this.handlers["onStoreBuy"] = (socket, data) =>
-      handleStoreBuy(socket, data as StoreItemPayload, this.world);
-
-    this.handlers["onStoreSell"] = (socket, data) =>
-      handleStoreSell(socket, data as StoreItemPayload, this.world);
-
-    this.handlers["onStoreClose"] = (socket, data) =>
-      handleStoreClose(socket, data as StoreClosePayload, this.world);
-
-    // Generic entity interaction handler - for entities like starter chests
-    this.handlers["onEntityInteract"] = async (socket, data) => {
-      const playerEntity = socket.player;
-      if (!playerEntity) {
-        console.warn(
-          "[ServerNetwork] entityInteract: no player entity on socket",
-        );
-        return;
-      }
-
-      const payload = data as EntityInteractPayload;
-
-      console.log(
-        `[ServerNetwork] entityInteract received: entityId=${payload.entityId}, interactionType=${payload.interactionType}, playerId=${playerEntity.id}`,
-      );
-
-      if (!payload.entityId) {
-        console.warn("[ServerNetwork] entityInteract missing entityId");
-        return;
-      }
-
-      // Find the entity in the world
-      const entity = this.world.entities.get(payload.entityId);
-      if (!entity) {
-        console.warn(
-          `[ServerNetwork] entityInteract: entity ${payload.entityId} not found`,
-        );
-        return;
-      }
-
-      console.log(
-        `[ServerNetwork] Found entity: type=${entity.type}, name=${entity.name}`,
-      );
-
-      // Check if entity has handleInteraction method
-      const interactableEntity = entity as unknown as {
-        handleInteraction?: (data: {
-          playerId: string;
-          entityId: string;
-          interactionType: string;
-          position: { x: number; y: number; z: number };
-          playerPosition: { x: number; y: number; z: number };
-        }) => Promise<void>;
-      };
-
-      if (typeof interactableEntity.handleInteraction === "function") {
-        console.log(
-          `[ServerNetwork] Calling handleInteraction on ${entity.type} entity`,
-        );
-        try {
-          // Build full EntityInteractionData
-          const entityPos = entity.position ?? { x: 0, y: 0, z: 0 };
-          const playerPos = playerEntity.position ?? { x: 0, y: 0, z: 0 };
-
-          await interactableEntity.handleInteraction({
-            playerId: playerEntity.id,
-            entityId: payload.entityId,
-            interactionType: payload.interactionType || "interact",
-            position: { x: entityPos.x, y: entityPos.y, z: entityPos.z },
-            playerPosition: { x: playerPos.x, y: playerPos.y, z: playerPos.z },
-          });
-          console.log(
-            `[ServerNetwork] handleInteraction completed for ${entity.type}`,
-          );
-        } catch (err) {
-          console.error(`[ServerNetwork] Error in entity interaction: ${err}`);
-        }
-      } else {
-        console.warn(
-          `[ServerNetwork] Entity ${payload.entityId} has no handleInteraction method`,
-        );
-      }
-    };
-    // Also register without "on" prefix for client compatibility
-    this.handlers["entityInteract"] = this.handlers["onEntityInteract"];
-
-    // Trade handlers
-    this.handlers["onTradeRequest"] = (socket, data) =>
-      handleTradeRequest(socket, data as TradeRequestPayload, this.world);
-
-    this.handlers["tradeRequest"] = (socket, data) =>
-      handleTradeRequest(socket, data as TradeRequestPayload, this.world);
-
-    this.handlers["onTradeRequestRespond"] = (socket, data) =>
-      handleTradeRequestRespond(
-        socket,
-        data as TradeRespondPayload,
-        this.world,
-      );
-    this.handlers["tradeRequestRespond"] =
-      this.handlers["onTradeRequestRespond"];
-
-    this.handlers["onTradeAddItem"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for trade add item",
-        );
-        return;
-      }
-      handleTradeAddItem(socket, data as TradeItemPayload, this.world, db);
-    };
-
-    this.handlers["tradeAddItem"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for trade add item",
-        );
-        return;
-      }
-      handleTradeAddItem(socket, data as TradeItemPayload, this.world, db);
-    };
-
-    this.handlers["onTradeRemoveItem"] = (socket, data) =>
-      handleTradeRemoveItem(socket, data as TradeSlotPayload, this.world);
-
-    this.handlers["tradeRemoveItem"] = (socket, data) =>
-      handleTradeRemoveItem(socket, data as TradeSlotPayload, this.world);
-
-    this.handlers["onTradeSetItemQuantity"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for trade set quantity",
-        );
-        return;
-      }
-      handleTradeSetQuantity(
-        socket,
-        data as TradeSetQuantityPayload,
-        this.world,
-        db,
-      );
-    };
-
-    this.handlers["tradeSetItemQuantity"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for trade set quantity",
-        );
-        return;
-      }
-      handleTradeSetQuantity(
-        socket,
-        data as TradeSetQuantityPayload,
-        this.world,
-        db,
-      );
-    };
-
-    this.handlers["onTradeAccept"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for trade accept",
-        );
-        return;
-      }
-      handleTradeAccept(socket, data as TradeIdPayload, this.world, db);
-    };
-
-    this.handlers["tradeAccept"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for trade accept",
-        );
-        return;
-      }
-      handleTradeAccept(socket, data as TradeIdPayload, this.world, db);
-    };
-
-    this.handlers["onTradeCancelAccept"] = (socket, data) =>
-      handleTradeCancelAccept(socket, data as TradeIdPayload, this.world);
-
-    this.handlers["tradeCancelAccept"] = (socket, data) =>
-      handleTradeCancelAccept(socket, data as TradeIdPayload, this.world);
-
-    this.handlers["onTradeCancel"] = (socket, data) =>
-      handleTradeCancel(socket, data as TradeIdPayload, this.world);
-
-    this.handlers["tradeCancel"] = (socket, data) =>
-      handleTradeCancel(socket, data as TradeIdPayload, this.world);
-
-    // Duel handlers
-    this.handlers["onDuelChallenge"] = (socket, data) =>
-      handleDuelChallenge(socket, data as DuelChallengePayload, this.world);
-
-    this.handlers["duel:challenge"] = (socket, data) =>
-      handleDuelChallenge(socket, data as DuelChallengePayload, this.world);
-
-    // Also register with "on" prefix (packet transformation adds this)
-    this.handlers["onDuel:challenge"] = (socket, data) =>
-      handleDuelChallenge(socket, data as DuelChallengePayload, this.world);
-
-    this.handlers["onDuelChallengeRespond"] = (socket, data) =>
-      handleDuelChallengeRespond(
-        socket,
-        data as DuelChallengeRespondPayload,
-        this.world,
-      );
-
-    this.handlers["duel:challenge:respond"] = (socket, data) =>
-      handleDuelChallengeRespond(
-        socket,
-        data as DuelChallengeRespondPayload,
-        this.world,
-      );
-
-    // Also register with "on" prefix (packet transformation adds this)
-    this.handlers["onDuel:challenge:respond"] = (socket, data) =>
-      handleDuelChallengeRespond(
-        socket,
-        data as DuelChallengeRespondPayload,
-        this.world,
-      );
-
-    // Duel rules handlers (register with both formats for packet routing)
-    this.handlers["duel:toggle:rule"] = (socket, data) =>
-      handleDuelToggleRule(socket, data as DuelToggleRulePayload, this.world);
-    this.handlers["onDuel:toggle:rule"] = this.handlers["duel:toggle:rule"];
-
-    this.handlers["duel:toggle:equipment"] = (socket, data) =>
-      handleDuelToggleEquipment(
-        socket,
-        data as DuelToggleEquipmentPayload,
-        this.world,
-      );
-    this.handlers["onDuel:toggle:equipment"] =
-      this.handlers["duel:toggle:equipment"];
-
-    this.handlers["duel:accept:rules"] = (socket, data) =>
-      handleDuelAcceptRules(socket, data as DuelIdPayload, this.world);
-    this.handlers["onDuel:accept:rules"] = this.handlers["duel:accept:rules"];
-
-    this.handlers["duel:cancel"] = (socket, data) =>
-      handleDuelCancel(socket, data as DuelIdPayload, this.world);
-    this.handlers["onDuel:cancel"] = this.handlers["duel:cancel"];
-
-    // Duel stakes handlers
-    this.handlers["duel:add:stake"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for duel add stake",
-        );
-        return;
-      }
-      handleDuelAddStake(socket, data as DuelAddStakePayload, this.world, db);
-    };
-    this.handlers["onDuel:add:stake"] = this.handlers["duel:add:stake"];
-
-    this.handlers["duel:remove:stake"] = (socket, data) => {
-      const db = getDatabase(this.world);
-      if (!db) {
-        console.error(
-          "[ServerNetwork] Database not available for duel remove stake",
-        );
-        return;
-      }
-      handleDuelRemoveStake(
-        socket,
-        data as DuelRemoveStakePayload,
-        this.world,
-        db,
-      );
-    };
-    this.handlers["onDuel:remove:stake"] = this.handlers["duel:remove:stake"];
-
-    this.handlers["duel:accept:stakes"] = (socket, data) =>
-      handleDuelAcceptStakes(socket, data as DuelIdPayload, this.world);
-    this.handlers["onDuel:accept:stakes"] = this.handlers["duel:accept:stakes"];
-
-    this.handlers["duel:accept:final"] = (socket, data) =>
-      handleDuelAcceptFinal(socket, data as DuelIdPayload, this.world);
-    this.handlers["onDuel:accept:final"] = this.handlers["duel:accept:final"];
-
-    this.handlers["duel:forfeit"] = (socket, data) =>
-      handleDuelForfeit(socket, data as DuelIdPayload, this.world);
-    this.handlers["onDuel:forfeit"] = this.handlers["duel:forfeit"];
-
-    // Friend/Social handlers
-    this.handlers["onFriendRequest"] = (socket, data) =>
-      handleFriendRequest(socket, data as FriendTargetNamePayload, this.world);
-    this.handlers["friendRequest"] = this.handlers["onFriendRequest"];
-
-    this.handlers["onFriendAccept"] = (socket, data) =>
-      handleFriendAccept(socket, data as FriendRequestIdPayload, this.world);
-    this.handlers["friendAccept"] = this.handlers["onFriendAccept"];
-
-    this.handlers["onFriendDecline"] = (socket, data) =>
-      handleFriendDecline(socket, data as FriendRequestIdPayload, this.world);
-    this.handlers["friendDecline"] = this.handlers["onFriendDecline"];
-
-    this.handlers["onFriendRemove"] = (socket, data) =>
-      handleFriendRemove(socket, data as FriendIdPayload, this.world);
-    this.handlers["friendRemove"] = this.handlers["onFriendRemove"];
-
-    this.handlers["onIgnoreAdd"] = (socket, data) =>
-      handleIgnoreAdd(socket, data as FriendTargetNamePayload, this.world);
-    this.handlers["ignoreAdd"] = this.handlers["onIgnoreAdd"];
-
-    this.handlers["onIgnoreRemove"] = (socket, data) =>
-      handleIgnoreRemove(socket, data as IgnoreIdPayload, this.world);
-    this.handlers["ignoreRemove"] = this.handlers["onIgnoreRemove"];
-
-    this.handlers["onPrivateMessage"] = (socket, data) =>
-      handlePrivateMessage(socket, data as PrivateMessagePayload, this.world);
-    this.handlers["privateMessage"] = this.handlers["onPrivateMessage"];
+    // All bank handlers (onBankOpen/Deposit/Withdraw/etc. + every `bank*`
+    // alias), onRequestBankState (+ `requestBankState` alias), and keepalive
+    // (+ alias) migrated to the IPacketHandlerRegistry bridge — see
+    // packages/server/src/startup/packetHandlerRegistration.ts.
+
+    // NPC interact, generic entity interact, quest mutations
+    // (onQuestAccept/Abandon/Complete + aliases), and store handlers
+    // (onStoreOpen/Buy/Sell/Close) migrated to the IPacketHandlerRegistry
+    // bridge — see packages/server/src/startup/packetHandlerRegistration.ts.
+
+    // Trade handlers (onTradeRequest/RequestRespond/AddItem/RemoveItem/
+    // SetItemQuantity/Accept/CancelAccept/Cancel + all legacy aliases)
+    // migrated to the IPacketHandlerRegistry bridge — see
+    // packages/server/src/startup/packetHandlerRegistration.ts.
+
+    // Duel handlers (challenge/challenge:respond/toggle:rule/toggle:equipment/
+    // accept:rules/cancel/add:stake/remove:stake/accept:stakes/accept:final/
+    // forfeit + `onDuel:*` aliases) migrated to the IPacketHandlerRegistry
+    // bridge — see packages/server/src/startup/packetHandlerRegistration.ts.
+
+    // Friend/social/ignore/private-message handlers (onFriendRequest/Accept/
+    // Decline/Remove, onIgnoreAdd/Remove, onPrivateMessage + aliases)
+    // migrated to the IPacketHandlerRegistry bridge — see
+    // packages/server/src/startup/packetHandlerRegistration.ts.
   }
 
   /**
@@ -3420,12 +2586,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   // ---------------------------------------------------------------------------
 
   /**
-   * Get the UwsWebSocketAdapter for a player's socket.
-   * Returns undefined if player not connected or not on uWS transport.
+   * Get the pub/sub adapter for a player's socket.
+   * Returns undefined if player not connected or not on a pub/sub
+   * transport (e.g. InMemorySocket in PIE mode).
    */
   private getUwsAdapterForPlayer(
     playerId: string,
-  ): UwsWebSocketAdapter | undefined {
+  ): ISocketPubSubAdapter | undefined {
     const socket = this.getSocketByPlayerId(playerId);
     if (!socket) return undefined;
     return this.broadcastManager.getAdapter(socket.id);
@@ -3666,6 +2833,21 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     return true;
   }
 
+  /**
+   * PLAN_SERVERNETWORK_MIGRATION.md Step 5d alternative: look up a packet
+   * handler from the shared IPacketHandlerRegistry bridge system. Returns
+   * undefined if the system isn't registered (e.g. in a stripped PIE world)
+   * or if no handler is registered for the given packet. Callers must still
+   * fall back to the legacy `this.handlers[...]` dict until all handlers are
+   * migrated to the bridge.
+   */
+  private getPacketRegistryHandler(method: string): NetworkHandler | undefined {
+    const registry = this.world.getSystem("packet-handlers") as
+      | { getHandler?(name: string): NetworkHandler | undefined }
+      | undefined;
+    return registry?.getHandler?.(method);
+  }
+
   private getOrCreateMessageMetric(method: string): NetworkMessageMetric {
     let metric = this.messageMetrics.get(method);
     if (!metric) {
@@ -3760,7 +2942,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         console.log(`[ServerNetwork] Received duel packet: ${method}`, data);
       }
 
-      const handler = this.handlers[method];
+      // PLAN_SERVERNETWORK_MIGRATION.md Step 5d alternative: dispatch first
+      // checks the shared IPacketHandlerRegistry bridge, then falls back to the
+      // legacy static `this.handlers[...]` dict. Once all handlers are
+      // registered through the bridge, the static dict can be dropped and this
+      // dispatcher (plus its enclosing file) can move to @hyperforge/shared
+      // untouched — because the handler modules stay server-side.
+      const registryHandler = this.getPacketRegistryHandler(method);
+      const handler = registryHandler ?? this.handlers[method];
       if (handler) {
         const metric = this.getOrCreateMessageMetric(method);
         const result = handler.call(this, socket, data);

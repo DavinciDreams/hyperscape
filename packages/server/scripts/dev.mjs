@@ -54,7 +54,20 @@ await esbuild.build({
   minify: false,
   sourcemap: true,
   packages: 'external',
-  external: ['vitest'],
+  // Server files import shared via relative paths (../../../../shared/src/...)
+  // which bypasses packages:'external'. That transitively pulls shared's
+  // PhysXManager into this bundle, including its
+  //   await import("./PhysXManager.server")
+  // which at runtime resolves relative to build/index.js. Keep those
+  // dynamic-import paths external and copy the emitted files from
+  // packages/shared/build/ next to build/index.js below.
+  external: [
+    'vitest',
+    './PhysXManager.server',
+    './PhysXManager.server.js',
+    './storage.server',
+    './storage.server.js',
+  ],
   target: 'node22',
   define: {
     'process.env.CLIENT': 'false',
@@ -79,7 +92,13 @@ await esbuild.build({
   minify: false,
   sourcemap: true,
   packages: 'external',
-  external: ['vitest'],
+  external: [
+    'vitest',
+    './PhysXManager.server',
+    './PhysXManager.server.js',
+    './storage.server',
+    './storage.server.js',
+  ],
   target: 'node22',
   define: {
     'process.env.CLIENT': 'false',
@@ -92,6 +111,26 @@ await esbuild.build({
   plugins: [excludeTestsPlugin],
   logLevel: 'error',
 })
+
+// Copy shared's server-only dynamic-import targets next to build/index.js.
+// Shared emits these as standalone files (see packages/shared/scripts/build.mjs);
+// the bundled dynamic import in build/index.js resolves relative to its own
+// directory at runtime, so the files must physically sit next to it.
+const { copyFileSync, existsSync, mkdirSync } = await import('fs')
+const { join: _join } = await import('path')
+const serverBuildDir = _join(process.cwd(), 'build')
+const sharedBuildDir = _join(process.cwd(), '..', 'shared', 'build')
+mkdirSync(serverBuildDir, { recursive: true })
+for (const base of ['PhysXManager.server.js', 'storage.server.js']) {
+  const src = _join(sharedBuildDir, base)
+  if (existsSync(src)) {
+    copyFileSync(src, _join(serverBuildDir, base))
+    const map = src + '.map'
+    if (existsSync(map)) copyFileSync(map, _join(serverBuildDir, base + '.map'))
+  } else {
+    console.warn('⚠ Shared server-only module missing:', src)
+  }
+}
 
 console.log('✅ Server build complete')
 `;

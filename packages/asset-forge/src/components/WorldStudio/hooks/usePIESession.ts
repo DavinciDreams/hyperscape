@@ -95,6 +95,13 @@ interface PIESessionState {
   markerGroup: THREE.Group | null;
   animationId: number | null;
   lastTime: number;
+  /**
+   * Object3D wired into PlayTestWorld as the pawn body when `mode === "play"`.
+   * The PIE interaction-router shim mutates its `position` on click-to-walk;
+   * the orbit camera shim reads it each tick. Added to the scene so future
+   * visual feedback (player marker, etc.) can be attached.
+   */
+  playerObject: THREE.Object3D | null;
 }
 
 interface UsePIESessionOptions {
@@ -127,6 +134,7 @@ export function usePIESession({
     markerGroup: null,
     animationId: null,
     lastTime: 0,
+    playerObject: null,
   });
 
   // Track the onExit callback in a ref to avoid stale closures
@@ -260,6 +268,17 @@ export function usePIESession({
     const manifest: GameModeManifest =
       state.project.gameMode ?? HYPERIA_DEFAULT_MANIFEST;
 
+    // Play mode needs an Object3D pawn body the GameMode controllers can
+    // possess. Created here (not inside PlayTestWorld) so it sits in the
+    // editor scene graph and future visual feedback can attach to it.
+    const pieMode = state.pie.mode;
+    const playerObject = pieMode === "play" ? new THREE.Object3D() : null;
+    if (playerObject) {
+      playerObject.name = "pie-player-pawn";
+      playerObject.position.set(playerSpawn.x, playerSpawn.y, playerSpawn.z);
+      refs.scene.add(playerObject);
+    }
+
     const startOptions: PlayTestWorldOptions = {
       mobSpawns,
       npcs,
@@ -268,6 +287,14 @@ export function usePIESession({
       playerSpawn,
       debugSink: (entry: PIEDebugEntry) => onDebugRef.current?.(entry),
       gameMode: manifest,
+      mode: pieMode === "play" ? "play" : "simulate",
+      ...(pieMode === "play"
+        ? {
+            viewport: refs.container,
+            camera: refs.camera,
+            playerObject: playerObject!,
+          }
+        : {}),
     };
     world.start(startOptions);
 
@@ -293,29 +320,27 @@ export function usePIESession({
     session.markers = markers;
     session.markerGroup = markerGroup;
     session.lastTime = performance.now();
+    session.playerObject = playerObject;
 
     // Branch on (pieMode, gameMode id):
     //   - Simulate: WASD fly-cam regardless of GameMode. The editor
     //     camera possesses nothing; designers move freely.
-    //   - Play + click-to-walk: eventually instantiate
-    //     ClickToWalkPlayerController + OrbitCameraController against
-    //     the PIE world. Needs InteractionRouter + ClientCameraSystem
-    //     wiring in PlayTestWorld; until that lands we fall through to
-    //     the fly-cam so PIE remains functional.
+    //   - Play + click-to-walk: PlayTestWorld owns the camera via the
+    //     resolved `OrbitCameraController` + `PIEOrbitCameraShim` and
+    //     routes viewport clicks through `PIEInteractionRouterShim`.
+    //     We suppress OrbitControls (setInteractionMode "tool") so its
+    //     rotation doesn't fight the orbit shim.
     //   - Play + unknown id: alternate manifests registered by
-    //     downstream games (Phase 5). Fly-cam fallback so the editor
-    //     never hangs on an unrecognised controller.
-    const pieMode = state.pie.mode;
+    //     downstream games (Phase 5). Controllers are attached by
+    //     PlayTestWorld; interaction mode is set to "tool" for the
+    //     same reason.
     const modeId = world.gameMode?.id ?? CLICK_TO_WALK_CONTROLLER_ID;
     if (pieMode === "simulate") {
       refs.enterPlayerMode();
     } else if (modeId === CLICK_TO_WALK_CONTROLLER_ID) {
-      // TODO(gamemode-phase-4): instantiate ClickToWalkPlayerController
-      // + OrbitCameraController here once PlayTestWorld hosts the
-      // InteractionRouter + ClientCameraSystem surface.
-      refs.enterPlayerMode();
+      refs.setInteractionMode("tool");
     } else {
-      refs.enterPlayerMode();
+      refs.setInteractionMode("tool");
     }
 
     // Start the tick loop
@@ -434,7 +459,7 @@ function stopPIEInternal(
     session.animationId = null;
   }
 
-  // Stop the world
+  // Stop the world (detaches controllers + disposes PIE shims)
   if (session.world) {
     session.world.stop();
     session.world = null;
@@ -451,9 +476,17 @@ function stopPIEInternal(
   }
   session.markers.clear();
 
-  // Exit player mode
+  // Remove the pawn Object3D if play mode created one.
+  if (session.playerObject) {
+    refs.scene.remove(session.playerObject);
+    session.playerObject = null;
+  }
+
+  // Exit player mode (simulate) and restore orbit camera (play).
   if (refs.isPlayerMode()) {
     refs.exitPlayerMode();
+  } else {
+    refs.setInteractionMode("orbit");
   }
 
   console.log("[PIE] Session stopped");

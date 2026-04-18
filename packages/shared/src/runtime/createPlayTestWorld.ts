@@ -18,19 +18,34 @@
 // Note: This module is self-contained — no dependency on the full World/ECS stack.
 // Future expansion will integrate with the World class for full RPG system support.
 
+import { Object3D, type Camera } from "three";
+
 import {
   PIEScriptRunner,
   type PIEDebugEntry,
   type PIEDebugSink,
 } from "./PIEScriptRunner";
 import type { RuntimeScriptGraph } from "../systems/shared/scripting/ScriptGraphInterpreter";
-import type { GameMode, GameModeManifest } from "../gameMode/GameMode";
+import type {
+  GameMode,
+  GameModeContext,
+  GameModeManifest,
+} from "../gameMode/GameMode";
+import type { PlayerController } from "../gameMode/controllers/PlayerController";
+import type { CameraController } from "../gameMode/cameras/CameraController";
+import type { Pawn } from "../gameMode/pawns/Pawn";
 import {
   HYPERIA_DEFAULT_MANIFEST,
   gameModeRegistry,
   registerAlternateGameModes,
   registerHyperiaGameMode,
 } from "../gameMode";
+import { CLICK_TO_WALK_CONTROLLER_ID } from "../gameMode/controllers/ClickToWalkPlayerController";
+import {
+  PIEInteractionRouterShim,
+  PIEOrbitCameraShim,
+  createPIEPawn,
+} from "./pieShims";
 
 export type { PIEDebugEntry, PIEDebugSink } from "./PIEScriptRunner";
 
@@ -150,6 +165,36 @@ export interface PlayTestWorldOptions {
    * activates for the viewport.
    */
   gameMode?: GameModeManifest;
+  /**
+   * Editor viewport element. Required when `mode === "play"` and the
+   * resolved GameMode needs pointer routing (e.g. click-to-walk). The
+   * PIE InteractionRouter shim installs its pointerdown handler on this
+   * element.
+   */
+  viewport?: HTMLElement;
+  /**
+   * Editor camera. Required when `mode === "play"` — the orbit shim
+   * drives this camera to follow the pawn. Keeping the camera external
+   * means the editor retains ownership (and can reclaim it in simulate
+   * mode) without PIE spinning up its own WebGPU renderer.
+   */
+  camera?: Camera;
+  /**
+   * THREE.Object3D for the player marker. The shim writes movement
+   * updates to this object's position; PIE syncs the numeric entity
+   * record from the object each tick. When omitted, PIE falls back to
+   * a scratch Object3D so controllers still resolve but visible
+   * movement is a no-op.
+   */
+  playerObject?: Object3D;
+  /**
+   * PIE session mode. `"play"` installs the shim surface and attaches
+   * the resolved GameMode's controllers; `"simulate"` keeps the editor
+   * fly-cam and skips controller attach. Defaults to `"simulate"` for
+   * backward compatibility with callers that have not wired the play-
+   * mode hooks yet.
+   */
+  mode?: "play" | "simulate";
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +227,48 @@ export class PlayTestWorld {
    */
   gameMode: GameMode | null = null;
 
+  /**
+   * Controllers resolved from the active GameMode when `options.mode`
+   * is `"play"`. They own input/camera wiring for the session and get
+   * `.tick(dt)` called from `tick()`. Null in simulate mode.
+   */
+  playerController: PlayerController | null = null;
+  cameraController: CameraController | null = null;
+
+  /** Pawn wrapping the player marker while PIE is active. Null otherwise. */
+  pawn: Pawn | null = null;
+
+  /**
+   * External camera reference (owned by the editor) during `play` mode.
+   * The `OrbitCameraController` reads `world.camera`; the orbit shim
+   * mutates it. Null in simulate mode.
+   */
+  camera: Camera | null = null;
+
+  /**
+   * Event bus — minimal emit/on/off compatible with the
+   * `OrbitCameraController` → `CAMERA_SET_TARGET` path. PIE systems
+   * and shims subscribe here; script `_scripts.emit` remains separate
+   * because its event catalogue (trigger/onInteract etc.) is distinct
+   * from the GameMode control-plane events.
+   */
+  private _listeners = new Map<string, Set<(payload: unknown) => void>>();
+
+  /**
+   * System registry — keyed by system id. `ClickToWalkPlayerController`
+   * calls `getSystem("interaction-router")` through the `getSystem`
+   * utility, which walks `world.systems` then falls back to
+   * `world.getSystem(id)`. PIE registers its `PIEInteractionRouterShim`
+   * here under the same id.
+   */
+  systems = new Map<string, unknown>();
+
+  private _routerShim: PIEInteractionRouterShim | null = null;
+  private _orbitShim: PIEOrbitCameraShim | null = null;
+
+  /** Scratch Object3D used when `options.playerObject` is omitted. */
+  private static readonly _fallbackPawnObject = new Object3D();
+
   /** Network stub for systems that check world.network */
   get network(): PIENetworkStub {
     return this._networkStub;
@@ -194,6 +281,38 @@ export class PlayTestWorld {
   /** Access the script runner (null before start() / after stop()). */
   get scripts(): PIEScriptRunner | null {
     return this._scripts;
+  }
+
+  /**
+   * Minimal event bus. The PIE shims (orbit + interaction-router) and
+   * future in-world systems subscribe here; `OrbitCameraController`
+   * emits through this path via the cast `this as unknown as World`.
+   */
+  emit(type: string, payload: unknown): void {
+    const set = this._listeners.get(type);
+    if (!set) return;
+    for (const fn of set) fn(payload);
+  }
+
+  on(type: string, fn: (payload: unknown) => void): void {
+    let set = this._listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this._listeners.set(type, set);
+    }
+    set.add(fn);
+  }
+
+  off(type: string, fn: (payload: unknown) => void): void {
+    this._listeners.get(type)?.delete(fn);
+  }
+
+  /**
+   * Resolve a system by id. Mirrors the `getSystem(world, id)` utility
+   * the `ClickToWalkPlayerController` diagnostic uses.
+   */
+  getSystem(id: string): unknown | null {
+    return this.systems.get(id) ?? null;
   }
 
   /**
@@ -213,14 +332,52 @@ export class PlayTestWorld {
     registerHyperiaGameMode(gameModeRegistry);
     registerAlternateGameModes(gameModeRegistry);
     const manifest = options.gameMode ?? HYPERIA_DEFAULT_MANIFEST;
-    this.gameMode = gameModeRegistry.resolve(manifest, {
-      // PlayTestWorld is not a full `World`; the context.world field is
-      // kept optional at the controller level (InteractionRouter and
-      // ClientCameraSystem cannot run inside PIE today). The mode acts
-      // as metadata here — usePIESession reads `mode.id` to branch.
+    const modeCtx: GameModeContext = {
+      // PlayTestWorld now exposes the minimum surface the controllers
+      // touch: `camera`, `emit`, `getSystem`, and (through the pawn)
+      // `object.position`. See the "event bus" / "system registry"
+      // sections above. The cast remains because PlayTestWorld is still
+      // not a full `World` — unrelated World fields are untouched.
       world: this as unknown as import("../core/World").World,
       runtime: "pie",
-    });
+    };
+    this.gameMode = gameModeRegistry.resolve(manifest, modeCtx);
+
+    // Install the PIE shim surface only when we're actually going to
+    // drive the viewport (i.e. `play` mode with the required editor
+    // handles). Simulate mode keeps the editor fly-cam; omitting
+    // `camera`/`viewport`/`playerObject` also keeps the legacy behavior
+    // so callers that haven't been updated yet still work.
+    const playMode = options.mode === "play";
+    if (playMode && options.camera && options.playerObject) {
+      this.camera = options.camera;
+      this.pawn = createPIEPawn(
+        "pie-player",
+        options.playerObject ?? PlayTestWorld._fallbackPawnObject,
+      );
+      this._orbitShim = new PIEOrbitCameraShim(options.camera, {
+        on: (t, fn) => this.on(t, fn),
+        off: (t, fn) => this.off(t, fn),
+      });
+      if (
+        options.viewport &&
+        this.gameMode.id === CLICK_TO_WALK_CONTROLLER_ID
+      ) {
+        this._routerShim = new PIEInteractionRouterShim({
+          viewport: options.viewport,
+          camera: options.camera,
+          bus: { emit: (t, p) => this.emit(t, p) },
+        });
+        this._routerShim.setPawn(this.pawn);
+        this.systems.set("interaction-router", this._routerShim);
+      }
+      // Attach controllers via the resolved GameMode.
+      this.playerController = this.gameMode.createPlayerController(modeCtx);
+      this.cameraController = this.gameMode.createCameraController(modeCtx);
+      const input = this.gameMode.createInputContext(modeCtx);
+      this.playerController.attach(this.pawn, input);
+      this.cameraController.attach(this.pawn);
+    }
 
     // Spin up the scripting runtime. Entity lookup resolves to the entity's
     // mutable record so action handlers can read live position / rotation.
@@ -350,6 +507,21 @@ export class PlayTestWorld {
     // Drive the script runtime — resumes any delayed continuations.
     this._scripts?.tick(deltaTime);
 
+    // Advance the PIE control plane before simulation so the pawn's
+    // position is current when AI / proximity checks below read it.
+    this._routerShim?.tick(deltaTime);
+    this.playerController?.tick(deltaTime);
+    this.cameraController?.tick(deltaTime);
+    this._orbitShim?.tick(deltaTime);
+
+    // Sync the numeric player entity record from the pawn's Object3D so
+    // scripts and proximity triggers read the post-controller position.
+    if (this.pawn && this.player) {
+      this.player.position.x = this.pawn.object.position.x;
+      this.player.position.y = this.pawn.object.position.y;
+      this.player.position.z = this.pawn.object.position.z;
+    }
+
     // Emit player-proximity triggers (debounced via _playerNearby flag).
     if (this.player && this._scripts) {
       const px = this.player.position.x;
@@ -423,6 +595,21 @@ export class PlayTestWorld {
    */
   stop(): void {
     this._isRunning = false;
+    // Detach controllers before their shims disappear; detach is
+    // idempotent so double-stop is safe.
+    this.playerController?.detach();
+    this.cameraController?.detach();
+    this._routerShim?.dispose();
+    this._orbitShim?.dispose();
+    this.playerController = null;
+    this.cameraController = null;
+    this._routerShim = null;
+    this._orbitShim = null;
+    this.pawn = null;
+    this.camera = null;
+    this.systems.clear();
+    this._listeners.clear();
+
     this._scripts?.stop();
     this._scripts = null;
     this.player = null;

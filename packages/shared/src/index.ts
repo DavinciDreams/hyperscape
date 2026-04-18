@@ -1519,3 +1519,14 @@ export {
   queryVegetationDensity,
   getTierVegetationMultiplier,
 } from "./utils/world";
+
+// ServerNetwork migrated modules — character selection & world entry
+// (PLAN_SERVERNETWORK_MIGRATION.md Step 5e).
+export {
+  loadCharacterList,
+  handleCharacterListRequest,
+  handleCharacterCreate,
+  handleCharacterSelected,
+  collectInitialSyncEntities,
+  handleEnterWorld,
+} from "./systems/server/network/character-selection";

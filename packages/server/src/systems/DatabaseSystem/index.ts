@@ -60,6 +60,7 @@ import {
   QuestRepository,
   ActivityLogRepository,
   BankRepository,
+  FriendRepository,
 } from "../../database/repositories";
 import type { DeathLockData } from "../../database/repositories/DeathRepository";
 
@@ -142,6 +143,7 @@ export class DatabaseSystem extends SystemBase {
   private questRepository!: QuestRepository;
   private activityLogRepository!: ActivityLogRepository;
   private bankRepository!: BankRepository;
+  private friendRepository!: FriendRepository;
 
   /**
    * Constructor
@@ -197,6 +199,7 @@ export class DatabaseSystem extends SystemBase {
         this.pool,
       );
       this.bankRepository = new BankRepository(this.db, this.pool);
+      this.friendRepository = new FriendRepository(this.db, this.pool);
     } else {
       throw new Error(
         "[DatabaseSystem] Drizzle database not provided on world object",
@@ -238,6 +241,7 @@ export class DatabaseSystem extends SystemBase {
     this.questRepository.markDestroying();
     this.activityLogRepository.markDestroying();
     this.bankRepository.markDestroying();
+    this.friendRepository.markDestroying();
 
     if (this.pendingOperations.size === 0) {
       return;
@@ -1351,10 +1355,35 @@ export class DatabaseSystem extends SystemBase {
 
   /**
    * Get the BankRepository for direct access
-   * Used by admin routes for bank queries
+   * Used by admin routes for bank queries and by shared handlers (via
+   * IDatabaseSystem interface).
    */
   getBankRepository(): BankRepository {
     return this.bankRepository;
+  }
+
+  /**
+   * Get the CharacterRepository for direct access.
+   * Exposed for shared handlers that access it via IDatabaseSystem.
+   */
+  getCharacterRepository(): CharacterRepository {
+    return this.characterRepository;
+  }
+
+  /**
+   * Get the InventoryRepository for direct access.
+   * Exposed for shared handlers that access it via IDatabaseSystem.
+   */
+  getInventoryRepository(): InventoryRepository {
+    return this.inventoryRepository;
+  }
+
+  /**
+   * Get the FriendRepository for direct access.
+   * Exposed for shared handlers that access it via IDatabaseSystem.
+   */
+  getFriendRepository(): FriendRepository {
+    return this.friendRepository;
   }
 
   // ============================================================================

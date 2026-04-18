@@ -16,7 +16,9 @@
     "baseUrl": ".",
     "paths": {
       "@hyperforge/plugin-hyperia": ["../plugin-hyperia/src/index.ts"],
-      "@hyperforge/plugin-hyperia/*": ["../plugin-hyperia/src/*"]
+      "@hyperforge/plugin-hyperia/*": ["../plugin-hyperia/src/*"],
+      "@hyperforge/shared": ["../shared/src/index.ts"],
+      "@hyperforge/shared/*": ["../shared/src/*"]
     },
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,

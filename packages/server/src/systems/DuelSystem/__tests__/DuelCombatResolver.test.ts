@@ -18,7 +18,10 @@ const mockAuditLoggerInstance = {
 };
 
 // Mock AuditLogger to prevent side effects and allow verification
-vi.mock("../../ServerNetwork/services", () => ({
+// DuelCombatResolver relocated to shared (PLAN_SERVERNETWORK_MIGRATION.md Step 4)
+// imports AuditLogger/Logger from shared's services barrel directly, so we must
+// mock that resolved path — not the legacy server shim path — for vi to intercept.
+vi.mock("../../../../../shared/src/systems/server/network/services", () => ({
   AuditLogger: {
     getInstance: () => mockAuditLoggerInstance,
   },
@@ -30,7 +33,7 @@ vi.mock("../../ServerNetwork/services", () => ({
   },
 }));
 
-import { Logger } from "../../ServerNetwork/services";
+import { Logger } from "../../../../../shared/src/systems/server/network/services";
 
 // ============================================================================
 // Helpers

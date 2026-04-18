@@ -95,6 +95,48 @@ export async function initializeWorld(
   if (process.env.DISABLE_ACTIVITY_LOGGER !== "true") {
     world.register("activity-logger", ActivityLoggerSystem);
   }
+
+  // Agent bridges expose Eliza singletons as world systems so shared-side
+  // handlers can reach them via world.getSystem() — part of the
+  // ServerNetwork → @hyperforge/shared migration (Step 5e).
+  const { AgentManagerBridgeSystem, AgentRuntimeLookupBridgeSystem } =
+    await import("../systems/AgentBridgeSystems/index.js");
+  world.register("agent-manager", AgentManagerBridgeSystem);
+  world.register("agent-runtime-lookup", AgentRuntimeLookupBridgeSystem);
+
+  // Auth bridge exposes createJWT/verifyJWT as a world system so shared-side
+  // handlers can access them via world.getSystem("auth") — Step 5e (JWT wiring).
+  const { AuthBridgeSystem } =
+    await import("../systems/AuthBridgeSystem/index.js");
+  world.register("auth", AuthBridgeSystem);
+
+  // Packet handler registry — concrete storage for packet-name → handler
+  // dispatch, populated at startup by server-side registration code and
+  // consumed by ServerNetwork (post-Step 6, once it lives in shared).
+  // Step 5d alternative in PLAN_SERVERNETWORK_MIGRATION.md.
+  const { PacketHandlerBridgeSystem } =
+    await import("../systems/PacketHandlerBridgeSystem/index.js");
+  world.register("packet-handlers", PacketHandlerBridgeSystem);
+
+  // Duel stake transfer bridge — wraps the server-only
+  // `executeDuelStakeTransferWithRetry` so ServerNetwork (post-Step 6, in
+  // shared) can reach it via `world.getSystem("duel-stake-transfer")`.
+  const { DuelStakeTransferBridgeSystem } =
+    await import("../systems/DuelStakeTransferBridgeSystem/index.js");
+  world.register("duel-stake-transfer", DuelStakeTransferBridgeSystem);
+
+  // Server-network sub-manager factory — constructs the three server-only
+  // managers (BroadcastManager, EventBridge, ConnectionHandler) that
+  // depend on uWebSockets.js / Drizzle and therefore cannot live in
+  // shared. ServerNetwork (post-Step 6) will look it up via
+  // `world.getSystem("server-network-factory")`.
+  const { ServerNetworkManagerFactoryBridgeSystem } =
+    await import("../systems/ServerNetworkManagerFactoryBridgeSystem/index.js");
+  world.register(
+    "server-network-factory",
+    ServerNetworkManagerFactoryBridgeSystem,
+  );
+
   world.register("network", ServerNetwork);
 
   // Make PostgreSQL pool and Drizzle DB available for DatabaseSystem to use
@@ -122,6 +164,38 @@ export async function initializeWorld(
   if (!world.assetsUrl.endsWith("/")) {
     world.assetsUrl += "/";
   }
+
+  // DuelScheduler and DuelBettingBridge — constructed here rather than
+  // inside ServerNetwork.init() so ServerNetwork (post-Step 6, in shared)
+  // does not import these server-only classes. Both are fire-and-forget
+  // after construction; ServerNetwork never touched the stored references.
+  // PLAN_SERVERNETWORK_MIGRATION.md Step 6.
+  const { DuelScheduler, DuelBettingBridge } =
+    await import("../systems/DuelScheduler/index.js");
+  const legacyDuelSchedulerEnabled =
+    process.env.DUEL_SCHEDULER_ENABLED !== "false" &&
+    process.env.STREAMING_DUEL_ENABLED !== "true";
+  if (legacyDuelSchedulerEnabled) {
+    const duelScheduler = new DuelScheduler(world);
+    duelScheduler.init();
+    (
+      world as { duelScheduler?: InstanceType<typeof DuelScheduler> }
+    ).duelScheduler = duelScheduler;
+  }
+  const duelBettingBridge = new DuelBettingBridge(world);
+  duelBettingBridge.init();
+  (
+    world as { duelBettingBridge?: InstanceType<typeof DuelBettingBridge> }
+  ).duelBettingBridge = duelBettingBridge;
+
+  // Register packet handlers migrated to the IPacketHandlerRegistry bridge.
+  // PLAN_SERVERNETWORK_MIGRATION.md Step 5d alternative — handlers are moved
+  // out of ServerNetwork/index.ts into this registration module one at a
+  // time. ServerNetwork's dispatcher consults the registry first, so any
+  // registered handler takes precedence over the legacy static dict.
+  const { registerMigratedPacketHandlers } =
+    await import("./packetHandlerRegistration.js");
+  registerMigratedPacketHandlers(world);
 
   // Load entities from world.json
   await loadWorldEntities(world, config);

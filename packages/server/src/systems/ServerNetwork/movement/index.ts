@@ -1,26 +1,12 @@
 /**
- * Movement Module - Barrel Export
+ * @deprecated Re-export shim.
  *
- * Server-side movement validation and anti-cheat systems.
- * Use these to validate all client movement requests before processing.
+ * Movement module barrel relocated to
+ * `packages/shared/src/systems/server/network/movement/index.ts`
+ * as part of the ServerNetwork → @hyperforge/shared migration
+ * (PLAN_SERVERNETWORK_MIGRATION.md Step 1 — zero-dep leaves).
  *
- * @example
- * import {
- *   MovementInputValidator,
- *   MovementAntiCheat,
- *   MovementViolationSeverity
- * } from "./movement";
+ * Delete this shim after Step 8.
  */
 
-// Input Validation
-export {
-  MovementInputValidator,
-  MovementViolationSeverity,
-} from "./MovementInputValidator";
-export type {
-  ValidatedMovePayload,
-  MoveRequestValidation,
-} from "./MovementInputValidator";
-
-// Anti-Cheat Monitoring
-export { MovementAntiCheat } from "./MovementAntiCheat";
+export * from "../../../../../shared/src/systems/server/network/movement";
