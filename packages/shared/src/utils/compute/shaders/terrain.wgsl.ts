@@ -172,7 +172,16 @@ struct Uniforms {
   centerX: f32,
   centerZ: f32,
   blendWidth: f32,
-  padding: f32,
+  // X-dimension workgroup count passed from the host. At textureSize ≥
+  // 2048 (pixelCount ≥ 4,194,304) the 1D dispatch count exceeds
+  // WebGPU's 65535 per-dimension ceiling, so the host issues a 2D
+  // dispatch (dispatchWorkgroups(x, y, 1)) and the shader must
+  // reconstruct the linear pixel index from
+  // (global_invocation_id.x, global_invocation_id.y) using
+  // numWorkgroupsX. Under the 1D case the host passes y=1 and
+  // numWorkgroupsX = totalWorkgroups, and the arithmetic degenerates
+  // back to idx = global_id.x.
+  numWorkgroupsX: f32,
 }
 
 @group(0) @binding(0) var<storage, read> roads: array<Road>;
@@ -208,12 +217,19 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  let idx = global_id.x;
+  // Reconstruct the linear pixel index across 2D dispatch.
+  // threadsPerRow = numWorkgroupsX * workgroup_size_x (64).
+  // Under a 1D dispatch dispatchWorkgroups(N, 1, 1), global_id.y is 0
+  // and this reduces to idx = global_id.x. Under a 2D dispatch
+  // dispatchWorkgroups(65535, K, 1) we offset by a full row of threads
+  // per y index.
+  let threadsPerRow = u32(uniforms.numWorkgroupsX) * 64u;
+  let idx = global_id.y * threadsPerRow + global_id.x;
   let pixelCount = u32(uniforms.pixelCount);
   if (idx >= pixelCount) {
     return;
   }
-  
+
   let roadCount = u32(uniforms.roadCount);
   let texSize = u32(uniforms.textureSize);
   let halfWorld = uniforms.worldSize * 0.5;

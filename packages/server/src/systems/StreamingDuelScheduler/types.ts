@@ -96,6 +96,7 @@ export interface LeaderboardEntry {
   winRate: number;
   combatLevel: number;
   currentStreak: number;
+  lossStreak: number;
 }
 
 export interface RecentDuelEntry {
@@ -109,6 +110,15 @@ export interface RecentDuelEntry {
   winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw";
   damageWinner: number;
   damageLoser: number;
+  // Oracle proof fields required by the keeper result-catch-up endpoint.
+  // Populated at resolution time from buildOracleProof() on the currentCycle.
+  // Nullable for backwards-compatibility with rows persisted before this
+  // field set was added; legacy rows cannot be used for synthetic onDuelEnd
+  // replay.
+  duelKeyHex: string | null;
+  duelEndTime: number | null;
+  seed: string | null;
+  replayHash: string | null;
 }
 
 export interface StreamingCycleAgent {

@@ -148,6 +148,65 @@ function getSystemDebugName(
 
 let hasLoggedMissingAssetBase = false;
 
+const TREE_ASSET_FAMILY_REWRITES = Object.freeze<
+  Record<string, readonly string[]>
+>({
+  bamboo: ["bamboo_01", "bamboo_02", "bamboo_03", "bamboo_04"],
+  banana: ["oak_01", "oak_02", "oak_03", "oak_04"],
+  dead: ["dead_01", "dead_02", "dead_03", "dead_04", "dead_05", "dead_06"],
+  eucalyptus: ["oak_01", "oak_02", "oak_03", "oak_04", "oak_01"],
+  general: ["oak_01", "oak_02", "oak_03", "oak_04", "oak_01", "oak_02"],
+  magic: ["oak_03", "oak_04"],
+  maple: ["maple_01", "maple_02", "maple_03", "maple_01"],
+  mahogany: ["oak_02", "oak_03"],
+  oak: ["oak_01", "oak_02", "oak_03", "oak_04"],
+  palm: ["palm_01", "palm_02", "palm_03", "palm_04", "palm_05"],
+  pine: ["pine_01", "pine_02", "pine_03", "pine_01", "pine_02"],
+  pineDead: ["dead_01", "dead_02", "dead_03"],
+});
+
+function normalizeTreeAssetAlias(url: string): string {
+  const suffixMatch = url.match(/([?#].*)$/);
+  const suffix = suffixMatch?.[1] ?? "";
+  const baseUrl = suffix ? url.slice(0, -suffix.length) : url;
+
+  const assetMatch = baseUrl.match(
+    /^(asset:\/\/models\/trees\/)([^/]+)\/[^/]+_(\d+)((?:_lod[12])?)\.glb$/i,
+  );
+  if (assetMatch) {
+    const [, prefix, family, rawIndex, lodSuffix] = assetMatch;
+    const replacements =
+      TREE_ASSET_FAMILY_REWRITES[
+        family as keyof typeof TREE_ASSET_FAMILY_REWRITES
+      ];
+    if (replacements?.length) {
+      const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
+      const replacement =
+        replacements[index] ?? replacements[index % replacements.length];
+      return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
+    }
+  }
+
+  const absoluteMatch = baseUrl.match(
+    /^(.*\/models\/trees\/)([^/]+)\/[^/]+_(\d+)((?:_lod[12])?)\.glb$/i,
+  );
+  if (absoluteMatch) {
+    const [, prefix, family, rawIndex, lodSuffix] = absoluteMatch;
+    const replacements =
+      TREE_ASSET_FAMILY_REWRITES[
+        family as keyof typeof TREE_ASSET_FAMILY_REWRITES
+      ];
+    if (replacements?.length) {
+      const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
+      const replacement =
+        replacements[index] ?? replacements[index % replacements.length];
+      return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
+    }
+  }
+
+  return url;
+}
+
 interface AsyncTickCallMetric {
   label: string;
   phase: "fixedUpdate" | "update" | "lateUpdate";
@@ -2108,6 +2167,8 @@ export class World extends EventEmitter {
         url = `asset://${relativePath}${suffix}`;
       }
     }
+
+    url = normalizeTreeAssetAlias(url);
 
     // Blob URLs are already resolved
     if (url.startsWith("blob")) {

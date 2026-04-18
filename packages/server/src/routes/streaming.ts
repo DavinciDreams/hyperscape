@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
+import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
   STREAMING_TIMING,
@@ -18,6 +19,33 @@ import {
 } from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
+import {
+  buildStreamDestinationId,
+  normalizeStreamDestinationProvider,
+  resolveStreamDeliveryInfo,
+  type StreamManifestStatus,
+} from "../streaming/delivery-config.js";
+import type { StreamSourceRuntime } from "../streaming/source-runtime.js";
+import { resolveStreamIngestSettings } from "../streaming/ingest-config.js";
+import {
+  acquirePlaybackProbePoller,
+  type StreamPlaybackProbeResult,
+} from "../streaming/destination-probe.js";
+import {
+  loadPersistedStreamingAuthorityState,
+  type PersistedStreamingAuthorityState,
+} from "../streaming/cloudflare-authority.js";
+import {
+  extractBettingFeedToken,
+  hasValidBettingFeedToken,
+  resolveBettingFeedAccessToken,
+  shouldSkipBettingFeedAuth,
+} from "./streaming-betting-auth.js";
+import {
+  readLocalHlsManifestSnapshot,
+  resolveExternalStatusFile,
+  type HlsManifestSnapshot,
+} from "../streaming/stream-status-artifacts.js";
 import {
   STREAMING_CANONICAL_PLATFORM,
   STREAMING_PUBLIC_DELAY_DEFAULT_MS,
@@ -29,8 +57,13 @@ import {
   loadExternalRtmpStatusSnapshot,
   registerStreamingBettingRoutes,
 } from "./streaming-betting-routes.js";
+import type {
+  ExternalCaptureDiagnosticsBlob,
+  ExternalRtmpDestination,
+  ExternalRtmpStatusSnapshot,
+} from "./streaming-external-status.js";
+import { deriveStreamSourceRuntime } from "./streaming-source-runtime.js";
 import { trimReplayFrames } from "./streaming-sse-buffer.js";
-import { getDefaultPublicWsUrl } from "../shared/public-ws-url.js";
 type InventorySnapshotItem = {
   slot: number;
   itemId: string;
@@ -101,11 +134,14 @@ const STREAMING_SSE_MAX_CLIENTS = Math.max(
     Number.parseInt(process.env.STREAMING_SSE_MAX_CLIENTS || "64", 10),
   ),
 );
-const EXTERNAL_RTMP_STATUS_FILE = (process.env.RTMP_STATUS_FILE || "").trim();
+const EXTERNAL_RTMP_STATUS_FILE = resolveExternalStatusFile(process.env);
 const EXTERNAL_RTMP_STATUS_MAX_AGE_MS = Math.max(
   5000,
   Number.parseInt(process.env.RTMP_STATUS_MAX_AGE_MS || "15000", 10),
 );
+const REQUIRE_EXTERNAL_SOURCE_RUNTIME =
+  process.env.STREAM_SOURCE_RUNTIME_REQUIRE_EXTERNAL === "true" ||
+  process.env.NODE_ENV === "production";
 const BETTING_BOOTSTRAP_RATE_LIMIT: RateLimitOptions = {
   max: 240,
   timeWindow: "1 minute",
@@ -114,6 +150,635 @@ const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
   max: 60,
   timeWindow: "1 minute",
 };
+
+type StreamingStatusMetricsSnapshot = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+};
+
+type StreamingStatusManifestSnapshot = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+type StreamingStatusSmokeSnapshot = {
+  currentSceneUrl: string | null;
+  activeBundle: string | null;
+  deliveryMode: string | null;
+  captureFpsP50: number | null;
+  captureFpsP95: number | null;
+  encodeFpsP50: number | null;
+  encodeFpsP95: number | null;
+  updatedAt: number | null;
+  ingest: StreamingStatusIngestSnapshot;
+};
+
+type StreamingStatusIngestSnapshot = {
+  profile: string | null;
+  transport: string | null;
+  audioSampleRate: number | null;
+  gopFrames: number | null;
+  probeOnly: boolean | null;
+};
+
+type StreamingCanonicalStatusSnapshot = {
+  sourceReady: boolean;
+  canonicalTransportConnected: boolean;
+  canonicalPlaybackReady: boolean;
+  manifestStatus: StreamManifestStatus;
+  lastError: string | null;
+  updatedAt: number | null;
+};
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+export function normalizeStreamingStatusMetrics(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  bridgeStats?:
+    | {
+        encoderFps?: number;
+        droppedFrames?: number;
+      }
+    | null
+    | undefined;
+}): StreamingStatusMetricsSnapshot {
+  const metrics = params.externalSnapshot?.metrics;
+  const bridgeStats = params.bridgeStats;
+
+  return {
+    captureFps: asFiniteNumber(metrics?.captureFps),
+    encodeFps:
+      asFiniteNumber(metrics?.encodeFps) ??
+      asFiniteNumber(bridgeStats?.encoderFps),
+    droppedFrames:
+      asFiniteNumber(metrics?.droppedFrames) ??
+      asFiniteNumber(bridgeStats?.droppedFrames),
+    renderTick: asFiniteNumber(metrics?.renderTick),
+    duelStateTick: asFiniteNumber(metrics?.duelStateTick),
+    latestFrameAt: asFiniteNumber(metrics?.latestFrameAt),
+    latestRenderTickAt: asFiniteNumber(metrics?.latestRenderTickAt),
+    latestDuelStateTickAt: asFiniteNumber(metrics?.latestDuelStateTickAt),
+    latestVisualChangeAt: asFiniteNumber(metrics?.latestVisualChangeAt),
+    visualChangeAgeMs: asFiniteNumber(metrics?.visualChangeAgeMs),
+  };
+}
+
+export function normalizeStreamingStatusManifest(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  localHlsManifest?: HlsManifestSnapshot | null;
+}): StreamingStatusManifestSnapshot {
+  const externalManifest = params.externalSnapshot?.hlsManifest;
+  const localManifest = params.localHlsManifest;
+  return {
+    updatedAt:
+      asFiniteNumber(externalManifest?.updatedAt) ??
+      asFiniteNumber(localManifest?.updatedAt),
+    mediaSequence:
+      asFiniteNumber(externalManifest?.mediaSequence) ??
+      asFiniteNumber(localManifest?.mediaSequence),
+  };
+}
+
+export function normalizeStreamingStatusSmoke(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  deliveryModeFallback: string | null;
+}): StreamingStatusSmokeSnapshot {
+  const smoke = params.externalSnapshot?.smoke;
+  const ingest =
+    smoke?.ingest && typeof smoke.ingest === "object"
+      ? smoke.ingest
+      : params.externalSnapshot?.ingest;
+  const fallbackIngest = resolveStreamIngestSettings(process.env);
+  return {
+    currentSceneUrl:
+      typeof smoke?.currentSceneUrl === "string" &&
+      smoke.currentSceneUrl.trim().length > 0
+        ? smoke.currentSceneUrl.trim()
+        : null,
+    activeBundle:
+      typeof smoke?.activeBundle === "string" &&
+      smoke.activeBundle.trim().length > 0
+        ? smoke.activeBundle.trim()
+        : null,
+    deliveryMode:
+      typeof smoke?.deliveryMode === "string" &&
+      smoke.deliveryMode.trim().length > 0
+        ? smoke.deliveryMode.trim()
+        : params.deliveryModeFallback,
+    captureFpsP50: asFiniteNumber(smoke?.captureFpsP50),
+    captureFpsP95: asFiniteNumber(smoke?.captureFpsP95),
+    encodeFpsP50: asFiniteNumber(smoke?.encodeFpsP50),
+    encodeFpsP95: asFiniteNumber(smoke?.encodeFpsP95),
+    updatedAt: asFiniteNumber(smoke?.updatedAt),
+    ingest: {
+      profile:
+        typeof ingest?.profile === "string" && ingest.profile.trim().length > 0
+          ? ingest.profile.trim()
+          : fallbackIngest.profile,
+      transport:
+        typeof ingest?.transport === "string" &&
+        ingest.transport.trim().length > 0
+          ? ingest.transport.trim()
+          : fallbackIngest.transport,
+      audioSampleRate:
+        asFiniteNumber(ingest?.audioSampleRate) ??
+        fallbackIngest.audioSampleRate,
+      gopFrames: asFiniteNumber(ingest?.gopFrames) ?? fallbackIngest.gopFrames,
+      probeOnly:
+        asBoolean(ingest?.probeOnly) ??
+        (fallbackIngest.probeOnly ? true : false),
+    },
+  };
+}
+
+function findCanonicalStreamingDestination(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
+}): {
+  index: number;
+  destination: ExternalRtmpDestination | null;
+} {
+  const destinations = Array.isArray(params.externalSnapshot?.destinations)
+    ? params.externalSnapshot!.destinations
+    : [];
+  const canonicalProvider = normalizeStreamDestinationProvider(
+    params.delivery.provider,
+    "Cloudflare",
+  );
+  const canonicalDestinationId = buildStreamDestinationId({
+    role: "canonical",
+    provider: canonicalProvider,
+    name: "External Delivery",
+  });
+
+  const index = destinations.findIndex(
+    (destination) => destination.role === "canonical",
+  );
+  if (index >= 0) {
+    return {
+      index,
+      destination: destinations[index] ?? null,
+    };
+  }
+
+  const idIndex = destinations.findIndex(
+    (destination) => destination.id === canonicalDestinationId,
+  );
+  if (idIndex >= 0) {
+    return {
+      index: idIndex,
+      destination: destinations[idIndex] ?? null,
+    };
+  }
+
+  const providerIndex = destinations.findIndex(
+    (destination) =>
+      normalizeStreamDestinationProvider(
+        destination.provider ?? null,
+        destination.name ?? null,
+      ) === canonicalProvider,
+  );
+  if (providerIndex >= 0) {
+    return {
+      index: providerIndex,
+      destination: destinations[providerIndex] ?? null,
+    };
+  }
+
+  return {
+    index: -1,
+    destination: null,
+  };
+}
+
+function isFreshStreamingSnapshot(
+  updatedAt: number | null | undefined,
+  nowMs: number,
+): boolean {
+  return (
+    typeof updatedAt === "number" &&
+    Number.isFinite(updatedAt) &&
+    Math.max(0, nowMs - updatedAt) <= EXTERNAL_RTMP_STATUS_MAX_AGE_MS
+  );
+}
+
+function resolveStreamingManifestStatusFromUpdatedAt(
+  updatedAt: number | null | undefined,
+  nowMs: number,
+): StreamManifestStatus {
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt)) {
+    return "missing";
+  }
+  return isFreshStreamingSnapshot(updatedAt, nowMs) ? "ok" : "stale";
+}
+
+function resolveCanonicalPlaybackUrl(params: {
+  destination: ExternalRtmpDestination | null;
+  delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
+}): string | null {
+  return (
+    params.destination?.playbackUrl ??
+    params.delivery.playbackUrl ??
+    params.delivery.llhlsUrl ??
+    params.delivery.hlsUrl ??
+    null
+  );
+}
+
+function hasFreshContradictorySourceError(params: {
+  sourceRuntime: StreamSourceRuntime;
+  captureDiagnostics?: ExternalCaptureDiagnosticsBlob | null;
+  canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
+}): boolean {
+  if (params.sourceRuntime.ready === true) {
+    return false;
+  }
+
+  const probeUpdatedAt = asFiniteNumber(
+    params.canonicalProbeSnapshot?.updatedAt,
+  );
+  const fatalWriteAt = asFiniteNumber(
+    params.captureDiagnostics?.lastFatalWriteError?.at,
+  );
+  const workerHeartbeatAt = asFiniteNumber(
+    params.sourceRuntime.workerHeartbeatAt,
+  );
+  const freshestSourceIncidentAt = Math.max(
+    fatalWriteAt ?? Number.NEGATIVE_INFINITY,
+    workerHeartbeatAt ?? Number.NEGATIVE_INFINITY,
+  );
+
+  if (!Number.isFinite(freshestSourceIncidentAt)) {
+    return true;
+  }
+  if (probeUpdatedAt == null) {
+    return true;
+  }
+
+  return freshestSourceIncidentAt >= probeUpdatedAt;
+}
+
+function normalizeCanonicalStreamingTruth(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  delivery: ReturnType<typeof resolveStreamDeliveryInfo>;
+  canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
+  sourceRuntime: StreamSourceRuntime;
+  localHlsManifest?: HlsManifestSnapshot | null;
+}): {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  canonicalStatus: StreamingCanonicalStatusSnapshot;
+} {
+  if (params.delivery.mode === "self_hls") {
+    const playbackUrl = params.delivery.playbackUrl ?? null;
+    const externalManifestUpdatedAt = asFiniteNumber(
+      params.externalSnapshot?.hlsManifest?.updatedAt,
+    );
+    const localManifestUpdatedAt = asFiniteNumber(
+      params.localHlsManifest?.updatedAt,
+    );
+    const manifestUpdatedAt =
+      externalManifestUpdatedAt != null && localManifestUpdatedAt != null
+        ? Math.max(externalManifestUpdatedAt, localManifestUpdatedAt)
+        : (externalManifestUpdatedAt ?? localManifestUpdatedAt ?? null);
+    const nowMs = Date.now();
+    const manifestStatus = resolveStreamingManifestStatusFromUpdatedAt(
+      manifestUpdatedAt,
+      nowMs,
+    );
+    const sourceReady = params.sourceRuntime.ready === true;
+    const canonicalPlaybackReady = manifestStatus === "ok";
+    const canonicalTransportConnected = sourceReady && canonicalPlaybackReady;
+    const lastError = sourceReady
+      ? canonicalPlaybackReady
+        ? null
+        : manifestStatus === "stale"
+          ? "manifest_stale"
+          : playbackUrl
+            ? "manifest_not_ready"
+            : "playback_unconfigured"
+      : (params.sourceRuntime.degradedReason ?? "source_unavailable");
+
+    const selfHostedDestination = {
+      id: buildStreamDestinationId({
+        role: "canonical",
+        provider: "self_hls",
+        name: "Self-HLS",
+      }),
+      name: "Self-HLS",
+      role: "canonical" as const,
+      provider: "self_hls" as const,
+      transport: "hls" as const,
+      playbackUrl,
+      ingestUrl: null,
+      connected: canonicalPlaybackReady,
+      transportHealthy: canonicalTransportConnected,
+      playbackReady: canonicalPlaybackReady,
+      manifestStatus,
+      lastError,
+      error: lastError ?? undefined,
+      updatedAt: manifestUpdatedAt ?? undefined,
+    };
+
+    const destinations = Array.isArray(params.externalSnapshot?.destinations)
+      ? params.externalSnapshot!.destinations
+      : [];
+    const normalizedIndex = destinations.findIndex((candidate) => {
+      if (candidate.role === "canonical") return true;
+      if (candidate.id === selfHostedDestination.id) return true;
+      return (
+        normalizeStreamDestinationProvider(
+          candidate.provider ?? null,
+          candidate.name ?? null,
+        ) === "self_hls"
+      );
+    });
+
+    const normalizedSnapshot = params.externalSnapshot
+      ? {
+          ...params.externalSnapshot,
+          destinations:
+            normalizedIndex >= 0
+              ? params.externalSnapshot.destinations.map((candidate, index) =>
+                  index === normalizedIndex
+                    ? { ...candidate, ...selfHostedDestination }
+                    : candidate,
+                )
+              : [
+                  ...params.externalSnapshot.destinations,
+                  selfHostedDestination,
+                ],
+        }
+      : {
+          active: canonicalTransportConnected,
+          ffmpegRunning: sourceReady,
+          clientConnected: sourceReady,
+          destinations: [selfHostedDestination],
+          stats: {},
+          updatedAt: manifestUpdatedAt ?? nowMs,
+          hlsManifest: {
+            updatedAt: manifestUpdatedAt,
+            mediaSequence:
+              asFiniteNumber(params.localHlsManifest?.mediaSequence) ?? null,
+          },
+          delivery: params.delivery,
+        };
+
+    return {
+      externalSnapshot: normalizedSnapshot,
+      canonicalStatus: {
+        sourceReady,
+        canonicalTransportConnected,
+        canonicalPlaybackReady,
+        manifestStatus,
+        lastError,
+        updatedAt: manifestUpdatedAt,
+      },
+    };
+  }
+
+  const { index, destination } = findCanonicalStreamingDestination({
+    externalSnapshot: params.externalSnapshot,
+    delivery: params.delivery,
+  });
+  const playbackUrl = resolveCanonicalPlaybackUrl({
+    destination,
+    delivery: params.delivery,
+  });
+  const probeReady = params.canonicalProbeSnapshot?.ready === true;
+  const sourceReady = params.sourceRuntime.ready === true;
+  const contradictorySourceError = hasFreshContradictorySourceError({
+    sourceRuntime: params.sourceRuntime,
+    captureDiagnostics: params.externalSnapshot?.captureDiagnostics ?? null,
+    canonicalProbeSnapshot: params.canonicalProbeSnapshot ?? null,
+  });
+  const destinationError =
+    typeof destination?.error === "string" &&
+    destination.error.trim().length > 0
+      ? destination.error.trim()
+      : null;
+  const canonicalDestinationConnected =
+    probeReady || destination?.connected === true;
+  const canonicalTransportConnected =
+    sourceReady && canonicalDestinationConnected && !contradictorySourceError;
+  const canonicalPlaybackReady = probeReady;
+  const manifestStatus =
+    params.canonicalProbeSnapshot?.manifestStatus ??
+    (playbackUrl ? "unknown" : "missing");
+  const updatedAt =
+    params.canonicalProbeSnapshot?.updatedAt ??
+    destination?.startedAt ??
+    params.externalSnapshot?.updatedAt ??
+    null;
+  const lastError =
+    probeReady && !contradictorySourceError
+      ? null
+      : params.sourceRuntime.ready
+        ? (destinationError ??
+          params.canonicalProbeSnapshot?.lastError ??
+          (playbackUrl ? "delivery_disconnected" : "playback_unconfigured"))
+        : (params.sourceRuntime.degradedReason ??
+          destinationError ??
+          "source_unavailable");
+
+  if (!params.externalSnapshot || index < 0) {
+    return {
+      externalSnapshot: params.externalSnapshot,
+      canonicalStatus: {
+        sourceReady,
+        canonicalTransportConnected,
+        canonicalPlaybackReady,
+        manifestStatus,
+        lastError,
+        updatedAt,
+      },
+    };
+  }
+
+  const normalizedDestinations = params.externalSnapshot.destinations.map(
+    (candidate, candidateIndex) => {
+      if (candidateIndex !== index) {
+        return candidate;
+      }
+      return {
+        ...candidate,
+        connected: canonicalDestinationConnected,
+        transportHealthy:
+          sourceReady && probeReady && !contradictorySourceError,
+        playbackReady: canonicalPlaybackReady,
+        manifestStatus,
+        lastError,
+        error: lastError ?? undefined,
+        updatedAt: updatedAt ?? undefined,
+      };
+    },
+  );
+
+  return {
+    externalSnapshot: {
+      ...params.externalSnapshot,
+      destinations: normalizedDestinations,
+    },
+    canonicalStatus: {
+      sourceReady,
+      canonicalTransportConnected,
+      canonicalPlaybackReady,
+      manifestStatus,
+      lastError,
+      updatedAt,
+    },
+  };
+}
+
+export function buildStreamingStatusPayload(params: {
+  base: Record<string, unknown>;
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  canonicalProbeSnapshot?: StreamPlaybackProbeResult | null;
+  localHlsManifest?: HlsManifestSnapshot | null;
+  bridgeStats?:
+    | {
+        encoderFps?: number;
+        droppedFrames?: number;
+      }
+    | null
+    | undefined;
+  rendererHealth: ReturnType<typeof deriveBettingRendererHealth>;
+  captureStats?:
+    | {
+        clientConnected: boolean;
+        ffmpegRunning: boolean;
+      }
+    | null
+    | undefined;
+  persistedAuthorityState?: PersistedStreamingAuthorityState | null;
+  cloudflareLiveInputId?: string | null;
+}) {
+  const delivery =
+    params.externalSnapshot?.delivery ?? resolveStreamDeliveryInfo(process.env);
+  const sourceRuntime: StreamSourceRuntime = deriveStreamSourceRuntime({
+    externalStatusSnapshot: params.externalSnapshot,
+    externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+    rendererHealth: params.rendererHealth,
+    localHlsManifest: params.localHlsManifest,
+    captureStats: params.captureStats,
+    requireExternalWorker: REQUIRE_EXTERNAL_SOURCE_RUNTIME,
+  });
+  const normalizedCanonicalTruth = normalizeCanonicalStreamingTruth({
+    externalSnapshot: params.externalSnapshot,
+    delivery,
+    canonicalProbeSnapshot: params.canonicalProbeSnapshot ?? null,
+    sourceRuntime,
+    localHlsManifest: params.localHlsManifest,
+  });
+  const effectiveExternalSnapshot = normalizedCanonicalTruth.externalSnapshot;
+  const persistedAuthority = params.persistedAuthorityState ?? null;
+  const metrics = normalizeStreamingStatusMetrics({
+    externalSnapshot: effectiveExternalSnapshot,
+    bridgeStats: params.bridgeStats,
+  });
+  const hlsManifest = normalizeStreamingStatusManifest({
+    externalSnapshot: effectiveExternalSnapshot,
+    localHlsManifest: params.localHlsManifest,
+  });
+  const smoke = normalizeStreamingStatusSmoke({
+    externalSnapshot: effectiveExternalSnapshot,
+    deliveryModeFallback: delivery.mode,
+  });
+  const externalActive = asBoolean(effectiveExternalSnapshot?.active);
+  const externalFfmpegRunning = asBoolean(
+    effectiveExternalSnapshot?.ffmpegRunning,
+  );
+  const externalClientConnected = asBoolean(
+    effectiveExternalSnapshot?.clientConnected,
+  );
+  const activeCanonicalProvider =
+    persistedAuthority?.canonicalProviderState?.activeProvider ??
+    (delivery.mode === "self_hls"
+      ? "self_hls"
+      : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare"));
+  const cloudflarePlaybackProbe =
+    activeCanonicalProvider === "cloudflare_stream" &&
+    params.canonicalProbeSnapshot
+      ? {
+          ready: params.canonicalProbeSnapshot.ready,
+          manifestStatus: params.canonicalProbeSnapshot.manifestStatus,
+          lastError: params.canonicalProbeSnapshot.lastError,
+          updatedAt: params.canonicalProbeSnapshot.updatedAt,
+        }
+      : null;
+  const lastExternalTransportError =
+    typeof effectiveExternalSnapshot?.captureDiagnostics?.lastFatalWriteError
+      ?.message === "string" &&
+    effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
+      .length > 0
+      ? effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
+      : null;
+
+  return {
+    ...params.base,
+    running: externalActive ?? params.base.running,
+    bridgeActive: externalActive ?? params.base.bridgeActive,
+    ffmpegRunning: externalFfmpegRunning ?? params.base.ffmpegRunning,
+    clientConnected: externalClientConnected ?? params.base.clientConnected,
+    destinations:
+      effectiveExternalSnapshot?.destinations ?? params.base.destinations ?? [],
+    metrics,
+    captureFps: metrics.captureFps,
+    encodeFps: metrics.encodeFps,
+    droppedFrames: metrics.droppedFrames,
+    renderTick: metrics.renderTick,
+    duelStateTick: metrics.duelStateTick,
+    latestFrameAt: metrics.latestFrameAt,
+    latestRenderTickAt: metrics.latestRenderTickAt,
+    latestDuelStateTickAt: metrics.latestDuelStateTickAt,
+    latestVisualChangeAt: metrics.latestVisualChangeAt,
+    visualChangeAgeMs: metrics.visualChangeAgeMs,
+    hlsManifest,
+    hlsManifestUpdatedAt: hlsManifest.updatedAt,
+    hlsMediaSequence: hlsManifest.mediaSequence,
+    delivery,
+    ingest: smoke.ingest,
+    smoke,
+    deliveryMode: delivery.mode,
+    deliveryProvider: delivery.provider ?? null,
+    playbackUrl: delivery.playbackUrl ?? null,
+    rendererHealth: params.rendererHealth,
+    sourceRuntime,
+    canonicalStatus: normalizedCanonicalTruth.canonicalStatus,
+    authority: {
+      activeCanonicalProvider,
+      primaryHealthySince:
+        persistedAuthority?.canonicalProviderState?.primaryHealthySince ?? null,
+      updatedAt: persistedAuthority?.canonicalProviderState?.updatedAt ?? null,
+    },
+    cloudflare: {
+      liveInputId:
+        params.cloudflareLiveInputId ??
+        persistedAuthority?.cloudflareLifecycle?.liveInputId ??
+        null,
+      lifecycle: persistedAuthority?.cloudflareLifecycle ?? null,
+      lastWebhook: persistedAuthority?.cloudflareLastWebhook ?? null,
+      lastPlaybackProbe: cloudflarePlaybackProbe,
+      lastExternalTransportError,
+    },
+    captureDiagnostics:
+      (effectiveExternalSnapshot?.captureDiagnostics as ExternalCaptureDiagnosticsBlob | null) ??
+      null,
+  };
+}
 
 function getInventorySnapshot(
   world: World,
@@ -206,6 +871,21 @@ export function registerStreamingRoutes(
   let lastBroadcastSeq = 0;
   let statePushInterval: ReturnType<typeof setInterval> | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  const configuredStreamingDelivery = resolveStreamDeliveryInfo(process.env);
+  const canonicalPlaybackProbePoller = acquirePlaybackProbePoller(
+    configuredStreamingDelivery.mode === "external_hls"
+      ? (configuredStreamingDelivery.playbackUrl ??
+          configuredStreamingDelivery.llhlsUrl ??
+          configuredStreamingDelivery.hlsUrl)
+      : null,
+    {
+      intervalMs: Math.max(
+        2_000,
+        Math.min(EXTERNAL_RTMP_STATUS_MAX_AGE_MS, 5_000),
+      ),
+      timeoutMs: Math.min(EXTERNAL_RTMP_STATUS_MAX_AGE_MS, 4_000),
+    },
+  );
   const bettingRoutes = registerStreamingBettingRoutes({
     fastify,
     world,
@@ -228,6 +908,26 @@ export function registerStreamingRoutes(
     externalStatusFile: EXTERNAL_RTMP_STATUS_FILE || null,
     externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
   });
+  const cloudflareLiveInputId =
+    process.env.STREAM_CLOUDFLARE_LIVE_INPUT_ID?.trim() || null;
+  const getStorageDb = () =>
+    (
+      world.getSystem("database") as
+        | {
+            getDb?: () => ReturnType<DatabaseSystem["getDb"]>;
+          }
+        | null
+        | undefined
+    )?.getDb?.() ?? null;
+  const loadPersistedAuthorityState = () =>
+    loadPersistedStreamingAuthorityState(getStorageDb());
+  const loadPersistedAuthorityStateSafely = async () => {
+    try {
+      return await loadPersistedAuthorityState();
+    } catch {
+      return null;
+    }
+  };
 
   const formatSseEvent = (event: string, data: string, id?: number): string => {
     const normalizedData = data.replace(/\n/g, "\ndata: ");
@@ -437,11 +1137,35 @@ export function registerStreamingRoutes(
     }
   };
 
+  const redactOracleProofFromCycle = (cycle: unknown): unknown => {
+    if (!cycle || typeof cycle !== "object") {
+      return cycle;
+    }
+
+    const {
+      duelKeyHex: _k,
+      duelEndTime: _e,
+      seed: _s,
+      replayHash: _r,
+      ...publicCycle
+    } = cycle as Record<string, unknown>;
+
+    return publicCycle;
+  };
+
+  const redactOracleProofFromState = <T extends { cycle: unknown }>(
+    state: T,
+  ): T =>
+    ({
+      ...state,
+      cycle: redactOracleProofFromCycle(state.cycle),
+    }) as T;
+
   const getPublicStreamingState = (
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
   ): ReturnType<typeof scheduler.getStreamingState> | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      return scheduler.getStreamingState();
+      return redactOracleProofFromState(scheduler.getStreamingState());
     }
 
     // Keep delayed replay frames fresh for REST polling consumers
@@ -459,7 +1183,7 @@ export function registerStreamingRoutes(
 
     return {
       type: "STREAMING_STATE_UPDATE" as const,
-      cycle: delayed.cycle as ReturnType<
+      cycle: redactOracleProofFromCycle(delayed.cycle) as ReturnType<
         typeof scheduler.getStreamingState
       >["cycle"],
       leaderboard: delayed.leaderboard as ReturnType<
@@ -479,7 +1203,7 @@ export function registerStreamingRoutes(
     const scheduler = getStreamingDuelScheduler();
     if (!scheduler) return null;
 
-    const state = scheduler.getStreamingState();
+    const state = redactOracleProofFromState(scheduler.getStreamingState());
     const serialized = JSON.stringify(state);
     if (
       !forceNewFrame &&
@@ -570,6 +1294,7 @@ export function registerStreamingRoutes(
     for (const clientId of [...sseClients.keys()]) {
       removeSseClient(clientId, "shutdown");
     }
+    canonicalPlaybackProbePoller?.release();
     bettingRoutes.close();
     done();
   });
@@ -987,7 +1712,21 @@ export function registerStreamingRoutes(
           : Number.POSITIVE_INFINITY;
       const recentDuels = scheduler
         .getRecentDuels(historyLimit)
-        .filter((duel) => duel.finishedAt <= cutoff);
+        .filter((duel) => duel.finishedAt <= cutoff)
+        // Strip oracle-proof fields. They are persisted on RecentDuelEntry
+        // for the keeper-only /api/streaming/results/:duelId catch-up path
+        // (bearer-auth). Leaking them on this public, unauthenticated handler
+        // would defeat that auth boundary — a caller could harvest proofs
+        // from this endpoint and skip the bearer check entirely.
+        .map(
+          ({
+            duelKeyHex: _k,
+            duelEndTime: _e,
+            seed: _s,
+            replayHash: _r,
+            ...publicEntry
+          }) => publicEntry,
+        );
       const delayedUpdatedAt =
         STREAMING_PUBLIC_DELAY_MS > 0
           ? (getLatestEligibleReplayFrame()?.emittedAt ?? Date.now())
@@ -1002,6 +1741,113 @@ export function registerStreamingRoutes(
     },
   );
 
+  // Authoritative per-duel oracle result lookup for the hyperbet keeper.
+  //
+  // When the keeper misses a live `duel_ended` event (for example a restart
+  // window), the bundle is stuck at LOCKED with no path forward because
+  // Solana resolution requires the seed + replayHash that only arrive on
+  // that event. This endpoint lets the keeper reconstruct the resolution
+  // from the durable streaming_duel_history row.
+  //
+  // Bearer-auth via the same token the betting feed uses (BETTING_FEED_ACCESS_TOKEN).
+  fastify.get<{
+    Params: { duelId: string };
+  }>(
+    "/api/streaming/results/:duelId",
+    {
+      config: { rateLimit: false },
+    },
+    async (request, reply) => {
+      const skipAuth = shouldSkipBettingFeedAuth(
+        process.env as Record<string, string | undefined>,
+      );
+      const requiredToken = resolveBettingFeedAccessToken(
+        process.env as Record<string, string | undefined>,
+      ).token;
+      if (!requiredToken) {
+        if (process.env.NODE_ENV === "production" || !skipAuth) {
+          return reply.status(503).send({
+            error: "Service unavailable",
+            message: "Betting feed auth token is not configured",
+          });
+        }
+      } else {
+        const token = extractBettingFeedToken({
+          authorizationHeader: request.headers.authorization,
+        });
+        if (!hasValidBettingFeedToken(requiredToken, token)) {
+          return reply.status(401).send({
+            error: "Unauthorized",
+            message: "Missing or invalid betting feed token",
+          });
+        }
+      }
+
+      const duelId = request.params.duelId?.trim();
+      if (!duelId) {
+        return reply.status(400).send({
+          error: "Bad request",
+          message: "duelId is required",
+        });
+      }
+
+      const db = getStorageDb();
+      if (!db) {
+        return reply.status(503).send({
+          error: "Service unavailable",
+          message: "Database is not available",
+        });
+      }
+
+      const { streamingDuelHistory } = await import("../database/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      const rows = await db
+        .select()
+        .from(streamingDuelHistory)
+        .where(eq(streamingDuelHistory.duelId, duelId))
+        .limit(1);
+      const row = rows[0];
+
+      if (!row) {
+        return reply.status(404).send({
+          error: "Not found",
+          message: `No resolved duel with duelId=${duelId}`,
+        });
+      }
+
+      // Legacy rows written before migration 0055 may not carry the oracle
+      // proof fields. Callers must handle this by waiting and retrying —
+      // the current live duel will write fresh rows with the full proof.
+      if (!row.seed || !row.replayHash || !row.duelKeyHex) {
+        return reply.status(409).send({
+          error: "Incomplete proof",
+          message:
+            "This duel's oracle proof was not persisted. The duel predates schema migration 0055.",
+          duelId: row.duelId,
+          cycleId: row.cycleId,
+        });
+      }
+
+      return reply.send({
+        duelId: row.duelId,
+        cycleId: row.cycleId,
+        duelKeyHex: row.duelKeyHex,
+        duelEndTime: row.duelEndTime,
+        seed: row.seed,
+        replayHash: row.replayHash,
+        winnerId: row.winnerId,
+        winnerName: row.winnerName,
+        loserId: row.loserId,
+        loserName: row.loserName,
+        winReason: row.winReason,
+        damageWinner: row.damageWinner,
+        damageLoser: row.damageLoser,
+        finishedAt: row.finishedAt,
+      });
+    },
+  );
+
   // Get streaming configuration
   fastify.get(
     "/api/streaming/config",
@@ -1009,8 +1855,6 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const betUrl =
-        (process.env.STREAMING_PUBLIC_BET_URL || "").trim() || null;
       return reply.send({
         enabled: process.env.STREAMING_DUEL_ENABLED !== "false",
         cycleDuration: STREAMING_TIMING.CYCLE_DURATION,
@@ -1022,32 +1866,7 @@ export function registerStreamingRoutes(
         publicDelayMs: STREAMING_PUBLIC_DELAY_MS,
         publicDelayDefaultMs: STREAMING_PUBLIC_DELAY_DEFAULT_MS,
         publicDelayOverridden: STREAMING_PUBLIC_DELAY_OVERRIDDEN,
-        wsUrl: process.env.PUBLIC_WS_URL || getDefaultPublicWsUrl(),
-        betUrl,
-        bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
-      });
-    },
-  );
-
-  /**
-   * Public betting CTA for stream overlays (no secrets).
-   * Set STREAMING_PUBLIC_BET_URL to your prediction-market / wallet-connect page.
-   */
-  fastify.get(
-    "/api/streaming/betting",
-    {
-      config: { rateLimit: false },
-    },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
-      const betUrl =
-        (process.env.STREAMING_PUBLIC_BET_URL || "").trim() || null;
-      return reply.send({
-        betUrl,
-        bettingBridgeEnabled: process.env.DUEL_BETTING_ENABLED === "true",
-        hint:
-          betUrl != null
-            ? "Wagers typically lock when the countdown starts. Pick a side before the bell."
-            : "Set STREAMING_PUBLIC_BET_URL on the server to show a bet link on stream.",
+        wsUrl: process.env.PUBLIC_WS_URL || "ws://localhost:5555/ws",
       });
     },
   );
@@ -1059,12 +1878,53 @@ export function registerStreamingRoutes(
       config: { rateLimit: false },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
       );
+      const canonicalProbeSnapshot = canonicalPlaybackProbePoller
+        ? await canonicalPlaybackProbePoller
+            .refresh()
+            .then(() => canonicalPlaybackProbePoller.getSnapshot())
+        : null;
+      const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
       if (externalSnapshot) {
-        return reply.send(externalSnapshot);
+        const rendererHealth = deriveBettingRendererHealth(
+          getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          {
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            localHlsManifest,
+            captureStats: {
+              clientConnected: externalSnapshot.clientConnected === true,
+              ffmpegRunning: externalSnapshot.ffmpegRunning === true,
+            },
+          },
+        );
+
+        return reply.send(
+          buildStreamingStatusPayload({
+            base: {
+              running: externalSnapshot.active === true,
+              bridgeActive: externalSnapshot.active === true,
+              ffmpegRunning: externalSnapshot.ffmpegRunning === true,
+              clientConnected: externalSnapshot.clientConnected === true,
+              destinations: externalSnapshot.destinations,
+              stats: externalSnapshot.stats,
+            },
+            externalSnapshot,
+            canonicalProbeSnapshot,
+            localHlsManifest,
+            rendererHealth,
+            persistedAuthorityState,
+            cloudflareLiveInputId,
+            captureStats: {
+              clientConnected: externalSnapshot.clientConnected === true,
+              ffmpegRunning: externalSnapshot.ffmpegRunning === true,
+            },
+          }),
+        );
       }
 
       try {
@@ -1077,28 +1937,45 @@ export function registerStreamingRoutes(
         }
         const status = bridge.getStatus();
         const stats = bridge.getStats();
-
-        return reply.send({
-          ...status,
-          stats: {
-            bytesReceived: stats.bytesReceived,
-            bytesReceivedMB: (stats.bytesReceived / 1024 / 1024).toFixed(2),
-            uptimeSeconds: Math.floor(stats.uptime / 1000),
-            destinations: stats.destinations,
-            healthy: stats.healthy,
-            droppedFrames: stats.droppedFrames,
-            backpressured: stats.backpressured,
-            spectators: stats.spectators,
-            processMemory: stats.processMemory,
+        const rendererHealth = deriveBettingRendererHealth(
+          getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          {
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            localHlsManifest,
           },
-          rendererHealth: deriveBettingRendererHealth(
-            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
-            {
-              externalStatusSnapshot: externalSnapshot,
-              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+        );
+
+        return reply.send(
+          buildStreamingStatusPayload({
+            base: {
+              ...status,
+              stats: {
+                bytesReceived: stats.bytesReceived,
+                bytesReceivedMB: (stats.bytesReceived / 1024 / 1024).toFixed(2),
+                uptimeSeconds: Math.floor(stats.uptime / 1000),
+                destinations: stats.destinations,
+                healthy: stats.healthy,
+                droppedFrames: stats.droppedFrames,
+                encoderFps: stats.encoderFps,
+                backpressured: stats.backpressured,
+                spectators: stats.spectators,
+                processMemory: stats.processMemory,
+              },
             },
-          ),
-        });
+            externalSnapshot,
+            canonicalProbeSnapshot,
+            localHlsManifest,
+            bridgeStats: stats,
+            rendererHealth,
+            persistedAuthorityState,
+            cloudflareLiveInputId,
+            captureStats: {
+              clientConnected: status.clientConnected,
+              ffmpegRunning: status.ffmpegRunning,
+            },
+          }),
+        );
       } catch {
         return reply.status(503).send({
           error: "RTMP bridge not initialized",
@@ -1116,26 +1993,92 @@ export function registerStreamingRoutes(
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const persistedAuthorityState =
+          await loadPersistedAuthorityStateSafely();
         const capture = getStreamCapture();
+        const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
         const externalSnapshot = await loadExternalRtmpStatusSnapshot(
           EXTERNAL_RTMP_STATUS_FILE || null,
           EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
           { allowStale: true },
         );
-        return reply.send({
-          ...capture.getStats(),
-          rendererHealth: deriveBettingRendererHealth(
-            getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
-            {
-              externalStatusSnapshot: externalSnapshot,
-              externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
-            },
-          ),
-        });
+        const canonicalProbeSnapshot = canonicalPlaybackProbePoller
+          ? await canonicalPlaybackProbePoller
+              .refresh()
+              .then(() => canonicalPlaybackProbePoller.getSnapshot())
+          : null;
+        const captureStats = capture.getStats();
+        const rendererHealth = deriveBettingRendererHealth(
+          getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+          {
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            localHlsManifest,
+            captureStats,
+          },
+        );
+        return reply.send(
+          buildStreamingStatusPayload({
+            base: captureStats,
+            externalSnapshot,
+            canonicalProbeSnapshot,
+            localHlsManifest,
+            rendererHealth,
+            persistedAuthorityState,
+            cloudflareLiveInputId,
+            captureStats,
+          }),
+        );
       } catch {
         return reply.status(503).send({
           error: "Stream capture not initialized",
           message: "The stream capture pipeline has not been started",
+        });
+      }
+    },
+  );
+
+  fastify.get(
+    "/api/streaming/capture/smoke",
+    {
+      config: { rateLimit: false },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const externalSnapshot = await loadExternalRtmpStatusSnapshot(
+          EXTERNAL_RTMP_STATUS_FILE || null,
+          EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+          { allowStale: true },
+        );
+        const delivery =
+          externalSnapshot?.delivery ?? resolveStreamDeliveryInfo(process.env);
+        return reply.send({
+          ...normalizeStreamingStatusSmoke({
+            externalSnapshot,
+            deliveryModeFallback: delivery.mode,
+          }),
+          sourceRuntime: deriveStreamSourceRuntime({
+            externalStatusSnapshot: externalSnapshot,
+            externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+            rendererHealth: deriveBettingRendererHealth(
+              getStreamingDuelScheduler()?.getCurrentCycle() ?? null,
+              {
+                externalStatusSnapshot: externalSnapshot,
+                externalStatusMaxAgeMs: EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
+                localHlsManifest: readLocalHlsManifestSnapshot(process.env),
+                captureStats: getStreamCapture().getStats(),
+              },
+            ),
+            localHlsManifest: readLocalHlsManifestSnapshot(process.env),
+            captureStats: getStreamCapture().getStats(),
+            requireExternalWorker: REQUIRE_EXTERNAL_SOURCE_RUNTIME,
+          }),
+        });
+      } catch {
+        return reply.status(503).send({
+          error: "Stream capture smoke unavailable",
+          message:
+            "The stream capture smoke summary is not available right now",
         });
       }
     },

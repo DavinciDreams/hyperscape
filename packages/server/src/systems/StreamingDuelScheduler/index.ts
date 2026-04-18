@@ -1360,8 +1360,25 @@ export class StreamingDuelScheduler {
       this.orchestrator.endFightByTimeout();
     }
 
-    // Update HP from entities
-    this.orchestrator.updateContestantHp();
+    // Update HP from entities and feed damage hits to camera director
+    const hpDeltas = this.orchestrator.updateContestantHp();
+    if (hpDeltas && this.currentCycle) {
+      const { hpLost1, hpLost2, maxHp1, maxHp2 } = hpDeltas;
+      if (hpLost1 > 0 && this.currentCycle.agent1) {
+        this.camera.onCombatHit(
+          this.currentCycle.agent1.characterId,
+          hpLost1 / Math.max(1, maxHp1),
+          now,
+        );
+      }
+      if (hpLost2 > 0 && this.currentCycle.agent2) {
+        this.camera.onCombatHit(
+          this.currentCycle.agent2.characterId,
+          hpLost2 / Math.max(1, maxHp2),
+          now,
+        );
+      }
+    }
 
     // Fallback: nudge stalled fights so the stream cycle still progresses even
     // when combat start hooks fail in this tick window.
@@ -1505,6 +1522,12 @@ export class StreamingDuelScheduler {
         this.currentCycle.agent1?.characterId === loserId
           ? this.currentCycle.agent1.damageDealtThisFight
           : (this.currentCycle.agent2?.damageDealtThisFight ?? 0),
+      // Oracle proof — needed by the keeper result-catch-up endpoint so a
+      // missed onDuelEnd event can still be replayed to resolve the bundle.
+      duelKeyHex: this.currentCycle.duelKeyHex ?? null,
+      duelEndTime: this.currentCycle.duelEndTime ?? null,
+      seed: this.currentCycle.seed ?? null,
+      replayHash: this.currentCycle.replayHash ?? null,
     });
 
     // Pull per-fight AI stats (attacksLanded, healsUsed) captured in stopCombatAIs
@@ -2379,6 +2402,25 @@ export class StreamingDuelScheduler {
       if (this.camera.isAgentValidCameraCandidate(agentId)) {
         return agentId;
       }
+    }
+
+    // Final fallback: during an active cycle, prefer to point at a contestant
+    // that still has a live world entity, even if they are no longer in the
+    // matchmaking `availableAgents` pool. This covers the case where a
+    // contestant disconnects mid-fight (PLAYER_LEFT → unregisterAgent) and
+    // is therefore no longer a "valid camera candidate" by the matchmaking
+    // rule, but their entity is still in the arena and is the thing the
+    // viewer actually wants to see. Observed on 2026-04-15 where the state
+    // endpoint returned `phase: FIGHTING` with `cameraTarget: null` because
+    // both contestants had been unregistered from matchmaking but were still
+    // alive in the world.
+    const cycleAgent1Id = this.currentCycle.agent1?.characterId;
+    if (cycleAgent1Id && this.world.entities.get(cycleAgent1Id)) {
+      return cycleAgent1Id;
+    }
+    const cycleAgent2Id = this.currentCycle.agent2?.characterId;
+    if (cycleAgent2Id && this.world.entities.get(cycleAgent2Id)) {
+      return cycleAgent2Id;
     }
 
     return null;

@@ -317,6 +317,20 @@ export class TerrainComputeContext {
       "rtex_output",
       pixelCount * 4,
     );
+    // Dispatch shape: one GPU thread per pixel at workgroup size 64.
+    // At textureSize ≥ 2048 (pixelCount ≥ 4,194,304) the 1D workgroup
+    // count exceeds WebGPU's 65535 per-dimension ceiling. Reshape to
+    // 2D (dispatchX, dispatchY, 1) in that case and pass numWorkgroupsX
+    // so the shader can reconstruct the linear pixel index via
+    //   idx = global_id.y * (numWorkgroupsX * 64) + global_id.x
+    // Under the 1D case (pixelCount < 4.19M) dispatchY degenerates
+    // to 1 and the math yields idx = global_id.x — identical to the
+    // previous behavior.
+    const totalWorkgroups = Math.ceil(pixelCount / 64);
+    const WEBGPU_MAX_WORKGROUPS_PER_DIM = 65535;
+    const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
+    const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
+
     const uniformBuffer = this.ctx.createUniformBuffer(
       "rtex_uniforms",
       new Float32Array([
@@ -327,7 +341,7 @@ export class TerrainComputeContext {
         centerX,
         centerZ,
         blendWidth,
-        0, // padding
+        dispatchX, // numWorkgroupsX — see shader comment
       ]),
     );
 
@@ -349,11 +363,10 @@ export class TerrainComputeContext {
       throw new Error("Failed to create bind group");
     }
 
-    // Dispatch
     await this.ctx.dispatchAndWait({
       pipeline: this.roadInfluenceTexturePipeline,
       bindGroup,
-      workgroupCount: this.ctx.calculateWorkgroupCount(pixelCount, 64),
+      workgroupCount: [dispatchX, dispatchY, 1],
     });
 
     // Read back results

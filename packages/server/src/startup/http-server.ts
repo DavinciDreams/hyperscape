@@ -33,6 +33,7 @@ import Fastify, {
   type FastifyReply,
 } from "fastify";
 import fs from "fs-extra";
+import { Readable } from "node:stream";
 import path from "path";
 import type { ServerConfig } from "./config.js";
 import {
@@ -48,12 +49,60 @@ import {
   enforceSameSiteCookies,
 } from "../middleware/csrf.js";
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function derivePagesProjectHost(hostname: string): string | null {
+  const normalized = hostname.trim().toLowerCase();
+  if (!normalized.endsWith(".pages.dev")) {
+    return null;
+  }
+
+  const segments = normalized.split(".");
+  if (segments.length < 3) {
+    return null;
+  }
+
+  return segments.slice(-3).join(".");
+}
+
+export function buildPagesPreviewOriginPatterns(
+  origin: string | null | undefined,
+): RegExp[] {
+  const trimmed = origin?.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return [];
+    }
+
+    const projectHost = derivePagesProjectHost(parsed.hostname);
+    if (!projectHost) {
+      return [];
+    }
+
+    return [
+      new RegExp(
+        `^${escapeRegExp(parsed.protocol)}//(?:[a-z0-9-]+\\.)+${escapeRegExp(projectHost)}$`,
+        "i",
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * SECURITY: Validate Origin header for state-changing requests.
  * This provides additional protection against cross-origin attacks
  * even though we don't use cookies (which would make CSRF a non-issue).
  */
-function createOriginValidator(allowedOrigins: (string | RegExp)[]) {
+export function createOriginValidator(allowedOrigins: (string | RegExp)[]) {
   return function validateOrigin(origin: string | undefined): boolean {
     if (!origin) return true; // Server-to-server or same-origin requests may not have Origin
 
@@ -148,6 +197,11 @@ export async function createHttpServer(
     process.env.PUBLIC_APP_URL ||
     getDefaultPublicAppUrl();
   const serverUrl = process.env.SERVER_URL || `http://localhost:${config.port}`;
+  const derivedPagesPreviewOrigins = [
+    ...buildPagesPreviewOriginPatterns(clientUrl),
+    ...buildPagesPreviewOriginPatterns(process.env.PUBLIC_APP_URL),
+    ...buildPagesPreviewOriginPatterns(process.env.CLIENT_URL),
+  ];
 
   const allowedOrigins = [
     // Production domains (HTTPS)
@@ -162,8 +216,6 @@ export async function createHttpServer(
     "https://hyperscape.pages.dev",
     "https://hyperscape-betting.pages.dev",
     "https://hyperbet.pages.dev",
-    "https://hyperbet-solana.pages.dev",
-    "https://hyperbet-bsc.pages.dev",
     "https://hyperscape-production.up.railway.app",
     "https://api.hyperbet.win",
     "https://bsc-api.hyperbet.win",
@@ -171,8 +223,6 @@ export async function createHttpServer(
     "http://hyperscape.pages.dev",
     "http://hyperscape-betting.pages.dev",
     "http://hyperbet.pages.dev",
-    "http://hyperbet-solana.pages.dev",
-    "http://hyperbet-bsc.pages.dev",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
     clientUrl, // Game Client
@@ -183,8 +233,6 @@ export async function createHttpServer(
     /^https?:\/\/.+\.hyperbet\.win$/, // hyperbet.win subdomains
     /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/, // Existing Hyperbet Pages preview deployments
     /^https?:\/\/.+\.hyperbet\.pages\.dev$/, // Hyperbet Pages preview deployments
-    /^https?:\/\/.+\.hyperbet-solana\.pages\.dev$/, // Hyperbet Solana preview deployments
-    /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
     /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
@@ -192,6 +240,7 @@ export async function createHttpServer(
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
     /^https:\/\/.+\.up\.railway\.app$/,
+    ...derivedPagesPreviewOrigins,
   ];
 
   // Add custom domain from env if set
@@ -558,15 +607,28 @@ async function registerStaticFiles(
       : null;
 
   if (gameAssetsRoot) {
-    await fastify.register(statics, {
-      root: gameAssetsRoot,
-      prefix: "/game-assets/",
-      decorateReply: false,
-      setHeaders: (res, filePath) => {
-        setAssetHeaders(res, filePath);
-      },
-    });
-    console.log(`[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot}`);
+    const gameAssetsFallbackUrl =
+      process.env["GAME_ASSETS_FALLBACK_URL"]?.trim() || null;
+    if (gameAssetsFallbackUrl) {
+      registerGameAssetsRoute(
+        fastify,
+        gameAssetsRoot,
+        gameAssetsFallbackUrl,
+      );
+      console.log(
+        `[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot} (fallback: ${gameAssetsFallbackUrl})`,
+      );
+    } else {
+      await fastify.register(statics, {
+        root: gameAssetsRoot,
+        prefix: "/game-assets/",
+        decorateReply: false,
+        setHeaders: (res, filePath) => {
+          setAssetHeaders(res, filePath);
+        },
+      });
+      console.log(`[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot}`);
+    }
 
     const legacyAssetsRoot = hasCachedAssetsDir
       ? config.assetsDir
@@ -768,6 +830,124 @@ function setAssetHeaders(
   // browser) can fetch assets served from :5555 without triggering CORP blocks.
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+}
+
+function normalizeGameAssetPath(rawPath: string): string | null {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(rawPath);
+  } catch {
+    return null;
+  }
+
+  const normalizedPath = path.posix
+    .normalize(decodedPath)
+    .replace(/^\/+/, "");
+  if (
+    normalizedPath.length === 0 ||
+    normalizedPath === "." ||
+    normalizedPath === ".." ||
+    normalizedPath.startsWith("../")
+  ) {
+    return null;
+  }
+  return normalizedPath;
+}
+
+function copyHeaderIfPresent(
+  reply: FastifyReply,
+  upstreamHeaders: Headers,
+  headerName: string,
+): void {
+  const value = upstreamHeaders.get(headerName);
+  if (value) {
+    reply.header(headerName, value);
+  }
+}
+
+function registerGameAssetsRoute(
+  fastify: FastifyInstance,
+  gameAssetsRoot: string,
+  fallbackBaseUrl: string,
+): void {
+  const resolvedRoot = path.resolve(gameAssetsRoot);
+  const fallbackRoot = fallbackBaseUrl.endsWith("/")
+    ? fallbackBaseUrl
+    : `${fallbackBaseUrl}/`;
+
+  fastify.route({
+    method: ["GET", "HEAD"],
+    url: "/game-assets/*",
+    handler: async (request, reply) => {
+      const rawPath = String((request.params as { "*": string })["*"] || "");
+      const normalizedPath = normalizeGameAssetPath(rawPath);
+      if (!normalizedPath) {
+        return reply.code(400).send({ error: "Invalid asset path" });
+      }
+
+      const localAssetPath = path.resolve(resolvedRoot, normalizedPath);
+      if (
+        localAssetPath === resolvedRoot ||
+        !localAssetPath.startsWith(`${resolvedRoot}${path.sep}`)
+      ) {
+        return reply.code(400).send({ error: "Invalid asset path" });
+      }
+
+      if (await fs.pathExists(localAssetPath)) {
+        setAssetHeaders(reply.raw, localAssetPath);
+        if (request.method === "HEAD") {
+          const stats = await fs.stat(localAssetPath);
+          reply.header("Content-Length", String(stats.size));
+          return reply.code(200).send();
+        }
+        return reply.send(fs.createReadStream(localAssetPath));
+      }
+
+      if (normalizedPath.startsWith("manifests/")) {
+        return reply.code(404).send({ error: "Asset not found" });
+      }
+
+      const requestUrl = new URL(
+        request.raw.url || `/game-assets/${normalizedPath}`,
+        "http://localhost",
+      );
+      const fallbackUrl = new URL(normalizedPath, fallbackRoot);
+      fallbackUrl.search = requestUrl.search;
+
+      console.warn(
+        `[HTTP] Local asset miss for /game-assets/${normalizedPath}; proxying to ${fallbackUrl.toString()}`,
+      );
+
+      const upstreamResponse = await fetch(fallbackUrl, {
+        method: request.method,
+        redirect: "follow",
+      });
+      if (!upstreamResponse.ok) {
+        return reply
+          .code(upstreamResponse.status)
+          .send({ error: "Asset not found" });
+      }
+
+      setAssetHeaders(reply.raw, normalizedPath);
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "content-type");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "content-length");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "etag");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "last-modified");
+      copyHeaderIfPresent(reply, upstreamResponse.headers, "accept-ranges");
+
+      if (request.method === "HEAD") {
+        return reply.code(200).send();
+      }
+
+      if (!upstreamResponse.body) {
+        return reply.code(502).send({ error: "Asset fallback returned no body" });
+      }
+
+      return reply.send(
+        Readable.fromWeb(upstreamResponse.body as any),
+      );
+    },
+  });
 }
 
 /**

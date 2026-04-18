@@ -677,7 +677,23 @@ export class RuntimeComputeContext {
     elementCount: number,
     workgroupSize: number = 64,
   ): number {
-    return Math.ceil(elementCount / workgroupSize);
+    const count = Math.ceil(elementCount / workgroupSize);
+    // TEMPORARY CANARY INSTRUMENTATION: the 2D-reshape migration is in
+    // progress (only broadphase done). Any call still returning > 65535
+    // will cause WebGPU to reject the dispatch with "Dispatch workgroup
+    // count X exceeds max compute workgroups per dimension". Log a
+    // stack-trace-tagged warning so the canary reveals the exact offenders
+    // instead of the unhelpful "unlabeled ComputePassEncoder" GPUDevice
+    // error. Safe to strip once the migration lands.
+    if (count > 65535) {
+      const stack =
+        new Error("[compute-dispatch-over-limit]").stack ??
+        "(no stack available)";
+      console.warn(
+        `[compute] calculateWorkgroupCount=${count} (elementCount=${elementCount}, workgroupSize=${workgroupSize}) exceeds WebGPU 65535 per-dimension ceiling. Dispatch will fail unless reshaped to 2D.\n${stack}`,
+      );
+    }
+    return count;
   }
 
   /**

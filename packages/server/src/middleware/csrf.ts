@@ -63,8 +63,6 @@ const KNOWN_CROSS_ORIGIN_PATTERNS = [
   /^https?:\/\/(www\.)?hyperscape-betting\.pages\.dev$/,
   /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/,
   /^https?:\/\/.+\.hyperbet\.pages\.dev$/,
-  /^https?:\/\/.+\.hyperbet-solana\.pages\.dev$/,
-  /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/,
   /^https?:\/\/.+\.hyperscape\.pages\.dev$/,
 ];
 

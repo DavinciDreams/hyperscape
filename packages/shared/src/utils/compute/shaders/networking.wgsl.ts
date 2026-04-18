@@ -445,7 +445,14 @@ struct Uniforms {
   aabbCount: u32,
   layerMask: u32,  // Bitmask for layer filtering
   maxOverlaps: u32,
-  padding: u32,
+  // X-dimension workgroup count passed from the host. Needed because this
+  // shader can be dispatched 2D (dispatchWorkgroups(x, y, 1)) whenever
+  // ceil(totalPairs/64) exceeds WebGPU's per-dimension ceiling of 65535.
+  // In that case the linear thread index must be reconstructed from
+  // (global_invocation_id.x, global_invocation_id.y) instead of
+  // global_invocation_id.x alone. The 1D dispatch case just passes y=1
+  // and this field is still correct (numWorkgroupsX equals the total).
+  numWorkgroupsX: u32,
 }
 
 @group(0) @binding(0) var<storage, read> aabbs: array<AABB>;
@@ -461,13 +468,20 @@ fn aabbOverlap(a: AABB, b: AABB) -> bool {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  let threadIdx = global_id.x;
-  
+  // Reconstruct the linear thread index across 2D dispatch.
+  // threadsPerRow = numWorkgroupsX * workgroup_size_x.
+  // Under a 1D dispatch dispatchWorkgroups(N, 1, 1), global_id.y is 0 and
+  // this reduces to threadIdx = global_id.x. Under a 2D dispatch
+  // dispatchWorkgroups(65535, K, 1), global_id.y ranges 0..K-1 and we
+  // offset by a full row of threads per y.
+  let threadsPerRow = uniforms.numWorkgroupsX * 64u;
+  let threadIdx = global_id.y * threadsPerRow + global_id.x;
+
   // Each thread checks one pair (upper triangle of N×N matrix)
   // Thread i maps to pair (a, b) where a < b
   let n = uniforms.aabbCount;
   let totalPairs = n * (n - 1u) / 2u;
-  
+
   if (threadIdx >= totalPairs) {
     return;
   }
