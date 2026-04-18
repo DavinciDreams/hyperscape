@@ -279,16 +279,18 @@ In shared, build `PIEServerSession` that:
 Then point `usePIESession.ts` at `PIEServerSession` and delete
 `createPlayTestWorld.ts` + `PIENetworkStub`.
 
-**Step 9 — PARTIAL (2026-04-18 18:45 EDT)**:
+**Step 9 — PARTIAL (2026-04-18 19:03 EDT)**:
 - ✅ `InMemoryStubs.ts` — 14 narrow-interface stubs + `createPIEStubSystemDatabase()`
 - ✅ `PIEBridgeSystems.ts` — 8 `SystemBase` adapters + `registerPIEBridges(world)`
 - ✅ `createPIEServerWorld.ts` — minimal server-world factory (skips procgen/towns/POI/docks/livekit/bot)
 - ✅ `PIEServerSession.ts` — composes world + bridges + `ServerNetwork` + `InMemorySocketPair`
-- ✅ 17 unit + integration tests green (bridges, lifecycle guards, SystemDatabase stub, real `start()` + `connect()`)
-- ✅ Real `start()` → `world.init()` → `ServerNetwork` tick loop + `connect()` verified in-process
+- ✅ `PIELoopbackConnectionHandler` (replaces `PIENoopConnectionHandler`) — wraps `InMemorySocket` in real `Socket`, registers in `ServerNetwork.sockets` with a synthetic `accountId` (from `ConnectionParams.characterId` or uuid). No Privy auth, no snapshot send, no player-entity creation (editor owns those).
+- ✅ 20 unit + integration tests green: bridges, lifecycle guards, `SystemDatabase` stub, real `start()` + `connect()`, socket registration, server→client packet roundtrip via `sendPacket`, clean disconnect teardown (`Socket.onClose` → `SocketManager.handleDisconnect` → `sockets.delete`).
+- ✅ Commits `054588a48` (foundation) + `79822c7ef` (loopback handler).
 
 **Step 9 — REMAINING** (next phase, not blocking migration):
-- ⏳ Editor repoint (`usePIESession.ts`): depends on `PlayTestWorld`'s lightweight entity map (`entities.values()`), simulate mode, per-entity script-graph injection, `interactWith()`, `gameMode`, `isRunning`, debug sink. `PIEServerSession` wraps a real server world whose entity/gameplay surface is different — repoint requires either a compatibility façade or an editor rework that consumes the real ECS.
+- ⏳ Editor repoint (`usePIESession.ts`): depends on `PlayTestWorld`'s lightweight entity map (`entities.values()`), simulate mode, per-entity script-graph injection, `interactWith()`, `gameMode`, `isRunning`, debug sink. `PIEServerSession` wraps a real server world whose entity/gameplay surface is different — repoint requires either a compatibility façade or an editor rework that consumes the real ECS via `ClientNetwork`-over-`InMemorySocket`.
+- ⏳ `ClientNetwork` PIE-friendliness: real client currently expects a `wsUrl` and constructs its own WebSocket; PIE needs it to accept a pre-connected `InMemorySocket` so the editor can speak to `PIEServerSession` over the same code path the live client uses.
 - ⏳ Delete `createPlayTestWorld.ts` + `PIENetworkStub`: blocked on editor repoint above.
 
 ## Per-step checklist
