@@ -571,35 +571,7 @@ export function registerAgentRoutes(
       const accountId = `wallet:${walletType}:${walletAddress}`;
 
       // Get database access
-      const databaseSystem = world.getSystem("database") as
-        | {
-            db: {
-              select: (fields?: unknown) => {
-                from: (table: unknown) => {
-                  where: (condition: unknown) => Promise<unknown[]>;
-                };
-              };
-              insert: (table: unknown) => {
-                values: (values: Record<string, unknown>) => {
-                  onConflictDoUpdate: (config: {
-                    target: unknown;
-                    set: unknown;
-                  }) => Promise<unknown>;
-                } & Promise<unknown>;
-              };
-              query: {
-                characters: {
-                  findFirst: (opts: {
-                    where: (
-                      chars: { accountId: unknown },
-                      ops: { eq: (a: unknown, b: string) => unknown },
-                    ) => unknown;
-                  }) => Promise<{ id: string; name: string } | null>;
-                };
-              };
-            };
-          }
-        | undefined;
+      const databaseSystem = getDatabaseSystem();
 
       if (!databaseSystem?.db) {
         return reply.status(500).send({
@@ -3102,42 +3074,7 @@ export function registerAgentRoutes(
       const inputCharacterId = body.characterId;
 
       // Get character from database to retrieve accountId and name
-      const databaseSystem = world.getSystem("database") as
-        | {
-            db: {
-              select: (fields?: unknown) => {
-                from: (table: unknown) => {
-                  where: (condition: unknown) => Promise<unknown[]>;
-                };
-              };
-              insert: (table: unknown) => {
-                values: (values: Record<string, unknown>) => {
-                  onConflictDoUpdate: (config: {
-                    set: Record<string, unknown>;
-                    target: unknown;
-                  }) => Promise<unknown>;
-                } & Promise<unknown>;
-              };
-              delete: (table: unknown) => {
-                where: (condition: unknown) => Promise<unknown>;
-              };
-              query: {
-                characters: {
-                  findFirst: (opts: {
-                    where: (
-                      chars: { id: unknown },
-                      ops: { eq: (a: unknown, b: string) => unknown },
-                    ) => unknown;
-                  }) => Promise<{
-                    id: string;
-                    accountId: string;
-                    name: string;
-                  } | null>;
-                };
-              };
-            };
-          }
-        | undefined;
+      const databaseSystem = getDatabaseSystem();
 
       if (!databaseSystem?.db) {
         return reply.status(500).send({
