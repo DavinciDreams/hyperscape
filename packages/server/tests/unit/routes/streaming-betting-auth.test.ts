@@ -3,6 +3,7 @@ import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
+  resolveOracleProofAccessToken,
   shouldSkipBettingFeedAuth,
 } from "../../../src/routes/streaming-betting-auth.js";
 
@@ -81,5 +82,35 @@ describe("streaming-betting-auth", () => {
         BETTING_FEED_SKIP_AUTH: "true",
       }),
     ).toBe(false);
+  });
+
+  it("prefers STREAMING_ORACLE_PROOF_TOKEN over the betting feed token for oracle proof retrieval", () => {
+    expect(
+      resolveOracleProofAccessToken({
+        STREAMING_ORACLE_PROOF_TOKEN: "oracle-secret",
+        BETTING_FEED_ACCESS_TOKEN: "bet-secret",
+      }),
+    ).toEqual({
+      token: "oracle-secret",
+      source: "oracle-proof",
+    });
+  });
+
+  it("falls back to BETTING_FEED_ACCESS_TOKEN when the oracle-proof token is unset", () => {
+    expect(
+      resolveOracleProofAccessToken({
+        BETTING_FEED_ACCESS_TOKEN: "bet-secret",
+      }),
+    ).toEqual({
+      token: "bet-secret",
+      source: "betting-feed",
+    });
+  });
+
+  it("reports missing auth when neither oracle-proof nor betting feed token is configured", () => {
+    expect(resolveOracleProofAccessToken({})).toEqual({
+      token: null,
+      source: null,
+    });
   });
 });

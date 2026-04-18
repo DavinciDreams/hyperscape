@@ -9,6 +9,11 @@ export type BettingFeedAccessTokenResolution = {
   source: "betting-feed" | null;
 };
 
+export type OracleProofAccessTokenResolution = {
+  token: string | null;
+  source: "oracle-proof" | "betting-feed" | null;
+};
+
 export function shouldSkipBettingFeedAuth(
   env: Record<string, string | undefined>,
 ): boolean {
@@ -69,4 +74,24 @@ export function resolveBettingFeedAccessToken(
     token: null,
     source: null,
   };
+}
+
+// Oracle-proof retrieval (`/api/streaming/results/:duelId`) exposes
+// `duelKeyHex` + `seed` + `replayHash` — the material needed to submit a
+// Solana resolution. This secret must be scopable narrower than the general
+// betting feed token. STREAMING_ORACLE_PROOF_TOKEN is the dedicated secret;
+// if it is unset we fall back to BETTING_FEED_ACCESS_TOKEN so existing
+// deployments keep working during rollout.
+export function resolveOracleProofAccessToken(
+  env: Record<string, string | undefined>,
+): OracleProofAccessTokenResolution {
+  const oracleToken = env.STREAMING_ORACLE_PROOF_TOKEN?.trim() || null;
+  if (oracleToken) {
+    return { token: oracleToken, source: "oracle-proof" };
+  }
+  const bettingFeedToken = env.BETTING_FEED_ACCESS_TOKEN?.trim() || null;
+  if (bettingFeedToken) {
+    return { token: bettingFeedToken, source: "betting-feed" };
+  }
+  return { token: null, source: null };
 }

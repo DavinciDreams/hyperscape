@@ -40,6 +40,7 @@ import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
+  resolveOracleProofAccessToken,
   shouldSkipBettingFeedAuth,
 } from "./streaming-betting-auth.js";
 import {
@@ -1581,9 +1582,14 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/duel-context",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const scheduler = getStreamingDuelScheduler();
       if (!scheduler) {
         return reply.status(503).send({
@@ -1645,9 +1651,14 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/monologues",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       if (STREAMING_PUBLIC_DELAY_MS > 0) {
         return reply.send({
           characterId: request.params.characterId,
@@ -1674,9 +1685,14 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/inventory",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       if (STREAMING_PUBLIC_DELAY_MS > 0) {
         return reply.send({
           characterId: request.params.characterId,
@@ -1698,9 +1714,14 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/leaderboard",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const scheduler = getStreamingDuelScheduler();
 
       if (!scheduler) {
@@ -1728,9 +1749,14 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/leaderboard/details",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const scheduler = getStreamingDuelScheduler();
 
       if (!scheduler) {
@@ -1799,23 +1825,44 @@ export function registerStreamingRoutes(
   // that event. This endpoint lets the keeper reconstruct the resolution
   // from the durable streaming_duel_history row.
   //
-  // Bearer-auth via the same token the betting feed uses (BETTING_FEED_ACCESS_TOKEN).
+  // Bearer-auth is keyed to STREAMING_ORACLE_PROOF_TOKEN if configured.
+  // BETTING_FEED_ACCESS_TOKEN is accepted as a compatibility fallback so
+  // existing deployments keep working during rollout. Operators should
+  // migrate to the dedicated oracle-proof secret to narrow the blast
+  // radius of a feed-token leak.
+  let oracleProofFallbackWarnLogged = false;
+  let oracleProofSkipAuthWarnLogged = false;
   const authorizeResultsLookup = async (
     request: FastifyRequest,
     reply: FastifyReply,
   ) => {
-    const skipAuth = shouldSkipBettingFeedAuth(
-      process.env as Record<string, string | undefined>,
-    );
-    const requiredToken = resolveBettingFeedAccessToken(
-      process.env as Record<string, string | undefined>,
-    ).token;
+    const env = process.env as Record<string, string | undefined>;
+    const skipAuth = shouldSkipBettingFeedAuth(env);
+    const resolution = resolveOracleProofAccessToken(env);
+    const requiredToken = resolution.token;
+
+    if (
+      resolution.source === "betting-feed" &&
+      !oracleProofFallbackWarnLogged
+    ) {
+      fastify.log.warn(
+        "[streaming] /api/streaming/results/:duelId authenticated via BETTING_FEED_ACCESS_TOKEN; set STREAMING_ORACLE_PROOF_TOKEN to scope oracle-proof access independently",
+      );
+      oracleProofFallbackWarnLogged = true;
+    }
+
     if (!requiredToken) {
       if (process.env.NODE_ENV === "production" || !skipAuth) {
         return reply.status(503).send({
           error: "Service unavailable",
-          message: "Betting feed auth token is not configured",
+          message: "Oracle proof auth token is not configured",
         });
+      }
+      if (!oracleProofSkipAuthWarnLogged) {
+        fastify.log.warn(
+          "[streaming] /api/streaming/results/:duelId is serving requests UNAUTHENTICATED (BETTING_FEED_SKIP_AUTH=true, NODE_ENV=development)",
+        );
+        oracleProofSkipAuthWarnLogged = true;
       }
       return;
     }
@@ -1829,7 +1876,7 @@ export function registerStreamingRoutes(
 
     return reply.status(401).send({
       error: "Unauthorized",
-      message: "Missing or invalid betting feed token",
+      message: "Missing or invalid oracle proof token",
     });
   };
 

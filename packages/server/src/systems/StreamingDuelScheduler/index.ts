@@ -1424,7 +1424,7 @@ export class StreamingDuelScheduler {
     loserId: string,
     winReason: "kill" | "hp_advantage" | "damage_advantage" | "draw",
     finishedAt: number,
-  ): { seed: string; replayHash: string } {
+  ): { duelKeyHex: string | null; seed: string; replayHash: string } {
     const duelId = cycle.duelId ?? `streaming-${cycle.cycleId}`;
     const fightStartedAt = cycle.fightStartTime ?? cycle.cycleStartTime;
     const duelSeedHex = crypto
@@ -1455,7 +1455,11 @@ export class StreamingDuelScheduler {
         }),
       )
       .digest("hex");
-    return { seed, replayHash };
+    // Return the duel key alongside seed + replayHash so the proof is
+    // self-contained. Callers that persist the proof must not rely on
+    // cycle.duelKeyHex still being populated at write time — the cycle can
+    // be cleared by shutdown or phase-reset before persistence completes.
+    return { duelKeyHex: cycle.duelKeyHex ?? null, seed, replayHash };
   }
 
   /**
@@ -1504,6 +1508,11 @@ export class StreamingDuelScheduler {
     );
     this.currentCycle.seed = oracleProof.seed;
     this.currentCycle.replayHash = oracleProof.replayHash;
+    // If the cycle's duelKeyHex was somehow cleared, recover it from the
+    // self-contained proof so persistence below is consistent.
+    if (!this.currentCycle.duelKeyHex && oracleProof.duelKeyHex) {
+      this.currentCycle.duelKeyHex = oracleProof.duelKeyHex;
+    }
 
     // Update stats — draws don't affect win/loss/streaks (#24)
     if (winReason === "draw") {
@@ -2010,9 +2019,7 @@ export class StreamingDuelScheduler {
   }
 
   private broadcastState(): void {
-    const state = redactOracleProofFromStreamingState(
-      this.getStreamingState(),
-    );
+    const state = redactOracleProofFromStreamingState(this.getStreamingState());
     // Broadcast streaming state only to spectator sockets (interest management).
     // Regular gameplay clients don't need streaming duel updates every second.
     const network = this.world.network as NetworkWithSend | undefined;
