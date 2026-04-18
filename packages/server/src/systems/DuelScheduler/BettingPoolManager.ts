@@ -442,9 +442,15 @@ function isValidSolanaWalletAddress(walletAddress: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(walletAddress.trim());
 }
 
+// Integer portion capped at 18 digits (~10^18, covers lamports/gwei scale),
+// fractional capped at 8 digits. Unlimited precision previously admitted
+// strings like "1.123456789012345678901234567890" that could exacerbate
+// rounding errors in NUMERIC SUM aggregation and on-chain serialization.
+const BET_AMOUNT_PATTERN = /^(?:0|[1-9]\d{0,17})(?:\.\d{1,8})?$/;
+
 function isValidPositiveDecimalAmount(amount: string): boolean {
   const normalized = amount.trim();
-  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(normalized)) {
+  if (!BET_AMOUNT_PATTERN.test(normalized)) {
     return false;
   }
   return !/^0+(?:\.0+)?$/.test(normalized);

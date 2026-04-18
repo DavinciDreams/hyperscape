@@ -253,11 +253,23 @@ async function uploadFile(
   await uploadPromise;
 }
 
+// HLS output produces structured filenames (e.g. index.m3u8, 0001.ts).
+// Restrict uploads to this allowlist so a crafted filename such as
+// "../../../etc/passwd" cannot traverse outside config.hlsDir, even if the
+// watcher or readdir output is ever influenced by a compromised capture
+// process. basename() alone is not enough — it strips prefixes but permits
+// arbitrary characters in the leaf.
+const HLS_SAFE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
+const isSafeHlsFilename = (name: string): boolean =>
+  HLS_SAFE_FILENAME_RE.test(name) &&
+  !name.startsWith(".") &&
+  !name.includes("..");
+
 async function syncDirectory(config: HlsCdnConfig): Promise<void> {
   try {
     const files = await readdir(config.hlsDir);
     const hlsFiles = files.filter(
-      (f) => f.endsWith(".ts") || f.endsWith(".m3u8"),
+      (f) => isSafeHlsFilename(f) && (f.endsWith(".ts") || f.endsWith(".m3u8")),
     );
 
     // Upload .ts segments first, then .m3u8 (so playlist references exist)
@@ -306,6 +318,9 @@ export function startHlsCdnSync(): string | null {
         const rawFileName = filename.toString();
         const safeFileName = basename(rawFileName);
         if (safeFileName !== rawFileName) {
+          return;
+        }
+        if (!isSafeHlsFilename(safeFileName)) {
           return;
         }
         if (safeFileName.endsWith(".ts") || safeFileName.endsWith(".m3u8")) {

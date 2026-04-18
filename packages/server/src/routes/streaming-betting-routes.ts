@@ -2090,9 +2090,14 @@ export function registerStreamingBettingRoutes(
   );
 
   // Cloudflare webhook bodies are small JSON events (live-input lifecycle +
-  // recording metadata). Cap at 32 KiB and require an object-shaped body so
-  // a compromised webhook secret can't be used to deliver arbitrarily large
-  // or non-object payloads.
+  // recording metadata). Cap at 32 KiB and require an object-shaped body.
+  // We keep `additionalProperties: true` because Cloudflare evolves the
+  // webhook schema on their side and a closed allowlist would break on
+  // format updates. Defense-in-depth against injection already happens at:
+  //   1. timingSafeEqual shared-secret verification (authorizeCloudflareWebhook)
+  //   2. bodyLimit (here)
+  //   3. summarizeCloudflareLiveWebhook() — field-by-field allowlist parsing,
+  //      so unknown fields never reach downstream persistence
   fastify.post<{
     Body: Record<string, unknown>;
   }>(
