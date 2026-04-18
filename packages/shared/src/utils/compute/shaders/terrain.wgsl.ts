@@ -190,6 +190,7 @@ struct Uniforms {
   // numWorkgroupsX = totalWorkgroups, and the arithmetic degenerates
   // back to idx = global_id.x.
   numWorkgroupsX: u32,
+  numWorkgroupsX: u32,
 }
 
 @group(0) @binding(0) var<storage, read> roads: array<Road>;
@@ -227,10 +228,12 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // Reconstruct the linear pixel index across 2D dispatch.
   // threadsPerRow = numWorkgroupsX * workgroup_size_x.
+  // threadsPerRow = numWorkgroupsX * workgroup_size_x.
   // Under a 1D dispatch dispatchWorkgroups(N, 1, 1), global_id.y is 0
   // and this reduces to idx = global_id.x. Under a 2D dispatch
   // dispatchWorkgroups(65535, K, 1) we offset by a full row of threads
   // per y index.
+  let threadsPerRow = uniforms.numWorkgroupsX * WORKGROUP_SIZE_1D;
   let threadsPerRow = uniforms.numWorkgroupsX * WORKGROUP_SIZE_1D;
   let idx = global_id.y * threadsPerRow + global_id.x;
   let pixelCount = u32(uniforms.pixelCount);
