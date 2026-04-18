@@ -241,8 +241,52 @@ export class PIEInMemoryDatabaseSystem implements IDatabaseSystem {
   }
 
   getDb(): unknown | null {
-    return null;
+    return createPIEStubSystemDatabase();
   }
+}
+
+/**
+ * Minimal `SystemDatabase`-shaped stub for PIE.
+ *
+ * Satisfies `isDatabaseInstance` (it's a function) and the Knex-like query
+ * builder protocol with no-op behavior:
+ *   - every query chain resolves to `[]`
+ *   - `first()` resolves to `undefined`
+ *   - `insert/update/delete` resolve to `0`
+ *
+ * ServerNetwork's `InitializationManager.hydrateEntities()` and
+ * `loadSettings()` both wrap their queries in try/catch and treat empty
+ * results as "nothing to load", so PIE boots cleanly with no entities and
+ * default settings.
+ */
+export function createPIEStubSystemDatabase(): (
+  table: string,
+) => Record<string, unknown> {
+  const makeBuilder = () => {
+    const builder: Record<string, unknown> = {};
+    const chainable = [
+      "where",
+      "whereNull",
+      "whereIn",
+      "whereRaw",
+      "orWhere",
+      "select",
+    ];
+    for (const m of chainable) {
+      builder[m] = () => builder;
+    }
+    builder.first = async () => undefined;
+    builder.update = async () => 0;
+    builder.delete = async () => 0;
+    builder.insert = async () => undefined;
+    builder.then = <T>(onfulfilled: (v: unknown[]) => T) =>
+      Promise.resolve([]).then(onfulfilled);
+    builder.catch = <T>(onrejected: (e: unknown) => T) =>
+      Promise.resolve([]).catch(onrejected);
+    return builder;
+  };
+  const fn = (_table: string) => makeBuilder();
+  return fn;
 }
 
 // ---------------------------------------------------------------------------
