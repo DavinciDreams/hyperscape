@@ -513,15 +513,51 @@ regressions introduced by migration work.
 - Server TS errors: 71 in-package (total 122 with shared), unchanged
   baseline. No regressions from handler migration.
 
-**Next recommended action**: begin Step 5d as a single dedicated effort.
-Further churn on the handler list or on individual DB-coupled files will
-not advance the migration — Step 5d must land as one architectural unit
-(DB write abstractions + transaction tokens) before the remaining
-DB-coupled files (`event-bridge.ts`, `duel-settlement.ts`,
-`handlers/{action-bar,commands,inventory,store}.ts`,
-`handlers/bank/*`, `handlers/common/{transaction,types}.ts`,
-`handlers/trade/{acceptance,items,swap,types}.ts`,
-`handlers/duel/stakes.ts`) can relocate to shared.
+**Step 6 — COMPLETE** (2026-04-18 5:59 EDT, commit `635a7fa72`):
+- `ServerNetwork/index.ts` (3202 lines) physically relocated to
+  `packages/shared/src/systems/server/network/index.ts`.
+- Import path fixes: `../../shared/types` split into `./server-types` +
+  `../../../index`; `@hyperforge/shared` self-import → `../../../index`;
+  interfaces import simplified to `./interfaces`; PlayerLocal cast
+  switched to `../../../index` to dodge shared/build vs shared/src type
+  identity mismatch.
+- Server-side file replaced with a thin re-export shim (subsequently
+  deleted in Step 8).
+
+**Step 8 — PARTIAL** (2026-04-18 6:19 EDT, commits `3fb51de33`,
+`a7954c411`):
+- Primary static consumers of `ServerNetwork` (world.ts,
+  packetHandlerRegistration.ts, AgentManager.ts, dashboardInterop.ts,
+  llmBehaviorDecision.ts) and `GameTickProcessor.ts` manager imports
+  now resolve directly to the shared sources.
+- All 11 lazy `await import(...)` sites in streaming.ts, admin-routes.ts,
+  agent-routes.ts redirected to shared.
+- Server-side `packages/server/src/systems/ServerNetwork/index.ts` shim
+  deleted — no remaining consumers.
+- Sibling shims for managers (`action-queue.ts`, `tile-movement.ts`,
+  `PendingAttackManager.ts`, etc.) remain — they are still imported by
+  server-side DB-coupled handlers and internal `ServerNetwork/*` files
+  that legitimately stay in the server package per the Step 5d
+  alternative. Future sweep is possible but low-priority.
+
+**Next recommended action**: Step 9 PIE wiring. Build `PIEServerSession`
+in shared that:
+1. Calls `createServerWorld()`
+2. Registers minimal in-memory stub implementations of every `I*` bridge
+   interface ServerNetwork expects (IBankRepository, IInventoryRepository,
+   ICharacterRepository, IFriendRepository, IDatabaseSystem,
+   IAgentManager, IAgentRuntimeLookup, IAuthService,
+   IPacketHandlerRegistry, IBroadcastManager, IEventBridge,
+   IConnectionHandler, IDuelStakeTransfer, IServerNetworkManagerFactory).
+3. Registers `ServerNetwork`.
+4. Uses `createInMemorySocketPair()` (already exists in
+   `packages/shared/src/platform/shared/InMemorySocketPair.ts`) to connect
+   a client socket to `network.onConnection(...)`.
+5. Exposes the client-side socket to `ClientNetwork.init(...)` so the
+   editor viewport receives real server packets.
+
+Then repoint `packages/asset-forge/src/components/WorldStudio/hooks/usePIESession.ts`
+at `PIEServerSession` and delete `createPlayTestWorld.ts` + `PIENetworkStub`.
 
 ---
 
