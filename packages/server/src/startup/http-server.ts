@@ -903,8 +903,9 @@ function ensureRateLimitDecorator(
   if (typeof fastify.rateLimit === "function") {
     return;
   }
-  (fastify as RateLimitedFastify).rateLimit = (() =>
-    async () => {}) as RateLimitedFastify["rateLimit"];
+  throw new Error(
+    "HTTP routes require @fastify/rate-limit to be registered before route setup",
+  );
 }
 
 function buildGameAssetFallbackUrl(

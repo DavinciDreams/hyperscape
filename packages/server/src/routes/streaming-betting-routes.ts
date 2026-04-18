@@ -162,8 +162,9 @@ function ensureRateLimitDecorator(
   if (typeof fastify.rateLimit === "function") {
     return;
   }
-  (fastify as RateLimitedFastify).rateLimit = (() => async () => {}) as
-    RateLimitedFastify["rateLimit"];
+  throw new Error(
+    "Streaming betting routes require @fastify/rate-limit to be registered before route setup",
+  );
 }
 
 export function normalizeInternalAllowedOrigin(
@@ -1234,8 +1235,7 @@ export function registerStreamingBettingRoutes(
             id: buildStreamDestinationId({
               role: "canonical",
               provider,
-              name:
-                provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
+              name: provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
             }),
             name: provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
             role: "canonical",
