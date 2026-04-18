@@ -37,6 +37,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import path from "path";
+import { RateLimiterMemory } from "rate-limiter-flexible";
 import type { ServerConfig } from "./config.js";
 import {
   getDefaultElizaOsApiUrl,
@@ -125,6 +126,16 @@ type PublicRootInfo = {
   assetsPath: string;
   source: "server-public" | "client-dist";
 };
+
+const PUBLIC_DEBUG_CODEQL_LIMITER = new RateLimiterMemory({
+  points: 240,
+  duration: 60,
+});
+
+const GAME_ASSETS_CODEQL_LIMITER = new RateLimiterMemory({
+  points: 240,
+  duration: 60,
+});
 
 async function resolvePublicRoot(
   config: ServerConfig,
@@ -425,10 +436,13 @@ export async function createHttpServer(
     fastify.get(
       "/debug/public",
       {
-        preHandler: fastify.rateLimit({
-          max: 240,
-          timeWindow: "1 minute",
-        }),
+        preHandler: async (request, reply) => {
+          try {
+            await PUBLIC_DEBUG_CODEQL_LIMITER.consume(request.ip);
+          } catch {
+            return reply.code(429).send({ error: "Too Many Requests" });
+          }
+        },
       },
       async (_req, reply) => {
         const publicDir = path.join(config.__dirname, "public");
@@ -633,11 +647,7 @@ async function registerStaticFiles(
     const gameAssetsFallbackUrl =
       process.env["GAME_ASSETS_FALLBACK_URL"]?.trim() || null;
     if (gameAssetsFallbackUrl) {
-      registerGameAssetsRoute(
-        fastify,
-        gameAssetsRoot,
-        gameAssetsFallbackUrl,
-      );
+      registerGameAssetsRoute(fastify, gameAssetsRoot, gameAssetsFallbackUrl);
       console.log(
         `[HTTP] ✅ Registered /game-assets/ → ${gameAssetsRoot} (fallback: ${gameAssetsFallbackUrl})`,
       );
@@ -863,9 +873,7 @@ function normalizeGameAssetPath(rawPath: string): string | null {
     return null;
   }
 
-  const normalizedPath = path.posix
-    .normalize(decodedPath)
-    .replace(/^\/+/, "");
+  const normalizedPath = path.posix.normalize(decodedPath).replace(/^\/+/, "");
   if (
     normalizedPath.length === 0 ||
     normalizedPath === "." ||
@@ -902,8 +910,8 @@ function ensureRateLimitDecorator(
   if (typeof fastify.rateLimit === "function") {
     return;
   }
-  (fastify as RateLimitedFastify).rateLimit = (() => async () => {}) as
-    RateLimitedFastify["rateLimit"];
+  (fastify as RateLimitedFastify).rateLimit = (() =>
+    async () => {}) as RateLimitedFastify["rateLimit"];
 }
 
 function buildGameAssetFallbackUrl(
@@ -945,10 +953,13 @@ function registerGameAssetsRoute(
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
-    preHandler: fastify.rateLimit({
-      max: 240,
-      timeWindow: "1 minute",
-    }),
+    preHandler: async (request, reply) => {
+      try {
+        await GAME_ASSETS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+    },
     handler: async (request, reply) => {
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);
@@ -999,14 +1010,18 @@ function registerGameAssetsRoute(
         });
       } catch (error) {
         const errorName = error instanceof Error ? error.name : "";
-        return reply.code(
-          errorName === "TimeoutError" || errorName === "AbortError" ? 504 : 502,
-        ).send({
-          error:
+        return reply
+          .code(
             errorName === "TimeoutError" || errorName === "AbortError"
-              ? "Asset fallback timed out"
-              : "Asset fallback failed",
-        });
+              ? 504
+              : 502,
+          )
+          .send({
+            error:
+              errorName === "TimeoutError" || errorName === "AbortError"
+                ? "Asset fallback timed out"
+                : "Asset fallback failed",
+          });
       }
       if (!upstreamResponse.ok) {
         return reply
@@ -1026,7 +1041,9 @@ function registerGameAssetsRoute(
       }
 
       if (!upstreamResponse.body) {
-        return reply.code(502).send({ error: "Asset fallback returned no body" });
+        return reply
+          .code(502)
+          .send({ error: "Asset fallback returned no body" });
       }
 
       return reply.send(

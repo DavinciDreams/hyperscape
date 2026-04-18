@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
+import { RateLimiterMemory } from "rate-limiter-flexible";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
@@ -158,6 +159,10 @@ const STREAMING_STATUS_RATE_LIMIT: RateLimitOptions = {
   max: 120,
   timeWindow: "1 minute",
 };
+const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
+  points: 120,
+  duration: 60,
+});
 type RateLimitedFastify = FastifyInstance & {
   rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
 };
@@ -251,8 +256,8 @@ function ensureRateLimitDecorator(
   if (typeof fastify.rateLimit === "function") {
     return;
   }
-  (fastify as RateLimitedFastify).rateLimit = (() => async () => {}) as
-    RateLimitedFastify["rateLimit"];
+  (fastify as RateLimitedFastify).rateLimit = (() =>
+    async () => {}) as RateLimitedFastify["rateLimit"];
 }
 
 export function normalizeStreamingStatusMetrics(params: {
@@ -1928,10 +1933,13 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      preHandler: fastify.rateLimit({
-        max: 120,
-        timeWindow: "1 minute",
-      }),
+      preHandler: async (request, reply) => {
+        try {
+          await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+        } catch {
+          return reply.code(429).send({ error: "Too Many Requests" });
+        }
+      },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
@@ -2045,10 +2053,13 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
-      preHandler: fastify.rateLimit({
-        max: 120,
-        timeWindow: "1 minute",
-      }),
+      preHandler: async (request, reply) => {
+        try {
+          await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+        } catch {
+          return reply.code(429).send({ error: "Too Many Requests" });
+        }
+      },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
