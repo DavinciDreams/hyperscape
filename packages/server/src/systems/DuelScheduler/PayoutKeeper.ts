@@ -8,7 +8,7 @@
  * Implements exponential backoff on failure, max 5 attempts.
  */
 
-import { eq, and, lte, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { getDatabase } from "../../database/client.js";
 import {
   solanaPayoutJobs,

@@ -6,6 +6,12 @@ export type HlsManifestSnapshot = {
   mediaSequence: number | null;
 };
 
+const HLS_MANIFEST_CACHE_TTL_MS = 250;
+
+let cachedManifestPath: string | null = null;
+let cachedManifestReadAt = 0;
+let cachedManifestSnapshot: HlsManifestSnapshot | null = null;
+
 function asNonEmptyString(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -38,6 +44,14 @@ export function readLocalHlsManifestSnapshot(
     };
   }
 
+  if (
+    cachedManifestPath === hlsOutputPath &&
+    cachedManifestSnapshot &&
+    Date.now() - cachedManifestReadAt <= HLS_MANIFEST_CACHE_TTL_MS
+  ) {
+    return cachedManifestSnapshot;
+  }
+
   try {
     const stat = fs.statSync(hlsOutputPath);
     const rawManifest = fs.readFileSync(hlsOutputPath, "utf8");
@@ -48,17 +62,25 @@ export function readLocalHlsManifestSnapshot(
       ? Number.parseInt(mediaSequenceMatch[1] || "", 10)
       : null;
 
-    return {
+    const snapshot = {
       updatedAt: Number.isFinite(stat.mtimeMs) ? Math.round(stat.mtimeMs) : null,
       mediaSequence:
         mediaSequence != null && Number.isFinite(mediaSequence)
           ? mediaSequence
           : null,
     };
+    cachedManifestPath = hlsOutputPath;
+    cachedManifestReadAt = Date.now();
+    cachedManifestSnapshot = snapshot;
+    return snapshot;
   } catch {
-    return {
+    const snapshot = {
       updatedAt: null,
       mediaSequence: null,
     };
+    cachedManifestPath = hlsOutputPath;
+    cachedManifestReadAt = Date.now();
+    cachedManifestSnapshot = snapshot;
+    return snapshot;
   }
 }

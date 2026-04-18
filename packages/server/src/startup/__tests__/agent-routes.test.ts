@@ -38,7 +38,10 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   const actual = await importOriginal<typeof import("drizzle-orm")>();
   return {
     ...actual,
+    and: (...conditions: unknown[]) => ({ op: "and", conditions }),
+    desc: (column: string) => ({ direction: "desc", column }),
     eq: (column: string, value: unknown) => ({ column, value }),
+    gt: (column: string, value: unknown) => ({ column, value, op: "gt" }),
   };
 });
 
@@ -148,19 +151,34 @@ function createMockDatabase(initialMappings: MappingRow[]) {
       },
     },
     select: () => ({
-      from: (table: { __table: string }) => ({
-        where: async (condition: {
-          column: keyof MappingRow;
-          value: unknown;
+      from: (table: { __table: string }) => {
+        const filterRows = (condition: {
+          column?: keyof MappingRow;
+          value?: unknown;
         }) => {
-          if (table.__table === "agentMappings") {
+          if (table.__table === "agentMappings" && condition.column) {
             return state.mappings.filter(
-              (mapping) => mapping[condition.column] === condition.value,
+              (mapping) => mapping[condition.column!] === condition.value,
             );
           }
           return [];
-        },
-      }),
+        };
+        return {
+          where: (condition: {
+            column?: keyof MappingRow;
+            value?: unknown;
+          }) => {
+            const rows = filterRows(condition);
+            return {
+              then: (onfulfilled: (value: MappingRow[]) => unknown) =>
+                Promise.resolve(onfulfilled(rows)),
+              orderBy: () => ({
+                limit: async () => rows,
+              }),
+            };
+          },
+        };
+      },
     }),
   };
 

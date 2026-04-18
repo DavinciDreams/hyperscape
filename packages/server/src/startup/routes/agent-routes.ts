@@ -51,6 +51,12 @@ type CachedValue<T> = {
   value: T;
 };
 
+type AgentRouteSelectQuery = PromiseLike<unknown[]> & {
+  orderBy: (order: unknown) => {
+    limit: (count: number) => Promise<unknown[]>;
+  };
+};
+
 type AgentRouteDb = {
   delete: (table: unknown) => {
     where: (condition: unknown) => Promise<unknown>;
@@ -75,7 +81,7 @@ type AgentRouteDb = {
   };
   select: (fields?: unknown) => {
     from: (table: unknown) => {
-      where: (condition: unknown) => Promise<unknown[]>;
+      where: (condition: unknown) => AgentRouteSelectQuery;
     };
   };
   update: (table: unknown) => {
@@ -2926,22 +2932,24 @@ export function registerAgentRoutes(
         try {
           const { agentThoughts: agentThoughtsTable } =
             await import("../../database/schema.js");
-          const { eq } = await import("drizzle-orm");
+          const { and, desc, eq, gt } = await import("drizzle-orm");
+          const conditions = [eq(agentThoughtsTable.characterId, characterId)];
+          if (since > 0) {
+            conditions.push(gt(agentThoughtsTable.timestamp, since));
+          }
           const rows = (await db
             .select()
             .from(agentThoughtsTable)
-            .where(eq(
-              agentThoughtsTable.characterId,
-              characterId,
-            ))) as Array<{
+            .where(and(...conditions))
+            .orderBy(desc(agentThoughtsTable.timestamp))
+            .limit(limit)) as Array<{
             characterId: string;
             type: string;
             content: string;
             timestamp: number;
             decisionPath?: string | null;
           }>;
-          rows.sort((a, b) => b.timestamp - a.timestamp);
-          thoughts = rows.slice(0, limit).map((r) => ({
+          thoughts = rows.map((r) => ({
             id: `${r.characterId}-thought-${r.timestamp}`,
             type: r.type,
             content: r.content,
@@ -2960,11 +2968,10 @@ export function registerAgentRoutes(
       }
 
       // Filter by since timestamp and limit
-      let filteredThoughts = thoughts;
-      if (since > 0) {
-        filteredThoughts = thoughts.filter((t) => t.timestamp > since);
-      }
-      filteredThoughts = filteredThoughts.slice(0, limit);
+      const filteredThoughts =
+        since > 0
+          ? thoughts.filter((t) => t.timestamp > since).slice(0, limit)
+          : thoughts.slice(0, limit);
 
       return reply.send({
         success: true,

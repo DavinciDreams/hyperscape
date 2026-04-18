@@ -1421,8 +1421,6 @@ export class TerrainSystem extends System {
     LOD_DISTANCES: [100, 200, 350], // Distance thresholds
     LOD_RESOLUTIONS: [64, 32, 16, 8], // Resolution at each LOD level
 
-    // Chunking - Only adjacent tiles
-    VIEW_DISTANCE: 1, // Load only 1 tile in each direction (3x3 = 9 tiles)
     UPDATE_INTERVAL: 0.5, // Check player movement every 0.5 seconds
 
     // Movement Constraints
@@ -5306,61 +5304,6 @@ export class TerrainSystem extends System {
     const night = 1 - dayIntensity;
     const t = Math.max(0, Math.min(1, (night - 0.4) / 0.3));
     return t * t * (3 - 2 * t);
-  }
-
-  private checkPlayerMovement(): void {
-    // Get player positions and update loaded tiles accordingly
-    const players = this.world.getPlayers() || [];
-
-    for (const player of players) {
-      const x = player.node.position.x;
-      const z = player.node.position.z;
-
-      const tileX = Math.floor(x / this.CONFIG.TILE_SIZE);
-      const tileZ = Math.floor(z / this.CONFIG.TILE_SIZE);
-
-      // Check if player moved to a new tile
-      if (tileX !== this.lastPlayerTile.x || tileZ !== this.lastPlayerTile.z) {
-        this.updateTilesAroundPlayer(tileX, tileZ);
-        this.lastPlayerTile = { x: tileX, z: tileZ };
-      }
-    }
-  }
-
-  private updateTilesAroundPlayer(centerX: number, centerZ: number): void {
-    const requiredTiles = new Set<string>();
-
-    // Generate list of required tiles (3x3 around player)
-    for (
-      let dx = -this.CONFIG.VIEW_DISTANCE;
-      dx <= this.CONFIG.VIEW_DISTANCE;
-      dx++
-    ) {
-      for (
-        let dz = -this.CONFIG.VIEW_DISTANCE;
-        dz <= this.CONFIG.VIEW_DISTANCE;
-        dz++
-      ) {
-        const tileX = centerX + dx;
-        const tileZ = centerZ + dz;
-        requiredTiles.add(`${tileX}_${tileZ}`);
-      }
-    }
-
-    // Unload tiles that are no longer needed
-    for (const [key, tile] of this.terrainTiles) {
-      if (!requiredTiles.has(key)) {
-        this.unloadTile(tile);
-      }
-    }
-
-    // Load new tiles that are needed
-    for (const key of requiredTiles) {
-      if (!this.terrainTiles.has(key)) {
-        const [tileX, tileZ] = key.split("_").map(Number);
-        this.generateTile(tileX, tileZ);
-      }
-    }
   }
 
   /**
