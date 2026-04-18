@@ -17,7 +17,7 @@
  */
 
 import { watch, type FSWatcher } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createHmac, createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 
@@ -173,7 +173,7 @@ const uploadedHashes = new Map<string, string>();
 const MAX_TRACKED_FILES = 500;
 
 /** Pending uploads (deduplication) */
-const pendingUploads = new Set<string>();
+const pendingUploads = new Map<string, Promise<void>>();
 
 let watcher: FSWatcher | null = null;
 let syncInterval: ReturnType<typeof setInterval> | null = null;
@@ -183,72 +183,93 @@ async function uploadFile(
   filePath: string,
   fileName: string,
 ): Promise<void> {
-  if (pendingUploads.has(fileName)) return;
-  pendingUploads.add(fileName);
-
-  try {
-    const body = await readFile(filePath);
-    const hash = sha256Hex(body);
-
-    // Skip if unchanged (for .m3u8 which gets rewritten)
-    if (uploadedHashes.get(fileName) === hash) {
-      return;
-    }
-
-    const contentType = fileName.endsWith(".m3u8")
-      ? "application/vnd.apple.mpegurl"
-      : "video/MP2T";
-
-    const key = `${config.prefix}${fileName}`;
-    const { url, headers } = signS3PutRequest({
-      endpoint: config.endpoint,
-      bucket: config.bucket,
-      key,
-      body,
-      contentType,
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-      region: config.region,
-    });
-
-    const response = await fetch(url, {
-      method: "PUT",
-      headers,
-      body,
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      console.error(
-        `[HLS-CDN] Upload failed: ${fileName} → ${response.status} ${text.slice(0, 200)}`,
-      );
-      return;
-    }
-
-    uploadedHashes.set(fileName, hash);
-
-    // Evict old entries
-    if (uploadedHashes.size > MAX_TRACKED_FILES) {
-      const keys = [...uploadedHashes.keys()];
-      for (let i = 0; i < 100; i++) {
-        uploadedHashes.delete(keys[i]);
-      }
-    }
-  } catch (err) {
-    console.error(
-      `[HLS-CDN] Upload error: ${fileName}`,
-      err instanceof Error ? err.message : err,
-    );
-  } finally {
-    pendingUploads.delete(fileName);
+  const existingUpload = pendingUploads.get(fileName);
+  if (existingUpload) {
+    await existingUpload;
+    return;
   }
+
+  const uploadPromise = (async () => {
+    try {
+      const body = await readFile(filePath);
+      const hash = sha256Hex(body);
+
+      // Skip if unchanged (for .m3u8 which gets rewritten)
+      if (uploadedHashes.get(fileName) === hash) {
+        return;
+      }
+
+      const contentType = fileName.endsWith(".m3u8")
+        ? "application/vnd.apple.mpegurl"
+        : "video/MP2T";
+
+      const key = `${config.prefix}${fileName}`;
+      const { url, headers } = signS3PutRequest({
+        endpoint: config.endpoint,
+        bucket: config.bucket,
+        key,
+        body,
+        contentType,
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+        region: config.region,
+      });
+
+      const response = await fetch(url, {
+        method: "PUT",
+        headers,
+        body,
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        console.error(
+          `[HLS-CDN] Upload failed: ${fileName} → ${response.status} ${text.slice(0, 200)}`,
+        );
+        return;
+      }
+
+      uploadedHashes.set(fileName, hash);
+
+      // Evict old entries
+      if (uploadedHashes.size > MAX_TRACKED_FILES) {
+        const keys = [...uploadedHashes.keys()];
+        for (let i = 0; i < 100; i++) {
+          uploadedHashes.delete(keys[i]);
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[HLS-CDN] Upload error: ${fileName}`,
+        err instanceof Error ? err.message : err,
+      );
+    } finally {
+      pendingUploads.delete(fileName);
+    }
+  })();
+
+  pendingUploads.set(fileName, uploadPromise);
+  await uploadPromise;
 }
+
+// HLS output produces structured filenames (e.g. index.m3u8, 0001.ts).
+// Restrict uploads to this allowlist so a crafted filename such as
+// "../../../etc/passwd" cannot traverse outside config.hlsDir, even if the
+// watcher or readdir output is ever influenced by a compromised capture
+// process. basename() alone is not enough — it strips prefixes but permits
+// arbitrary characters in the leaf.
+const HLS_SAFE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
+const isSafeHlsFilename = (name: string): boolean =>
+  HLS_SAFE_FILENAME_RE.test(name) &&
+  !name.startsWith(".") &&
+  !name.includes("..");
 
 async function syncDirectory(config: HlsCdnConfig): Promise<void> {
   try {
     const files = await readdir(config.hlsDir);
     const hlsFiles = files.filter(
-      (f) => f.endsWith(".ts") || f.endsWith(".m3u8"),
+      (f) => isSafeHlsFilename(f) && (f.endsWith(".ts") || f.endsWith(".m3u8")),
     );
 
     // Upload .ts segments first, then .m3u8 (so playlist references exist)
@@ -294,8 +315,20 @@ export function startHlsCdnSync(): string | null {
       { persistent: false },
       (eventType, filename) => {
         if (!filename) return;
-        if (filename.endsWith(".ts") || filename.endsWith(".m3u8")) {
-          void uploadFile(config, join(config.hlsDir, filename), filename);
+        const rawFileName = filename.toString();
+        const safeFileName = basename(rawFileName);
+        if (safeFileName !== rawFileName) {
+          return;
+        }
+        if (!isSafeHlsFilename(safeFileName)) {
+          return;
+        }
+        if (safeFileName.endsWith(".ts") || safeFileName.endsWith(".m3u8")) {
+          void uploadFile(
+            config,
+            join(config.hlsDir, safeFileName),
+            safeFileName,
+          );
         }
       },
     );

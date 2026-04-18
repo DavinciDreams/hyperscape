@@ -2,6 +2,7 @@ import type {
   StreamManifestStatus,
   StreamPublicReadiness,
 } from "./delivery-config.js";
+import { isIP } from "node:net";
 
 export type StreamPlaybackProbeResult = {
   playbackUrl: string;
@@ -20,6 +21,65 @@ type PlaybackProbePoller = {
 };
 
 const playbackProbePollers = new Map<string, PlaybackProbePoller>();
+
+function isPrivateIpv4Address(hostname: string): boolean {
+  const parts = hostname.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) {
+    return false;
+  }
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function isBlockedPrivateHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  if (
+    normalized === "localhost" ||
+    normalized === "localhost.localdomain" ||
+    normalized.endsWith(".local")
+  ) {
+    return true;
+  }
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) {
+    return isPrivateIpv4Address(normalized);
+  }
+  if (ipVersion === 6) {
+    return normalized === "::1" || normalized.startsWith("fe80:");
+  }
+  return false;
+}
+
+function validatePlaybackProbeUrl(playbackUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(playbackUrl);
+  } catch {
+    return "invalid_playback_url";
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return "unsupported_playback_protocol";
+  }
+
+  const allowPrivateHosts =
+    process.env.NODE_ENV !== "production" ||
+    process.env.STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES === "true";
+  if (!allowPrivateHosts && isBlockedPrivateHost(parsed.hostname)) {
+    return "private_playback_host_blocked";
+  }
+
+  return null;
+}
 
 function classifyProbeResult(params: {
   statusCode: number | null;
@@ -68,6 +128,18 @@ export async function probePlaybackUrl(
   playbackUrl: string,
   timeoutMs = 4_000,
 ): Promise<StreamPlaybackProbeResult> {
+  const validationError = validatePlaybackProbeUrl(playbackUrl);
+  if (validationError) {
+    return {
+      playbackUrl,
+      ready: false,
+      manifestStatus: "unknown",
+      statusCode: null,
+      lastError: validationError,
+      updatedAt: Date.now(),
+    };
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 

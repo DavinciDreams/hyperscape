@@ -42,6 +42,13 @@ interface EmbeddedWorldMapData {
     position: { x: number; y: number; z: number };
     biome: string;
   }>;
+  pointsOfInterest?: Array<{
+    id: string;
+    name: string;
+    category: string;
+    position: { x: number; y: number; z: number };
+    biome: string;
+  }>;
   resources: Array<{
     type: string;
     resourceId: string;
@@ -225,6 +232,10 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     this.world = world;
     this.characterId = characterId;
     this.accountId = accountId;
+    this.name = name;
+  }
+
+  setDisplayName(name: string): void {
     this.name = name;
   }
 

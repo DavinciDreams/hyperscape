@@ -13,6 +13,7 @@ import {
 import {
   ROAD_INFLUENCE_SHADER,
   ROAD_INFLUENCE_TEXTURE_SHADER,
+  ROAD_INFLUENCE_TEXTURE_WORKGROUP_SIZE_X,
   TERRAIN_VERTEX_COLOR_SHADER,
   INSTANCE_MATRIX_SHADER,
   BATCH_DISTANCE_SHADER,
@@ -289,6 +290,10 @@ export class TerrainComputeContext {
       throw new Error("TerrainComputeContext not initialized");
     }
 
+    if (!Number.isFinite(textureSize) || textureSize <= 0) {
+      return new Float32Array(0);
+    }
+
     const pixelCount = textureSize * textureSize;
     const roadCount = roads.length;
 
@@ -322,27 +327,33 @@ export class TerrainComputeContext {
     // count exceeds WebGPU's 65535 per-dimension ceiling. Reshape to
     // 2D (dispatchX, dispatchY, 1) in that case and pass numWorkgroupsX
     // so the shader can reconstruct the linear pixel index via
-    //   idx = global_id.y * (numWorkgroupsX * 64) + global_id.x
+    //   idx = global_id.y * (numWorkgroupsX * WORKGROUP_SIZE_1D)
+    //       + global_id.x
     // Under the 1D case (pixelCount < 4.19M) dispatchY degenerates
     // to 1 and the math yields idx = global_id.x — identical to the
-    // previous behavior.
-    const totalWorkgroups = Math.ceil(pixelCount / 64);
+    // previous behavior. Workgroup size is imported from the shader
+    // module so the host-side divisor can't drift from @workgroup_size.
+    const totalWorkgroups = Math.ceil(
+      pixelCount / ROAD_INFLUENCE_TEXTURE_WORKGROUP_SIZE_X,
+    );
     const WEBGPU_MAX_WORKGROUPS_PER_DIM = 65535;
     const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
     const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
 
+    const roadInfluenceUniformData = new ArrayBuffer(8 * 4);
+    const roadInfluenceUniformF32 = new Float32Array(roadInfluenceUniformData);
+    roadInfluenceUniformF32[0] = pixelCount;
+    roadInfluenceUniformF32[1] = roadCount;
+    roadInfluenceUniformF32[2] = textureSize;
+    roadInfluenceUniformF32[3] = worldSize;
+    roadInfluenceUniformF32[4] = centerX;
+    roadInfluenceUniformF32[5] = centerZ;
+    roadInfluenceUniformF32[6] = blendWidth;
+    new Uint32Array(roadInfluenceUniformData)[7] = dispatchX;
+
     const uniformBuffer = this.ctx.createUniformBuffer(
       "rtex_uniforms",
-      new Float32Array([
-        pixelCount,
-        roadCount,
-        textureSize,
-        worldSize,
-        centerX,
-        centerZ,
-        blendWidth,
-        dispatchX, // numWorkgroupsX — see shader comment
-      ]),
+      new Uint8Array(roadInfluenceUniformData),
     );
 
     if (!roadBuffer || !outputBuffer || !uniformBuffer) {

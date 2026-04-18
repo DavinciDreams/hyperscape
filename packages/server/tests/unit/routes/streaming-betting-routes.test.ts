@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   allocateNextBettingClientId,
@@ -31,11 +31,18 @@ function restoreStubbedEnvs(): void {
   stubbedEnv.clear();
 }
 
+function createFastifyWithRateLimitDecorator(): FastifyInstance {
+  const fastify = Fastify();
+  fastify.decorate("rateLimit", (() =>
+    async () => {}) as FastifyInstance["rateLimit"]);
+  return fastify;
+}
+
 function createRouteOptions(
   overrides: Partial<Parameters<typeof registerStreamingBettingRoutes>[0]> = {},
 ) {
   return {
-    fastify: Fastify(),
+    fastify: createFastifyWithRateLimitDecorator(),
     world: {
       getSystem: () => null,
     } as never,
@@ -248,8 +255,8 @@ describe("streaming-betting-routes", () => {
       cycle: {
         duelId: "duel-1",
         phase: "RESOLUTION",
-        winnerId: "agent-a",
-        winReason: "knockout",
+        winnerId: null,
+        winReason: null,
       },
       duelId: "duel-1",
       phase: "FIGHTING",

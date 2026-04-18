@@ -11,19 +11,15 @@ import type {
 } from "../data/DataManager";
 
 const OAK_TREE_VARIANTS = [
-  "asset://models/trees/oak_01.glb",
-  "asset://models/trees/oak_02.glb",
-  "asset://models/trees/oak_03.glb",
-  "asset://models/trees/oak_04.glb",
+  "asset://models/trees/oak/oak_01.glb",
+  "asset://models/trees/oak/oak_02.glb",
 ] as const;
 
 const DEAD_TREE_VARIANTS = [
-  "asset://models/trees/dead_01.glb",
-  "asset://models/trees/dead_02.glb",
-  "asset://models/trees/dead_03.glb",
-  "asset://models/trees/dead_04.glb",
-  "asset://models/trees/dead_05.glb",
-  "asset://models/trees/dead_06.glb",
+  "asset://models/trees/dead/dead_01.glb",
+  "asset://models/trees/dead/dead_02.glb",
+  "asset://models/trees/dead/dead_03.glb",
+  "asset://models/trees/dead/dead_04.glb",
 ] as const;
 
 const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
@@ -33,8 +29,15 @@ const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
     type: "tree",
     examine: "A tropical banana tree with large, broad leaves.",
     modelPath: null,
-    modelVariants: [...OAK_TREE_VARIANTS],
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    modelVariants: [
+      "asset://models/trees/banana/banana_01.glb",
+      "asset://models/trees/banana/banana_02.glb",
+      "asset://models/trees/banana/banana_03.glb",
+      "asset://models/trees/banana/banana_04.glb",
+      "asset://models/trees/banana/banana_05.glb",
+    ],
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
     scale: 1,
     depletedScale: 0.1,
     harvestSkill: "woodcutting",
@@ -60,8 +63,13 @@ const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
     type: "tree",
     examine: "A weathered pine, stripped bare by harsh tundra winds.",
     modelPath: null,
-    modelVariants: [...DEAD_TREE_VARIANTS],
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    modelVariants: [
+      "asset://models/trees/pine_dead/pine_dead_01.glb",
+      "asset://models/trees/pine_dead/pine_dead_02.glb",
+      "asset://models/trees/pine_dead/pine_dead_03.glb",
+    ],
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
     scale: 1,
     depletedScale: 0.1,
     harvestSkill: "woodcutting",
@@ -87,8 +95,15 @@ const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
     type: "tree",
     examine: "A tall eucalyptus with peeling bark and long leaves.",
     modelPath: null,
-    modelVariants: [...OAK_TREE_VARIANTS, "asset://models/trees/oak_01.glb"],
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    modelVariants: [
+      "asset://models/trees/eucalyptus/eucalyptus_01.glb",
+      "asset://models/trees/eucalyptus/eucalyptus_02.glb",
+      "asset://models/trees/eucalyptus/eucalyptus_03.glb",
+      "asset://models/trees/eucalyptus/eucalyptus_04.glb",
+      "asset://models/trees/eucalyptus/eucalyptus_05.glb",
+    ],
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
     scale: 1,
     depletedScale: 0.1,
     harvestSkill: "woodcutting",
@@ -115,11 +130,15 @@ const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
     examine: "A common tree. I can chop it down with a hatchet.",
     modelPath: null,
     modelVariants: [
-      ...OAK_TREE_VARIANTS,
-      "asset://models/trees/oak_01.glb",
-      "asset://models/trees/oak_02.glb",
+      "asset://models/trees/general/general_01.glb",
+      "asset://models/trees/general/general_02.glb",
+      "asset://models/trees/general/general_03.glb",
+      "asset://models/trees/general/general_04.glb",
+      "asset://models/trees/general/general_05.glb",
+      "asset://models/trees/general/general_06.glb",
     ],
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
     scale: 1,
     depletedScale: 0.1,
     harvestSkill: "woodcutting",
@@ -146,10 +165,11 @@ const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
     examine: "A tree infused with magical energy.",
     modelPath: null,
     modelVariants: [
-      "asset://models/trees/oak_03.glb",
-      "asset://models/trees/oak_04.glb",
+      "asset://models/trees/magic/magic_01.glb",
+      "asset://models/trees/magic/magic_02.glb",
     ],
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
     scale: 1,
     depletedScale: 0.1,
     harvestSkill: "woodcutting",
@@ -176,10 +196,11 @@ const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
     examine: "A mahogany tree with rich, reddish-brown timber.",
     modelPath: null,
     modelVariants: [
-      "asset://models/trees/oak_02.glb",
-      "asset://models/trees/oak_03.glb",
+      "asset://models/trees/mahogany/mahogany_01.glb",
+      "asset://models/trees/mahogany/mahogany_02.glb",
     ],
-    depletedModelPath: "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
     scale: 1,
     depletedScale: 0.1,
     harvestSkill: "woodcutting",

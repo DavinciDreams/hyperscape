@@ -70,7 +70,8 @@ describe("buildStreamingStatusPayload", () => {
         },
         smoke: {
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           deliveryMode: "external_hls",
           captureFpsP50: 29.5,
           captureFpsP95: 30,
@@ -91,7 +92,8 @@ describe("buildStreamingStatusPayload", () => {
           captureMode: "cdp",
           degradedReason: null,
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: 997,
           lastRenderTickAt: 996,
           lastVisualChangeAt: 995,
@@ -130,6 +132,15 @@ describe("buildStreamingStatusPayload", () => {
     expect(payload.deliveryMode).toBe("external_hls");
     expect(payload.deliveryProvider).toBe("cloudflare_stream");
     expect(payload.playbackUrl).toBe("https://customer.example/live.m3u8");
+    expect(payload.delivery).toMatchObject({
+      mode: "external_hls",
+      provider: "cloudflare_stream",
+      playbackUrl: "https://customer.example/live.m3u8",
+      hlsUrl: "https://customer.example/live.m3u8",
+      llhlsUrl: "https://customer.example/live.m3u8?protocol=llhls",
+      ingestUrl: null,
+    });
+    expect(payload.destinations).toEqual([]);
     expect(payload.ingest).toEqual({
       profile: "cloudflare_live",
       transport: "rtmps",
@@ -201,6 +212,7 @@ describe("buildStreamingStatusPayload", () => {
       playbackUrl: "https://env.example/live.m3u8?protocol=llhls",
       hlsUrl: "https://env.example/live.m3u8",
       llhlsUrl: "https://env.example/live.m3u8?protocol=llhls",
+      ingestUrl: null,
     });
     expect(payload.ingest).toEqual({
       profile: "cloudflare_live",
@@ -337,7 +349,8 @@ describe("buildStreamingStatusPayload", () => {
           captureMode: "cdp",
           degradedReason: null,
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: 4_050,
           lastRenderTickAt: 4_040,
           lastVisualChangeAt: 4_030,
@@ -373,17 +386,14 @@ describe("buildStreamingStatusPayload", () => {
     expect(payload.destinations).toHaveLength(1);
     expect(payload.destinations[0]).toMatchObject({
       id: "canonical-cloudflare",
+      ingestUrl: null,
       connected: true,
       transportHealthy: true,
       playbackReady: true,
       manifestStatus: "ok",
       lastError: null,
     });
-    expect(payload.captureDiagnostics).toMatchObject({
-      lastFatalWriteError: expect.objectContaining({
-        at: 3_100,
-      }),
-    });
+    expect(payload.captureDiagnostics).toBeNull();
   });
 
   it("keeps canonical playback visible but marks transport unhealthy after a fresher source incident", () => {
@@ -436,7 +446,8 @@ describe("buildStreamingStatusPayload", () => {
           captureMode: "cdp",
           degradedReason: "encoder_stalled",
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: 5_000,
           lastRenderTickAt: 4_990,
           lastVisualChangeAt: 4_980,
@@ -470,6 +481,7 @@ describe("buildStreamingStatusPayload", () => {
       updatedAt: 4_900,
     });
     expect(payload.destinations[0]).toMatchObject({
+      ingestUrl: null,
       connected: true,
       transportHealthy: false,
       playbackReady: true,
@@ -602,26 +614,9 @@ describe("buildStreamingStatusPayload", () => {
       updatedAt: 3_500,
     });
     expect(payload.cloudflare).toEqual({
-      liveInputId: "live-input-123",
-      lifecycle: {
-        eventType: "stream_live_input.disconnected",
-        eventName: "Stream Live Input Disconnected",
-        liveInputId: "live-input-123",
-        videoId: "video-456",
-        status: "disconnected",
-        errorCode: "publish_disconnected",
-        errorMessage: "Publisher disconnected unexpectedly",
-        occurredAt: 4_000,
-        receivedAt: 4_100,
-      },
-      lastWebhook: {
-        eventType: "stream_live_input.disconnected",
-        eventName: "Stream Live Input Disconnected",
-        liveInputId: "live-input-123",
-        videoId: "video-456",
-        occurredAt: 4_000,
-        receivedAt: 4_100,
-      },
+      liveInputId: null,
+      lifecycle: null,
+      lastWebhook: null,
       lastPlaybackProbe: null,
       lastExternalTransportError: null,
     });

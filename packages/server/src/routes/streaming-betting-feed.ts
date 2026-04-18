@@ -187,6 +187,53 @@ function resolveWinnerName(cycle: StreamingDuelCycle): string | null {
   return null;
 }
 
+function redactOracleProofFromCycle(
+  cycle: StreamingDuelCycle | null,
+  exposeResolutionOutcome: boolean,
+): StreamingDuelCycle | null {
+  if (!cycle) {
+    return null;
+  }
+
+  return {
+    ...cycle,
+    duelKeyHex: null,
+    duelEndTime: null,
+    seed: null,
+    replayHash: null,
+    winnerId: exposeResolutionOutcome ? (cycle.winnerId ?? null) : null,
+    winReason: exposeResolutionOutcome ? (cycle.winReason ?? null) : null,
+  };
+}
+
+function redactIngestUrlFromDestination(
+  destination: StreamDestinationState | null,
+): StreamDestinationState | null {
+  if (!destination) {
+    return null;
+  }
+  return {
+    ...destination,
+    ingestUrl: null,
+  };
+}
+
+function redactIngestUrlFromChannel(
+  channel: StreamChannelState | null,
+): StreamChannelState | null {
+  if (!channel) {
+    return null;
+  }
+
+  return {
+    ...channel,
+    destinations: channel.destinations.map((destination) => ({
+      ...destination,
+      ingestUrl: null,
+    })),
+  };
+}
+
 function toAgentSnapshot(
   agent: StreamingDuelCycle["agent1"],
 ): BettingFeedAgent | null {
@@ -226,8 +273,14 @@ function resolveBroadcastTimelinePhase(params: {
   fightStartTime: number | null;
   duelEndTime: number | null;
 }): StreamingPhase | null {
-  const { cycle, emittedAt, betOpenTime, betCloseTime, fightStartTime, duelEndTime } =
-    params;
+  const {
+    cycle,
+    emittedAt,
+    betOpenTime,
+    betCloseTime,
+    fightStartTime,
+    duelEndTime,
+  } = params;
   if (!cycle) {
     return null;
   }
@@ -324,9 +377,9 @@ export function buildBettingFeedPayload(params: {
     ) ?? null;
   const fallbackDestination =
     channel?.fallbackDestinationId != null
-      ? channel.destinations.find(
+      ? (channel.destinations.find(
           (destination) => destination.id === channel.fallbackDestinationId,
-        ) ?? null
+        ) ?? null)
       : null;
   const delivery =
     params.delivery ??
@@ -366,14 +419,29 @@ export function buildBettingFeedPayload(params: {
   });
   const publicPhase = broadcastTimeline.phase ?? cycle?.phase ?? null;
   const exposeResolutionOutcome = publicPhase === "RESOLUTION";
+  const publicCycle = redactOracleProofFromCycle(
+    cycle,
+    exposeResolutionOutcome,
+  );
+  const publicChannel = redactIngestUrlFromChannel(channel);
+  const publicCanonicalDestination =
+    redactIngestUrlFromDestination(canonicalDestination);
+  const publicFallbackDestination =
+    redactIngestUrlFromDestination(fallbackDestination);
+  const publicDelivery = delivery
+    ? {
+        ...delivery,
+        ingestUrl: null,
+      }
+    : null;
   return {
     schemaVersion: BETTING_FEED_SCHEMA_VERSION,
     sourceEpoch: params.sourceEpoch,
     seq: params.seq,
     emittedAt: params.emittedAt,
-    cycle,
+    cycle: publicCycle,
     duelId: cycle?.duelId ?? null,
-    duelKey: cycle?.duelKeyHex ?? null,
+    duelKey: null,
     phase: publicPhase,
     phaseVersion: cycle?.phaseVersion ?? 0,
     broadcastTimeline,
@@ -390,10 +458,10 @@ export function buildBettingFeedPayload(params: {
     arenaPositions: cycle?.arenaPositions ?? null,
     rendererHealth: params.rendererHealth ?? null,
     deliveryHealth,
-    channel,
-    publicReadiness: channel?.publicReadiness ?? null,
-    canonicalDestination,
-    fallbackDestination,
+    channel: publicChannel,
+    publicReadiness: publicChannel?.publicReadiness ?? null,
+    canonicalDestination: publicCanonicalDestination,
+    fallbackDestination: publicFallbackDestination,
     canonicalAuthority: params.canonicalAuthority ?? null,
     sourceRuntime: params.sourceRuntime ?? null,
     rendererMetrics,
@@ -409,10 +477,10 @@ export function buildBettingFeedPayload(params: {
     visualChangeAgeMs: rendererMetrics?.visualChangeAgeMs ?? null,
     hlsManifestUpdatedAt: hlsManifest?.updatedAt ?? null,
     hlsMediaSequence: hlsManifest?.mediaSequence ?? null,
-    delivery,
-    deliveryMode: delivery?.mode ?? null,
-    deliveryProvider: delivery?.provider ?? null,
-    playbackUrl: delivery?.playbackUrl ?? null,
+    delivery: publicDelivery,
+    deliveryMode: publicDelivery?.mode ?? null,
+    deliveryProvider: publicDelivery?.provider ?? null,
+    playbackUrl: publicDelivery?.playbackUrl ?? null,
   };
 }
 

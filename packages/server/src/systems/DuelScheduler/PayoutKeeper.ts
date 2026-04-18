@@ -8,7 +8,7 @@
  * Implements exponential backoff on failure, max 5 attempts.
  */
 
-import { eq, and, lte, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { getDatabase } from "../../database/client.js";
 import {
   solanaPayoutJobs,
@@ -16,6 +16,7 @@ import {
   arenaRounds,
 } from "../../database/schema.js";
 import { Logger } from "../ServerNetwork/services";
+import { redactWalletAddress } from "./BettingPoolManager.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_ATTEMPTS = 5;
@@ -129,19 +130,40 @@ async function processOneJob(
 
     // Determine if this bettor won
     // Agent A is the round's agentAId, Agent B is agentBId
-    const winningSide = round.winnerId === round.agentAId ? "A" : "B";
+    const winningSide =
+      round.winnerId === round.agentAId
+        ? "A"
+        : round.winnerId === round.agentBId
+          ? "B"
+          : null;
+    if (!winningSide) {
+      await markFailed(db, job.id, "Round winner does not match either side");
+      return;
+    }
     const userBetOnWinner = bets.some((b) => b.side === winningSide);
 
     if (!userBetOnWinner) {
-      // Bettor lost — mark job as complete (no payout needed)
-      await db
+      // Bettor lost — mark job as complete (no payout needed).
+      // Guard on status='PENDING' so two instances racing on the same job
+      // won't both transition it; the loser's update matches zero rows.
+      const lostUpdate = await db
         .update(solanaPayoutJobs)
         .set({ status: "NO_PAYOUT", updatedAt: Date.now() })
-        .where(eq(solanaPayoutJobs.id, job.id));
+        .where(
+          and(
+            eq(solanaPayoutJobs.id, job.id),
+            eq(solanaPayoutJobs.status, "PENDING"),
+          ),
+        )
+        .returning({ id: solanaPayoutJobs.id });
+      if (lostUpdate.length === 0) {
+        // Another worker beat us to this job; skip logging to avoid noise.
+        return;
+      }
 
       Logger.info("PayoutKeeper", "Bettor lost — no payout", {
         jobId: job.id,
-        wallet: job.bettorWallet,
+        wallet: redactWalletAddress(job.bettorWallet),
         roundId: job.roundId,
       });
       return;
@@ -149,27 +171,36 @@ async function processOneJob(
 
     // Calculate payout: (user's winning bet / total winning pool) * total pool
     // For now, mark as READY_FOR_PAYOUT — actual transfer will be implemented
-    // when the token infrastructure is connected
-    await db
+    // when the token infrastructure is connected.
+    // Same status guard as above prevents duplicate transitions under races.
+    const readyUpdate = await db
       .update(solanaPayoutJobs)
       .set({
         status: "READY_FOR_PAYOUT",
         updatedAt: Date.now(),
       })
-      .where(eq(solanaPayoutJobs.id, job.id));
+      .where(
+        and(
+          eq(solanaPayoutJobs.id, job.id),
+          eq(solanaPayoutJobs.status, "PENDING"),
+        ),
+      )
+      .returning({ id: solanaPayoutJobs.id });
+    if (readyUpdate.length === 0) {
+      return;
+    }
 
     Logger.info("PayoutKeeper", "Payout job marked ready", {
       jobId: job.id,
-      wallet: job.bettorWallet,
+      wallet: redactWalletAddress(job.bettorWallet),
       roundId: job.roundId,
       winningSide,
     });
 
-    // TODO: When Solana token transfer is implemented:
-    // 1. Calculate exact payout amount
-    // 2. Build + send Solana transfer transaction from operator wallet
-    // 3. Store tx signature in claimSignature
-    // 4. Mark as COMPLETE on confirmation
+    // Payout transfer plumbing is not wired in this branch yet. The keeper
+    // intentionally stops at READY_FOR_PAYOUT after recording the winner so a
+    // transfer-capable follow-up can calculate the final amount, submit the
+    // Solana transfer, persist claimSignature, and then mark COMPLETE.
   } catch (err) {
     Logger.error(
       "PayoutKeeper",

@@ -426,7 +426,14 @@ describe.skip("StreamingDuelScheduler", () => {
 
     expect(ctx.world.network.send).toHaveBeenCalledWith(
       "streamingState",
-      expect.any(Object),
+      expect.objectContaining({
+        cycle: expect.objectContaining({
+          duelKeyHex: null,
+          duelEndTime: null,
+          seed: null,
+          replayHash: null,
+        }),
+      }),
     );
 
     scheduler.destroy();

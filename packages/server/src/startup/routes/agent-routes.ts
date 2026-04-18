@@ -51,6 +51,12 @@ type CachedValue<T> = {
   value: T;
 };
 
+type AgentRouteSelectQuery = PromiseLike<unknown[]> & {
+  orderBy: (order: unknown) => {
+    limit: (count: number) => Promise<unknown[]>;
+  };
+};
+
 type AgentRouteDb = {
   delete: (table: unknown) => {
     where: (condition: unknown) => Promise<unknown>;
@@ -75,7 +81,7 @@ type AgentRouteDb = {
   };
   select: (fields?: unknown) => {
     from: (table: unknown) => {
-      where: (condition: unknown) => Promise<unknown[]>;
+      where: (condition: unknown) => AgentRouteSelectQuery;
     };
   };
   update: (table: unknown) => {
@@ -565,35 +571,7 @@ export function registerAgentRoutes(
       const accountId = `wallet:${walletType}:${walletAddress}`;
 
       // Get database access
-      const databaseSystem = world.getSystem("database") as
-        | {
-            db: {
-              select: (fields?: unknown) => {
-                from: (table: unknown) => {
-                  where: (condition: unknown) => Promise<unknown[]>;
-                };
-              };
-              insert: (table: unknown) => {
-                values: (values: Record<string, unknown>) => {
-                  onConflictDoUpdate: (config: {
-                    target: unknown;
-                    set: unknown;
-                  }) => Promise<unknown>;
-                } & Promise<unknown>;
-              };
-              query: {
-                characters: {
-                  findFirst: (opts: {
-                    where: (
-                      chars: { accountId: unknown },
-                      ops: { eq: (a: unknown, b: string) => unknown },
-                    ) => unknown;
-                  }) => Promise<{ id: string; name: string } | null>;
-                };
-              };
-            };
-          }
-        | undefined;
+      const databaseSystem = getDatabaseSystem();
 
       if (!databaseSystem?.db) {
         return reply.status(500).send({
@@ -640,7 +618,15 @@ export function registerAgentRoutes(
           createdAt: Date.now(),
         });
 
-        character = { id: characterId, name: agentName };
+        character = {
+          id: characterId,
+          accountId,
+          name: agentName,
+        };
+      }
+
+      if (!character) {
+        throw new Error("Failed to resolve character after wallet auth");
       }
 
       // Generate 7-day JWT
@@ -2926,13 +2912,23 @@ export function registerAgentRoutes(
         try {
           const { agentThoughts: agentThoughtsTable } =
             await import("../../database/schema.js");
-          const { desc, eq } = await import("drizzle-orm");
-          const rows = await db
+          const { and, desc, eq, gt } = await import("drizzle-orm");
+          const conditions = [eq(agentThoughtsTable.characterId, characterId)];
+          if (since > 0) {
+            conditions.push(gt(agentThoughtsTable.timestamp, since));
+          }
+          const rows = (await db
             .select()
             .from(agentThoughtsTable)
-            .where(eq(agentThoughtsTable.characterId, characterId))
+            .where(and(...conditions))
             .orderBy(desc(agentThoughtsTable.timestamp))
-            .limit(limit);
+            .limit(limit)) as Array<{
+            characterId: string;
+            type: string;
+            content: string;
+            timestamp: number;
+            decisionPath?: string | null;
+          }>;
           thoughts = rows.map((r) => ({
             id: `${r.characterId}-thought-${r.timestamp}`,
             type: r.type,
@@ -2952,11 +2948,10 @@ export function registerAgentRoutes(
       }
 
       // Filter by since timestamp and limit
-      let filteredThoughts = thoughts;
-      if (since > 0) {
-        filteredThoughts = thoughts.filter((t) => t.timestamp > since);
-      }
-      filteredThoughts = filteredThoughts.slice(0, limit);
+      const filteredThoughts =
+        since > 0
+          ? thoughts.filter((t) => t.timestamp > since).slice(0, limit)
+          : thoughts.slice(0, limit);
 
       return reply.send({
         success: true,
@@ -3087,42 +3082,7 @@ export function registerAgentRoutes(
       const inputCharacterId = body.characterId;
 
       // Get character from database to retrieve accountId and name
-      const databaseSystem = world.getSystem("database") as
-        | {
-            db: {
-              select: (fields?: unknown) => {
-                from: (table: unknown) => {
-                  where: (condition: unknown) => Promise<unknown[]>;
-                };
-              };
-              insert: (table: unknown) => {
-                values: (values: Record<string, unknown>) => {
-                  onConflictDoUpdate: (config: {
-                    set: Record<string, unknown>;
-                    target: unknown;
-                  }) => Promise<unknown>;
-                } & Promise<unknown>;
-              };
-              delete: (table: unknown) => {
-                where: (condition: unknown) => Promise<unknown>;
-              };
-              query: {
-                characters: {
-                  findFirst: (opts: {
-                    where: (
-                      chars: { id: unknown },
-                      ops: { eq: (a: unknown, b: string) => unknown },
-                    ) => unknown;
-                  }) => Promise<{
-                    id: string;
-                    accountId: string;
-                    name: string;
-                  } | null>;
-                };
-              };
-            };
-          }
-        | undefined;
+      const databaseSystem = getDatabaseSystem();
 
       if (!databaseSystem?.db) {
         return reply.status(500).send({

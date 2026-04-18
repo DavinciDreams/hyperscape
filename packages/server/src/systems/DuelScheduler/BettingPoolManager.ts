@@ -77,31 +77,75 @@ export class BettingPoolManager {
       };
     }
 
-    const amount = parseFloat(bet.amount);
-    if (isNaN(amount) || amount <= 0) {
+    if (!isValidPositiveDecimalAmount(bet.amount)) {
       return { success: false, error: "Invalid bet amount" };
+    }
+
+    if (!isValidSolanaWalletAddress(bet.walletAddress)) {
+      return { success: false, error: "Invalid wallet address" };
     }
 
     const betId = randomUUID();
     try {
-      await db.insert(solanaBets).values({
-        id: betId,
-        roundId: bet.roundId,
-        bettorWallet: bet.walletAddress,
-        side: bet.side,
-        sourceAsset: "GOLD",
-        sourceAmount: bet.amount,
-        goldAmount: bet.amount,
-        status: "CONFIRMED",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const insertResult = await db.transaction(async (tx) => {
+        const lockedRounds = await tx.execute<{
+          id: string;
+          bettingClosesAt: number;
+          duelEndsAt: number | null;
+          winnerId: string | null;
+        }>(
+          sql`
+            SELECT
+              id,
+              "bettingClosesAt",
+              "duelEndsAt",
+              "winnerId"
+            FROM arena_rounds
+            WHERE id = ${bet.roundId}
+            FOR UPDATE
+          `,
+        );
+        const round = lockedRounds.rows[0];
+        if (!round) {
+          return { success: false, error: "Round not found" } as const;
+        }
+        if (
+          round.bettingClosesAt <= Date.now() ||
+          round.duelEndsAt !== null ||
+          round.winnerId !== null
+        ) {
+          return {
+            success: false,
+            error: "Market is locked, betting is closed",
+          } as const;
+        }
+
+        await tx.insert(solanaBets).values({
+          id: betId,
+          roundId: bet.roundId,
+          bettorWallet: bet.walletAddress,
+          side: bet.side,
+          sourceAsset: "GOLD",
+          sourceAmount: bet.amount,
+          goldAmount: bet.amount,
+          status: "CONFIRMED",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return { success: true } as const;
       });
+      if (!insertResult.success) {
+        return { success: false, error: insertResult.error };
+      }
     } catch (err) {
       Logger.error(
         "BettingPoolManager",
         "Failed to insert bet",
         err instanceof Error ? err : null,
-        { roundId: bet.roundId, wallet: bet.walletAddress },
+        {
+          roundId: bet.roundId,
+          wallet: redactWalletAddress(bet.walletAddress),
+        },
       );
       return { success: false, error: "Database error" };
     }
@@ -123,7 +167,7 @@ export class BettingPoolManager {
       roundId: bet.roundId,
       side: bet.side,
       amount: bet.amount,
-      wallet: bet.walletAddress,
+      wallet: redactWalletAddress(bet.walletAddress),
     });
 
     return { success: true, betId };
@@ -212,7 +256,7 @@ export class BettingPoolManager {
         "BettingPoolManager",
         "Failed to get bets by wallet",
         err instanceof Error ? err : null,
-        { walletAddress },
+        { wallet: redactWalletAddress(walletAddress) },
       );
       return [];
     }
@@ -227,67 +271,136 @@ export class BettingPoolManager {
   ): Promise<{ success: boolean; error?: string; jobId?: string }> {
     const db = getDatabase();
 
-    // Verify they have a winning bet
-    const bets = await db
-      .select()
-      .from(solanaBets)
-      .where(
-        and(
-          eq(solanaBets.roundId, roundId),
-          eq(solanaBets.bettorWallet, walletAddress),
-          eq(solanaBets.status, "CONFIRMED"),
-        ),
-      )
-      .limit(1);
-
-    if (bets.length === 0) {
-      return { success: false, error: "No confirmed bet found for this round" };
-    }
-
-    // Check if payout job already exists
-    const existing = await db
-      .select()
-      .from(solanaPayoutJobs)
-      .where(
-        and(
-          eq(solanaPayoutJobs.roundId, roundId),
-          eq(solanaPayoutJobs.bettorWallet, walletAddress),
-        ),
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      return { success: true, jobId: existing[0].id };
-    }
-
     const jobId = randomUUID();
     try {
-      await db.insert(solanaPayoutJobs).values({
-        id: jobId,
-        roundId,
-        bettorWallet: walletAddress,
-        status: "PENDING",
-        attempts: 0,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const result = await db.transaction(async (tx) => {
+        // pg_try_advisory_xact_lock returns immediately with false if another
+        // transaction holds the lock, instead of blocking. If a concurrent
+        // claim for the same (round, wallet) pair hangs mid-transaction, the
+        // original pg_advisory_xact_lock would queue everyone behind it —
+        // that's an easy DoS vector on the payout path. Returning a conflict
+        // error lets the caller retry.
+        const lockRows = await tx.execute<{ acquired: boolean }>(
+          sql`SELECT pg_try_advisory_xact_lock(hashtext(${`solana-payout:${roundId}:${walletAddress}`})) AS acquired`,
+        );
+        if (!lockRows.rows[0]?.acquired) {
+          return {
+            success: false,
+            error: "A concurrent claim is in progress; retry shortly",
+          } as const;
+        }
+
+        const lockedRounds = await tx.execute<{
+          id: string;
+          winnerId: string | null;
+          agentAId: string;
+          agentBId: string;
+        }>(
+          sql`
+            SELECT
+              id,
+              "winnerId",
+              "agentAId",
+              "agentBId"
+            FROM arena_rounds
+            WHERE id = ${roundId}
+            FOR UPDATE
+          `,
+        );
+        const round = lockedRounds.rows[0];
+        if (!round) {
+          return { success: false, error: "Round not found" } as const;
+        }
+        if (!round.winnerId) {
+          return {
+            success: false,
+            error: "Round has not resolved yet",
+          } as const;
+        }
+
+        const winningSide =
+          round.winnerId === round.agentAId
+            ? "A"
+            : round.winnerId === round.agentBId
+              ? "B"
+              : null;
+        if (!winningSide) {
+          return {
+            success: false,
+            error: "Round winner does not match either bettor side",
+          } as const;
+        }
+
+        const bets = await tx
+          .select()
+          .from(solanaBets)
+          .where(
+            and(
+              eq(solanaBets.roundId, roundId),
+              eq(solanaBets.bettorWallet, walletAddress),
+              eq(solanaBets.status, "CONFIRMED"),
+            ),
+          );
+
+        if (bets.length === 0) {
+          return {
+            success: false,
+            error: "No confirmed bet found for this round",
+          } as const;
+        }
+
+        const hasWinningBet = bets.some((bet) => bet.side === winningSide);
+        if (!hasWinningBet) {
+          return {
+            success: false,
+            error: "No winning bet found for this round",
+          } as const;
+        }
+
+        const existing = await tx
+          .select()
+          .from(solanaPayoutJobs)
+          .where(
+            and(
+              eq(solanaPayoutJobs.roundId, roundId),
+              eq(solanaPayoutJobs.bettorWallet, walletAddress),
+            ),
+          )
+          .limit(1);
+
+        if (existing.length > 0) {
+          return { success: true, jobId: existing[0].id } as const;
+        }
+
+        await tx.insert(solanaPayoutJobs).values({
+          id: jobId,
+          roundId,
+          bettorWallet: walletAddress,
+          status: "PENDING",
+          attempts: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return { success: true, jobId } as const;
       });
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      Logger.info("BettingPoolManager", "Claim job created", {
+        jobId: result.jobId,
+        roundId,
+        wallet: redactWalletAddress(walletAddress),
+      });
+      return { success: true, jobId: result.jobId };
     } catch (err) {
       Logger.error(
         "BettingPoolManager",
         "Failed to create payout job",
         err instanceof Error ? err : null,
-        { roundId, wallet: walletAddress },
+        { roundId, wallet: redactWalletAddress(walletAddress) },
       );
       return { success: false, error: "Database error" };
     }
-
-    Logger.info("BettingPoolManager", "Claim job created", {
-      jobId,
-      roundId,
-      wallet: walletAddress,
-    });
-
-    return { success: true, jobId };
   }
 
   /**
@@ -323,4 +436,30 @@ export class BettingPoolManager {
       return [];
     }
   }
+}
+
+function isValidSolanaWalletAddress(walletAddress: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(walletAddress.trim());
+}
+
+// Integer portion capped at 18 digits (~10^18, covers lamports/gwei scale),
+// fractional capped at 8 digits. Unlimited precision previously admitted
+// strings like "1.123456789012345678901234567890" that could exacerbate
+// rounding errors in NUMERIC SUM aggregation and on-chain serialization.
+const BET_AMOUNT_PATTERN = /^(?:0|[1-9]\d{0,17})(?:\.\d{1,8})?$/;
+
+function isValidPositiveDecimalAmount(amount: string): boolean {
+  const normalized = amount.trim();
+  if (!BET_AMOUNT_PATTERN.test(normalized)) {
+    return false;
+  }
+  return !/^0+(?:\.0+)?$/.test(normalized);
+}
+
+export function redactWalletAddress(walletAddress: string): string {
+  const trimmed = walletAddress.trim();
+  if (trimmed.length <= 12) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
 }

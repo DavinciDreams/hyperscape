@@ -11,7 +11,8 @@ describe("parseExternalRtmpStatusSnapshot", () => {
         captureMode: "cdp",
         smoke: {
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           deliveryMode: "external_hls",
           captureFpsP50: 29.5,
           captureFpsP95: 30,
@@ -39,7 +40,8 @@ describe("parseExternalRtmpStatusSnapshot", () => {
           captureMode: "cdp",
           degradedReason: null,
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: 1230,
           lastRenderTickAt: 1231,
           lastVisualChangeAt: 1232,
@@ -177,5 +179,32 @@ describe("parseExternalRtmpStatusSnapshot", () => {
       manifestStatus: "ok",
     });
     expect(parsed).not.toHaveProperty("unexpected");
+  });
+
+  it("validates stats field-by-field and drops malformed values", () => {
+    const parsed = parseExternalRtmpStatusSnapshot(
+      JSON.stringify({
+        destinations: [],
+        stats: {
+          bitrate: 4_000,
+          fps: "30",
+          uptime: 12,
+          bytesReceived: 8_192,
+          droppedFrames: "2",
+          healthy: true,
+          injected: "nope",
+        },
+        updatedAt: Date.now(),
+      }),
+      15_000,
+      { allowStale: true },
+    );
+
+    expect(parsed?.stats).toEqual({
+      bitrate: 4_000,
+      uptime: 12,
+      bytesReceived: 8_192,
+      healthy: true,
+    });
   });
 });

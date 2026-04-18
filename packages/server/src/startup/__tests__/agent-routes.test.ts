@@ -9,24 +9,24 @@ type MappingRow = {
   updatedAt?: Date;
 };
 
-const agentMappingsTable = {
-  __table: "agentMappings",
-  accountId: "accountId",
-  agentId: "agentId",
-  agentName: "agentName",
-  characterId: "characterId",
-};
-
-const usersTable = {
-  __table: "users",
-  id: "id",
-};
-
-const charactersTable = {
-  __table: "characters",
-  accountId: "accountId",
-  id: "id",
-};
+const { agentMappingsTable, usersTable, charactersTable } = vi.hoisted(() => ({
+  agentMappingsTable: {
+    __table: "agentMappings",
+    accountId: "accountId",
+    agentId: "agentId",
+    agentName: "agentName",
+    characterId: "characterId",
+  },
+  usersTable: {
+    __table: "users",
+    id: "id",
+  },
+  charactersTable: {
+    __table: "characters",
+    accountId: "accountId",
+    id: "id",
+  },
+}));
 
 vi.mock("../../database/schema.js", () => ({
   agentMappings: agentMappingsTable,
@@ -38,7 +38,10 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   const actual = await importOriginal<typeof import("drizzle-orm")>();
   return {
     ...actual,
+    and: (...conditions: unknown[]) => ({ op: "and", conditions }),
+    desc: (column: string) => ({ direction: "desc", column }),
     eq: (column: string, value: unknown) => ({ column, value }),
+    gt: (column: string, value: unknown) => ({ column, value, op: "gt" }),
   };
 });
 
@@ -77,6 +80,10 @@ function createFastifyRecorder() {
     },
     post(path: string, handler: Function) {
       routes.set(`POST ${path}`, handler);
+      return this;
+    },
+    patch(path: string, handler: Function) {
+      routes.set(`PATCH ${path}`, handler);
       return this;
     },
     put(path: string, handler: Function) {
@@ -144,19 +151,34 @@ function createMockDatabase(initialMappings: MappingRow[]) {
       },
     },
     select: () => ({
-      from: (table: { __table: string }) => ({
-        where: async (condition: {
-          column: keyof MappingRow;
-          value: unknown;
+      from: (table: { __table: string }) => {
+        const filterRows = (condition: {
+          column?: keyof MappingRow;
+          value?: unknown;
         }) => {
-          if (table.__table === "agentMappings") {
+          if (table.__table === "agentMappings" && condition.column) {
             return state.mappings.filter(
-              (mapping) => mapping[condition.column] === condition.value,
+              (mapping) => mapping[condition.column!] === condition.value,
             );
           }
           return [];
-        },
-      }),
+        };
+        return {
+          where: (condition: {
+            column?: keyof MappingRow;
+            value?: unknown;
+          }) => {
+            const rows = filterRows(condition);
+            return {
+              then: (onfulfilled: (value: MappingRow[]) => unknown) =>
+                Promise.resolve(onfulfilled(rows)),
+              orderBy: () => ({
+                limit: async () => rows,
+              }),
+            };
+          },
+        };
+      },
     }),
   };
 
@@ -208,8 +230,8 @@ describe("agent route mapping cache", () => {
       firstListReply as never,
     );
     expect(firstListReply.payload).toMatchObject({
-      agentIds: ["agent-1"],
-      count: 1,
+      agentIds: expect.arrayContaining(["agent-1", "character-1"]),
+      count: 2,
       success: true,
     });
 
@@ -252,8 +274,8 @@ describe("agent route mapping cache", () => {
       newAccountReply as never,
     );
     expect(newAccountReply.payload).toMatchObject({
-      agentIds: ["agent-1"],
-      count: 1,
+      agentIds: expect.arrayContaining(["agent-1", "character-2"]),
+      count: 2,
       success: true,
     });
 
@@ -286,8 +308,8 @@ describe("agent route mapping cache", () => {
       listReply as never,
     );
     expect(listReply.payload).toMatchObject({
-      agentIds: ["agent-1"],
-      count: 1,
+      agentIds: expect.arrayContaining(["agent-1", "character-1"]),
+      count: 2,
       success: true,
     });
 

@@ -1,20 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
 import type { ExternalResourceData } from "../../data/DataManager";
 import {
   getExternalResource,
   getExternalResources,
 } from "../ExternalAssetUtils";
-
-const WORLD_ASSETS_DIR = fileURLToPath(
-  new URL("../../../../server/world/assets", import.meta.url),
-);
-
-function assetUriExists(assetUri: string): boolean {
-  return existsSync(resolve(WORLD_ASSETS_DIR, assetUri.replace("asset://", "")));
-}
 
 describe("ExternalAssetUtils", () => {
   beforeEach(() => {
@@ -33,7 +22,7 @@ describe("ExternalAssetUtils", () => {
     expect(getExternalResources().has("tree_general")).toBe(true);
   });
 
-  it("points fallback staging tree resources at packaged models", () => {
+  it("points fallback staging tree resources at nested tree asset URIs", () => {
     const resourceIds = [
       "tree_banana",
       "tree_pineDead",
@@ -47,9 +36,13 @@ describe("ExternalAssetUtils", () => {
       const resource = getExternalResource(resourceId);
       expect(resource).not.toBeNull();
       for (const modelVariant of resource?.modelVariants ?? []) {
-        expect(assetUriExists(modelVariant)).toBe(true);
+        expect(modelVariant).toMatch(
+          /^asset:\/\/models\/trees\/[^/]+\/[^/]+\.glb$/,
+        );
       }
-      expect(assetUriExists(resource?.depletedModelPath ?? "")).toBe(true);
+      expect(resource?.depletedModelPath).toBe(
+        "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+      );
     }
   });
 

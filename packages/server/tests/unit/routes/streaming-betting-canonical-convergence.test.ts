@@ -1,9 +1,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerStreamingBettingRoutes } from "../../../src/routes/streaming-betting-routes.js";
+
+type BettingSyncStatePayload = {
+  rendererHealth?: {
+    ready?: boolean;
+    degradedReason?: string | null;
+  };
+} & Record<string, unknown>;
 
 const stubbedEnv = new Map<string, string | undefined>();
 
@@ -25,11 +32,18 @@ function restoreStubbedEnvs(): void {
   stubbedEnv.clear();
 }
 
+function createFastifyWithRateLimitDecorator(): FastifyInstance {
+  const fastify = Fastify();
+  fastify.decorate("rateLimit", (() =>
+    async () => {}) as FastifyInstance["rateLimit"]);
+  return fastify;
+}
+
 function createRouteOptions(
   overrides: Partial<Parameters<typeof registerStreamingBettingRoutes>[0]> = {},
 ) {
   return {
-    fastify: Fastify(),
+    fastify: createFastifyWithRateLimitDecorator(),
     world: {
       getSystem: () => null,
     } as never,
@@ -288,7 +302,7 @@ describe("streaming-betting canonical convergence", () => {
 
     writeStatus(true, now + 5_000);
 
-    let refreshedPayload: Record<string, unknown> | null = null;
+    let refreshedPayload: BettingSyncStatePayload | null = null;
     for (let attempt = 0; attempt < 40; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
       const response = await options.fastify.inject({
@@ -299,7 +313,7 @@ describe("streaming-betting canonical convergence", () => {
         },
       });
       expect(response.statusCode).toBe(200);
-      const payload = response.json();
+      const payload = response.json() as BettingSyncStatePayload;
       if (payload.rendererHealth?.ready === true) {
         refreshedPayload = payload;
         break;
@@ -307,7 +321,7 @@ describe("streaming-betting canonical convergence", () => {
     }
 
     expect(refreshedPayload).not.toBeNull();
-    expect((refreshedPayload as any).rendererHealth).toMatchObject({
+    expect(refreshedPayload?.rendererHealth).toMatchObject({
       ready: true,
       degradedReason: null,
     });

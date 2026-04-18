@@ -105,7 +105,7 @@ function createChannel(overrides: Record<string, unknown> = {}) {
     mode: "always_on",
     presentationDelayMs: 4_000,
     activeDuelId: "duel-1",
-    activeDuelKey: "0xabcdef",
+    activeDuelKey: null,
     canonicalDestinationId: "canonical-cloudflare",
     fallbackDestinationId: "fallback-self-hls",
     publicPlaybackUrl: "https://video.example/live.m3u8?protocol=llhls",
@@ -228,11 +228,11 @@ describe("streaming-betting-feed", () => {
       cycle: {
         phase: "FIGHTING",
         fightStartTime: 3_000,
-        winnerId: "agent-b",
-        winReason: "damage_advantage",
+        winnerId: null,
+        winReason: null,
       },
       duelId: "duel-1",
-      duelKey: "0xabcdef",
+      duelKey: null,
       phase: "FIGHTING",
       phaseVersion: 9,
       broadcastTimeline: {
@@ -330,9 +330,13 @@ describe("streaming-betting-feed", () => {
     expect(payload.agent1?.id).toBe("agent-a");
     expect(payload.agent2?.hp).toBe(20);
     expect(payload.rendererMetrics?.hlsManifest?.mediaSequence).toBe(812);
-    expect(payload.channel?.canonicalDestinationId).toBe("canonical-cloudflare");
+    expect(payload.channel?.canonicalDestinationId).toBe(
+      "canonical-cloudflare",
+    );
     expect(payload.delivery?.llhlsUrl).toContain("protocol=llhls");
-    expect(payload.deliveryHealth?.degradedReason).toBe("delivery_disconnected");
+    expect(payload.deliveryHealth?.degradedReason).toBe(
+      "delivery_disconnected",
+    );
     expect(payload.canonicalAuthority).toMatchObject({
       decision: "blocked",
       reason: "provider_not_live",
@@ -447,8 +451,8 @@ describe("streaming-betting-feed", () => {
     expect(payload.winReason).toBeNull();
     expect(payload.cycle).toMatchObject({
       phase: "RESOLUTION",
-      winnerId: "agent-a",
-      winReason: "knockout",
+      winnerId: null,
+      winReason: null,
     });
   });
 
@@ -567,10 +571,12 @@ describe("streaming-betting-feed", () => {
               ...basePayload.channel.publicReadiness,
               updatedAt: 888_888,
             },
-            destinations: basePayload.channel.destinations.map((destination) => ({
-              ...destination,
-              updatedAt: 999_999,
-            })),
+            destinations: basePayload.channel.destinations.map(
+              (destination) => ({
+                ...destination,
+                updatedAt: 999_999,
+              }),
+            ),
           }
         : null,
       sourceRuntime: basePayload.sourceRuntime

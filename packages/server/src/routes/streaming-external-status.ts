@@ -218,6 +218,40 @@ function parseExternalDestinations(value: unknown): ExternalRtmpDestination[] {
   return destinations;
 }
 
+function parseExternalStats(value: unknown): ExternalRtmpStreamStats {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const record = value as Record<string, unknown>;
+  const stats: ExternalRtmpStreamStats = {};
+  const bitrate = asFiniteNumber(record.bitrate);
+  const fps = asFiniteNumber(record.fps);
+  const uptime = asFiniteNumber(record.uptime);
+  const bytesReceived = asFiniteNumber(record.bytesReceived);
+  const droppedFrames = asFiniteNumber(record.droppedFrames);
+
+  if (bitrate !== null) {
+    stats.bitrate = bitrate;
+  }
+  if (fps !== null) {
+    stats.fps = fps;
+  }
+  if (uptime !== null) {
+    stats.uptime = uptime;
+  }
+  if (bytesReceived !== null) {
+    stats.bytesReceived = bytesReceived;
+  }
+  if (droppedFrames !== null) {
+    stats.droppedFrames = droppedFrames;
+  }
+  if (typeof record.healthy === "boolean") {
+    stats.healthy = record.healthy;
+  }
+
+  return stats;
+}
+
 /**
  * Parse and validate the external RTMP status JSON, stripping unknown keys.
  *
@@ -255,7 +289,7 @@ export function parseExternalRtmpStatusSnapshot(
     // Allowlist: only forward known fields.
     const snapshot: ExternalRtmpStatusSnapshot = {
       destinations: parseExternalDestinations(parsed.destinations),
-      stats: parsed.stats as ExternalRtmpStreamStats,
+      stats: parseExternalStats(parsed.stats),
       updatedAt,
     };
     if (typeof parsed.active === "boolean") {

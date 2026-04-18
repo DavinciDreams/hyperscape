@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
+import { RateLimiterMemory } from "rate-limiter-flexible";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
@@ -39,6 +40,7 @@ import {
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
+  resolveOracleProofAccessToken,
   shouldSkipBettingFeedAuth,
 } from "./streaming-betting-auth.js";
 import {
@@ -150,7 +152,21 @@ const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
   max: 60,
   timeWindow: "1 minute",
 };
-
+const AUTHENTICATED_RESULTS_RATE_LIMIT: RateLimitOptions = {
+  max: 120,
+  timeWindow: "1 minute",
+};
+const STREAMING_STATUS_RATE_LIMIT: RateLimitOptions = {
+  max: 120,
+  timeWindow: "1 minute",
+};
+const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
+  points: 120,
+  duration: 60,
+});
+type RateLimitedFastify = FastifyInstance & {
+  rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
+};
 type StreamingStatusMetricsSnapshot = {
   captureFps: number | null;
   encodeFps: number | null;
@@ -204,6 +220,46 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function redactIngestUrlFromDestination<T>(destination: T): T {
+  if (!destination || typeof destination !== "object") {
+    return destination;
+  }
+  return {
+    ...destination,
+    ingestUrl: null,
+  };
+}
+
+function redactIngestUrlsFromDestinations<T>(destinations: readonly T[]): T[] {
+  return destinations.map((destination) =>
+    redactIngestUrlFromDestination(destination),
+  );
+}
+
+function redactIngestUrlFromDelivery<T>(delivery: T): T {
+  if (!delivery || typeof delivery !== "object") {
+    return delivery;
+  }
+  if (!("ingestUrl" in delivery)) {
+    return delivery;
+  }
+  return {
+    ...delivery,
+    ingestUrl: null,
+  };
+}
+
+function ensureRateLimitDecorator(
+  fastify: FastifyInstance,
+): asserts fastify is RateLimitedFastify {
+  if (typeof fastify.rateLimit === "function") {
+    return;
+  }
+  throw new Error(
+    "Streaming routes require @fastify/rate-limit to be registered before route setup",
+  );
 }
 
 export function normalizeStreamingStatusMetrics(params: {
@@ -709,6 +765,12 @@ export function buildStreamingStatusPayload(params: {
     (delivery.mode === "self_hls"
       ? "self_hls"
       : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare"));
+  const publicDestinations = redactIngestUrlsFromDestinations(
+    (effectiveExternalSnapshot?.destinations ??
+      params.base.destinations ??
+      []) as readonly unknown[],
+  );
+  const publicDelivery = redactIngestUrlFromDelivery(delivery);
   const cloudflarePlaybackProbe =
     activeCanonicalProvider === "cloudflare_stream" &&
     params.canonicalProbeSnapshot
@@ -719,13 +781,13 @@ export function buildStreamingStatusPayload(params: {
           updatedAt: params.canonicalProbeSnapshot.updatedAt,
         }
       : null;
-  const lastExternalTransportError =
-    typeof effectiveExternalSnapshot?.captureDiagnostics?.lastFatalWriteError
-      ?.message === "string" &&
-    effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
-      .length > 0
-      ? effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
-      : null;
+  const publicCloudflareStatus = {
+    liveInputId: null,
+    lifecycle: null,
+    lastWebhook: null,
+    lastPlaybackProbe: cloudflarePlaybackProbe,
+    lastExternalTransportError: null,
+  };
 
   return {
     ...params.base,
@@ -733,8 +795,7 @@ export function buildStreamingStatusPayload(params: {
     bridgeActive: externalActive ?? params.base.bridgeActive,
     ffmpegRunning: externalFfmpegRunning ?? params.base.ffmpegRunning,
     clientConnected: externalClientConnected ?? params.base.clientConnected,
-    destinations:
-      effectiveExternalSnapshot?.destinations ?? params.base.destinations ?? [],
+    destinations: publicDestinations,
     metrics,
     captureFps: metrics.captureFps,
     encodeFps: metrics.encodeFps,
@@ -749,12 +810,12 @@ export function buildStreamingStatusPayload(params: {
     hlsManifest,
     hlsManifestUpdatedAt: hlsManifest.updatedAt,
     hlsMediaSequence: hlsManifest.mediaSequence,
-    delivery,
+    delivery: publicDelivery,
     ingest: smoke.ingest,
     smoke,
-    deliveryMode: delivery.mode,
-    deliveryProvider: delivery.provider ?? null,
-    playbackUrl: delivery.playbackUrl ?? null,
+    deliveryMode: publicDelivery.mode,
+    deliveryProvider: publicDelivery.provider ?? null,
+    playbackUrl: publicDelivery.playbackUrl ?? null,
     rendererHealth: params.rendererHealth,
     sourceRuntime,
     canonicalStatus: normalizedCanonicalTruth.canonicalStatus,
@@ -764,19 +825,8 @@ export function buildStreamingStatusPayload(params: {
         persistedAuthority?.canonicalProviderState?.primaryHealthySince ?? null,
       updatedAt: persistedAuthority?.canonicalProviderState?.updatedAt ?? null,
     },
-    cloudflare: {
-      liveInputId:
-        params.cloudflareLiveInputId ??
-        persistedAuthority?.cloudflareLifecycle?.liveInputId ??
-        null,
-      lifecycle: persistedAuthority?.cloudflareLifecycle ?? null,
-      lastWebhook: persistedAuthority?.cloudflareLastWebhook ?? null,
-      lastPlaybackProbe: cloudflarePlaybackProbe,
-      lastExternalTransportError,
-    },
-    captureDiagnostics:
-      (effectiveExternalSnapshot?.captureDiagnostics as ExternalCaptureDiagnosticsBlob | null) ??
-      null,
+    cloudflare: publicCloudflareStatus,
+    captureDiagnostics: null,
   };
 }
 
@@ -839,6 +889,7 @@ export function registerStreamingRoutes(
   fastify: FastifyInstance,
   world: World,
 ): void {
+  ensureRateLimitDecorator(fastify);
   const sseClients = new Map<number, FastifyReply>();
   const replayFrames: StreamingSseFrame[] = [];
   let replayFramesTotalBytes = 0;
@@ -1303,7 +1354,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/state",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const scheduler = getStreamingDuelScheduler();
@@ -1329,7 +1380,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/metrics",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const bettingMetrics = bettingRoutes.getMetrics();
@@ -1401,7 +1452,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/state/events",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (request, reply) => {
       if (sseClients.size >= STREAMING_SSE_MAX_CLIENTS) {
@@ -1531,9 +1582,14 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/duel-context",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const scheduler = getStreamingDuelScheduler();
       if (!scheduler) {
         return reply.status(503).send({
@@ -1595,9 +1651,14 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/monologues",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       if (STREAMING_PUBLIC_DELAY_MS > 0) {
         return reply.send({
           characterId: request.params.characterId,
@@ -1624,9 +1685,14 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/agent/:characterId/inventory",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       if (STREAMING_PUBLIC_DELAY_MS > 0) {
         return reply.send({
           characterId: request.params.characterId,
@@ -1648,9 +1714,14 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/leaderboard",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const scheduler = getStreamingDuelScheduler();
 
       if (!scheduler) {
@@ -1678,9 +1749,14 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/leaderboard/details",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (request, reply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const scheduler = getStreamingDuelScheduler();
 
       if (!scheduler) {
@@ -1749,40 +1825,71 @@ export function registerStreamingRoutes(
   // that event. This endpoint lets the keeper reconstruct the resolution
   // from the durable streaming_duel_history row.
   //
-  // Bearer-auth via the same token the betting feed uses (BETTING_FEED_ACCESS_TOKEN).
+  // Bearer-auth prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
+  // hyperbet keeper's consumption order). STREAMING_ORACLE_PROOF_TOKEN is a
+  // server-side alias kept for continuity. BETTING_FEED_ACCESS_TOKEN is
+  // accepted as a compatibility fallback so existing deployments keep working
+  // during rollout. Operators should migrate to the dedicated oracle-proof
+  // secret to narrow the blast radius of a feed-token leak.
+  let oracleProofFallbackWarnLogged = false;
+  let oracleProofSkipAuthWarnLogged = false;
+  const authorizeResultsLookup = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const env = process.env as Record<string, string | undefined>;
+    const skipAuth = shouldSkipBettingFeedAuth(env);
+    const resolution = resolveOracleProofAccessToken(env);
+    const requiredToken = resolution.token;
+
+    if (
+      resolution.source === "betting-feed" &&
+      !oracleProofFallbackWarnLogged
+    ) {
+      fastify.log.warn(
+        "[streaming] /api/streaming/results/:duelId authenticated via BETTING_FEED_ACCESS_TOKEN; set HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches hyperbet keeper) to scope oracle-proof access independently",
+      );
+      oracleProofFallbackWarnLogged = true;
+    }
+
+    if (!requiredToken) {
+      if (process.env.NODE_ENV === "production" || !skipAuth) {
+        return reply.status(503).send({
+          error: "Service unavailable",
+          message: "Oracle proof auth token is not configured",
+        });
+      }
+      if (!oracleProofSkipAuthWarnLogged) {
+        fastify.log.warn(
+          "[streaming] /api/streaming/results/:duelId is serving requests UNAUTHENTICATED (BETTING_FEED_SKIP_AUTH=true, NODE_ENV=development)",
+        );
+        oracleProofSkipAuthWarnLogged = true;
+      }
+      return;
+    }
+
+    const token = extractBettingFeedToken({
+      authorizationHeader: request.headers.authorization,
+    });
+    if (hasValidBettingFeedToken(requiredToken, token)) {
+      return;
+    }
+
+    return reply.status(401).send({
+      error: "Unauthorized",
+      message: "Missing or invalid oracle proof token",
+    });
+  };
+
   fastify.get<{
     Params: { duelId: string };
   }>(
     "/api/streaming/results/:duelId",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: AUTHENTICATED_RESULTS_RATE_LIMIT },
+      preHandler: authorizeResultsLookup,
     },
     async (request, reply) => {
-      const skipAuth = shouldSkipBettingFeedAuth(
-        process.env as Record<string, string | undefined>,
-      );
-      const requiredToken = resolveBettingFeedAccessToken(
-        process.env as Record<string, string | undefined>,
-      ).token;
-      if (!requiredToken) {
-        if (process.env.NODE_ENV === "production" || !skipAuth) {
-          return reply.status(503).send({
-            error: "Service unavailable",
-            message: "Betting feed auth token is not configured",
-          });
-        }
-      } else {
-        const token = extractBettingFeedToken({
-          authorizationHeader: request.headers.authorization,
-        });
-        if (!hasValidBettingFeedToken(requiredToken, token)) {
-          return reply.status(401).send({
-            error: "Unauthorized",
-            message: "Missing or invalid betting feed token",
-          });
-        }
-      }
-
       const duelId = request.params.duelId?.trim();
       if (!duelId) {
         return reply.status(400).send({
@@ -1819,11 +1926,12 @@ export function registerStreamingRoutes(
       // Legacy rows written before migration 0055 may not carry the oracle
       // proof fields. Callers must handle this by waiting and retrying —
       // the current live duel will write fresh rows with the full proof.
+      // The 409 response intentionally does NOT leak the schema-migration
+      // number; that's an internal detail.
       if (!row.seed || !row.replayHash || !row.duelKeyHex) {
         return reply.status(409).send({
           error: "Incomplete proof",
-          message:
-            "This duel's oracle proof was not persisted. The duel predates schema migration 0055.",
+          message: "Oracle proof is not available for this duel.",
           duelId: row.duelId,
           cycleId: row.cycleId,
         });
@@ -1852,7 +1960,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/config",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       return reply.send({
@@ -1875,9 +1983,14 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
@@ -1957,7 +2070,7 @@ export function registerStreamingRoutes(
                 destinations: stats.destinations,
                 healthy: stats.healthy,
                 droppedFrames: stats.droppedFrames,
-                encoderFps: stats.encoderFps,
+                encoderFps: null,
                 backpressured: stats.backpressured,
                 spectators: stats.spectators,
                 processMemory: stats.processMemory,
@@ -1989,9 +2102,14 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
       try {
         const persistedAuthorityState =
           await loadPersistedAuthorityStateSafely();
@@ -2041,7 +2159,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/smoke",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {

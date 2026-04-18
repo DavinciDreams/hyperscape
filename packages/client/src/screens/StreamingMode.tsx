@@ -21,22 +21,12 @@ import { LoadingScreen } from "./LoadingScreen";
 import { StreamingOverlay } from "../components/streaming/StreamingOverlay";
 import type {
   World,
+  Entity,
   StreamingGuardrailAgentSnapshot,
   StreamingGuardrailPhase,
 } from "@hyperscape/shared";
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
-import type {
-  CaptureControlStatus,
-  StreamingTargetEntityDiagnostics,
-  StreamingWindowBootDiagnostics,
-  StreamingWindow,
-  StreamingWindowHeartbeat,
-} from "@/lib/streamingWindow";
-import { buildCaptureControlStatus } from "@/lib/captureStatus";
-import {
-  findStreamingTargetEntity,
-  isTargetAvatarReady,
-} from "@/lib/streamingReadiness";
+import type { StreamingWindow } from "@/lib/streamingWindow";
 import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
@@ -45,7 +35,7 @@ export interface StreamingState {
   type: "STREAMING_STATE_UPDATE";
   cycle: {
     cycleId: string;
-    duelId?: string | null;
+    duelId: string | null;
     phase: "IDLE" | "ANNOUNCEMENT" | "COUNTDOWN" | "FIGHTING" | "RESOLUTION";
     cycleStartTime: number;
     phaseStartTime: number;
@@ -99,7 +89,6 @@ export interface LeaderboardEntry {
   winRate: number;
   combatLevel: number;
   currentStreak: number;
-  lossStreak: number;
 }
 
 export interface StreamingRendererHealth {
@@ -107,258 +96,6 @@ export interface StreamingRendererHealth {
   degradedReason: string | null;
   updatedAt: number;
   phase: StreamingState["cycle"]["phase"] | null;
-}
-
-// How long the streaming renderer waits for the target avatar to load before
-// declaring the grace period expired (keeping the renderer degraded until the
-// avatar eventually loads — but avatar polling STOPS on expiry per 33dab353f,
-// so this value must be generous enough for the full game boot: WS connect +
-// entity snapshot + CDN VRM download + WebGPU init = 40-60s in practice.
-// Override for the capture pipeline via ?avatarGraceMs=<ms> query param so
-// stream-source can tune separately without rebuilding the client.
-const TARGET_AVATAR_READY_GRACE_MS = (() => {
-  if (typeof window !== "undefined") {
-    const param = new URLSearchParams(window.location.search).get(
-      "avatarGraceMs",
-    );
-    if (param) {
-      const parsed = parseInt(param, 10);
-      if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    }
-  }
-  return 90_000;
-})();
-
-function normalizeCaptureBridgeUrl(rawValue: string | null): string {
-  const fallbackUrl = "ws://localhost:8765";
-  const candidate = rawValue?.trim() || fallbackUrl;
-
-  try {
-    const parsed = new URL(candidate, window.location.href);
-    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
-      return fallbackUrl;
-    }
-    if (
-      parsed.hostname === "127.0.0.1" ||
-      parsed.hostname === "0.0.0.0" ||
-      parsed.hostname === "::1"
-    ) {
-      parsed.hostname = "localhost";
-    }
-    return parsed.toString();
-  } catch {
-    return fallbackUrl;
-  }
-}
-
-function createCaptureSessionGeneration(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID();
-  }
-  return `capture-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-// `findStreamingTargetEntity` and `isTargetAvatarReady` moved to
-// `@/lib/streamingReadiness` so that EmbeddedGameClient can share the same
-// implementation instead of maintaining a parallel copy.
-
-function readNumericCollectionSize(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (value instanceof Map || value instanceof Set) return value.size;
-  if (Array.isArray(value)) return value.length;
-  if (value && typeof value === "object") {
-    const record = value as { size?: unknown; length?: unknown };
-    if (typeof record.size === "number" && Number.isFinite(record.size)) {
-      return record.size;
-    }
-    if (typeof record.length === "number" && Number.isFinite(record.length)) {
-      return record.length;
-    }
-  }
-  return null;
-}
-
-function readFirstNumericField(
-  record: Record<string, unknown>,
-  fields: string[],
-): number | null {
-  for (const field of fields) {
-    const value = readNumericCollectionSize(record[field]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-function readArenaVisualDiagnostics(
-  world: World | null,
-): StreamingWindowBootDiagnostics["arenaVisuals"] {
-  const arenaSystem = world?.getSystem("duel-arena-visuals") as
-    | { isReady?: () => boolean }
-    | null
-    | undefined;
-  const sceneObject =
-    world?.stage?.scene?.getObjectByName?.("DuelArenaVisuals") ?? null;
-
-  return {
-    systemPresent: Boolean(arenaSystem),
-    isReady: arenaSystem?.isReady ? arenaSystem.isReady() : null,
-    sceneObjectPresent: world?.stage?.scene ? Boolean(sceneObject) : null,
-    sceneObjectChildren:
-      sceneObject && Array.isArray(sceneObject.children)
-        ? sceneObject.children.length
-        : null,
-  };
-}
-
-function isDuelArenaVisualsReady(world: World | null): boolean {
-  const diagnostics = readArenaVisualDiagnostics(world);
-  return (
-    diagnostics.systemPresent &&
-    diagnostics.isReady === true &&
-    diagnostics.sceneObjectPresent === true
-  );
-}
-
-/**
- * Fine-grained breakdown of where the camera-target entity lives and which
- * readiness fields it exposes. Used exclusively by the boot diagnostic writer
- * so that probes (or manual `copy(window.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__)`
- * inspection) can pinpoint which link in the readiness chain is failing when
- * `targetAvatarReady` stays false. Diagnostic-only — no behavior change.
- */
-function readTargetEntityDiagnostics(
-  world: World,
-  targetEntityId: string,
-): StreamingTargetEntityDiagnostics {
-  const playerDirect = world.entities?.players?.get?.(targetEntityId) as
-    | Record<string, unknown>
-    | undefined;
-  const itemDirect = world.entities?.items?.get?.(targetEntityId) as
-    | Record<string, unknown>
-    | undefined;
-  const matchedByDirectKey = Boolean(playerDirect || itemDirect);
-  const resolved =
-    (playerDirect ??
-      itemDirect ??
-      findStreamingTargetEntity(world, targetEntityId)) ||
-    null;
-  const entityWithFields = resolved as {
-    avatar?: unknown;
-    _avatar?: unknown;
-    _fallbackAvatarRoot?: unknown;
-    mesh?: unknown;
-    data?: {
-      sessionAvatar?: unknown;
-      avatar?: unknown;
-      avatarUrl?: unknown;
-    };
-  } | null;
-  const avatarUrlRaw =
-    entityWithFields?.data?.sessionAvatar ??
-    entityWithFields?.data?.avatar ??
-    entityWithFields?.data?.avatarUrl ??
-    null;
-  return {
-    found: Boolean(entityWithFields),
-    inPlayers: Boolean(playerDirect),
-    inItems: Boolean(itemDirect),
-    matchedByDirectKey,
-    avatarField: Boolean(entityWithFields?.avatar),
-    underscoreAvatarField: Boolean(entityWithFields?._avatar),
-    fallbackAvatarField: Boolean(entityWithFields?._fallbackAvatarRoot),
-    meshField: Boolean(entityWithFields?.mesh),
-    avatarUrl: typeof avatarUrlRaw === "string" ? avatarUrlRaw : null,
-  };
-}
-
-function buildStreamingBootDiagnostics(params: {
-  world: World | null;
-  connected: boolean;
-  worldReady: boolean;
-  terrainReady: boolean;
-  terrainStalled: boolean;
-  cameraTarget: string | null;
-  cameraLocked: boolean;
-  needsCameraLock: boolean;
-  needsTargetAvatar: boolean;
-  targetAvatarReady: boolean;
-  targetAvatarGraceExpired: boolean;
-  phase: StreamingState["cycle"]["phase"] | null;
-  hasStreamingState: boolean;
-  avatarLoadEventsForTarget: number;
-}): StreamingWindowBootDiagnostics {
-  const world = params.world;
-  const terrain = world?.getSystem("terrain") as
-    | (Record<string, unknown> & { isReady?: () => boolean })
-    | null
-    | undefined;
-  const targetEntityPresent =
-    world && params.cameraTarget
-      ? Boolean(findStreamingTargetEntity(world, params.cameraTarget))
-      : params.cameraTarget
-        ? false
-        : null;
-  const targetEntity =
-    world && params.cameraTarget
-      ? readTargetEntityDiagnostics(world, params.cameraTarget)
-      : null;
-
-  return {
-    updatedAt: Date.now(),
-    connected: params.connected,
-    worldReady: params.worldReady,
-    terrainReady: params.terrainReady,
-    terrainStalled: params.terrainStalled,
-    terrain: {
-      systemPresent: Boolean(terrain),
-      isReady: terrain?.isReady ? terrain.isReady() : null,
-      initialized:
-        typeof terrain?._terrainInitialized === "boolean"
-          ? terrain._terrainInitialized
-          : typeof terrain?.terrainInitialized === "boolean"
-            ? terrain.terrainInitialized
-            : null,
-      activeChunks: terrain
-        ? readFirstNumericField(terrain, [
-            "activeChunks",
-            "chunks",
-            "_chunks",
-            "loadedChunks",
-          ])
-        : null,
-      pendingChunks: terrain
-        ? readFirstNumericField(terrain, [
-            "pendingChunks",
-            "_pendingChunks",
-            "loadingChunks",
-            "chunkQueue",
-          ])
-        : null,
-      loadedTiles: terrain
-        ? readFirstNumericField(terrain, [
-            "loadedTiles",
-            "_loadedTiles",
-            "tiles",
-            "_tiles",
-          ])
-        : null,
-    },
-    arenaVisuals: readArenaVisualDiagnostics(world ?? null),
-    cameraTarget: params.cameraTarget,
-    cameraLocked: params.cameraLocked,
-    targetEntityPresent,
-    needsCameraLock: params.needsCameraLock,
-    needsTargetAvatar: params.needsTargetAvatar,
-    targetAvatarReady: params.targetAvatarReady,
-    targetAvatarGraceExpired: params.targetAvatarGraceExpired,
-    phase: params.phase,
-    hasStreamingState: params.hasStreamingState,
-    targetEntity,
-    avatarLoadEventsForTarget: params.avatarLoadEventsForTarget,
-  };
 }
 
 function toGuardrailAgent(
@@ -381,10 +118,6 @@ function deriveStreamingSurfaceBlockReason(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
-  needsArenaVisuals?: boolean;
-  arenaVisualsReady?: boolean;
-  needsTargetAvatar?: boolean;
-  targetAvatarReady?: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
 }): string | null {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
@@ -404,14 +137,8 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (!params.terrainReady) {
     return "terrain_not_ready";
   }
-  if (params.needsArenaVisuals && !params.arenaVisualsReady) {
-    return "arena_visuals_not_ready";
-  }
   if (params.needsCameraLock && !params.cameraLocked) {
     return "camera_target_unresolved";
-  }
-  if (params.needsTargetAvatar && params.targetAvatarReady !== true) {
-    return "avatar_not_ready";
   }
   return null;
 }
@@ -424,10 +151,6 @@ export function deriveStreamingRendererHealth(params: {
   initError: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
-  needsArenaVisuals?: boolean;
-  arenaVisualsReady?: boolean;
-  needsTargetAvatar?: boolean;
-  targetAvatarReady?: boolean;
   loadingDismissed: boolean;
   phase: StreamingState["cycle"]["phase"] | null;
   agent1: AgentInfo | null;
@@ -443,10 +166,6 @@ export function deriveStreamingRendererHealth(params: {
     initError: params.initError,
     needsCameraLock: params.needsCameraLock,
     cameraLocked: params.cameraLocked,
-    needsArenaVisuals: params.needsArenaVisuals,
-    arenaVisualsReady: params.arenaVisualsReady,
-    needsTargetAvatar: params.needsTargetAvatar,
-    targetAvatarReady: params.targetAvatarReady,
     phase: params.phase,
   });
   let degradedReason =
@@ -478,10 +197,6 @@ export function shouldDismissStreamingLoading(params: {
   initError?: string | null;
   needsCameraLock: boolean;
   cameraLocked: boolean;
-  needsArenaVisuals?: boolean;
-  arenaVisualsReady?: boolean;
-  needsTargetAvatar?: boolean;
-  targetAvatarReady?: boolean;
   phase?: StreamingState["cycle"]["phase"] | null;
 }): boolean {
   return (
@@ -493,20 +208,9 @@ export function shouldDismissStreamingLoading(params: {
       initError: params.initError ?? null,
       needsCameraLock: params.needsCameraLock,
       cameraLocked: params.cameraLocked,
-      needsArenaVisuals: params.needsArenaVisuals,
-      arenaVisualsReady: params.arenaVisualsReady,
-      needsTargetAvatar: params.needsTargetAvatar,
-      targetAvatarReady: params.targetAvatarReady,
       phase: params.phase ?? null,
     }) === null
   );
-}
-
-export function shouldShowStreamingLoadingOverlay(params: {
-  initError?: string | null;
-  loadingDismissed: boolean;
-}): boolean {
-  return !params.initError && !params.loadingDismissed;
 }
 
 export function StreamingMode() {
@@ -516,11 +220,7 @@ export function StreamingMode() {
   const [connected, setConnected] = useState(false);
   const [worldReady, setWorldReady] = useState(false);
   const [terrainReady, setTerrainReady] = useState(false);
-  const [arenaVisualsReady, setArenaVisualsReady] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(false);
-  const [targetAvatarReady, setTargetAvatarReady] = useState(false);
-  const [targetAvatarGraceExpired, setTargetAvatarGraceExpired] =
-    useState(false);
   const [terrainStalled, setTerrainStalled] = useState(false);
   const [readyEventDelayed, setReadyEventDelayed] = useState(false);
   const [clientInitError, setClientInitError] = useState<string | null>(null);
@@ -533,55 +233,18 @@ export function StreamingMode() {
   const lastCameraTargetRef = useRef<string | null>(null);
   const terrainPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const terrainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const arenaVisualsPollRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
-  const arenaVisualsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const avatarPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const avatarTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const worldReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const cameraRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const lastCycleIdRef = useRef<string | null>(null);
   const worldListenerCleanupRef = useRef<(() => void) | null>(null);
-  const heartbeatRafRef = useRef<number | null>(null);
-  const renderTickRef = useRef(0);
-  const duelStateTickRef = useRef(0);
-  const latestRenderTickAtRef = useRef<number | null>(null);
-  const latestDuelStateTickAtRef = useRef<number | null>(null);
-  const avatarLoadEventCountRef = useRef(0);
   const [streamAccessToken] = useState<string | null>(() =>
     getStreamingAccessToken(),
   );
 
-  const markWorldReady = useCallback(() => {
-    if (worldReadyRef.current) return;
-    worldReadyRef.current = true;
-    setWorldReady(true);
-    setReadyEventDelayed(false);
-    if (worldReadyTimeoutRef.current) {
-      clearTimeout(worldReadyTimeoutRef.current);
-      worldReadyTimeoutRef.current = null;
-    }
-  }, []);
-
-  const writeHeartbeat = useCallback(() => {
-    const win = window as StreamingWindow;
-    const heartbeat: StreamingWindowHeartbeat = {
-      renderTick: renderTickRef.current,
-      latestRenderTickAt: latestRenderTickAtRef.current,
-      duelStateTick: duelStateTickRef.current,
-      latestDuelStateTickAt: latestDuelStateTickAtRef.current,
-    };
-    win.__HYPERSCAPE_STREAM_HEARTBEAT__ = heartbeat;
-  }, []);
-
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
-    const baseWsUrl = GAME_WS_URL || "ws://localhost:5555/ws";
+    const baseWsUrl = GAME_WS_URL;
     const url = new URL(baseWsUrl, window.location.href);
     url.searchParams.set("mode", "streaming");
     if (streamAccessToken) {
@@ -601,121 +264,12 @@ export function StreamingMode() {
     }
   }, []);
 
-  const clearArenaVisualsPolling = useCallback(() => {
-    if (arenaVisualsPollRef.current) {
-      clearInterval(arenaVisualsPollRef.current);
-      arenaVisualsPollRef.current = null;
-    }
-    if (arenaVisualsTimeoutRef.current) {
-      clearTimeout(arenaVisualsTimeoutRef.current);
-      arenaVisualsTimeoutRef.current = null;
-    }
-  }, []);
-
-  const clearAvatarPolling = useCallback(() => {
-    if (avatarPollRef.current) {
-      clearInterval(avatarPollRef.current);
-      avatarPollRef.current = null;
-    }
-    if (avatarTimeoutRef.current) {
-      clearTimeout(avatarTimeoutRef.current);
-      avatarTimeoutRef.current = null;
-    }
-  }, []);
-
   const clearCameraRetryTimeouts = useCallback(() => {
     for (const timeoutId of cameraRetryTimeoutsRef.current) {
       clearTimeout(timeoutId);
     }
     cameraRetryTimeoutsRef.current = [];
   }, []);
-
-  // The first public state frame must drive the exact same bootstrap work
-  // regardless of whether it arrived via WS or the HTTP fallback.
-  const updateCameraTarget = useCallback(
-    (world: World, targetId: string) => {
-      const maxRetries = 20;
-      const retryDelayMs = 250;
-
-      const attemptLock = (attempt: number) => {
-        const entity = findStreamingTargetEntity(world, targetId);
-
-        if (!entity) {
-          if (attempt < maxRetries) {
-            if (import.meta.env.DEV && (attempt === 0 || attempt % 10 === 0)) {
-              console.log(
-                `[StreamingMode] Waiting for initial camera target "${targetId}" (attempt ${attempt}/${maxRetries})`,
-              );
-            }
-            const timeoutId = setTimeout(
-              () => attemptLock(attempt + 1),
-              retryDelayMs,
-            );
-            cameraRetryTimeoutsRef.current.push(timeoutId);
-          } else {
-            console.warn(
-              `[StreamingMode] Initial camera target not found after ${maxRetries} retries, proceeding anyway`,
-            );
-            setCameraLocked(true);
-          }
-          return;
-        }
-
-        setCameraLocked(true);
-        if (import.meta.env.DEV) {
-          console.log(
-            `[StreamingMode] Initial camera target acquired: ${targetId}`,
-          );
-        }
-      };
-
-      attemptLock(0);
-    },
-    [clearCameraRetryTimeouts],
-  );
-
-  const applyStreamingStateUpdate = useCallback(
-    (state: StreamingState, world: World | null) => {
-      markWorldReady();
-
-      if (
-        world &&
-        state.cameraTarget &&
-        state.cameraTarget !== lastCameraTargetRef.current
-      ) {
-        const isFirstTarget = lastCameraTargetRef.current === null;
-        lastCameraTargetRef.current = state.cameraTarget;
-
-        if (isFirstTarget) {
-          clearCameraRetryTimeouts();
-          updateCameraTarget(world, state.cameraTarget);
-        }
-      }
-
-      setStreamingState((prev) => {
-        if (!prev) return state;
-        // Skip re-render if phase, HP, countdown, and leaderboard are unchanged
-        const c = state.cycle;
-        const p = prev.cycle;
-        if (
-          c.phase === p.phase &&
-          c.countdown === p.countdown &&
-          c.winnerId === p.winnerId &&
-          c.agent1?.hp === p.agent1?.hp &&
-          c.agent2?.hp === p.agent2?.hp &&
-          c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
-          c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
-          Math.floor(c.timeRemaining / 1000) ===
-            Math.floor(p.timeRemaining / 1000) &&
-          state.leaderboard.length === prev.leaderboard.length
-        ) {
-          return prev; // Same reference = no re-render
-        }
-        return state;
-      });
-    },
-    [clearCameraRetryTimeouts, markWorldReady, updateCameraTarget],
-  );
 
   // Handle world setup
   const handleSetup = useCallback(
@@ -725,34 +279,14 @@ export function StreamingMode() {
       worldRef.current = world;
       setConnected(true);
       const win = window as StreamingWindow;
-      win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ =
-        createCaptureSessionGeneration();
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
-      setStreamingState(null);
       setWorldReady(false);
       setTerrainReady(false);
-      setArenaVisualsReady(false);
-      setCameraLocked(false);
-      setTargetAvatarReady(false);
-      setTargetAvatarGraceExpired(false);
       setTerrainStalled(false);
       setReadyEventDelayed(false);
       setClientInitError(null);
-      lastCameraTargetRef.current = null;
-      lastCycleIdRef.current = null;
-      renderTickRef.current = 0;
-      duelStateTickRef.current = 0;
-      latestRenderTickAtRef.current = null;
-      latestDuelStateTickAtRef.current = null;
-      avatarLoadEventCountRef.current = 0;
-      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = {
-        renderTick: 0,
-        latestRenderTickAt: null,
-        duelStateTick: 0,
-        latestDuelStateTickAt: null,
-      };
 
       // Force potato-mode graphics tuned for stable 720p streaming output.
       // Keep DPR at 1 so capture canvas stays at target resolution.
@@ -777,6 +311,17 @@ export function StreamingMode() {
         prefs.setEntityHighlighting?.(false);
       }
 
+      const markWorldReady = () => {
+        if (worldReadyRef.current) return;
+        worldReadyRef.current = true;
+        setWorldReady(true);
+        setReadyEventDelayed(false);
+        if (worldReadyTimeoutRef.current) {
+          clearTimeout(worldReadyTimeoutRef.current);
+          worldReadyTimeoutRef.current = null;
+        }
+      };
+
       world.on(EventType.READY, markWorldReady);
 
       // Safety net logging only: do not force world-ready state. Forcing
@@ -794,7 +339,6 @@ export function StreamingMode() {
 
       // Start terrain readiness polling so we avoid presenting chunk-pop-in.
       clearTerrainPolling();
-      clearArenaVisualsPolling();
       terrainPollRef.current = setInterval(() => {
         const terrain = world.getSystem("terrain") as {
           isReady?: () => boolean;
@@ -813,23 +357,50 @@ export function StreamingMode() {
         );
       }, 30000);
 
-      arenaVisualsPollRef.current = setInterval(() => {
-        if (isDuelArenaVisualsReady(world)) {
-          setArenaVisualsReady(true);
-          clearArenaVisualsPolling();
-        }
-      }, 100);
-
-      arenaVisualsTimeoutRef.current = setTimeout(() => {
-        console.warn(
-          "[StreamingMode] Arena visuals readiness timeout reached; continuing to report degraded renderer health",
-        );
-      }, 30000);
-
       // Subscribe to streaming state updates (forwarded from server via WebSocket)
       const onStreamingStateUpdate = (data: unknown) => {
         const state = data as StreamingState;
-        applyStreamingStateUpdate(state, world);
+
+        // Initial camera lock: only needed for the very first target so
+        // the loading screen can dismiss.  After that, ClientCameraSystem
+        // handles all target switches via its own streaming:state:update
+        // subscription with smooth cinematic transitions — no loading screen.
+        markWorldReady();
+        if (
+          state.cameraTarget &&
+          state.cameraTarget !== lastCameraTargetRef.current
+        ) {
+          const isFirstTarget = lastCameraTargetRef.current === null;
+          lastCameraTargetRef.current = state.cameraTarget;
+
+          if (isFirstTarget) {
+            clearCameraRetryTimeouts();
+            updateCameraTarget(world, state.cameraTarget);
+          }
+        }
+
+        // Only trigger React re-render when visible state actually changed
+        setStreamingState((prev) => {
+          if (!prev) return state;
+          // Skip re-render if phase, HP, countdown, and leaderboard are unchanged
+          const c = state.cycle;
+          const p = prev.cycle;
+          if (
+            c.phase === p.phase &&
+            c.countdown === p.countdown &&
+            c.winnerId === p.winnerId &&
+            c.agent1?.hp === p.agent1?.hp &&
+            c.agent2?.hp === p.agent2?.hp &&
+            c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
+            c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
+            Math.floor(c.timeRemaining / 1000) ===
+              Math.floor(p.timeRemaining / 1000) &&
+            state.leaderboard.length === prev.leaderboard.length
+          ) {
+            return prev; // Same reference = no re-render
+          }
+          return state;
+        });
       };
       world.on("streaming:state:update", onStreamingStateUpdate);
       worldListenerCleanupRef.current = () => {
@@ -853,13 +424,76 @@ export function StreamingMode() {
         console.log("[StreamingMode] World setup complete");
       }
     },
-    [
-      applyStreamingStateUpdate,
-      clearArenaVisualsPolling,
-      clearTerrainPolling,
-      markWorldReady,
-    ],
+    [clearTerrainPolling, clearCameraRetryTimeouts],
   );
+
+  // Initial camera lock — only used once to dismiss the loading screen.
+  // After this, ClientCameraSystem handles all camera targeting internally
+  // via its streaming:state:update subscription with smooth transitions.
+  const updateCameraTarget = useCallback((world: World, targetId: string) => {
+    const maxRetries = 20;
+    const retryDelayMs = 250;
+
+    const attemptLock = (attempt: number) => {
+      let entity = world.entities?.get(targetId);
+
+      if (!entity && world.entities?.players) {
+        for (const [, player] of world.entities.players) {
+          const playerAny = player as {
+            id?: string;
+            data?: { id?: string; characterId?: string };
+          };
+          if (
+            playerAny.id === targetId ||
+            playerAny.data?.id === targetId ||
+            playerAny.data?.characterId === targetId
+          ) {
+            entity = player as Entity;
+            break;
+          }
+        }
+      }
+
+      if (!entity && world.entities?.items) {
+        for (const [, item] of world.entities.items) {
+          if (item.id === targetId) {
+            entity = item;
+            break;
+          }
+        }
+      }
+
+      if (!entity) {
+        if (attempt < maxRetries) {
+          if (import.meta.env.DEV && (attempt === 0 || attempt % 10 === 0)) {
+            console.log(
+              `[StreamingMode] Waiting for initial camera target "${targetId}" (attempt ${attempt}/${maxRetries})`,
+            );
+          }
+          const timeoutId = setTimeout(
+            () => attemptLock(attempt + 1),
+            retryDelayMs,
+          );
+          cameraRetryTimeoutsRef.current.push(timeoutId);
+        } else {
+          console.warn(
+            `[StreamingMode] Initial camera target not found after ${maxRetries} retries, proceeding anyway`,
+          );
+          setCameraLocked(true);
+        }
+        return;
+      }
+
+      setCameraLocked(true);
+      if (import.meta.env.DEV) {
+        console.log(
+          `[StreamingMode] Initial camera target acquired: ${targetId}`,
+        );
+      }
+    };
+
+    attemptLock(0);
+  }, []);
 
   // Poll for initial state if not received via WebSocket
   useEffect(() => {
@@ -870,7 +504,7 @@ export function StreamingMode() {
     let warnedOnce = false;
 
     // Try to fetch initial state via HTTP. Keep retrying until WS/state arrives.
-    const baseApiUrl = GAME_API_URL || "http://localhost:5555";
+    const baseApiUrl = GAME_API_URL;
     const stateUrl = `${baseApiUrl}/api/streaming/state`;
     const fetchState = () => {
       if (!mounted) return;
@@ -893,7 +527,7 @@ export function StreamingMode() {
         .then((data) => {
           if (!mounted) return;
           if (data && data.type === "STREAMING_STATE_UPDATE") {
-            applyStreamingStateUpdate(data, worldRef.current);
+            setStreamingState(data);
           }
         })
         .catch((err) => {
@@ -919,7 +553,7 @@ export function StreamingMode() {
       }
       controllers.clear();
     };
-  }, [applyStreamingStateUpdate, connected, streamingState]);
+  }, [connected, streamingState]);
 
   // Lock the world's built-in MusicSystem to use exclusively combat tracks
   useEffect(() => {
@@ -995,7 +629,7 @@ export function StreamingMode() {
       delete win.__captureControl__;
     }
 
-    const bridgeUrl = normalizeCaptureBridgeUrl(searchParams.get("bridgeUrl"));
+    const bridgeUrl = searchParams.get("bridgeUrl") || "ws://127.0.0.1:8765";
 
     if (captureVerbose) {
       console.log("[StreamingMode] Starting canvas capture to", bridgeUrl);
@@ -1035,17 +669,17 @@ export function StreamingMode() {
       const perfWithMemory = performance as {
         memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number };
       };
-      return buildCaptureControlStatus({
-        recorderState: recorder?.state,
-        wsReadyState: ws?.readyState,
+      return {
+        recording: recorder?.state === "recording",
+        wsConnected: ws?.readyState === WebSocket.OPEN,
         chunkCount,
         bytesSent,
-        startedAt,
-        lastChunkAt,
-        wsBufferedAmount: ws?.bufferedAmount,
-        heapUsedBytes: perfWithMemory.memory?.usedJSHeapSize,
-        heapLimitBytes: perfWithMemory.memory?.jsHeapSizeLimit,
-      });
+        uptime: startedAt > 0 ? Date.now() - startedAt : 0,
+        lastChunkMs: lastChunkAt > 0 ? Date.now() - lastChunkAt : null,
+        wsBufferedAmount: ws?.bufferedAmount ?? 0,
+        heapUsedBytes: perfWithMemory.memory?.usedJSHeapSize ?? null,
+        heapLimitBytes: perfWithMemory.memory?.jsHeapSizeLimit ?? null,
+      };
     };
 
     const logCaptureStatus = (prefix: string) => {
@@ -1277,38 +911,10 @@ export function StreamingMode() {
   }, [worldReady, terrainReady]);
 
   useEffect(() => {
-    const tick = () => {
-      renderTickRef.current += 1;
-      latestRenderTickAtRef.current = Date.now();
-      writeHeartbeat();
-      heartbeatRafRef.current = window.requestAnimationFrame(tick);
-    };
-
-    heartbeatRafRef.current = window.requestAnimationFrame(tick);
-    return () => {
-      if (heartbeatRafRef.current !== null) {
-        window.cancelAnimationFrame(heartbeatRafRef.current);
-        heartbeatRafRef.current = null;
-      }
-    };
-  }, [writeHeartbeat]);
-
-  useEffect(() => {
-    if (!streamingState) {
-      return;
-    }
-    duelStateTickRef.current += 1;
-    latestDuelStateTickAtRef.current = Date.now();
-    writeHeartbeat();
-  }, [streamingState, writeHeartbeat]);
-
-  useEffect(() => {
     return () => {
       const win = window as StreamingWindow;
-      win.__HYPERSCAPE_STREAM_CAPTURE_SESSION_GENERATION__ = null;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
-      win.__HYPERSCAPE_STREAM_HEARTBEAT__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
       if (worldReadyTimeoutRef.current) {
         clearTimeout(worldReadyTimeoutRef.current);
@@ -1319,117 +925,14 @@ export function StreamingMode() {
       worldRef.current = null;
       worldReadyRef.current = false;
       clearTerrainPolling();
-      clearArenaVisualsPolling();
-      clearAvatarPolling();
       clearCameraRetryTimeouts();
     };
-  }, [
-    clearArenaVisualsPolling,
-    clearAvatarPolling,
-    clearTerrainPolling,
-    clearCameraRetryTimeouts,
-  ]);
+  }, [clearTerrainPolling, clearCameraRetryTimeouts]);
 
   // Loading screen is shown only during initial boot. Once everything is
   // ready for the first time, we fade out and never show it again — camera
   // target switches are handled seamlessly by ClientCameraSystem.
   const needsCameraLock = Boolean(streamingState?.cameraTarget);
-  const needsTargetAvatar = Boolean(
-    streamingState?.cameraTarget &&
-    streamingState?.cycle.phase &&
-    streamingState.cycle.phase !== "IDLE",
-  );
-  const needsArenaVisuals = Boolean(
-    streamingState?.cycle.phase && streamingState.cycle.phase !== "IDLE",
-  );
-  const effectiveTargetAvatarReady = targetAvatarReady;
-  const waitingForTargetAvatar =
-    needsTargetAvatar && !effectiveTargetAvatarReady;
-
-  useEffect(() => {
-    lastCycleIdRef.current = streamingState?.cycle.cycleId ?? null;
-  }, [streamingState?.cycle.cycleId]);
-
-  useEffect(() => {
-    clearAvatarPolling();
-    avatarLoadEventCountRef.current = 0;
-
-    if (!needsTargetAvatar) {
-      setTargetAvatarReady(true);
-      setTargetAvatarGraceExpired(false);
-      return;
-    }
-
-    const world = worldRef.current;
-    const targetEntityId = streamingState?.cameraTarget;
-    if (!world || !worldReady || !targetEntityId) {
-      setTargetAvatarReady(false);
-      setTargetAvatarGraceExpired(false);
-      return;
-    }
-
-    const checkAvatarReady = () => {
-      if (isTargetAvatarReady(world, targetEntityId)) {
-        setTargetAvatarReady(true);
-        setTargetAvatarGraceExpired(false);
-        clearAvatarPolling();
-        return true;
-      }
-      return false;
-    };
-
-    setTargetAvatarReady(false);
-    setTargetAvatarGraceExpired(false);
-    if (checkAvatarReady()) {
-      return;
-    }
-
-    const handleAvatarLoadComplete = (payload: unknown) => {
-      const data = payload as { playerId?: string; success?: boolean };
-      if (data.playerId !== targetEntityId) return;
-      avatarLoadEventCountRef.current += 1;
-      if (data.success === true) {
-        // Authoritative success for the current target — accept it without
-        // a second field-based re-check. `PlayerRemote.applyAvatar` assigns
-        // `this.avatar` before emitting the event in its `finally` block, so
-        // by the time we observe `success === true` the entity is already in
-        // a truthy readiness state. Previously we re-ran `checkAvatarReady`
-        // and bailed if it still returned false, which masked real successes
-        // when the probe was looking at the wrong collection.
-        setTargetAvatarReady(true);
-        setTargetAvatarGraceExpired(false);
-        clearAvatarPolling();
-        return;
-      }
-      // Non-success event — still trust the poll to catch a fallback avatar
-      // install, but do not set ready on the event alone.
-      checkAvatarReady();
-    };
-
-    world.on(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
-    avatarPollRef.current = setInterval(() => {
-      checkAvatarReady();
-    }, 250);
-    avatarTimeoutRef.current = setTimeout(() => {
-      clearAvatarPolling();
-      setTargetAvatarGraceExpired(true);
-      console.warn(
-        `[StreamingMode] Avatar readiness grace expired for "${targetEntityId}", keeping renderer degraded until avatar is ready`,
-      );
-    }, TARGET_AVATAR_READY_GRACE_MS);
-
-    return () => {
-      world.off(EventType.AVATAR_LOAD_COMPLETE, handleAvatarLoadComplete);
-      clearAvatarPolling();
-    };
-  }, [
-    clearAvatarPolling,
-    needsTargetAvatar,
-    streamingState?.cycle.cycleId,
-    streamingState?.cameraTarget,
-    worldReady,
-  ]);
-
   const isInitiallyReady = shouldDismissStreamingLoading({
     connected,
     worldReady,
@@ -1438,10 +941,6 @@ export function StreamingMode() {
     initError: clientInitError,
     needsCameraLock,
     cameraLocked,
-    needsArenaVisuals,
-    arenaVisualsReady,
-    needsTargetAvatar,
-    targetAvatarReady: effectiveTargetAvatarReady,
     phase: streamingState?.cycle.phase ?? null,
   });
   const rendererHealth = useMemo(
@@ -1454,10 +953,6 @@ export function StreamingMode() {
         initError: clientInitError,
         needsCameraLock,
         cameraLocked,
-        needsArenaVisuals,
-        arenaVisualsReady,
-        needsTargetAvatar,
-        targetAvatarReady: effectiveTargetAvatarReady,
         loadingDismissed,
         phase: streamingState?.cycle.phase ?? null,
         agent1: streamingState?.cycle.agent1 ?? null,
@@ -1469,13 +964,9 @@ export function StreamingMode() {
       clientInitError,
       connected,
       loadingDismissed,
-      needsArenaVisuals,
       needsCameraLock,
-      needsTargetAvatar,
       streamingState,
       terrainReady,
-      arenaVisualsReady,
-      effectiveTargetAvatarReady,
       worldReady,
     ],
   );
@@ -1484,89 +975,6 @@ export function StreamingMode() {
     const win = window as StreamingWindow;
     win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
     win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
-  }, [rendererHealth]);
-
-  useEffect(() => {
-    const writeDiagnostics = () => {
-      const win = window as StreamingWindow;
-      win.__HYPERSCAPE_STREAM_BOOT_DIAGNOSTICS__ =
-        buildStreamingBootDiagnostics({
-          world: worldRef.current,
-          connected,
-          worldReady,
-          terrainReady,
-          terrainStalled,
-          cameraTarget: streamingState?.cameraTarget ?? null,
-          cameraLocked,
-          needsCameraLock,
-          needsTargetAvatar,
-          targetAvatarReady: effectiveTargetAvatarReady,
-          targetAvatarGraceExpired,
-          phase: streamingState?.cycle.phase ?? null,
-          hasStreamingState: streamingState !== null,
-          avatarLoadEventsForTarget: avatarLoadEventCountRef.current,
-        });
-    };
-
-    writeDiagnostics();
-    const interval = window.setInterval(writeDiagnostics, 1000);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [
-    cameraLocked,
-    connected,
-    effectiveTargetAvatarReady,
-    arenaVisualsReady,
-    needsCameraLock,
-    needsTargetAvatar,
-    streamingState,
-    targetAvatarGraceExpired,
-    terrainReady,
-    terrainStalled,
-    worldReady,
-  ]);
-
-  useEffect(() => {
-    if (window.parent === window) {
-      return;
-    }
-
-    let targetOrigin = window.location.origin;
-    try {
-      if (document.referrer) {
-        targetOrigin = new URL(document.referrer).origin;
-      }
-    } catch {
-      // Fall back to same-origin postMessage when referrer parsing fails.
-    }
-
-    const postStatus = () => {
-      const win = window as StreamingWindow;
-      const degradedReason = rendererHealth.degradedReason;
-      const status = rendererHealth.ready
-        ? "playing"
-        : degradedReason === "initialization_failed"
-          ? "error:init_failed"
-          : degradedReason || "loading";
-
-      window.parent.postMessage(
-        {
-          type: "HYPERSCAPE_STREAM_STATUS",
-          ready: rendererHealth.ready,
-          status,
-          rendererHealth,
-          heartbeat: win.__HYPERSCAPE_STREAM_HEARTBEAT__ ?? null,
-        },
-        targetOrigin,
-      );
-    };
-
-    postStatus();
-    const interval = window.setInterval(postStatus, 1000);
-    return () => {
-      window.clearInterval(interval);
-    };
   }, [rendererHealth]);
 
   // Write boot status to a window global so the capture pipeline's renderer
@@ -1590,23 +998,10 @@ export function StreamingMode() {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
     } else if (!terrainReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
-    } else if (needsArenaVisuals && !arenaVisualsReady) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_arena";
-    } else if (waitingForTargetAvatar) {
-      win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_avatar";
     } else {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
     }
-  }, [
-    clientInitError,
-    connected,
-    arenaVisualsReady,
-    loadingDismissed,
-    needsArenaVisuals,
-    terrainReady,
-    waitingForTargetAvatar,
-    worldReady,
-  ]);
+  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -1628,12 +1023,8 @@ export function StreamingMode() {
     return () => clearTimeout(timer);
   }, [fadingOut, loadingDismissed]);
 
-  // Show loading overlay only during initial load or fade-out. Once dismissed,
-  // camera target switches and avatar churn should not blank the stream again.
-  const showLoading = shouldShowStreamingLoadingOverlay({
-    initError: clientInitError,
-    loadingDismissed,
-  });
+  // Show loading overlay only during initial load or fade-out
+  const showLoading = !loadingDismissed && !clientInitError;
 
   const loadingHeadline = !connected
     ? "Connecting to Hyperscape..."
@@ -1654,9 +1045,7 @@ export function StreamingMode() {
           : "Waiting for terrain and arena visuals"
         : needsCameraLock && !cameraLocked
           ? "Locking the initial camera target"
-          : waitingForTargetAvatar
-            ? "Waiting for the active duel avatar to finish loading"
-            : "Finalizing spectator presentation";
+          : "Finalizing spectator presentation";
 
   return (
     <div

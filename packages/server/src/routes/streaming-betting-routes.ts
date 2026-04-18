@@ -130,8 +130,14 @@ type CanonicalProviderSelectionState = {
 const REQUIRE_EXTERNAL_SOURCE_RUNTIME =
   process.env.STREAM_SOURCE_RUNTIME_REQUIRE_EXTERNAL === "true" ||
   process.env.NODE_ENV === "production";
-
+const CLOUDFLARE_WEBHOOK_RATE_LIMIT: RateLimitOptions = {
+  max: 180,
+  timeWindow: "1 minute",
+};
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
+type RateLimitedFastify = FastifyInstance & {
+  rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
+};
 
 type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
 
@@ -148,6 +154,17 @@ function formatSseEvent(event: string, data: string, id?: number): string {
 
 function automaticFailoverEnabled(): boolean {
   return process.env.STREAM_ENABLE_AUTOMATIC_FAILOVER === "true";
+}
+
+function ensureRateLimitDecorator(
+  fastify: FastifyInstance,
+): asserts fastify is RateLimitedFastify {
+  if (typeof fastify.rateLimit === "function") {
+    return;
+  }
+  throw new Error(
+    "Streaming betting routes require @fastify/rate-limit to be registered before route setup",
+  );
 }
 
 export function normalizeInternalAllowedOrigin(
@@ -245,6 +262,7 @@ export function registerStreamingBettingRoutes(
     getStreamingDuelScheduler: getStreamingDuelSchedulerOverride,
     getStreamCaptureStats,
   } = options;
+  ensureRateLimitDecorator(fastify);
 
   const tokenResolution = resolveBettingFeedAccessToken(process.env);
   const skipAuth = shouldSkipBettingFeedAuth(process.env);
@@ -318,6 +336,13 @@ export function registerStreamingBettingRoutes(
   };
   let canonicalProviderSelectionHydrated = false;
   let canonicalProviderSelectionHydration: Promise<void> | null = null;
+  // Exponential backoff for failed hydration attempts. Without this, a failing
+  // DB causes every betting-feed tick to retry immediately, hammering the
+  // backend. Start at 1s and double up to 60s; reset on success.
+  let canonicalProviderHydrationFailures = 0;
+  let canonicalProviderHydrationNextAttemptAt = 0;
+  const HYDRATION_MIN_BACKOFF_MS = 1_000;
+  const HYDRATION_MAX_BACKOFF_MS = 60_000;
   let persistedAuthorityStateCache: PersistedStreamingAuthorityState | null =
     null;
   let lastPersistedCanonicalProviderStateJson: string | null = null;
@@ -456,6 +481,11 @@ export function registerStreamingBettingRoutes(
     if (canonicalProviderSelectionHydration) {
       return canonicalProviderSelectionHydration;
     }
+    if (Date.now() < canonicalProviderHydrationNextAttemptAt) {
+      // Backoff window from a prior failure is still active; callers see
+      // unhydrated state and will retry on their next tick.
+      return;
+    }
 
     canonicalProviderSelectionHydration = (async () => {
       try {
@@ -492,10 +522,23 @@ export function registerStreamingBettingRoutes(
           persisted.cloudflareReconciliation
             ? JSON.stringify(persisted.cloudflareReconciliation)
             : null;
-      } catch {
-        // Best-effort durability only.
-      } finally {
         canonicalProviderSelectionHydrated = true;
+        canonicalProviderHydrationFailures = 0;
+        canonicalProviderHydrationNextAttemptAt = 0;
+      } catch (error) {
+        canonicalProviderHydrationFailures += 1;
+        const backoff = Math.min(
+          HYDRATION_MAX_BACKOFF_MS,
+          HYDRATION_MIN_BACKOFF_MS *
+            2 ** (canonicalProviderHydrationFailures - 1),
+        );
+        canonicalProviderHydrationNextAttemptAt = Date.now() + backoff;
+        console.warn(
+          `[streaming-betting] Failed to hydrate canonical provider selection; retrying in ${backoff}ms (failures=${canonicalProviderHydrationFailures})`,
+          error,
+        );
+      } finally {
+        canonicalProviderSelectionHydration = null;
       }
     })();
 
@@ -1201,6 +1244,47 @@ export function registerStreamingBettingRoutes(
     canonical: CanonicalCandidateState;
     fallback: CanonicalCandidateState | null;
   } => {
+    if (params.candidates.length === 0) {
+      const provider: StreamCanonicalProvider =
+        configuredCanonicalProvider === "self_hls"
+          ? "self_hls"
+          : "cloudflare_stream";
+      return {
+        canonical: {
+          provider,
+          destination: {
+            id: buildStreamDestinationId({
+              role: "canonical",
+              provider,
+              name: provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
+            }),
+            name: provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
+            role: "canonical",
+            provider,
+            transport: inferStreamDeliveryTransport({
+              playbackUrl: null,
+              ingestUrl: null,
+            }),
+            playbackUrl: null,
+            ingestUrl: null,
+            connected: false,
+            transportHealthy: false,
+            playbackReady: false,
+            manifestStatus: "missing",
+            lastError: "no_delivery_candidate",
+            updatedAt: params.nowMs,
+          },
+          publicReadiness: {
+            ready: false,
+            reason: "no_delivery_candidate",
+            updatedAt: params.nowMs,
+          },
+          ready: false,
+        },
+        fallback: null,
+      };
+    }
+
     const candidatesByProvider = new Map(
       params.candidates.map((candidate) => [candidate.provider, candidate]),
     );
@@ -1487,7 +1571,7 @@ export function registerStreamingBettingRoutes(
         mode: "always_on",
         presentationDelayMs: configuredPresentationDelayMs,
         activeDuelId: cycle?.duelId ?? null,
-        activeDuelKey: cycle?.duelKeyHex ?? null,
+        activeDuelKey: null,
         canonicalDestinationId: canonicalDestination.id,
         fallbackDestinationId: fallbackDestination?.id ?? null,
         publicPlaybackUrl: canonicalDestination.playbackUrl,
@@ -1728,7 +1812,6 @@ export function registerStreamingBettingRoutes(
       return;
     }
   };
-
   const handleBettingBootstrap = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -1889,26 +1972,9 @@ export function registerStreamingBettingRoutes(
   };
 
   const handleCloudflareWebhook = async (
-    request: FastifyRequest<{ Body: unknown }>,
+    request: FastifyRequest<{ Body: Record<string, unknown> }>,
     reply: FastifyReply,
   ) => {
-    const webhookSecret =
-      process.env.STREAM_CLOUDFLARE_WEBHOOK_SECRET?.trim() || null;
-    if (!webhookSecret) {
-      return reply.status(503).send({
-        error: "Cloudflare webhook secret not configured",
-        message:
-          "Set STREAM_CLOUDFLARE_WEBHOOK_SECRET before enabling the webhook route",
-      });
-    }
-
-    if (!verifyCloudflareWebhookSecret(request.headers, webhookSecret)) {
-      return reply.status(401).send({
-        error: "Unauthorized",
-        message: "Missing or invalid Cloudflare webhook secret",
-      });
-    }
-
     const receivedAt = Date.now();
     const summary = summarizeCloudflareLiveWebhook({
       payload: request.body,
@@ -1950,6 +2016,30 @@ export function registerStreamingBettingRoutes(
       eventType: summary.webhook.eventType,
       liveInputId: summary.webhook.liveInputId,
       receivedAt,
+    });
+  };
+
+  const authorizeCloudflareWebhook = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const webhookSecret =
+      process.env.STREAM_CLOUDFLARE_WEBHOOK_SECRET?.trim() || null;
+    if (!webhookSecret) {
+      return reply.status(503).send({
+        error: "Cloudflare webhook secret not configured",
+        message:
+          "Set STREAM_CLOUDFLARE_WEBHOOK_SECRET before enabling the webhook route",
+      });
+    }
+
+    if (verifyCloudflareWebhookSecret(request.headers, webhookSecret)) {
+      return;
+    }
+
+    return reply.status(401).send({
+      error: "Unauthorized",
+      message: "Missing or invalid Cloudflare webhook secret",
     });
   };
 
@@ -1999,12 +2089,29 @@ export function registerStreamingBettingRoutes(
     handleBettingEvents,
   );
 
+  // Cloudflare webhook bodies are small JSON events (live-input lifecycle +
+  // recording metadata). Cap at 32 KiB and require an object-shaped body.
+  // We keep `additionalProperties: true` because Cloudflare evolves the
+  // webhook schema on their side and a closed allowlist would break on
+  // format updates. Defense-in-depth against injection already happens at:
+  //   1. timingSafeEqual shared-secret verification (authorizeCloudflareWebhook)
+  //   2. bodyLimit (here)
+  //   3. summarizeCloudflareLiveWebhook() — field-by-field allowlist parsing,
+  //      so unknown fields never reach downstream persistence
   fastify.post<{
-    Body: unknown;
+    Body: Record<string, unknown>;
   }>(
     "/api/streaming/cloudflare/webhook",
     {
-      config: { rateLimit: false },
+      bodyLimit: 32 * 1024,
+      config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: true,
+        },
+      },
+      preHandler: authorizeCloudflareWebhook,
     },
     handleCloudflareWebhook,
   );
