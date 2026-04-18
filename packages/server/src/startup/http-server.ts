@@ -972,10 +972,24 @@ function registerGameAssetsRoute(
         `[HTTP] Local asset miss for /game-assets/${normalizedPath}; proxying to ${fallbackUrl.toString()}`,
       );
 
-      const upstreamResponse = await fetch(fallbackUrl, {
-        method: request.method,
-        redirect: "follow",
-      });
+      let upstreamResponse: Response;
+      try {
+        upstreamResponse = await fetch(fallbackUrl, {
+          method: request.method,
+          redirect: "follow",
+          signal: AbortSignal.timeout(15_000),
+        });
+      } catch (error) {
+        const errorName = error instanceof Error ? error.name : "";
+        return reply.code(
+          errorName === "TimeoutError" || errorName === "AbortError" ? 504 : 502,
+        ).send({
+          error:
+            errorName === "TimeoutError" || errorName === "AbortError"
+              ? "Asset fallback timed out"
+              : "Asset fallback failed",
+        });
+      }
       if (!upstreamResponse.ok) {
         return reply
           .code(upstreamResponse.status)

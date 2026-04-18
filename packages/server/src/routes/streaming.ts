@@ -774,13 +774,13 @@ export function buildStreamingStatusPayload(params: {
           updatedAt: params.canonicalProbeSnapshot.updatedAt,
         }
       : null;
-  const lastExternalTransportError =
-    typeof effectiveExternalSnapshot?.captureDiagnostics?.lastFatalWriteError
-      ?.message === "string" &&
-    effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
-      .length > 0
-      ? effectiveExternalSnapshot.captureDiagnostics.lastFatalWriteError.message.trim()
-      : null;
+  const publicCloudflareStatus = {
+    liveInputId: null,
+    lifecycle: null,
+    lastWebhook: null,
+    lastPlaybackProbe: cloudflarePlaybackProbe,
+    lastExternalTransportError: null,
+  };
 
   return {
     ...params.base,
@@ -818,19 +818,8 @@ export function buildStreamingStatusPayload(params: {
         persistedAuthority?.canonicalProviderState?.primaryHealthySince ?? null,
       updatedAt: persistedAuthority?.canonicalProviderState?.updatedAt ?? null,
     },
-    cloudflare: {
-      liveInputId:
-        params.cloudflareLiveInputId ??
-        persistedAuthority?.cloudflareLifecycle?.liveInputId ??
-        null,
-      lifecycle: persistedAuthority?.cloudflareLifecycle ?? null,
-      lastWebhook: persistedAuthority?.cloudflareLastWebhook ?? null,
-      lastPlaybackProbe: cloudflarePlaybackProbe,
-      lastExternalTransportError,
-    },
-    captureDiagnostics:
-      (effectiveExternalSnapshot?.captureDiagnostics as ExternalCaptureDiagnosticsBlob | null) ??
-      null,
+    cloudflare: publicCloudflareStatus,
+    captureDiagnostics: null,
   };
 }
 
@@ -2096,7 +2085,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/smoke",
     {
-      config: { rateLimit: false },
+      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {

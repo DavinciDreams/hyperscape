@@ -390,11 +390,7 @@ describe("buildStreamingStatusPayload", () => {
       manifestStatus: "ok",
       lastError: null,
     });
-    expect(payload.captureDiagnostics).toMatchObject({
-      lastFatalWriteError: expect.objectContaining({
-        at: 3_100,
-      }),
-    });
+    expect(payload.captureDiagnostics).toBeNull();
   });
 
   it("keeps canonical playback visible but marks transport unhealthy after a fresher source incident", () => {
@@ -614,26 +610,9 @@ describe("buildStreamingStatusPayload", () => {
       updatedAt: 3_500,
     });
     expect(payload.cloudflare).toEqual({
-      liveInputId: "live-input-123",
-      lifecycle: {
-        eventType: "stream_live_input.disconnected",
-        eventName: "Stream Live Input Disconnected",
-        liveInputId: "live-input-123",
-        videoId: "video-456",
-        status: "disconnected",
-        errorCode: "publish_disconnected",
-        errorMessage: "Publisher disconnected unexpectedly",
-        occurredAt: 4_000,
-        receivedAt: 4_100,
-      },
-      lastWebhook: {
-        eventType: "stream_live_input.disconnected",
-        eventName: "Stream Live Input Disconnected",
-        liveInputId: "live-input-123",
-        videoId: "video-456",
-        occurredAt: 4_000,
-        receivedAt: 4_100,
-      },
+      liveInputId: null,
+      lifecycle: null,
+      lastWebhook: null,
       lastPlaybackProbe: null,
       lastExternalTransportError: null,
     });
