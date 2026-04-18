@@ -16,6 +16,7 @@ import {
 } from "../TerrainComputeContext";
 import {
   ROAD_INFLUENCE_SHADER,
+  ROAD_INFLUENCE_TEXTURE_SHADER,
   TERRAIN_VERTEX_COLOR_SHADER,
   INSTANCE_MATRIX_SHADER,
   BATCH_DISTANCE_SHADER,
@@ -28,6 +29,10 @@ describe("TerrainComputeContext", () => {
       expect(ROAD_INFLUENCE_SHADER).toBeDefined();
       expect(ROAD_INFLUENCE_SHADER).toContain("@compute");
       expect(ROAD_INFLUENCE_SHADER).toContain("distanceToLineSegment");
+      expect(ROAD_INFLUENCE_TEXTURE_SHADER).toContain("numWorkgroupsX: u32");
+      expect(ROAD_INFLUENCE_TEXTURE_SHADER).toContain(
+        "uniforms.numWorkgroupsX * 64u",
+      );
     });
 
     it("should export terrain vertex color shader", () => {

@@ -618,7 +618,15 @@ export function registerAgentRoutes(
           createdAt: Date.now(),
         });
 
-        character = { id: characterId, name: agentName };
+        character = {
+          id: characterId,
+          accountId,
+          name: agentName,
+        };
+      }
+
+      if (!character) {
+        throw new Error("Failed to resolve character after wallet auth");
       }
 
       // Generate 7-day JWT

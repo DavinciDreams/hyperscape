@@ -22,6 +22,22 @@ interface NetworkWithSend {
   send: <T>(name: string, data: T, ignoreSocketId?: string) => void;
   sendToSpectators?: <T>(name: string, data: T) => void;
 }
+
+function redactOracleProofFromStreamingState(
+  state: StreamingStateUpdate,
+): StreamingStateUpdate {
+  return {
+    ...state,
+    cycle: {
+      ...state.cycle,
+      duelKeyHex: null,
+      duelEndTime: null,
+      seed: null,
+      replayHash: null,
+    },
+  };
+}
+
 import { Logger } from "../ServerNetwork/services";
 import { v4 as uuidv4 } from "uuid";
 import { errMsg } from "../../shared/errMsg.js";
@@ -1994,7 +2010,9 @@ export class StreamingDuelScheduler {
   }
 
   private broadcastState(): void {
-    const state = this.getStreamingState();
+    const state = redactOracleProofFromStreamingState(
+      this.getStreamingState(),
+    );
     // Broadcast streaming state only to spectator sockets (interest management).
     // Regular gameplay clients don't need streaming duel updates every second.
     const network = this.world.network as NetworkWithSend | undefined;

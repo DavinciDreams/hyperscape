@@ -1347,7 +1347,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/state",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const scheduler = getStreamingDuelScheduler();
@@ -1373,7 +1373,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/metrics",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const bettingMetrics = bettingRoutes.getMetrics();
@@ -1445,7 +1445,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/state/events",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (request, reply) => {
       if (sseClients.size >= STREAMING_SSE_MAX_CLIENTS) {
@@ -1799,7 +1799,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/results/:duelId",
     {
-      preHandler: fastify.rateLimit(AUTHENTICATED_RESULTS_RATE_LIMIT),
+      config: { rateLimit: AUTHENTICATED_RESULTS_RATE_LIMIT },
     },
     async (request, reply) => {
       const skipAuth = shouldSkipBettingFeedAuth(
@@ -1896,7 +1896,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/config",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       return reply.send({

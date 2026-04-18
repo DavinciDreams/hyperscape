@@ -181,7 +181,7 @@ struct Uniforms {
   // numWorkgroupsX. Under the 1D case the host passes y=1 and
   // numWorkgroupsX = totalWorkgroups, and the arithmetic degenerates
   // back to idx = global_id.x.
-  numWorkgroupsX: f32,
+  numWorkgroupsX: u32,
 }
 
 @group(0) @binding(0) var<storage, read> roads: array<Road>;
@@ -223,7 +223,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // and this reduces to idx = global_id.x. Under a 2D dispatch
   // dispatchWorkgroups(65535, K, 1) we offset by a full row of threads
   // per y index.
-  let threadsPerRow = u32(uniforms.numWorkgroupsX) * 64u;
+  let threadsPerRow = uniforms.numWorkgroupsX * 64u;
   let idx = global_id.y * threadsPerRow + global_id.x;
   let pixelCount = u32(uniforms.pixelCount);
   if (idx >= pixelCount) {

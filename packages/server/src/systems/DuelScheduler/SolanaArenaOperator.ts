@@ -19,6 +19,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
+import bs58 from "bs58";
 import { createHash } from "node:crypto";
 import { Logger } from "../ServerNetwork/services";
 
@@ -523,33 +524,5 @@ function parseKeypair(raw: string): Keypair {
     return Keypair.fromSecretKey(assertSecretKeyLength(Uint8Array.from(bytes)));
   }
 
-  // Base58 encoded secret key — decode using the alphabet from @solana/web3.js
-  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  const ALPHABET_MAP = new Map<string, number>();
-  for (let i = 0; i < ALPHABET.length; i++) ALPHABET_MAP.set(ALPHABET[i], i);
-
-  let carry: number;
-  const bytes: number[] = [0];
-  for (const char of trimmed) {
-    const val = ALPHABET_MAP.get(char);
-    if (val === undefined) throw new Error(`Invalid base58 character: ${char}`);
-    carry = val;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  // Leading zeros
-  for (const char of trimmed) {
-    if (char !== "1") break;
-    bytes.push(0);
-  }
-  return Keypair.fromSecretKey(
-    assertSecretKeyLength(Uint8Array.from(bytes.reverse())),
-  );
+  return Keypair.fromSecretKey(assertSecretKeyLength(bs58.decode(trimmed)));
 }

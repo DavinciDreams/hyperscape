@@ -77,8 +77,7 @@ export class BettingPoolManager {
       };
     }
 
-    const amount = parseFloat(bet.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!isValidPositiveDecimalAmount(bet.amount)) {
       return { success: false, error: "Invalid bet amount" };
     }
 
@@ -143,7 +142,10 @@ export class BettingPoolManager {
         "BettingPoolManager",
         "Failed to insert bet",
         err instanceof Error ? err : null,
-        { roundId: bet.roundId, wallet: bet.walletAddress },
+        {
+          roundId: bet.roundId,
+          wallet: redactWalletAddress(bet.walletAddress),
+        },
       );
       return { success: false, error: "Database error" };
     }
@@ -165,7 +167,7 @@ export class BettingPoolManager {
       roundId: bet.roundId,
       side: bet.side,
       amount: bet.amount,
-      wallet: bet.walletAddress,
+      wallet: redactWalletAddress(bet.walletAddress),
     });
 
     return { success: true, betId };
@@ -254,7 +256,7 @@ export class BettingPoolManager {
         "BettingPoolManager",
         "Failed to get bets by wallet",
         err instanceof Error ? err : null,
-        { walletAddress },
+        { wallet: redactWalletAddress(walletAddress) },
       );
       return [];
     }
@@ -375,7 +377,7 @@ export class BettingPoolManager {
       Logger.info("BettingPoolManager", "Claim job created", {
         jobId: result.jobId,
         roundId,
-        wallet: walletAddress,
+        wallet: redactWalletAddress(walletAddress),
       });
       return { success: true, jobId: result.jobId };
     } catch (err) {
@@ -383,7 +385,7 @@ export class BettingPoolManager {
         "BettingPoolManager",
         "Failed to create payout job",
         err instanceof Error ? err : null,
-        { roundId, wallet: walletAddress },
+        { roundId, wallet: redactWalletAddress(walletAddress) },
       );
       return { success: false, error: "Database error" };
     }
@@ -426,4 +428,20 @@ export class BettingPoolManager {
 
 function isValidSolanaWalletAddress(walletAddress: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(walletAddress.trim());
+}
+
+function isValidPositiveDecimalAmount(amount: string): boolean {
+  const normalized = amount.trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(normalized)) {
+    return false;
+  }
+  return !/^0+(?:\.0+)?$/.test(normalized);
+}
+
+function redactWalletAddress(walletAddress: string): string {
+  const trimmed = walletAddress.trim();
+  if (trimmed.length <= 12) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
 }

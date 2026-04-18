@@ -2066,7 +2066,7 @@ export function registerStreamingBettingRoutes(
   }>(
     "/api/streaming/cloudflare/webhook",
     {
-      preHandler: fastify.rateLimit(CLOUDFLARE_WEBHOOK_RATE_LIMIT),
+      config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
     },
     handleCloudflareWebhook,
   );

@@ -416,30 +416,35 @@ export async function createHttpServer(
     reply.status(500).send({ error: "Internal server error" });
   });
 
-  // Debug endpoint to see public directory contents
-  fastify.get("/debug/public", async (_req, reply) => {
-    const publicDir = path.join(config.__dirname, "public");
-    const assetsDir = path.join(publicDir, "assets");
-    let publicContents: string[] = [];
-    let assetsContents: string[] = [];
-    try {
-      publicContents = await fs.readdir(publicDir);
-    } catch (e) {
-      publicContents = [`ERROR: ${e}`];
-    }
-    try {
-      assetsContents = await fs.readdir(assetsDir);
-    } catch (e) {
-      assetsContents = [`ERROR: ${e}`];
-    }
-    return reply.send({
-      publicDir,
-      assetsDir,
-      publicContents,
-      assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
-      configDirname: config.__dirname,
+  const allowPublicDebugRoute =
+    process.env.NODE_ENV !== "production" ||
+    process.env.ENABLE_PUBLIC_DEBUG_ROUTE === "true";
+  if (allowPublicDebugRoute) {
+    // Debug endpoint to see public directory contents
+    fastify.get("/debug/public", async (_req, reply) => {
+      const publicDir = path.join(config.__dirname, "public");
+      const assetsDir = path.join(publicDir, "assets");
+      let publicContents: string[] = [];
+      let assetsContents: string[] = [];
+      try {
+        publicContents = await fs.readdir(publicDir);
+      } catch (e) {
+        publicContents = [`ERROR: ${e}`];
+      }
+      try {
+        assetsContents = await fs.readdir(assetsDir);
+      } catch (e) {
+        assetsContents = [`ERROR: ${e}`];
+      }
+      return reply.send({
+        publicDir,
+        assetsDir,
+        publicContents,
+        assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
+        configDirname: config.__dirname,
+      });
     });
-  });
+  }
 
   // SPA catch-all route - serve index.html for any unmatched routes
   // This must be registered AFTER all other routes

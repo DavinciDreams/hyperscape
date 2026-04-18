@@ -335,18 +335,20 @@ export class TerrainComputeContext {
     const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
     const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
 
+    const roadInfluenceUniformData = new ArrayBuffer(8 * 4);
+    const roadInfluenceUniformF32 = new Float32Array(roadInfluenceUniformData);
+    roadInfluenceUniformF32[0] = pixelCount;
+    roadInfluenceUniformF32[1] = roadCount;
+    roadInfluenceUniformF32[2] = textureSize;
+    roadInfluenceUniformF32[3] = worldSize;
+    roadInfluenceUniformF32[4] = centerX;
+    roadInfluenceUniformF32[5] = centerZ;
+    roadInfluenceUniformF32[6] = blendWidth;
+    new Uint32Array(roadInfluenceUniformData)[7] = dispatchX;
+
     const uniformBuffer = this.ctx.createUniformBuffer(
       "rtex_uniforms",
-      new Float32Array([
-        pixelCount,
-        roadCount,
-        textureSize,
-        worldSize,
-        centerX,
-        centerZ,
-        blendWidth,
-        dispatchX, // numWorkgroupsX — see shader comment
-      ]),
+      new Uint8Array(roadInfluenceUniformData),
     );
 
     if (!roadBuffer || !outputBuffer || !uniformBuffer) {
