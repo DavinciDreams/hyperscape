@@ -425,12 +425,10 @@ export async function createHttpServer(
     fastify.get(
       "/debug/public",
       {
-        config: {
-          rateLimit: {
-            max: 240,
-            timeWindow: "1 minute",
-          },
-        },
+        preHandler: fastify.rateLimit({
+          max: 240,
+          timeWindow: "1 minute",
+        }),
       },
       async (_req, reply) => {
         const publicDir = path.join(config.__dirname, "public");
@@ -947,12 +945,10 @@ function registerGameAssetsRoute(
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
-    config: {
-      rateLimit: {
-        max: 240,
-        timeWindow: "1 minute",
-      },
-    },
+    preHandler: fastify.rateLimit({
+      max: 240,
+      timeWindow: "1 minute",
+    }),
     handler: async (request, reply) => {
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);
