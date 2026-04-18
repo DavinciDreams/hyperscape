@@ -1928,7 +1928,12 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: "1 minute",
+        },
+      },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
@@ -2042,7 +2047,12 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
-      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: "1 minute",
+        },
+      },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
