@@ -1730,7 +1730,7 @@ export function registerAgentRoutes(
 
       // Get goal and available goals from ServerNetwork storage
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       const goal = ServerNetwork.agentGoals.get(characterId);
       const availableGoals =
         ServerNetwork.agentAvailableGoals.get(characterId) || [];
@@ -1846,7 +1846,7 @@ export function registerAgentRoutes(
 
       // Get the socket for this character
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -1919,7 +1919,7 @@ export function registerAgentRoutes(
 
       // Get the socket for this character
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -1986,7 +1986,7 @@ export function registerAgentRoutes(
 
       // Get the socket for this character
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -2061,7 +2061,7 @@ export function registerAgentRoutes(
 
       // Get the socket for this character
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -2328,7 +2328,7 @@ export function registerAgentRoutes(
 
       // Get available goals from ServerNetwork storage
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       const availableGoalsRaw = (ServerNetwork.agentAvailableGoals.get(
         characterId,
       ) || []) as Array<{
@@ -2661,7 +2661,7 @@ export function registerAgentRoutes(
 
       // Get activity from ServerNetwork storage (if we add activity tracking there)
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
 
       // Check if activity tracking exists
       const activityData = (
@@ -2903,7 +2903,7 @@ export function registerAgentRoutes(
 
       // Get thoughts from ServerNetwork in-memory cache first
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
 
       let thoughts =
         (
@@ -3011,7 +3011,7 @@ export function registerAgentRoutes(
 
       // Clear thoughts from ServerNetwork storage
       const { ServerNetwork } =
-        await import("../../systems/ServerNetwork/index.js");
+        await import("../../../../shared/src/systems/server/network/index");
       ServerNetwork.agentThoughts.delete(characterId);
 
       console.log(
