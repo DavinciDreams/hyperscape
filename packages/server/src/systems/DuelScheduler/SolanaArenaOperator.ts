@@ -490,10 +490,31 @@ export class SolanaArenaOperator {
       maxRetries: 3,
     });
 
-    await connection.confirmTransaction(
-      { signature: sig, blockhash, lastValidBlockHeight },
-      "confirmed",
-    );
+    // confirmTransaction can block indefinitely on RPC stalls or a partitioned
+    // network. Cap with an explicit timeout so the caller surfaces a clean
+    // error instead of a stuck transaction that ties up the reporter wallet.
+    let confirmTimer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        connection.confirmTransaction(
+          { signature: sig, blockhash, lastValidBlockHeight },
+          "confirmed",
+        ),
+        new Promise<never>((_, reject) => {
+          confirmTimer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `confirmTransaction timed out after ${TX_CONFIRM_TIMEOUT_MS}ms (signature=${sig})`,
+                ),
+              ),
+            TX_CONFIRM_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (confirmTimer !== null) clearTimeout(confirmTimer);
+    }
 
     return sig;
   }
@@ -520,8 +541,36 @@ function parseKeypair(raw: string): Keypair {
 
   // JSON byte array: [1,2,3,...]
   if (trimmed.startsWith("[")) {
-    const bytes = JSON.parse(trimmed) as number[];
-    return Keypair.fromSecretKey(assertSecretKeyLength(Uint8Array.from(bytes)));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      throw new Error(
+        `Reporter private key JSON is malformed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error("Reporter private key JSON must be a number array");
+    }
+    // Uint8Array.from silently coerces out-of-range or non-integer values
+    // (e.g. 256 → 0, -1 → 255, "1" → 1). Validate each byte explicitly so a
+    // corrupted key fails loud instead of producing an attacker-controlled
+    // reporter identity.
+    for (const byte of parsed) {
+      if (
+        typeof byte !== "number" ||
+        !Number.isInteger(byte) ||
+        byte < 0 ||
+        byte > 255
+      ) {
+        throw new Error(
+          "Reporter private key JSON must contain only integers in [0, 255]",
+        );
+      }
+    }
+    return Keypair.fromSecretKey(
+      assertSecretKeyLength(Uint8Array.from(parsed as number[])),
+    );
   }
 
   return Keypair.fromSecretKey(assertSecretKeyLength(bs58.decode(trimmed)));

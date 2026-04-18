@@ -274,9 +274,21 @@ export class BettingPoolManager {
     const jobId = randomUUID();
     try {
       const result = await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${`solana-payout:${roundId}:${walletAddress}`}))`,
+        // pg_try_advisory_xact_lock returns immediately with false if another
+        // transaction holds the lock, instead of blocking. If a concurrent
+        // claim for the same (round, wallet) pair hangs mid-transaction, the
+        // original pg_advisory_xact_lock would queue everyone behind it —
+        // that's an easy DoS vector on the payout path. Returning a conflict
+        // error lets the caller retry.
+        const lockRows = await tx.execute<{ acquired: boolean }>(
+          sql`SELECT pg_try_advisory_xact_lock(hashtext(${`solana-payout:${roundId}:${walletAddress}`})) AS acquired`,
         );
+        if (!lockRows.rows[0]?.acquired) {
+          return {
+            success: false,
+            error: "A concurrent claim is in progress; retry shortly",
+          } as const;
+        }
 
         const lockedRounds = await tx.execute<{
           id: string;
@@ -438,7 +450,7 @@ function isValidPositiveDecimalAmount(amount: string): boolean {
   return !/^0+(?:\.0+)?$/.test(normalized);
 }
 
-function redactWalletAddress(walletAddress: string): string {
+export function redactWalletAddress(walletAddress: string): string {
   const trimmed = walletAddress.trim();
   if (trimmed.length <= 12) {
     return trimmed;
