@@ -33,7 +33,9 @@ import Fastify, {
   type FastifyReply,
 } from "fastify";
 import fs from "fs-extra";
+import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import path from "path";
 import type { ServerConfig } from "./config.js";
 import {
@@ -321,13 +323,19 @@ export async function createHttpServer(
             ? header[0]
             : undefined;
 
-      // Disable origin lock check to allow direct client requests (fixes 403 Forbidden)
-      // if (!presented || presented !== cloudflareOriginSecret) {
-      //   return reply.status(403).send({
-      //     error: "Forbidden",
-      //     message: "Origin not authorized",
-      //   });
-      // }
+      const expected = Buffer.from(cloudflareOriginSecret);
+      const actual = presented ? Buffer.from(presented) : null;
+      const authorized =
+        actual != null &&
+        actual.length === expected.length &&
+        timingSafeEqual(actual, expected);
+
+      if (!authorized) {
+        return reply.status(403).send({
+          error: "Forbidden",
+          message: "Origin not authorized",
+        });
+      }
     });
     console.log("[HTTP] ✅ Cloudflare origin secret enforcement enabled");
   }
@@ -977,7 +985,9 @@ function registerGameAssetsRoute(
       }
 
       return reply.send(
-        Readable.fromWeb(upstreamResponse.body as any),
+        Readable.fromWeb(
+          upstreamResponse.body as unknown as NodeReadableStream,
+        ),
       );
     },
   });

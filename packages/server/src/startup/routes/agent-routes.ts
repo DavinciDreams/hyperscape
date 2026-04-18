@@ -2926,14 +2926,22 @@ export function registerAgentRoutes(
         try {
           const { agentThoughts: agentThoughtsTable } =
             await import("../../database/schema.js");
-          const { desc, eq } = await import("drizzle-orm");
-          const rows = await db
+          const { eq } = await import("drizzle-orm");
+          const rows = (await db
             .select()
             .from(agentThoughtsTable)
-            .where(eq(agentThoughtsTable.characterId, characterId))
-            .orderBy(desc(agentThoughtsTable.timestamp))
-            .limit(limit);
-          thoughts = rows.map((r) => ({
+            .where(eq(
+              agentThoughtsTable.characterId,
+              characterId,
+            ))) as Array<{
+            characterId: string;
+            type: string;
+            content: string;
+            timestamp: number;
+            decisionPath?: string | null;
+          }>;
+          rows.sort((a, b) => b.timestamp - a.timestamp);
+          thoughts = rows.slice(0, limit).map((r) => ({
             id: `${r.characterId}-thought-${r.timestamp}`,
             type: r.type,
             content: r.content,

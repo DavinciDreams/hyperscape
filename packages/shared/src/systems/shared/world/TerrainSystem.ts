@@ -6865,6 +6865,7 @@ export class TerrainSystem extends System {
     this.chunkPlayerCounts.clear();
     this._queuedTileRegenerations.clear();
     this._pendingTileRegeneration.clear();
+    this._pendingTileHeightData.clear();
     this.terrainBoundingBoxes.clear();
     this.pendingSerializationData.clear();
 

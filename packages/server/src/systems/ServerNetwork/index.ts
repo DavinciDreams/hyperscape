@@ -259,7 +259,10 @@ import { TradingSystem } from "../TradingSystem";
 import { DuelSystem } from "../DuelSystem";
 import { DuelScheduler, DuelBettingBridge } from "../DuelScheduler";
 import { SolanaArenaOperator } from "../DuelScheduler/SolanaArenaOperator.js";
-import { startPayoutKeeper } from "../DuelScheduler/PayoutKeeper.js";
+import {
+  startPayoutKeeper,
+  stopPayoutKeeper,
+} from "../DuelScheduler/PayoutKeeper.js";
 import {
   handleDuelChallenge,
   handleDuelChallengeRespond,
@@ -407,6 +410,26 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   static agentDesireScores: Map<
     string,
     Array<{ goalType: string; score: number; breakdown: string }>
+  > = new Map();
+
+  /** Agent activity storage (characterId -> recent actions and session stats). */
+  static agentActivity: Map<
+    string,
+    {
+      recentActions: Array<{
+        type: string;
+        description: string;
+        xpGained?: number;
+        timestamp: number;
+      }>;
+      sessionStats: {
+        kills: number;
+        deaths: number;
+        totalXpGained: number;
+        goldEarned: number;
+        resourcesGathered: Record<string, number>;
+      };
+    }
   > = new Map();
 
   /** Agent thought storage (characterId -> recent thoughts) for dashboard display */
@@ -3277,9 +3300,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ServerNetwork.agentGoals.clear();
     ServerNetwork.agentAvailableGoals.clear();
     ServerNetwork.agentGoalsPaused.clear();
+    ServerNetwork.agentActivity.clear();
     ServerNetwork.agentThoughts.clear();
     ServerNetwork.agentPersonality.clear();
     ServerNetwork.agentDesireScores.clear();
+    stopPayoutKeeper();
 
     // Clean up duel event listeners to prevent memory leak
     if (this.cleanupDuelEventListeners) {

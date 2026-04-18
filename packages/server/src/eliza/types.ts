@@ -36,6 +36,7 @@ export interface AgentCharacterConfig {
   username?: string;
   system?: string;
   bio?: string[];
+  lore?: string[];
   topics?: string[];
   adjectives?: string[];
   plugins?: string[];
@@ -122,6 +123,7 @@ export interface NearbyEntityData {
   level?: number;
   mobType?: string;
   itemId?: string;
+  resourceId?: string;
   resourceType?: string;
   equippedWeapon?: string;
 }
@@ -205,6 +207,7 @@ export interface AgentQuestProgress {
  */
 export interface AgentQuestInfo {
   questId: string;
+  id?: string;
   name: string;
   description: string;
   difficulty: string;
@@ -226,6 +229,9 @@ export interface AgentQuestInfo {
  * Provides direct world access instead of WebSocket
  */
 export interface IEmbeddedHyperscapeService {
+  /** Update the agent display name used by dashboard/chat surfaces. */
+  setDisplayName(name: string): void;
+
   /** Get the world instance */
   getWorld(): World;
 

@@ -486,6 +486,15 @@ export class SolanaArenaOperator {
 // ============================================================================
 
 function parseKeypair(raw: string): Keypair {
+  const assertSecretKeyLength = (bytes: Uint8Array): Uint8Array => {
+    if (bytes.length !== 64) {
+      throw new Error(
+        `Reporter private key must decode to 64 bytes; received ${bytes.length}`,
+      );
+    }
+    return bytes;
+  };
+
   const trimmed = raw.trim();
   if (trimmed.length > 1024) {
     throw new Error("Reporter private key input is unexpectedly large");
@@ -494,7 +503,7 @@ function parseKeypair(raw: string): Keypair {
   // JSON byte array: [1,2,3,...]
   if (trimmed.startsWith("[")) {
     const bytes = JSON.parse(trimmed) as number[];
-    return Keypair.fromSecretKey(Uint8Array.from(bytes));
+    return Keypair.fromSecretKey(assertSecretKeyLength(Uint8Array.from(bytes)));
   }
 
   // Base58 encoded secret key — decode using the alphabet from @solana/web3.js
@@ -523,5 +532,7 @@ function parseKeypair(raw: string): Keypair {
     if (char !== "1") break;
     bytes.push(0);
   }
-  return Keypair.fromSecretKey(Uint8Array.from(bytes.reverse()));
+  return Keypair.fromSecretKey(
+    assertSecretKeyLength(Uint8Array.from(bytes.reverse())),
+  );
 }

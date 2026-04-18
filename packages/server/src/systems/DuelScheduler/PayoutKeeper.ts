@@ -165,11 +165,10 @@ async function processOneJob(
       winningSide,
     });
 
-    // TODO: When Solana token transfer is implemented:
-    // 1. Calculate exact payout amount
-    // 2. Build + send Solana transfer transaction from operator wallet
-    // 3. Store tx signature in claimSignature
-    // 4. Mark as COMPLETE on confirmation
+    // Payout transfer plumbing is not wired in this branch yet. The keeper
+    // intentionally stops at READY_FOR_PAYOUT after recording the winner so a
+    // transfer-capable follow-up can calculate the final amount, submit the
+    // Solana transfer, persist claimSignature, and then mark COMPLETE.
   } catch (err) {
     Logger.error(
       "PayoutKeeper",

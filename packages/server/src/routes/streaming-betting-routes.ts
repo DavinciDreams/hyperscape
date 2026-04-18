@@ -496,10 +496,14 @@ export function registerStreamingBettingRoutes(
           persisted.cloudflareReconciliation
             ? JSON.stringify(persisted.cloudflareReconciliation)
             : null;
-      } catch {
-        // Best-effort durability only.
-      } finally {
         canonicalProviderSelectionHydrated = true;
+      } catch (error) {
+        console.warn(
+          "[streaming-betting] Failed to hydrate canonical provider selection; will retry",
+          error,
+        );
+      } finally {
+        canonicalProviderSelectionHydration = null;
       }
     })();
 
@@ -1205,6 +1209,48 @@ export function registerStreamingBettingRoutes(
     canonical: CanonicalCandidateState;
     fallback: CanonicalCandidateState | null;
   } => {
+    if (params.candidates.length === 0) {
+      const provider: StreamCanonicalProvider =
+        configuredCanonicalProvider === "self_hls"
+          ? "self_hls"
+          : "cloudflare_stream";
+      return {
+        canonical: {
+          provider,
+          destination: {
+            id: buildStreamDestinationId({
+              role: "canonical",
+              provider,
+              name:
+                provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
+            }),
+            name: provider === "self_hls" ? "Self-HLS" : "Cloudflare Stream",
+            role: "canonical",
+            provider,
+            transport: inferStreamDeliveryTransport({
+              playbackUrl: null,
+              ingestUrl: null,
+            }),
+            playbackUrl: null,
+            ingestUrl: null,
+            connected: false,
+            transportHealthy: false,
+            playbackReady: false,
+            manifestStatus: "missing",
+            lastError: "no_delivery_candidate",
+            updatedAt: params.nowMs,
+          },
+          publicReadiness: {
+            ready: false,
+            reason: "no_delivery_candidate",
+            updatedAt: params.nowMs,
+          },
+          ready: false,
+        },
+        fallback: null,
+      };
+    }
+
     const candidatesByProvider = new Map(
       params.candidates.map((candidate) => [candidate.provider, candidate]),
     );
