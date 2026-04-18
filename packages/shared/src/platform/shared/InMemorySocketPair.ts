@@ -135,6 +135,102 @@ export class InMemorySocket {
 }
 
 /**
+ * DOM-style `WebSocket`-compatible adapter over an `InMemorySocket`.
+ *
+ * The server side consumes `InMemorySocket` directly via its Node-style
+ * `on(event, listener)` API (wrapped by the real `Socket` class). The
+ * client side needs the browser/DOM `WebSocket` surface that
+ * `ClientNetwork.attachPreconnectedSocket` expects:
+ *
+ *   - `addEventListener("message" | "close" | "open" | "error", listener)`
+ *   - `removeEventListener(...)`
+ *   - `readyState` matching `WebSocket.OPEN/CLOSING/CLOSED`
+ *   - `binaryType` (settable; always binary here)
+ *   - `send(data)` writing to the peer
+ *   - `close()` closing both ends
+ *
+ * Dispatched `message` events carry `{ data: ArrayBuffer | Uint8Array }`
+ * matching `MessageEvent`; `close` events carry `{ code }` matching
+ * `CloseEvent`. These shapes are the contract
+ * `ClientNetwork.onPacket/onClose` rely on.
+ */
+type DomMessageListener = (event: { data: ArrayBuffer | Uint8Array }) => void;
+type DomCloseListener = (event: { code: number }) => void;
+type DomPlainListener = (event: unknown) => void;
+
+export class InMemoryClientSocket {
+  binaryType: "arraybuffer" | "blob" = "arraybuffer";
+  /** 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED — matches DOM `WebSocket`. */
+  readyState: number = 1;
+
+  private readonly _message = new Set<DomMessageListener>();
+  private readonly _close = new Set<DomCloseListener>();
+  private readonly _open = new Set<DomPlainListener>();
+  private readonly _error = new Set<DomPlainListener>();
+
+  constructor(private readonly _inner: InMemorySocket) {
+    _inner.on("message", (packet: unknown) => {
+      const data = packet as ArrayBuffer | Uint8Array;
+      for (const fn of Array.from(this._message)) fn({ data });
+    });
+    _inner.on("close", (arg: unknown) => {
+      const evt = (arg as { code?: number } | undefined) ?? { code: 1000 };
+      this.readyState = 3;
+      for (const fn of Array.from(this._close)) fn({ code: evt.code ?? 1000 });
+    });
+  }
+
+  addEventListener(type: string, listener: Function): void {
+    switch (type) {
+      case "message":
+        this._message.add(listener as DomMessageListener);
+        break;
+      case "close":
+        this._close.add(listener as DomCloseListener);
+        break;
+      case "open":
+        this._open.add(listener as DomPlainListener);
+        break;
+      case "error":
+        this._error.add(listener as DomPlainListener);
+        break;
+    }
+  }
+
+  removeEventListener(type: string, listener: Function): void {
+    switch (type) {
+      case "message":
+        this._message.delete(listener as DomMessageListener);
+        break;
+      case "close":
+        this._close.delete(listener as DomCloseListener);
+        break;
+      case "open":
+        this._open.delete(listener as DomPlainListener);
+        break;
+      case "error":
+        this._error.delete(listener as DomPlainListener);
+        break;
+    }
+  }
+
+  send(data: ArrayBuffer | Uint8Array): void {
+    this._inner.send(data);
+  }
+
+  close(): void {
+    if (this.readyState === 3) return;
+    this.readyState = 2;
+    this._inner.close();
+  }
+
+  /** Escape hatch for diagnostics / tests. */
+  get innerSocket(): InMemorySocket {
+    return this._inner;
+  }
+}
+
+/**
  * Factory — creates a bound pair. Callers hand one end to the server's
  * `ServerNetwork.onConnection` path and the other to the client's
  * `ClientNetwork.init` path.
@@ -163,4 +259,24 @@ export function createInMemorySocketPair(
   server._bindPeer(client);
   client._bindPeer(server);
   return { server, client };
+}
+
+/**
+ * Wrap an `InMemorySocket` in the DOM `WebSocket`-compatible adapter.
+ *
+ * Convenience for PIE callers: `ClientNetwork.attachPreconnectedSocket`
+ * wants a `WebSocket`-shaped object. Typical usage:
+ *
+ * ```ts
+ * const { server, client } = createInMemorySocketPair();
+ * await session.connect({ characterId: "editor-host" }); // hands `server` to ServerNetwork
+ * clientNetwork.attachPreconnectedSocket(
+ *   asClientWebSocket(client) as unknown as WebSocket,
+ * );
+ * ```
+ */
+export function asClientWebSocket(
+  socket: InMemorySocket,
+): InMemoryClientSocket {
+  return new InMemoryClientSocket(socket);
 }

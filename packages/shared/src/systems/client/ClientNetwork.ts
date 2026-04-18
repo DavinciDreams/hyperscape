@@ -789,16 +789,30 @@ export class ClientNetwork extends SystemBase {
   }
 
   /**
-   * Complete the connection setup after authentication (or immediately for legacy URL auth)
-   * Extracted to avoid code duplication between first-message auth and legacy auth paths
+   * Complete the connection setup after authentication (or immediately for legacy URL auth).
+   * Thin wrapper over `finalizeConnection()` that also clears the connection
+   * timeout and resolves the pending `init()` promise.
    */
   private completeConnectionSetup(
     timeout: ReturnType<typeof setTimeout>,
     resolve: () => void,
   ): void {
+    clearTimeout(timeout);
+    this.finalizeConnection();
+    resolve();
+  }
+
+  /**
+   * Post-connection state transition — marks the client connected, replays
+   * any queued outgoing packets, resets reconnect bookkeeping, and starts
+   * the application-level keepalive.
+   *
+   * Shared between the live `wsUrl` path (via `completeConnectionSetup`)
+   * and the PIE `attachPreconnectedSocket` path so they cannot drift.
+   */
+  private finalizeConnection(): void {
     this.connected = true;
     this.initialized = true;
-    clearTimeout(timeout);
 
     // Handle reconnection success
     if (this.isReconnecting) {
@@ -846,8 +860,55 @@ export class ClientNetwork extends SystemBase {
         }
       }
     }, ClientNetwork.KEEPALIVE_INTERVAL_MS);
+  }
 
-    resolve();
+  /**
+   * Attach a pre-connected WebSocket-compatible transport and bring the
+   * client online immediately, bypassing the `wsUrl` + auth handshake.
+   *
+   * Used by PIE (Play-In-Editor) to run the real `ClientNetwork` over an
+   * in-process `InMemorySocket` whose peer is registered with
+   * `ServerNetwork`. The editor stays on the same protocol as the live
+   * client — no compat façade, no simulated packet layer.
+   *
+   * Contract:
+   *   - `ws` must already be "open" (`readyState === WebSocket.OPEN`).
+   *   - Caller owns socket lifecycle; closing the socket routes through
+   *     `onClose` like a real disconnect.
+   *   - Any pre-existing `this.ws` is torn down first.
+   */
+  attachPreconnectedSocket(
+    ws: WebSocket,
+    options: { lastWsUrl?: string } = {},
+  ): void {
+    // Tear down any existing socket (defensive — matches init()'s cleanup).
+    if (this.ws) {
+      this.logger.debug(
+        `attachPreconnectedSocket: replacing existing ws (state: ${this.ws.readyState})`,
+      );
+      try {
+        this.ws.removeEventListener("message", this.onPacket);
+        this.ws.removeEventListener("close", this.onClose);
+        if (
+          this.ws.readyState === WebSocket.OPEN ||
+          this.ws.readyState === WebSocket.CONNECTING
+        ) {
+          this.ws.close();
+        }
+      } catch {
+        /* ignore */
+      }
+      this.ws = null;
+      this.connected = false;
+      this.id = null;
+    }
+
+    this.ws = ws;
+    ws.binaryType = "arraybuffer";
+    ws.addEventListener("message", this.onPacket);
+    ws.addEventListener("close", this.onClose);
+    this.lastWsUrl = options.lastWsUrl ?? "pie-loopback://";
+    this.finalizeConnection();
   }
 
   preFixedUpdate() {
