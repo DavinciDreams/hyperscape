@@ -289,6 +289,10 @@ export class TerrainComputeContext {
       throw new Error("TerrainComputeContext not initialized");
     }
 
+    if (!Number.isFinite(textureSize) || textureSize <= 0) {
+      return new Float32Array(0);
+    }
+
     const pixelCount = textureSize * textureSize;
     const roadCount = roads.length;
 

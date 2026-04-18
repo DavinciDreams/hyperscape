@@ -130,6 +130,15 @@ describe("buildStreamingStatusPayload", () => {
     expect(payload.deliveryMode).toBe("external_hls");
     expect(payload.deliveryProvider).toBe("cloudflare_stream");
     expect(payload.playbackUrl).toBe("https://customer.example/live.m3u8");
+    expect(payload.delivery).toMatchObject({
+      mode: "external_hls",
+      provider: "cloudflare_stream",
+      playbackUrl: "https://customer.example/live.m3u8",
+      hlsUrl: "https://customer.example/live.m3u8",
+      llhlsUrl: "https://customer.example/live.m3u8?protocol=llhls",
+      ingestUrl: null,
+    });
+    expect(payload.destinations).toEqual([]);
     expect(payload.ingest).toEqual({
       profile: "cloudflare_live",
       transport: "rtmps",
@@ -201,6 +210,7 @@ describe("buildStreamingStatusPayload", () => {
       playbackUrl: "https://env.example/live.m3u8?protocol=llhls",
       hlsUrl: "https://env.example/live.m3u8",
       llhlsUrl: "https://env.example/live.m3u8?protocol=llhls",
+      ingestUrl: null,
     });
     expect(payload.ingest).toEqual({
       profile: "cloudflare_live",
@@ -373,6 +383,7 @@ describe("buildStreamingStatusPayload", () => {
     expect(payload.destinations).toHaveLength(1);
     expect(payload.destinations[0]).toMatchObject({
       id: "canonical-cloudflare",
+      ingestUrl: null,
       connected: true,
       transportHealthy: true,
       playbackReady: true,
@@ -470,6 +481,7 @@ describe("buildStreamingStatusPayload", () => {
       updatedAt: 4_900,
     });
     expect(payload.destinations[0]).toMatchObject({
+      ingestUrl: null,
       connected: true,
       transportHealthy: false,
       playbackReady: true,

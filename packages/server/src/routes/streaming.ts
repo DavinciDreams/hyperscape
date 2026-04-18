@@ -216,6 +216,35 @@ function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
+function redactIngestUrlFromDestination<T>(destination: T): T {
+  if (!destination || typeof destination !== "object") {
+    return destination;
+  }
+  return {
+    ...destination,
+    ingestUrl: null,
+  };
+}
+
+function redactIngestUrlsFromDestinations<T>(destinations: readonly T[]): T[] {
+  return destinations.map((destination) =>
+    redactIngestUrlFromDestination(destination),
+  );
+}
+
+function redactIngestUrlFromDelivery<T>(delivery: T): T {
+  if (!delivery || typeof delivery !== "object") {
+    return delivery;
+  }
+  if (!("ingestUrl" in delivery)) {
+    return delivery;
+  }
+  return {
+    ...delivery,
+    ingestUrl: null,
+  };
+}
+
 function ensureRateLimitDecorator(
   fastify: FastifyInstance,
 ): asserts fastify is RateLimitedFastify {
@@ -729,6 +758,12 @@ export function buildStreamingStatusPayload(params: {
     (delivery.mode === "self_hls"
       ? "self_hls"
       : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare"));
+  const publicDestinations = redactIngestUrlsFromDestinations(
+    (effectiveExternalSnapshot?.destinations ??
+      params.base.destinations ??
+      []) as readonly unknown[],
+  );
+  const publicDelivery = redactIngestUrlFromDelivery(delivery);
   const cloudflarePlaybackProbe =
     activeCanonicalProvider === "cloudflare_stream" &&
     params.canonicalProbeSnapshot
@@ -753,8 +788,7 @@ export function buildStreamingStatusPayload(params: {
     bridgeActive: externalActive ?? params.base.bridgeActive,
     ffmpegRunning: externalFfmpegRunning ?? params.base.ffmpegRunning,
     clientConnected: externalClientConnected ?? params.base.clientConnected,
-    destinations:
-      effectiveExternalSnapshot?.destinations ?? params.base.destinations ?? [],
+    destinations: publicDestinations,
     metrics,
     captureFps: metrics.captureFps,
     encodeFps: metrics.encodeFps,
@@ -769,12 +803,12 @@ export function buildStreamingStatusPayload(params: {
     hlsManifest,
     hlsManifestUpdatedAt: hlsManifest.updatedAt,
     hlsMediaSequence: hlsManifest.mediaSequence,
-    delivery,
+    delivery: publicDelivery,
     ingest: smoke.ingest,
     smoke,
-    deliveryMode: delivery.mode,
-    deliveryProvider: delivery.provider ?? null,
-    playbackUrl: delivery.playbackUrl ?? null,
+    deliveryMode: publicDelivery.mode,
+    deliveryProvider: publicDelivery.provider ?? null,
+    playbackUrl: publicDelivery.playbackUrl ?? null,
     rendererHealth: params.rendererHealth,
     sourceRuntime,
     canonicalStatus: normalizedCanonicalTruth.canonicalStatus,

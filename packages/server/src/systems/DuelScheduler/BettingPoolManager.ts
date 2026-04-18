@@ -88,18 +88,56 @@ export class BettingPoolManager {
 
     const betId = randomUUID();
     try {
-      await db.insert(solanaBets).values({
-        id: betId,
-        roundId: bet.roundId,
-        bettorWallet: bet.walletAddress,
-        side: bet.side,
-        sourceAsset: "GOLD",
-        sourceAmount: bet.amount,
-        goldAmount: bet.amount,
-        status: "CONFIRMED",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const insertResult = await db.transaction(async (tx) => {
+        const lockedRounds = await tx.execute<{
+          id: string;
+          bettingClosesAt: number;
+          duelEndsAt: number | null;
+          winnerId: string | null;
+        }>(
+          sql`
+            SELECT
+              id,
+              "bettingClosesAt",
+              "duelEndsAt",
+              "winnerId"
+            FROM arena_rounds
+            WHERE id = ${bet.roundId}
+            FOR UPDATE
+          `,
+        );
+        const round = lockedRounds.rows[0];
+        if (!round) {
+          return { success: false, error: "Round not found" } as const;
+        }
+        if (
+          round.bettingClosesAt <= Date.now() ||
+          round.duelEndsAt !== null ||
+          round.winnerId !== null
+        ) {
+          return {
+            success: false,
+            error: "Market is locked, betting is closed",
+          } as const;
+        }
+
+        await tx.insert(solanaBets).values({
+          id: betId,
+          roundId: bet.roundId,
+          bettorWallet: bet.walletAddress,
+          side: bet.side,
+          sourceAsset: "GOLD",
+          sourceAmount: bet.amount,
+          goldAmount: bet.amount,
+          status: "CONFIRMED",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return { success: true } as const;
       });
+      if (!insertResult.success) {
+        return { success: false, error: insertResult.error };
+      }
     } catch (err) {
       Logger.error(
         "BettingPoolManager",
@@ -231,50 +269,115 @@ export class BettingPoolManager {
   ): Promise<{ success: boolean; error?: string; jobId?: string }> {
     const db = getDatabase();
 
-    // Verify they have a winning bet
-    const bets = await db
-      .select()
-      .from(solanaBets)
-      .where(
-        and(
-          eq(solanaBets.roundId, roundId),
-          eq(solanaBets.bettorWallet, walletAddress),
-          eq(solanaBets.status, "CONFIRMED"),
-        ),
-      )
-      .limit(1);
-
-    if (bets.length === 0) {
-      return { success: false, error: "No confirmed bet found for this round" };
-    }
-
-    // Check if payout job already exists
-    const existing = await db
-      .select()
-      .from(solanaPayoutJobs)
-      .where(
-        and(
-          eq(solanaPayoutJobs.roundId, roundId),
-          eq(solanaPayoutJobs.bettorWallet, walletAddress),
-        ),
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      return { success: true, jobId: existing[0].id };
-    }
-
     const jobId = randomUUID();
     try {
-      await db.insert(solanaPayoutJobs).values({
-        id: jobId,
-        roundId,
-        bettorWallet: walletAddress,
-        status: "PENDING",
-        attempts: 0,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const result = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`solana-payout:${roundId}:${walletAddress}`}))`,
+        );
+
+        const lockedRounds = await tx.execute<{
+          id: string;
+          winnerId: string | null;
+          agentAId: string;
+          agentBId: string;
+        }>(
+          sql`
+            SELECT
+              id,
+              "winnerId",
+              "agentAId",
+              "agentBId"
+            FROM arena_rounds
+            WHERE id = ${roundId}
+            FOR UPDATE
+          `,
+        );
+        const round = lockedRounds.rows[0];
+        if (!round) {
+          return { success: false, error: "Round not found" } as const;
+        }
+        if (!round.winnerId) {
+          return {
+            success: false,
+            error: "Round has not resolved yet",
+          } as const;
+        }
+
+        const winningSide =
+          round.winnerId === round.agentAId
+            ? "A"
+            : round.winnerId === round.agentBId
+              ? "B"
+              : null;
+        if (!winningSide) {
+          return {
+            success: false,
+            error: "Round winner does not match either bettor side",
+          } as const;
+        }
+
+        const bets = await tx
+          .select()
+          .from(solanaBets)
+          .where(
+            and(
+              eq(solanaBets.roundId, roundId),
+              eq(solanaBets.bettorWallet, walletAddress),
+              eq(solanaBets.status, "CONFIRMED"),
+            ),
+          );
+
+        if (bets.length === 0) {
+          return {
+            success: false,
+            error: "No confirmed bet found for this round",
+          } as const;
+        }
+
+        const hasWinningBet = bets.some((bet) => bet.side === winningSide);
+        if (!hasWinningBet) {
+          return {
+            success: false,
+            error: "No winning bet found for this round",
+          } as const;
+        }
+
+        const existing = await tx
+          .select()
+          .from(solanaPayoutJobs)
+          .where(
+            and(
+              eq(solanaPayoutJobs.roundId, roundId),
+              eq(solanaPayoutJobs.bettorWallet, walletAddress),
+            ),
+          )
+          .limit(1);
+
+        if (existing.length > 0) {
+          return { success: true, jobId: existing[0].id } as const;
+        }
+
+        await tx.insert(solanaPayoutJobs).values({
+          id: jobId,
+          roundId,
+          bettorWallet: walletAddress,
+          status: "PENDING",
+          attempts: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return { success: true, jobId } as const;
       });
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      Logger.info("BettingPoolManager", "Claim job created", {
+        jobId: result.jobId,
+        roundId,
+        wallet: walletAddress,
+      });
+      return { success: true, jobId: result.jobId };
     } catch (err) {
       Logger.error(
         "BettingPoolManager",
@@ -284,14 +387,6 @@ export class BettingPoolManager {
       );
       return { success: false, error: "Database error" };
     }
-
-    Logger.info("BettingPoolManager", "Claim job created", {
-      jobId,
-      roundId,
-      wallet: walletAddress,
-    });
-
-    return { success: true, jobId };
   }
 
   /**

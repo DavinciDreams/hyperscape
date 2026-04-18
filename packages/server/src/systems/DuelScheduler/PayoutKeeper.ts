@@ -129,7 +129,16 @@ async function processOneJob(
 
     // Determine if this bettor won
     // Agent A is the round's agentAId, Agent B is agentBId
-    const winningSide = round.winnerId === round.agentAId ? "A" : "B";
+    const winningSide =
+      round.winnerId === round.agentAId
+        ? "A"
+        : round.winnerId === round.agentBId
+          ? "B"
+          : null;
+    if (!winningSide) {
+      await markFailed(db, job.id, "Round winner does not match either side");
+      return;
+    }
     const userBetOnWinner = bets.some((b) => b.side === winningSide);
 
     if (!userBetOnWinner) {

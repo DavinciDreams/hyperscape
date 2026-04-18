@@ -17,7 +17,7 @@
  */
 
 import { watch, type FSWatcher } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createHmac, createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 
@@ -303,8 +303,17 @@ export function startHlsCdnSync(): string | null {
       { persistent: false },
       (eventType, filename) => {
         if (!filename) return;
-        if (filename.endsWith(".ts") || filename.endsWith(".m3u8")) {
-          void uploadFile(config, join(config.hlsDir, filename), filename);
+        const rawFileName = filename.toString();
+        const safeFileName = basename(rawFileName);
+        if (safeFileName !== rawFileName) {
+          return;
+        }
+        if (safeFileName.endsWith(".ts") || safeFileName.endsWith(".m3u8")) {
+          void uploadFile(
+            config,
+            join(config.hlsDir, safeFileName),
+            safeFileName,
+          );
         }
       },
     );
