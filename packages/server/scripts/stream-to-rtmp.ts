@@ -1695,8 +1695,15 @@ async function spawnX11NvencChromeAndConnect(): Promise<Browser> {
     "--disable-background-timer-throttling",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
+    // Chrome refuses to start as root (the capture worker's typical
+    // environment on gpu-server) without --no-sandbox. Playwright
+    // silently injected this for us in launch-mode; in direct-spawn
+    // we must pass it explicitly. x11grab never uses Chrome as a
+    // privilege boundary — it just renders a page for capture — so
+    // dropping the sandbox here matches the proven canary worker and
+    // the existing CDP/webcodecs launch posture.
+    "--no-sandbox",
   ];
-  if (CAPTURE_DISABLE_SANDBOX) args.push("--no-sandbox");
 
   console.log(
     `[Main] Spawning Chrome directly for x11_nvenc (no Playwright launch): ${chromePath} --app=<url> --kiosk --window-size=${VIEWPORT.width},${VIEWPORT.height} --remote-debugging-port=${port}`,
