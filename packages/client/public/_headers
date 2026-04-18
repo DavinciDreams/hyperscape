@@ -32,7 +32,7 @@
 # Scope is intentionally narrow: only /stream, only the bets staging domain.
 # ============================================================================
 /stream
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://auth.privy.io https://*.privy.io https://static.cloudflareinsights.com blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss: https: ws://localhost:* http://localhost:* data: blob:; frame-src 'self' https://auth.privy.io https://*.privy.io; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'self' https://*.hyperbet-enoomian-staging.pages.dev;
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://auth.privy.io https://*.privy.io https://static.cloudflareinsights.com blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' wss: https: ws://localhost:* http://localhost:* data: blob:; frame-src 'self' https://auth.privy.io https://*.privy.io; worker-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'self' https://hyperbet-enoomian-staging.pages.dev https://*.hyperbet-enoomian-staging.pages.dev;
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
