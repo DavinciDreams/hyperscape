@@ -2915,10 +2915,46 @@ async function main() {
   console.log("=".repeat(60));
   console.log("");
 
-  await refreshRendererHealthSnapshot(page);
+  // x11_nvenc mode has no Playwright Page to probe. The detached Chrome
+  // process IS the renderer, and its liveness + the encoder's
+  // frame-count progression are the authoritative health signals.
+  // Synthesize a healthy snapshot so downstream consumers
+  // (source-runtime, keeper /api/health, bets-page authority gate)
+  // don't report rendererHealthReady=false just because the Playwright
+  // probe is disabled by design.
+  if (CAPTURE_MODE === "x11_nvenc") {
+    latestRendererHealth = {
+      ready: true,
+      degradedReason: null,
+      updatedAt: Date.now(),
+      phase: null,
+      diagnostics: null,
+    };
+  } else {
+    await refreshRendererHealthSnapshot(page);
+  }
   writeExternalStatusSnapshot(bridge, activeCaptureMode);
   const statusSnapshotInterval = setInterval(() => {
-    void refreshRendererHealthSnapshot(page)
+    const healthProbe =
+      CAPTURE_MODE === "x11_nvenc"
+        ? Promise.resolve().then(() => {
+            // Refresh timestamp + re-assert healthy as long as the
+            // Chrome child is alive. Encoder-frame liveness is checked
+            // separately by the supervisor loop.
+            latestRendererHealth = {
+              ready: !!x11NvencChromeProcess && !x11NvencChromeProcess.killed,
+              degradedReason:
+                !!x11NvencChromeProcess && !x11NvencChromeProcess.killed
+                  ? null
+                  : "browser_missing",
+              updatedAt: Date.now(),
+              phase: null,
+              diagnostics: null,
+            };
+            return latestRendererHealth;
+          })
+        : refreshRendererHealthSnapshot(page);
+    void healthProbe
       .then(() =>
         activeCaptureMode === "cdp"
           ? Promise.resolve<BrowserCaptureStatus | null>(null)
