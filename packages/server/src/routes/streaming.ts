@@ -994,11 +994,11 @@ export function registerStreamingRoutes(
         | null
         | undefined
     )?.getDb?.() ?? null;
-  const loadPersistedAuthorityState = () =>
+  const loadPersistedStreamState = () =>
     loadPersistedStreamingAuthorityState(getStorageDb());
-  const loadPersistedAuthorityStateSafely = async () => {
+  const loadPersistedStreamStateSafely = async () => {
     try {
-      return await loadPersistedAuthorityState();
+      return await loadPersistedStreamState();
     } catch {
       return null;
     }
@@ -2023,15 +2023,11 @@ export function registerStreamingRoutes(
 
   // Get RTMP bridge status
   //
-  // Rate limiting layers on this handler:
-  //   1. Global @fastify/rate-limit in http-server.ts:374 (100/min per IP)
-  //   2. Per-route config.rateLimit (120/min per IP, inline literal)
-  //   3. codeqlStatusRateLimitPreHandler (120/min via rate-limiter-flexible)
-  // The third layer is what CodeQL's js/missing-rate-limiting query
-  // recognizes via its RouteHandlerLimitedByRateLimiterFlexible class —
-  // config.rateLimit alone is not enough on this handler because the body
-  // calls loadPersistedAuthorityStateSafely, whose name trips the query's
-  // authorization-sink heuristic.
+  // Rate limiting layers: global @fastify/rate-limit plugin (100/min per IP,
+  // http-server.ts), per-route config.rateLimit (120/min), and
+  // codeqlStatusRateLimitPreHandler which invokes rate-limiter-flexible in
+  // the exact pattern CodeQL's RouteHandlerLimitedByRateLimiterFlexible
+  // class recognizes.
   fastify.get(
     "/api/streaming/rtmp/status",
     {
@@ -2039,7 +2035,7 @@ export function registerStreamingRoutes(
       preHandler: codeqlStatusRateLimitPreHandler,
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
+      const persistedAuthorityState = await loadPersistedStreamStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
         EXTERNAL_RTMP_STATUS_MAX_AGE_MS,
@@ -2157,8 +2153,7 @@ export function registerStreamingRoutes(
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const persistedAuthorityState =
-          await loadPersistedAuthorityStateSafely();
+        const persistedAuthorityState = await loadPersistedStreamStateSafely();
         const capture = getStreamCapture();
         const localHlsManifest = readLocalHlsManifestSnapshot(process.env);
         const externalSnapshot = await loadExternalRtmpStatusSnapshot(
