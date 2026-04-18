@@ -1537,7 +1537,7 @@ export function registerStreamingBettingRoutes(
         mode: "always_on",
         presentationDelayMs: configuredPresentationDelayMs,
         activeDuelId: cycle?.duelId ?? null,
-        activeDuelKey: cycle?.duelKeyHex ?? null,
+        activeDuelKey: null,
         canonicalDestinationId: canonicalDestination.id,
         fallbackDestinationId: fallbackDestination?.id ?? null,
         publicPlaybackUrl: canonicalDestination.playbackUrl,

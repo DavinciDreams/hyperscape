@@ -434,7 +434,7 @@ export function buildBettingFeedPayload(params: {
     emittedAt: params.emittedAt,
     cycle: publicCycle,
     duelId: cycle?.duelId ?? null,
-    duelKey: cycle?.duelKeyHex ?? null,
+    duelKey: null,
     phase: publicPhase,
     phaseVersion: cycle?.phaseVersion ?? 0,
     broadcastTimeline,
