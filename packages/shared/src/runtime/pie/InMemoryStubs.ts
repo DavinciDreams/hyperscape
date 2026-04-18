@@ -54,6 +54,9 @@ import type {
   NodeWebSocket,
   ConnectionParams,
 } from "../../systems/server/network/server-types";
+import { Socket } from "../../platform/shared/Socket";
+import type { NetworkWithSocket } from "../../types/network/networking";
+import { uuid } from "../../utils/IdGenerator";
 
 // ---------------------------------------------------------------------------
 // REPOSITORIES — empty, permissive readers
@@ -460,17 +463,58 @@ export class PIENoopEventBridge implements IEventBridge {
 }
 
 /**
- * Accepts any websocket connection without auth. Real implementation runs
- * a multi-step Privy/character-selection handshake; PIE skips all of it.
+ * PIE loopback connection handler — minimal replacement for the real
+ * `ConnectionHandler` in `packages/server/.../connection-handler.ts`.
+ *
+ * The production handler runs a full Privy/JWT/character-selection handshake
+ * and sends the initial `snapshot` + `resourceSnapshot` packets. PIE has no
+ * auth infrastructure (no Privy app, no user DB, no character table) so this
+ * handler does the bare minimum needed for a functional loopback:
+ *
+ *   1. Wrap the incoming `NodeWebSocket` (an `InMemorySocket`) in a real
+ *      `Socket` instance so `ServerNetwork.enqueue`/`onDisconnect` work for
+ *      packets the client sends later.
+ *   2. Stamp the socket with a synthetic `accountId` (from `params.playerId`
+ *      if provided, otherwise a fresh uuid) so player-scoped code paths can
+ *      find it.
+ *   3. Register the socket in the shared `sockets` map so broadcast/targeted
+ *      sends reach it.
+ *
+ * Explicitly does NOT:
+ *   - Authenticate (no Privy in PIE)
+ *   - Send the initial snapshot (the editor constructs its own world state)
+ *   - Create a player entity (editor owns entity spawning)
+ *   - Emit `player:joined` (editor drives entity lifecycle)
  */
-export class PIENoopConnectionHandler implements IConnectionHandler {
+export class PIELoopbackConnectionHandler implements IConnectionHandler {
+  constructor(
+    private readonly sockets: Map<string, ServerSocket>,
+    private readonly network: NetworkWithSocket,
+  ) {}
+
   setSpatialIndex(_index: SpatialIndex): void {}
+
   async handleConnection(
-    _ws: NodeWebSocket,
-    _params: ConnectionParams,
+    ws: NodeWebSocket,
+    params: ConnectionParams,
   ): Promise<void> {
-    // Handshake is driven externally by PIEServerSession — this hook is a
-    // no-op so ServerNetwork.init() doesn't double-invoke it.
+    if (!ws || typeof ws.close !== "function") return;
+
+    // PIE has no user DB — the editor supplies a synthetic identity via
+    // `characterId` so tests can round-trip a stable id; fall back to uuid.
+    const accountId = params.characterId ?? uuid();
+    const socketId = uuid();
+
+    const socket = new Socket({
+      id: socketId,
+      ws,
+      network: this.network,
+      player: undefined,
+    }) as ServerSocket;
+    socket.accountId = accountId;
+    socket.createdAt = Date.now();
+
+    this.sockets.set(socket.id, socket);
   }
 }
 
@@ -504,8 +548,15 @@ export class PIEInMemoryServerNetworkManagerFactory implements IServerNetworkMan
   }
 
   createConnectionHandler(
-    _args: ConnectionHandlerFactoryArgs,
+    args: ConnectionHandlerFactoryArgs,
   ): IConnectionHandler {
-    return new PIENoopConnectionHandler();
+    // `world.network` is the ServerNetwork instance; it implements
+    // `enqueue` + `onDisconnect` (the `NetworkWithSocket` surface). The
+    // cast is safe at this call site — ServerNetwork constructs the factory
+    // via `getManagerFactory()` AFTER its own registration, so `world.network`
+    // is guaranteed to exist.
+    const network = (args.world as unknown as { network: NetworkWithSocket })
+      .network;
+    return new PIELoopbackConnectionHandler(args.sockets, network);
   }
 }

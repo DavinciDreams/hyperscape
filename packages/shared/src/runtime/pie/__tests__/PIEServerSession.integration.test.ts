@@ -77,6 +77,91 @@ describe("PIEServerSession — integration", () => {
   );
 
   it(
+    "connect() registers a real server socket in ServerNetwork.sockets",
+    { timeout: LONG_TIMEOUT_MS },
+    async () => {
+      session = new PIEServerSession({
+        skipRpgSystems: true,
+        skipTerrain: true,
+        skipEnvironment: true,
+      });
+      await session.start();
+      const sockets = (
+        session.network as unknown as {
+          sockets: Map<string, { accountId: string }>;
+        }
+      ).sockets;
+
+      expect(sockets.size).toBe(0);
+      await session.connect({ characterId: "editor-host" });
+      expect(sockets.size).toBe(1);
+      const [registered] = Array.from(sockets.values());
+      expect(registered.accountId).toBe("editor-host");
+    },
+  );
+
+  it(
+    "server-side send reaches the client endpoint over the in-memory socket",
+    { timeout: LONG_TIMEOUT_MS },
+    async () => {
+      session = new PIEServerSession({
+        skipRpgSystems: true,
+        skipTerrain: true,
+        skipEnvironment: true,
+      });
+      await session.start();
+      const { client } = await session.connect({ characterId: "editor-host" });
+
+      const received: Uint8Array[] = [];
+      client.on("message", (data: unknown) => {
+        received.push(new Uint8Array(data as ArrayBuffer));
+      });
+
+      const sockets = (
+        session.network as unknown as {
+          sockets: Map<string, { sendPacket: (p: Uint8Array) => void }>;
+        }
+      ).sockets;
+      const [serverSocket] = Array.from(sockets.values());
+      const payload = new Uint8Array([9, 8, 7, 6, 5]);
+      serverSocket.sendPacket(payload);
+
+      // InMemorySocketPair schedules peer delivery on the microtask queue.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(received).toHaveLength(1);
+      expect(Array.from(received[0]!)).toEqual([9, 8, 7, 6, 5]);
+    },
+  );
+
+  it(
+    "client close removes the server socket from ServerNetwork.sockets",
+    { timeout: LONG_TIMEOUT_MS },
+    async () => {
+      session = new PIEServerSession({
+        skipRpgSystems: true,
+        skipTerrain: true,
+        skipEnvironment: true,
+      });
+      await session.start();
+      const { client } = await session.connect({ characterId: "editor-host" });
+
+      const sockets = (
+        session.network as unknown as { sockets: Map<string, unknown> }
+      ).sockets;
+      expect(sockets.size).toBe(1);
+
+      client.close();
+      // close is delivered on the microtask queue; a handful of microtask
+      // turns covers the Socket.onClose → network.onDisconnect →
+      // SocketManager.handleDisconnect chain.
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(sockets.size).toBe(0);
+    },
+  );
+
+  it(
     "stop() is idempotent after start()",
     { timeout: LONG_TIMEOUT_MS },
     async () => {
