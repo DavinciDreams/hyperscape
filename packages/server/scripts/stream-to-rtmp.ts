@@ -2923,13 +2923,18 @@ async function main() {
   // don't report rendererHealthReady=false just because the Playwright
   // probe is disabled by design.
   if (CAPTURE_MODE === "x11_nvenc") {
+    const nowMs = Date.now();
     latestRendererHealth = {
       ready: true,
       degradedReason: null,
-      updatedAt: Date.now(),
+      updatedAt: nowMs,
       phase: null,
       diagnostics: null,
     };
+    // Seed render-tick + visual-change so the keeper's freshness gates
+    // don't flag them as stale on the first external-status write.
+    latestRenderTickAt = nowMs;
+    latestVisualChangeAt = nowMs;
   } else {
     await refreshRendererHealthSnapshot(page);
   }
@@ -2939,18 +2944,29 @@ async function main() {
       CAPTURE_MODE === "x11_nvenc"
         ? Promise.resolve().then(() => {
             // Refresh timestamp + re-assert healthy as long as the
-            // Chrome child is alive. Encoder-frame liveness is checked
-            // separately by the supervisor loop.
+            // Chrome child is alive. Also advance the render-tick and
+            // visual-change timestamps — the Playwright page.evaluate
+            // heartbeat that normally populates them is disabled here,
+            // and without these the keeper's deriveBettingRendererHealth
+            // flags `render_tick_stale` (observed on first cutover:
+            // rendererHealthReady=false despite fully healthy
+            // encoder+ingest). Encoder frame-count progression is
+            // already supervised separately as the authoritative
+            // liveness signal.
+            const chromeAlive =
+              !!x11NvencChromeProcess && !x11NvencChromeProcess.killed;
+            const nowMs = Date.now();
             latestRendererHealth = {
-              ready: !!x11NvencChromeProcess && !x11NvencChromeProcess.killed,
-              degradedReason:
-                !!x11NvencChromeProcess && !x11NvencChromeProcess.killed
-                  ? null
-                  : "browser_missing",
-              updatedAt: Date.now(),
+              ready: chromeAlive,
+              degradedReason: chromeAlive ? null : "browser_missing",
+              updatedAt: nowMs,
               phase: null,
               diagnostics: null,
             };
+            if (chromeAlive) {
+              latestRenderTickAt = nowMs;
+              latestVisualChangeAt = nowMs;
+            }
             return latestRendererHealth;
           })
         : refreshRendererHealthSnapshot(page);
