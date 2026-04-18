@@ -737,9 +737,24 @@ export class NetworkingComputeContext {
       "bp_count",
       new Uint32Array([0]),
     );
+    // Dispatch shape: one GPU thread per pair, workgroup size 64.
+    // The pair count is O(N²), so for aabbCount ≳ 5793 the 1D dispatch
+    // exceeds WebGPU's per-dimension ceiling of 65535 workgroups. We
+    // reshape to a 2D dispatch (x × y × 1) in that case and pass
+    // numWorkgroupsX in the uniform buffer so the shader can
+    // reconstruct the linear thread index via
+    //   threadIdx = global_id.y * (numWorkgroupsX * 64) + global_id.x
+    // For the 1D case we still pass numWorkgroupsX = totalWorkgroups,
+    // y=1, and the shader arithmetic degenerates correctly.
+    const totalPairs = (aabbCount * (aabbCount - 1)) / 2;
+    const totalWorkgroups = Math.ceil(totalPairs / 64);
+    const WEBGPU_MAX_WORKGROUPS_PER_DIM = 65535;
+    const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
+    const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
+
     const uniformBuffer = this.ctx.createUniformBuffer(
       "bp_uniforms",
-      new Uint32Array([aabbCount, layerMask, maxOverlaps, 0]),
+      new Uint32Array([aabbCount, layerMask, maxOverlaps, dispatchX]),
     );
 
     if (!aabbBuffer || !overlapBuffer || !countBuffer || !uniformBuffer) {
@@ -758,12 +773,10 @@ export class NetworkingComputeContext {
       throw new Error("Failed to create broadphase bind group");
     }
 
-    // Dispatch - one thread per pair
-    const totalPairs = (aabbCount * (aabbCount - 1)) / 2;
     await this.ctx.dispatchAndWait({
       pipeline: this.broadphasePipeline,
       bindGroup,
-      workgroupCount: this.ctx.calculateWorkgroupCount(totalPairs, 64),
+      workgroupCount: [dispatchX, dispatchY, 1],
     });
 
     // Read back results
