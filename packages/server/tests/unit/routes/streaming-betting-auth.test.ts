@@ -84,6 +84,19 @@ describe("streaming-betting-auth", () => {
     ).toBe(false);
   });
 
+  it("prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN over aliases (matches hyperbet keeper)", () => {
+    expect(
+      resolveOracleProofAccessToken({
+        HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN: "keeper-aligned-secret",
+        STREAMING_ORACLE_PROOF_TOKEN: "oracle-secret",
+        BETTING_FEED_ACCESS_TOKEN: "bet-secret",
+      }),
+    ).toEqual({
+      token: "keeper-aligned-secret",
+      source: "oracle-proof",
+    });
+  });
+
   it("prefers STREAMING_ORACLE_PROOF_TOKEN over the betting feed token for oracle proof retrieval", () => {
     expect(
       resolveOracleProofAccessToken({

@@ -79,12 +79,24 @@ export function resolveBettingFeedAccessToken(
 // Oracle-proof retrieval (`/api/streaming/results/:duelId`) exposes
 // `duelKeyHex` + `seed` + `replayHash` — the material needed to submit a
 // Solana resolution. This secret must be scopable narrower than the general
-// betting feed token. STREAMING_ORACLE_PROOF_TOKEN is the dedicated secret;
-// if it is unset we fall back to BETTING_FEED_ACCESS_TOKEN so existing
-// deployments keep working during rollout.
+// betting feed token.
+//
+// Env precedence (must match the hyperbet keeper's consumption order in
+// `packages/hyperbet-evm/keeper/src/bot.ts` RESULT_CATCHUP_BEARER_TOKEN):
+//   1. HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN — canonical dedicated secret
+//   2. STREAMING_ORACLE_PROOF_TOKEN — alias for the same secret
+//   3. BETTING_FEED_ACCESS_TOKEN — compatibility fallback so existing
+//      single-token deployments keep working during rollout
+// Operators should migrate to (1) to narrow the blast radius of a
+// feed-token leak and to keep the naming aligned with the keeper side.
 export function resolveOracleProofAccessToken(
   env: Record<string, string | undefined>,
 ): OracleProofAccessTokenResolution {
+  const keeperAlignedToken =
+    env.HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN?.trim() || null;
+  if (keeperAlignedToken) {
+    return { token: keeperAlignedToken, source: "oracle-proof" };
+  }
   const oracleToken = env.STREAMING_ORACLE_PROOF_TOKEN?.trim() || null;
   if (oracleToken) {
     return { token: oracleToken, source: "oracle-proof" };

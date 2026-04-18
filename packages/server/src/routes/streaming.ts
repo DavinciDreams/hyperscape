@@ -1825,11 +1825,12 @@ export function registerStreamingRoutes(
   // that event. This endpoint lets the keeper reconstruct the resolution
   // from the durable streaming_duel_history row.
   //
-  // Bearer-auth is keyed to STREAMING_ORACLE_PROOF_TOKEN if configured.
-  // BETTING_FEED_ACCESS_TOKEN is accepted as a compatibility fallback so
-  // existing deployments keep working during rollout. Operators should
-  // migrate to the dedicated oracle-proof secret to narrow the blast
-  // radius of a feed-token leak.
+  // Bearer-auth prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
+  // hyperbet keeper's consumption order). STREAMING_ORACLE_PROOF_TOKEN is a
+  // server-side alias kept for continuity. BETTING_FEED_ACCESS_TOKEN is
+  // accepted as a compatibility fallback so existing deployments keep working
+  // during rollout. Operators should migrate to the dedicated oracle-proof
+  // secret to narrow the blast radius of a feed-token leak.
   let oracleProofFallbackWarnLogged = false;
   let oracleProofSkipAuthWarnLogged = false;
   const authorizeResultsLookup = async (
@@ -1846,7 +1847,7 @@ export function registerStreamingRoutes(
       !oracleProofFallbackWarnLogged
     ) {
       fastify.log.warn(
-        "[streaming] /api/streaming/results/:duelId authenticated via BETTING_FEED_ACCESS_TOKEN; set STREAMING_ORACLE_PROOF_TOKEN to scope oracle-proof access independently",
+        "[streaming] /api/streaming/results/:duelId authenticated via BETTING_FEED_ACCESS_TOKEN; set HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches hyperbet keeper) to scope oracle-proof access independently",
       );
       oracleProofFallbackWarnLogged = true;
     }
@@ -1925,11 +1926,12 @@ export function registerStreamingRoutes(
       // Legacy rows written before migration 0055 may not carry the oracle
       // proof fields. Callers must handle this by waiting and retrying —
       // the current live duel will write fresh rows with the full proof.
+      // The 409 response intentionally does NOT leak the schema-migration
+      // number; that's an internal detail.
       if (!row.seed || !row.replayHash || !row.duelKeyHex) {
         return reply.status(409).send({
           error: "Incomplete proof",
-          message:
-            "This duel's oracle proof was not persisted. The duel predates schema migration 0055.",
+          message: "Oracle proof is not available for this duel.",
           duelId: row.duelId,
           cycleId: row.cycleId,
         });
