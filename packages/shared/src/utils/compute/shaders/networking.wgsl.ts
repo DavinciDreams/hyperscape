@@ -424,7 +424,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
  * - overlaps: pairs of overlapping AABB indices
  * - overlapCount: number of overlapping pairs
  */
+// Workgroup size used by the broadphase compute shader (1D along X).
+// Exported so host-side dispatch math stays in sync with the shader — any
+// drift here would silently miscompute thread indices in the 2D dispatch
+// path (threadsPerRow = numWorkgroupsX * BROADPHASE_WORKGROUP_SIZE_X).
+export const BROADPHASE_WORKGROUP_SIZE_X = 64;
+
 export const PHYSICS_BROADPHASE_SHADER = /* wgsl */ `
+// WORKGROUP_SIZE_1D must match BROADPHASE_WORKGROUP_SIZE_X above.
+const WORKGROUP_SIZE_1D: u32 = ${BROADPHASE_WORKGROUP_SIZE_X}u;
+
 struct AABB {
   minX: f32,
   minY: f32,
@@ -466,7 +475,7 @@ fn aabbOverlap(a: AABB, b: AABB) -> bool {
          a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(${BROADPHASE_WORKGROUP_SIZE_X})
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // Reconstruct the linear thread index across 2D dispatch.
   // threadsPerRow = numWorkgroupsX * workgroup_size_x.
@@ -474,7 +483,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // this reduces to threadIdx = global_id.x. Under a 2D dispatch
   // dispatchWorkgroups(65535, K, 1), global_id.y ranges 0..K-1 and we
   // offset by a full row of threads per y.
-  let threadsPerRow = uniforms.numWorkgroupsX * 64u;
+  let threadsPerRow = uniforms.numWorkgroupsX * WORKGROUP_SIZE_1D;
   let threadIdx = global_id.y * threadsPerRow + global_id.x;
 
   // Each thread checks one pair (upper triangle of N×N matrix)

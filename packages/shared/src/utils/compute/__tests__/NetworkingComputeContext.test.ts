@@ -96,8 +96,16 @@ describe("NetworkingComputeContext", () => {
       // uniforms. If this assertion fails the shader is back to the
       // 1D form and the canary will stall at 1080p.
       expect(PHYSICS_BROADPHASE_SHADER).toContain("numWorkgroupsX: u32");
+      // Shader multiplies by a named WGSL const bound to the host-side
+      // workgroup constant (not a raw "64u"), so host and shader cannot
+      // drift. The const value itself is still 64u, emitted from the TS
+      // template literal, so the assertion accepts either form for
+      // safety against future template tweaks.
+      expect(PHYSICS_BROADPHASE_SHADER).toMatch(
+        /uniforms\.numWorkgroupsX \* (WORKGROUP_SIZE_1D|64u)/,
+      );
       expect(PHYSICS_BROADPHASE_SHADER).toContain(
-        "uniforms.numWorkgroupsX * 64u",
+        "const WORKGROUP_SIZE_1D: u32 = 64u",
       );
       expect(PHYSICS_BROADPHASE_SHADER).toContain(
         "global_id.y * threadsPerRow + global_id.x",

@@ -15,6 +15,7 @@ import {
   BATCH_AGGRO_CHECK_SHADER,
   NEAREST_ENTITY_SHADER,
   PHYSICS_BROADPHASE_SHADER,
+  BROADPHASE_WORKGROUP_SIZE_X,
   SOUND_OCCLUSION_SHADER,
   SPAWN_VALIDATION_SHADER,
   LOOT_DISTRIBUTION_SHADER,
@@ -743,11 +744,14 @@ export class NetworkingComputeContext {
     // reshape to a 2D dispatch (x × y × 1) in that case and pass
     // numWorkgroupsX in the uniform buffer so the shader can
     // reconstruct the linear thread index via
-    //   threadIdx = global_id.y * (numWorkgroupsX * 64) + global_id.x
+    //   threadIdx = global_id.y * (numWorkgroupsX * WORKGROUP_SIZE_1D)
+    //             + global_id.x
     // For the 1D case we still pass numWorkgroupsX = totalWorkgroups,
-    // y=1, and the shader arithmetic degenerates correctly.
+    // y=1, and the shader arithmetic degenerates correctly. Workgroup
+    // size is imported from the shader module so the host-side divisor
+    // can't drift from @workgroup_size.
     const totalPairs = (aabbCount * (aabbCount - 1)) / 2;
-    const totalWorkgroups = Math.ceil(totalPairs / 64);
+    const totalWorkgroups = Math.ceil(totalPairs / BROADPHASE_WORKGROUP_SIZE_X);
     const WEBGPU_MAX_WORKGROUPS_PER_DIM = 65535;
     const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
     const dispatchY = Math.ceil(totalWorkgroups / dispatchX);

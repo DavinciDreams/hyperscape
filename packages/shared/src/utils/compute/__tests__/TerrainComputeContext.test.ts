@@ -30,8 +30,14 @@ describe("TerrainComputeContext", () => {
       expect(ROAD_INFLUENCE_SHADER).toContain("@compute");
       expect(ROAD_INFLUENCE_SHADER).toContain("distanceToLineSegment");
       expect(ROAD_INFLUENCE_TEXTURE_SHADER).toContain("numWorkgroupsX: u32");
+      // Shader multiplies by a named WGSL const bound to the host-side
+      // workgroup constant. Accept either the named form or the literal
+      // 64u in case the template substitution path changes.
+      expect(ROAD_INFLUENCE_TEXTURE_SHADER).toMatch(
+        /uniforms\.numWorkgroupsX \* (WORKGROUP_SIZE_1D|64u)/,
+      );
       expect(ROAD_INFLUENCE_TEXTURE_SHADER).toContain(
-        "uniforms.numWorkgroupsX * 64u",
+        "const WORKGROUP_SIZE_1D: u32 = 64u",
       );
     });
 

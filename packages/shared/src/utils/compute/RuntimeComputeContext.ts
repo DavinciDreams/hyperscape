@@ -691,7 +691,9 @@ export class RuntimeComputeContext {
       const stack =
         new Error("[compute-dispatch-over-limit]").stack ??
         "(no stack available)";
-      console.warn(
+      // Log at error level — truncated output is incorrect, not just slow —
+      // so this shows up in any aggregator configured to alert on errors.
+      console.error(
         `[compute] calculateWorkgroupCount=${count} (elementCount=${elementCount}, workgroupSize=${workgroupSize}) exceeds WebGPU 65535 per-dimension ceiling. Clamping to 65535; results past element ${65535 * workgroupSize} will be truncated.\n${stack}`,
       );
       return 65535;
