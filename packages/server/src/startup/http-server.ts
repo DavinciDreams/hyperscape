@@ -420,30 +420,37 @@ export async function createHttpServer(
     process.env.NODE_ENV !== "production" ||
     process.env.ENABLE_PUBLIC_DEBUG_ROUTE === "true";
   if (allowPublicDebugRoute) {
+    ensureRateLimitDecorator(fastify);
     // Debug endpoint to see public directory contents
-    fastify.get("/debug/public", async (_req, reply) => {
-      const publicDir = path.join(config.__dirname, "public");
-      const assetsDir = path.join(publicDir, "assets");
-      let publicContents: string[] = [];
-      let assetsContents: string[] = [];
-      try {
-        publicContents = await fs.readdir(publicDir);
-      } catch (e) {
-        publicContents = [`ERROR: ${e}`];
-      }
-      try {
-        assetsContents = await fs.readdir(assetsDir);
-      } catch (e) {
-        assetsContents = [`ERROR: ${e}`];
-      }
-      return reply.send({
-        publicDir,
-        assetsDir,
-        publicContents,
-        assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
-        configDirname: config.__dirname,
-      });
-    });
+    fastify.get(
+      "/debug/public",
+      {
+        config: { rateLimit: GAME_ASSET_PROXY_RATE_LIMIT },
+      },
+      async (_req, reply) => {
+        const publicDir = path.join(config.__dirname, "public");
+        const assetsDir = path.join(publicDir, "assets");
+        let publicContents: string[] = [];
+        let assetsContents: string[] = [];
+        try {
+          publicContents = await fs.readdir(publicDir);
+        } catch (e) {
+          publicContents = [`ERROR: ${e}`];
+        }
+        try {
+          assetsContents = await fs.readdir(assetsDir);
+        } catch (e) {
+          assetsContents = [`ERROR: ${e}`];
+        }
+        return reply.send({
+          publicDir,
+          assetsDir,
+          publicContents,
+          assetsContents: assetsContents.slice(0, 20), // Limit to 20 items
+          configDirname: config.__dirname,
+        });
+      },
+    );
   }
 
   // SPA catch-all route - serve index.html for any unmatched routes
@@ -935,7 +942,7 @@ function registerGameAssetsRoute(
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
-    preHandler: fastify.rateLimit(GAME_ASSET_PROXY_RATE_LIMIT),
+    config: { rateLimit: GAME_ASSET_PROXY_RATE_LIMIT },
     handler: async (request, reply) => {
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);

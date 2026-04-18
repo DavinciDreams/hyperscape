@@ -1954,23 +1954,6 @@ export function registerStreamingBettingRoutes(
     request: FastifyRequest<{ Body: unknown }>,
     reply: FastifyReply,
   ) => {
-    const webhookSecret =
-      process.env.STREAM_CLOUDFLARE_WEBHOOK_SECRET?.trim() || null;
-    if (!webhookSecret) {
-      return reply.status(503).send({
-        error: "Cloudflare webhook secret not configured",
-        message:
-          "Set STREAM_CLOUDFLARE_WEBHOOK_SECRET before enabling the webhook route",
-      });
-    }
-
-    if (!verifyCloudflareWebhookSecret(request.headers, webhookSecret)) {
-      return reply.status(401).send({
-        error: "Unauthorized",
-        message: "Missing or invalid Cloudflare webhook secret",
-      });
-    }
-
     const receivedAt = Date.now();
     const summary = summarizeCloudflareLiveWebhook({
       payload: request.body,
@@ -2012,6 +1995,30 @@ export function registerStreamingBettingRoutes(
       eventType: summary.webhook.eventType,
       liveInputId: summary.webhook.liveInputId,
       receivedAt,
+    });
+  };
+
+  const authorizeCloudflareWebhook = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const webhookSecret =
+      process.env.STREAM_CLOUDFLARE_WEBHOOK_SECRET?.trim() || null;
+    if (!webhookSecret) {
+      return reply.status(503).send({
+        error: "Cloudflare webhook secret not configured",
+        message:
+          "Set STREAM_CLOUDFLARE_WEBHOOK_SECRET before enabling the webhook route",
+      });
+    }
+
+    if (verifyCloudflareWebhookSecret(request.headers, webhookSecret)) {
+      return;
+    }
+
+    return reply.status(401).send({
+      error: "Unauthorized",
+      message: "Missing or invalid Cloudflare webhook secret",
     });
   };
 
@@ -2067,6 +2074,7 @@ export function registerStreamingBettingRoutes(
     "/api/streaming/cloudflare/webhook",
     {
       config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
+      preHandler: authorizeCloudflareWebhook,
     },
     handleCloudflareWebhook,
   );

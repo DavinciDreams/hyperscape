@@ -1794,39 +1794,48 @@ export function registerStreamingRoutes(
   // from the durable streaming_duel_history row.
   //
   // Bearer-auth via the same token the betting feed uses (BETTING_FEED_ACCESS_TOKEN).
+  const authorizeResultsLookup = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const skipAuth = shouldSkipBettingFeedAuth(
+      process.env as Record<string, string | undefined>,
+    );
+    const requiredToken = resolveBettingFeedAccessToken(
+      process.env as Record<string, string | undefined>,
+    ).token;
+    if (!requiredToken) {
+      if (process.env.NODE_ENV === "production" || !skipAuth) {
+        return reply.status(503).send({
+          error: "Service unavailable",
+          message: "Betting feed auth token is not configured",
+        });
+      }
+      return;
+    }
+
+    const token = extractBettingFeedToken({
+      authorizationHeader: request.headers.authorization,
+    });
+    if (hasValidBettingFeedToken(requiredToken, token)) {
+      return;
+    }
+
+    return reply.status(401).send({
+      error: "Unauthorized",
+      message: "Missing or invalid betting feed token",
+    });
+  };
+
   fastify.get<{
     Params: { duelId: string };
   }>(
     "/api/streaming/results/:duelId",
     {
       config: { rateLimit: AUTHENTICATED_RESULTS_RATE_LIMIT },
+      preHandler: authorizeResultsLookup,
     },
     async (request, reply) => {
-      const skipAuth = shouldSkipBettingFeedAuth(
-        process.env as Record<string, string | undefined>,
-      );
-      const requiredToken = resolveBettingFeedAccessToken(
-        process.env as Record<string, string | undefined>,
-      ).token;
-      if (!requiredToken) {
-        if (process.env.NODE_ENV === "production" || !skipAuth) {
-          return reply.status(503).send({
-            error: "Service unavailable",
-            message: "Betting feed auth token is not configured",
-          });
-        }
-      } else {
-        const token = extractBettingFeedToken({
-          authorizationHeader: request.headers.authorization,
-        });
-        if (!hasValidBettingFeedToken(requiredToken, token)) {
-          return reply.status(401).send({
-            error: "Unauthorized",
-            message: "Missing or invalid betting feed token",
-          });
-        }
-      }
-
       const duelId = request.params.duelId?.trim();
       if (!duelId) {
         return reply.status(400).send({
@@ -1919,7 +1928,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
@@ -2033,7 +2042,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
-      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
