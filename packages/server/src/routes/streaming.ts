@@ -164,6 +164,30 @@ const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
   points: 120,
   duration: 60,
 });
+
+/**
+ * Standalone preHandler implementing the exact pattern CodeQL's
+ * RouteHandlerLimitedByRateLimiterFlexible class recognizes: a function taking
+ * a request parameter that calls `.consume(request.<prop>)` on an instance of
+ * a `RateLimiter*` class from `rate-limiter-flexible`. Extracted to module
+ * scope so the middleware is a separate routing-tree node that guards the
+ * handler, which is what CodeQL's `isGuardedByNode` check requires.
+ *
+ * Using this preHandler satisfies `js/missing-rate-limiting` WITHOUT relying
+ * on the `config.rateLimit` shorthand, which CodeQL's `FastifyPerRouteRateLimit`
+ * class only recognizes when the rate-limiter plugin is imported under the
+ * old unscoped name `fastify-rate-limit` (this repo uses `@fastify/rate-limit`).
+ */
+async function codeqlStatusRateLimitPreHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  try {
+    await STREAMING_STATUS_CODEQL_LIMITER.consume(request.ip);
+  } catch {
+    await reply.code(429).send({ error: "Too Many Requests" });
+  }
+}
 type RateLimitedFastify = FastifyInstance & {
   rateLimit: NonNullable<FastifyInstance["rateLimit"]>;
 };
@@ -1999,31 +2023,22 @@ export function registerStreamingRoutes(
 
   // Get RTMP bridge status
   //
-  // Rate limiting IS applied on this handler through three independent
-  // mechanisms:
-  //   1. Global @fastify/rate-limit registration in http-server.ts:374
-  //      (100 req/min per IP across the whole app)
-  //   2. Per-route preHandler: fastify.rateLimit({...}) below (120/min)
-  //   3. STREAMING_STATUS_CODEQL_LIMITER.consume() in the handler body
-  // CodeQL's js/missing-rate-limiting query still flags this route because
-  // its dataflow heuristic can't trace the rate limit across any of these
-  // entry points when the handler also calls
-  // loadPersistedAuthorityStateSafely (the "Authority" substring in the
-  // function name tags it as an auth sink). The `lgtm` suppression below
-  // acknowledges the scanner is reporting a false positive here.
+  // Rate limiting layers on this handler:
+  //   1. Global @fastify/rate-limit in http-server.ts:374 (100/min per IP)
+  //   2. Per-route config.rateLimit (120/min per IP, inline literal)
+  //   3. codeqlStatusRateLimitPreHandler (120/min via rate-limiter-flexible)
+  // The third layer is what CodeQL's js/missing-rate-limiting query
+  // recognizes via its RouteHandlerLimitedByRateLimiterFlexible class —
+  // config.rateLimit alone is not enough on this handler because the body
+  // calls loadPersistedAuthorityStateSafely, whose name trips the query's
+  // authorization-sink heuristic.
   fastify.get(
     "/api/streaming/rtmp/status",
     {
       config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
-      preHandler: fastify.rateLimit({ max: 120, timeWindow: "1 minute" }),
+      preHandler: codeqlStatusRateLimitPreHandler,
     },
-    // lgtm[js/missing-rate-limiting]
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
-      } catch {
-        return reply.code(429).send({ error: "Too Many Requests" });
-      }
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
       const externalSnapshot = await loadExternalRtmpStatusSnapshot(
         EXTERNAL_RTMP_STATUS_FILE || null,
@@ -2132,23 +2147,15 @@ export function registerStreamingRoutes(
   );
 
   // Get stream capture status (headless browser → HLS pipeline)
-  // Same three-mechanism rate limiting as /rtmp/status. CodeQL's
-  // js/missing-rate-limiting flags this route for the same reason (handler
-  // calls loadPersistedAuthorityStateSafely). Suppressing the false
-  // positive inline — see the detailed rationale above /rtmp/status.
+  // Same CodeQL-visible rate-limiter-flexible preHandler as /rtmp/status;
+  // see comment there for the rationale.
   fastify.get(
     "/api/streaming/capture/status",
     {
       config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
-      preHandler: fastify.rateLimit({ max: 120, timeWindow: "1 minute" }),
+      preHandler: codeqlStatusRateLimitPreHandler,
     },
-    // lgtm[js/missing-rate-limiting]
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        await STREAMING_STATUS_CODEQL_LIMITER.consume(_request.ip);
-      } catch {
-        return reply.code(429).send({ error: "Too Many Requests" });
-      }
       try {
         const persistedAuthorityState =
           await loadPersistedAuthorityStateSafely();
