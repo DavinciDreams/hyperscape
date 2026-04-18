@@ -158,8 +158,6 @@ const STREAMING_STATUS_RATE_LIMIT: RateLimitOptions = {
   max: 120,
   timeWindow: "1 minute",
 };
-const noopPreHandler = async (): Promise<void> => {};
-
 type StreamingStatusMetricsSnapshot = {
   captureFps: number | null;
   encodeFps: number | null;
@@ -848,14 +846,6 @@ export function registerStreamingRoutes(
   fastify: FastifyInstance,
   world: World,
 ): void {
-  const authenticatedResultsRateLimitPreHandler =
-    typeof fastify.rateLimit === "function"
-      ? fastify.rateLimit(AUTHENTICATED_RESULTS_RATE_LIMIT)
-      : noopPreHandler;
-  const streamingStatusRateLimitPreHandler =
-    typeof fastify.rateLimit === "function"
-      ? fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT)
-      : noopPreHandler;
   const sseClients = new Map<number, FastifyReply>();
   const replayFrames: StreamingSseFrame[] = [];
   let replayFramesTotalBytes = 0;
@@ -1772,7 +1762,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/results/:duelId",
     {
-      preHandler: authenticatedResultsRateLimitPreHandler,
+      config: { rateLimit: AUTHENTICATED_RESULTS_RATE_LIMIT },
     },
     async (request, reply) => {
       const skipAuth = shouldSkipBettingFeedAuth(
@@ -1892,7 +1882,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      preHandler: streamingStatusRateLimitPreHandler,
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       const persistedAuthorityState = await loadPersistedAuthorityStateSafely();
@@ -2006,7 +1996,7 @@ export function registerStreamingRoutes(
   fastify.get(
     "/api/streaming/capture/status",
     {
-      preHandler: streamingStatusRateLimitPreHandler,
+      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {

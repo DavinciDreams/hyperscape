@@ -134,8 +134,6 @@ const CLOUDFLARE_WEBHOOK_RATE_LIMIT: RateLimitOptions = {
   max: 180,
   timeWindow: "1 minute",
 };
-const noopPreHandler = async (): Promise<void> => {};
-
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
 
 type DatabaseSystemLike = Pick<DatabaseSystem, "getDb">;
@@ -1779,11 +1777,6 @@ export function registerStreamingBettingRoutes(
       return;
     }
   };
-  const webhookRateLimitPreHandler =
-    typeof fastify.rateLimit === "function"
-      ? fastify.rateLimit(CLOUDFLARE_WEBHOOK_RATE_LIMIT)
-      : noopPreHandler;
-
   const handleBettingBootstrap = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -2059,7 +2052,7 @@ export function registerStreamingBettingRoutes(
   }>(
     "/api/streaming/cloudflare/webhook",
     {
-      preHandler: webhookRateLimitPreHandler,
+      config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
     },
     handleCloudflareWebhook,
   );
