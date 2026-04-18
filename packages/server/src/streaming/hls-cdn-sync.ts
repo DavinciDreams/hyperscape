@@ -173,7 +173,7 @@ const uploadedHashes = new Map<string, string>();
 const MAX_TRACKED_FILES = 500;
 
 /** Pending uploads (deduplication) */
-const pendingUploads = new Set<string>();
+const pendingUploads = new Map<string, Promise<void>>();
 
 let watcher: FSWatcher | null = null;
 let syncInterval: ReturnType<typeof setInterval> | null = null;
@@ -183,65 +183,74 @@ async function uploadFile(
   filePath: string,
   fileName: string,
 ): Promise<void> {
-  if (pendingUploads.has(fileName)) return;
-  pendingUploads.add(fileName);
-
-  try {
-    const body = await readFile(filePath);
-    const hash = sha256Hex(body);
-
-    // Skip if unchanged (for .m3u8 which gets rewritten)
-    if (uploadedHashes.get(fileName) === hash) {
-      return;
-    }
-
-    const contentType = fileName.endsWith(".m3u8")
-      ? "application/vnd.apple.mpegurl"
-      : "video/MP2T";
-
-    const key = `${config.prefix}${fileName}`;
-    const { url, headers } = signS3PutRequest({
-      endpoint: config.endpoint,
-      bucket: config.bucket,
-      key,
-      body,
-      contentType,
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-      region: config.region,
-    });
-
-    const response = await fetch(url, {
-      method: "PUT",
-      headers,
-      body,
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      console.error(
-        `[HLS-CDN] Upload failed: ${fileName} → ${response.status} ${text.slice(0, 200)}`,
-      );
-      return;
-    }
-
-    uploadedHashes.set(fileName, hash);
-
-    // Evict old entries
-    if (uploadedHashes.size > MAX_TRACKED_FILES) {
-      const keys = [...uploadedHashes.keys()];
-      for (let i = 0; i < 100; i++) {
-        uploadedHashes.delete(keys[i]);
-      }
-    }
-  } catch (err) {
-    console.error(
-      `[HLS-CDN] Upload error: ${fileName}`,
-      err instanceof Error ? err.message : err,
-    );
-  } finally {
-    pendingUploads.delete(fileName);
+  const existingUpload = pendingUploads.get(fileName);
+  if (existingUpload) {
+    await existingUpload;
+    return;
   }
+
+  const uploadPromise = (async () => {
+    try {
+      const body = await readFile(filePath);
+      const hash = sha256Hex(body);
+
+      // Skip if unchanged (for .m3u8 which gets rewritten)
+      if (uploadedHashes.get(fileName) === hash) {
+        return;
+      }
+
+      const contentType = fileName.endsWith(".m3u8")
+        ? "application/vnd.apple.mpegurl"
+        : "video/MP2T";
+
+      const key = `${config.prefix}${fileName}`;
+      const { url, headers } = signS3PutRequest({
+        endpoint: config.endpoint,
+        bucket: config.bucket,
+        key,
+        body,
+        contentType,
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+        region: config.region,
+      });
+
+      const response = await fetch(url, {
+        method: "PUT",
+        headers,
+        body,
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        console.error(
+          `[HLS-CDN] Upload failed: ${fileName} → ${response.status} ${text.slice(0, 200)}`,
+        );
+        return;
+      }
+
+      uploadedHashes.set(fileName, hash);
+
+      // Evict old entries
+      if (uploadedHashes.size > MAX_TRACKED_FILES) {
+        const keys = [...uploadedHashes.keys()];
+        for (let i = 0; i < 100; i++) {
+          uploadedHashes.delete(keys[i]);
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[HLS-CDN] Upload error: ${fileName}`,
+        err instanceof Error ? err.message : err,
+      );
+    } finally {
+      pendingUploads.delete(fileName);
+    }
+  })();
+
+  pendingUploads.set(fileName, uploadPromise);
+  await uploadPromise;
 }
 
 async function syncDirectory(config: HlsCdnConfig): Promise<void> {

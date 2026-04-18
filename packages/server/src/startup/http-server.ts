@@ -865,6 +865,37 @@ function copyHeaderIfPresent(
   }
 }
 
+const GAME_ASSET_PROXY_RATE_LIMIT = {
+  max: 240,
+  timeWindow: "1 minute",
+} as const;
+
+function buildGameAssetFallbackUrl(
+  fallbackBaseUrl: string,
+  normalizedPath: string,
+): URL | null {
+  if (!/^[A-Za-z0-9/_\-.]+$/.test(normalizedPath)) {
+    return null;
+  }
+
+  try {
+    const baseUrl = new URL(
+      fallbackBaseUrl.endsWith("/") ? fallbackBaseUrl : `${fallbackBaseUrl}/`,
+    );
+    if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") {
+      return null;
+    }
+
+    const nextUrl = new URL(baseUrl.toString());
+    nextUrl.pathname = path.posix.join(baseUrl.pathname, normalizedPath);
+    nextUrl.search = "";
+    nextUrl.hash = "";
+    return nextUrl;
+  } catch {
+    return null;
+  }
+}
+
 function registerGameAssetsRoute(
   fastify: FastifyInstance,
   gameAssetsRoot: string,
@@ -878,6 +909,7 @@ function registerGameAssetsRoute(
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
+    config: { rateLimit: GAME_ASSET_PROXY_RATE_LIMIT },
     handler: async (request, reply) => {
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);
@@ -907,12 +939,13 @@ function registerGameAssetsRoute(
         return reply.code(404).send({ error: "Asset not found" });
       }
 
-      const requestUrl = new URL(
-        request.raw.url || `/game-assets/${normalizedPath}`,
-        "http://localhost",
+      const fallbackUrl = buildGameAssetFallbackUrl(
+        fallbackRoot,
+        normalizedPath,
       );
-      const fallbackUrl = new URL(normalizedPath, fallbackRoot);
-      fallbackUrl.search = requestUrl.search;
+      if (!fallbackUrl) {
+        return reply.code(400).send({ error: "Invalid asset path" });
+      }
 
       console.warn(
         `[HTTP] Local asset miss for /game-assets/${normalizedPath}; proxying to ${fallbackUrl.toString()}`,

@@ -150,6 +150,10 @@ const BETTING_EVENTS_RATE_LIMIT: RateLimitOptions = {
   max: 60,
   timeWindow: "1 minute",
 };
+const AUTHENTICATED_RESULTS_RATE_LIMIT: RateLimitOptions = {
+  max: 120,
+  timeWindow: "1 minute",
+};
 
 type StreamingStatusMetricsSnapshot = {
   captureFps: number | null;
@@ -1755,7 +1759,7 @@ export function registerStreamingRoutes(
   }>(
     "/api/streaming/results/:duelId",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: AUTHENTICATED_RESULTS_RATE_LIMIT },
     },
     async (request, reply) => {
       const skipAuth = shouldSkipBettingFeedAuth(
@@ -1957,7 +1961,7 @@ export function registerStreamingRoutes(
                 destinations: stats.destinations,
                 healthy: stats.healthy,
                 droppedFrames: stats.droppedFrames,
-                encoderFps: stats.encoderFps,
+                encoderFps: null,
                 backpressured: stats.backpressured,
                 spectators: stats.spectators,
                 processMemory: stats.processMemory,

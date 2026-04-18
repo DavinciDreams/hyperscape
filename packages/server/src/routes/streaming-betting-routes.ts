@@ -130,6 +130,10 @@ type CanonicalProviderSelectionState = {
 const REQUIRE_EXTERNAL_SOURCE_RUNTIME =
   process.env.STREAM_SOURCE_RUNTIME_REQUIRE_EXTERNAL === "true" ||
   process.env.NODE_ENV === "production";
+const CLOUDFLARE_WEBHOOK_RATE_LIMIT: RateLimitOptions = {
+  max: 180,
+  timeWindow: "1 minute",
+};
 
 type SseSendStatus = "ok" | "closed" | "slow" | "error";
 
@@ -2004,7 +2008,7 @@ export function registerStreamingBettingRoutes(
   }>(
     "/api/streaming/cloudflare/webhook",
     {
-      config: { rateLimit: false },
+      config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
     },
     handleCloudflareWebhook,
   );

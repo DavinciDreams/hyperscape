@@ -166,45 +166,65 @@ const TREE_ASSET_FAMILY_REWRITES = Object.freeze<
 });
 
 function normalizeTreeAssetAlias(url: string): string {
-  const suffixMatch = url.match(/([?#].*)$/);
-  const suffix = suffixMatch?.[1] ?? "";
-  const baseUrl = suffix ? url.slice(0, -suffix.length) : url;
+  const queryIndex = url.indexOf("?");
+  const hashIndex = url.indexOf("#");
+  const suffixStart =
+    queryIndex === -1
+      ? hashIndex
+      : hashIndex === -1
+        ? queryIndex
+        : Math.min(queryIndex, hashIndex);
+  const suffix = suffixStart >= 0 ? url.slice(suffixStart) : "";
+  const baseUrl = suffixStart >= 0 ? url.slice(0, suffixStart) : url;
 
-  const assetMatch = baseUrl.match(
-    /^(asset:\/\/models\/trees\/)([^/]+)\/[^/]+_(\d+)((?:_lod[12])?)\.glb$/i,
-  );
-  if (assetMatch) {
-    const [, prefix, family, rawIndex, lodSuffix] = assetMatch;
-    const replacements =
-      TREE_ASSET_FAMILY_REWRITES[
-        family as keyof typeof TREE_ASSET_FAMILY_REWRITES
-      ];
-    if (replacements?.length) {
-      const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
-      const replacement =
-        replacements[index] ?? replacements[index % replacements.length];
-      return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
-    }
+  const marker = "/models/trees/";
+  const markerIndex = baseUrl.toLowerCase().indexOf(marker);
+  if (markerIndex === -1) {
+    return url;
   }
 
-  const absoluteMatch = baseUrl.match(
-    /^(.*\/models\/trees\/)([^/]+)\/[^/]+_(\d+)((?:_lod[12])?)\.glb$/i,
-  );
-  if (absoluteMatch) {
-    const [, prefix, family, rawIndex, lodSuffix] = absoluteMatch;
-    const replacements =
-      TREE_ASSET_FAMILY_REWRITES[
-        family as keyof typeof TREE_ASSET_FAMILY_REWRITES
-      ];
-    if (replacements?.length) {
-      const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
-      const replacement =
-        replacements[index] ?? replacements[index % replacements.length];
-      return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
-    }
+  const prefix = baseUrl.slice(0, markerIndex + marker.length);
+  const assetPath = baseUrl.slice(markerIndex + marker.length);
+  const familySeparatorIndex = assetPath.indexOf("/");
+  if (familySeparatorIndex <= 0) {
+    return url;
   }
 
-  return url;
+  const family = assetPath.slice(0, familySeparatorIndex);
+  const fileName = assetPath.slice(familySeparatorIndex + 1);
+  if (!fileName.toLowerCase().endsWith(".glb")) {
+    return url;
+  }
+
+  const withoutExtension = fileName.slice(0, -4);
+  const lodSuffix = withoutExtension.endsWith("_lod1")
+    ? "_lod1"
+    : withoutExtension.endsWith("_lod2")
+      ? "_lod2"
+      : "";
+  const withoutLod = lodSuffix
+    ? withoutExtension.slice(0, -lodSuffix.length)
+    : withoutExtension;
+  const indexSeparatorIndex = withoutLod.lastIndexOf("_");
+  if (indexSeparatorIndex <= 0) {
+    return url;
+  }
+
+  const rawIndex = withoutLod.slice(indexSeparatorIndex + 1);
+  if (!/^\d+$/.test(rawIndex)) {
+    return url;
+  }
+
+  const replacements =
+    TREE_ASSET_FAMILY_REWRITES[family as keyof typeof TREE_ASSET_FAMILY_REWRITES];
+  if (!replacements?.length) {
+    return url;
+  }
+
+  const index = Math.max(Number.parseInt(rawIndex, 10) - 1, 0);
+  const replacement =
+    replacements[index] ?? replacements[index % replacements.length];
+  return `${prefix}${replacement}${lodSuffix}.glb${suffix}`;
 }
 
 interface AsyncTickCallMetric {

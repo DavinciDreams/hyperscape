@@ -487,6 +487,9 @@ export class SolanaArenaOperator {
 
 function parseKeypair(raw: string): Keypair {
   const trimmed = raw.trim();
+  if (trimmed.length > 1024) {
+    throw new Error("Reporter private key input is unexpectedly large");
+  }
 
   // JSON byte array: [1,2,3,...]
   if (trimmed.startsWith("[")) {
