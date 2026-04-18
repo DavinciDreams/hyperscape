@@ -46,7 +46,7 @@
  *   RTMP_BRIDGE_PORT         - WebSocket port for legacy bridge (default: 8765)
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -309,6 +309,16 @@ function resolveXvfb60HzMode(
 
 let browser: Browser | null = null;
 let page: Page | null = null;
+// x11_nvenc mode spawns Chrome directly (outside of Playwright) so it can
+// pass `--app=URL --kiosk` and produce a chromeless, full-bleed window that
+// x11grab can capture without browser chrome or white margins. Playwright's
+// `chromium.launch()` silently drops `--kiosk`, so the Playwright-launched
+// browser re-exposes the tab bar + URL bar — confirmed by a failed preview
+// on :201 during the first prod cutover attempt. We keep a handle to the
+// externally-spawned Chrome process so cleanup() can SIGKILL it; the
+// `browser` var above holds the CDP-attached Playwright Browser session,
+// which owns no child process in this mode.
+let x11NvencChromeProcess: ChildProcess | null = null;
 let cdpSession: CDPSession | null = null;
 let selectedGameUrl: string | null = null;
 let latestSceneUrl: string | null = null;
@@ -1578,7 +1588,157 @@ async function waitForStreamReadiness(
 
 // ── Browser Launch ─────────────────────────────────────────────────────────
 
+/**
+ * Poll Chrome's /json/version endpoint until it returns a webSocketDebuggerUrl.
+ * Chrome exposes this after it has finished bringing up its CDP browser endpoint.
+ * Returns the ws:// URL suitable for `chromium.connectOverCDP()`.
+ */
+async function waitForChromeCdpEndpoint(
+  port: number,
+  timeoutMs: number,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr: string | null = null;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (res.ok) {
+        const body = (await res.json()) as {
+          webSocketDebuggerUrl?: unknown;
+        };
+        if (
+          typeof body.webSocketDebuggerUrl === "string" &&
+          body.webSocketDebuggerUrl.length > 0
+        ) {
+          return body.webSocketDebuggerUrl;
+        }
+      } else {
+        lastErr = `http ${res.status}`;
+      }
+    } catch (err) {
+      lastErr = errMsg(err);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(
+    `Chrome CDP endpoint on port ${port} did not come up within ${timeoutMs}ms (last: ${lastErr ?? "no reply"})`,
+  );
+}
+
+/**
+ * Spawn Chrome directly (outside Playwright) with `--app=URL --kiosk` so the
+ * rendered window has no tab bar / URL bar / infobars, then attach via
+ * `chromium.connectOverCDP()`. Only used for x11_nvenc mode. Other capture
+ * modes continue to use `chromium.launch()` unchanged.
+ *
+ * Why: Playwright's `chromium.launch({ args: ['--kiosk', ...] })` on Chrome
+ * channels silently renders the browser with a tab bar and URL bar, and
+ * x11grab captures those chrome pixels into the stream frame. The canary
+ * worker proved that a plain child_process spawn with `--app=URL --kiosk`
+ * renders a frameless, full-bleed window at the configured size — exactly
+ * what x11grab needs.
+ */
+async function spawnX11NvencChromeAndConnect(): Promise<Browser> {
+  // Kill any leftover child from a previous spawn (browser rotation, recovery)
+  if (x11NvencChromeProcess && !x11NvencChromeProcess.killed) {
+    try {
+      x11NvencChromeProcess.kill("SIGKILL");
+    } catch {
+      // Already dead
+    }
+    x11NvencChromeProcess = null;
+  }
+
+  const port = parseIntegerSetting(
+    process.env.STREAM_X11_NVENC_DEBUG_PORT,
+    9222,
+  );
+  const profileDir =
+    process.env.STREAM_X11_NVENC_PROFILE_DIR ?? "/tmp/x11-nvenc-render-profile";
+  const streamUrl = GAME_URL_CANDIDATES[0];
+  if (!streamUrl) {
+    throw new Error(
+      "x11_nvenc mode requires at least one GAME_URL_CANDIDATES entry",
+    );
+  }
+  const chromePath =
+    process.env.STREAM_CAPTURE_CHROME_PATH ?? "/opt/google/chrome-beta/chrome";
+
+  // Clean profile dir so stale Singleton-lock files don't block startup.
+  try {
+    fs.rmSync(profileDir, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+  fs.mkdirSync(profileDir, { recursive: true });
+
+  const args: string[] = [
+    `--app=${streamUrl}`,
+    `--user-data-dir=${profileDir}`,
+    `--remote-debugging-port=${port}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-infobars",
+    "--hide-scrollbars",
+    `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
+    "--window-position=0,0",
+    "--kiosk",
+    "--start-fullscreen",
+    "--autoplay-policy=no-user-gesture-required",
+    "--use-gl=angle",
+    `--use-angle=${ANGLE_BACKEND}`,
+    "--enable-webgl",
+    "--enable-unsafe-webgpu",
+    "--enable-features=Vulkan,UseSkiaRenderer,WebGPU",
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+  ];
+  if (CAPTURE_DISABLE_SANDBOX) args.push("--no-sandbox");
+
+  console.log(
+    `[Main] Spawning Chrome directly for x11_nvenc (no Playwright launch): ${chromePath} --app=<url> --kiosk --window-size=${VIEWPORT.width},${VIEWPORT.height} --remote-debugging-port=${port}`,
+  );
+  const child = spawn(chromePath, args, {
+    detached: false,
+    stdio: ["ignore", "ignore", "pipe"],
+    env: process.env,
+  });
+
+  child.on("exit", (code, signal) => {
+    console.warn(
+      `[Main] x11_nvenc Chrome exited (code=${code} signal=${signal})`,
+    );
+  });
+  if (child.stderr) {
+    child.stderr.on("data", (buf: Buffer) => {
+      const msg = buf.toString("utf8").trim();
+      if (!msg) return;
+      // Echo only genuine errors, filter GCM / ALSA noise.
+      if (
+        /error|fatal|crashed/i.test(msg) &&
+        !/ERROR:google_apis\/gcm|ERROR:.*alsa/i.test(msg)
+      ) {
+        console.warn("[x11-nvenc chrome]", msg.slice(0, 500));
+      }
+    });
+  }
+
+  x11NvencChromeProcess = child;
+
+  const endpoint = await waitForChromeCdpEndpoint(port, 30_000);
+  console.log(
+    `[Main] Connecting to x11_nvenc Chrome over CDP at ${endpoint.replace(/\/devtools\/browser\/[a-f0-9-]+/i, "/devtools/browser/…")}`,
+  );
+  return chromium.connectOverCDP(endpoint);
+}
+
 async function launchCaptureBrowser() {
+  if (CAPTURE_MODE === "x11_nvenc") {
+    return await spawnX11NvencChromeAndConnect();
+  }
   const featureFlags = "--enable-features=Vulkan,UseSkiaRenderer,WebGPU";
   // When in x11_nvenc mode, pin Chromium full-screen to the Xvfb display so
   // FFmpeg's x11grab captures the canvas region exactly (no browser chrome,
@@ -1659,11 +1819,28 @@ async function setupBrowser(forceReselect = false) {
   );
   browser = await launchCaptureBrowser();
 
-  const context = await browser.newContext({
-    viewport: VIEWPORT,
-    deviceScaleFactor: 1,
-  });
-  page = await context.newPage();
+  let context;
+  if (CAPTURE_MODE === "x11_nvenc") {
+    // The directly-spawned Chrome has already opened one context with one
+    // page via `--app=URL`. Reusing it instead of newContext()/newPage()
+    // keeps x11grab capturing the SAME window the user sees; creating a
+    // new page would open a second window that x11grab wouldn't frame.
+    const existingContexts = browser.contexts();
+    context =
+      existingContexts[0] ??
+      (await browser.newContext({
+        viewport: VIEWPORT,
+        deviceScaleFactor: 1,
+      }));
+    const existingPages = context.pages();
+    page = existingPages[0] ?? (await context.newPage());
+  } else {
+    context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+    });
+    page = await context.newPage();
+  }
 
   // Keep compositor frames flowing for CDP screencast even when the scene is
   // visually static (e.g. waiting overlays), otherwise some Chromium builds
@@ -1755,7 +1932,42 @@ async function setupBrowser(forceReselect = false) {
     void abortCaptureForUnexpectedNavigation(navigatedUrl);
   });
 
-  if (!selectedGameUrl) {
+  if (CAPTURE_MODE === "x11_nvenc") {
+    // Chrome was launched by `--app=<url>` in spawnX11NvencChromeAndConnect;
+    // the page is already navigated. Reload once so `addInitScript` above
+    // (which only affects future navigations) runs for the actual capture
+    // document, then fall through to the readiness / post-nav-delay path.
+    const initialUrl = page.url();
+    const redactedInitialUrl = redactStreamingSecretsFromUrl(initialUrl);
+    console.log(
+      `[Main] Reloading x11_nvenc capture page (${redactedInitialUrl}) so addInitScript runs for the captured document...`,
+    );
+    try {
+      const response = await page.reload({
+        timeout: 120_000,
+        waitUntil: "domcontentloaded",
+      });
+      assertCaptureDocumentResponse(response, initialUrl);
+      assertAllowedCaptureNavigation(page.url());
+      selectedGameUrl = page.url();
+    } catch (err) {
+      console.error(
+        `[Main] Failed to reload x11_nvenc capture page ${redactedInitialUrl}:`,
+        err,
+      );
+    }
+    if (USE_TIMED_STREAM_WARMUP) {
+      console.log(
+        `[Main] Using timed warmup (${STREAM_CAPTURE_WARMUP_MS}ms) for ${redactedInitialUrl}; skipping in-page readiness probe on x11_nvenc.`,
+      );
+      await page.waitForTimeout(STREAM_CAPTURE_WARMUP_MS);
+    } else {
+      console.log(
+        `[Main] Waiting for stream readiness on ${redactedInitialUrl}...`,
+      );
+      await waitForStreamReadiness(page, 90_000);
+    }
+  } else if (!selectedGameUrl) {
     for (const candidateUrl of GAME_URL_CANDIDATES) {
       const redactedCandidateUrl = redactStreamingSecretsFromUrl(candidateUrl);
       console.log(`[Main] Navigating to ${redactedCandidateUrl}...`);
@@ -3247,6 +3459,18 @@ async function cleanup() {
   if (browser) {
     await browser.close();
     browser = null;
+  }
+
+  // In x11_nvenc mode Chrome is a detached child process attached via CDP,
+  // so `browser.close()` above only disconnects — it does NOT terminate the
+  // Chrome child. Kill the child explicitly. No-op for other capture modes.
+  if (x11NvencChromeProcess && !x11NvencChromeProcess.killed) {
+    try {
+      x11NvencChromeProcess.kill("SIGKILL");
+    } catch {
+      // Already dead
+    }
+    x11NvencChromeProcess = null;
   }
 
   page = null;
