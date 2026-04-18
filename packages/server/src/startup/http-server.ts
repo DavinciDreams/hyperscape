@@ -284,6 +284,23 @@ export async function createHttpServer(
   // SECURITY: Add Origin validation for state-changing requests
   // This provides defense-in-depth against cross-origin attacks
   const isValidOrigin = createOriginValidator(allowedOrigins);
+  const isLocalhostOrigin = (origin: string): boolean => {
+    // Parse the origin and check the hostname is literally localhost/loopback.
+    // A substring match like origin.includes("localhost") is exploitable by
+    // origins such as `http://evil-localhost.com` or `https://localhost.evil`.
+    try {
+      const parsed = new URL(origin);
+      const host = parsed.hostname;
+      return (
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "[::1]" ||
+        host === "::1"
+      );
+    } catch {
+      return false;
+    }
+  };
   fastify.addHook("preHandler", async (request, reply) => {
     // Only check state-changing methods
     if (["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
@@ -294,7 +311,7 @@ export async function createHttpServer(
       // - Health check endpoints
       if (
         origin &&
-        !origin.includes("localhost") &&
+        !isLocalhostOrigin(origin) &&
         !request.url.startsWith("/health") &&
         !isValidOrigin(origin)
       ) {

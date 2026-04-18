@@ -336,6 +336,13 @@ export function registerStreamingBettingRoutes(
   };
   let canonicalProviderSelectionHydrated = false;
   let canonicalProviderSelectionHydration: Promise<void> | null = null;
+  // Exponential backoff for failed hydration attempts. Without this, a failing
+  // DB causes every betting-feed tick to retry immediately, hammering the
+  // backend. Start at 1s and double up to 60s; reset on success.
+  let canonicalProviderHydrationFailures = 0;
+  let canonicalProviderHydrationNextAttemptAt = 0;
+  const HYDRATION_MIN_BACKOFF_MS = 1_000;
+  const HYDRATION_MAX_BACKOFF_MS = 60_000;
   let persistedAuthorityStateCache: PersistedStreamingAuthorityState | null =
     null;
   let lastPersistedCanonicalProviderStateJson: string | null = null;
@@ -474,6 +481,11 @@ export function registerStreamingBettingRoutes(
     if (canonicalProviderSelectionHydration) {
       return canonicalProviderSelectionHydration;
     }
+    if (Date.now() < canonicalProviderHydrationNextAttemptAt) {
+      // Backoff window from a prior failure is still active; callers see
+      // unhydrated state and will retry on their next tick.
+      return;
+    }
 
     canonicalProviderSelectionHydration = (async () => {
       try {
@@ -511,9 +523,18 @@ export function registerStreamingBettingRoutes(
             ? JSON.stringify(persisted.cloudflareReconciliation)
             : null;
         canonicalProviderSelectionHydrated = true;
+        canonicalProviderHydrationFailures = 0;
+        canonicalProviderHydrationNextAttemptAt = 0;
       } catch (error) {
+        canonicalProviderHydrationFailures += 1;
+        const backoff = Math.min(
+          HYDRATION_MAX_BACKOFF_MS,
+          HYDRATION_MIN_BACKOFF_MS *
+            2 ** (canonicalProviderHydrationFailures - 1),
+        );
+        canonicalProviderHydrationNextAttemptAt = Date.now() + backoff;
         console.warn(
-          "[streaming-betting] Failed to hydrate canonical provider selection; will retry",
+          `[streaming-betting] Failed to hydrate canonical provider selection; retrying in ${backoff}ms (failures=${canonicalProviderHydrationFailures})`,
           error,
         );
       } finally {
@@ -1951,7 +1972,7 @@ export function registerStreamingBettingRoutes(
   };
 
   const handleCloudflareWebhook = async (
-    request: FastifyRequest<{ Body: unknown }>,
+    request: FastifyRequest<{ Body: Record<string, unknown> }>,
     reply: FastifyReply,
   ) => {
     const receivedAt = Date.now();
@@ -2068,12 +2089,23 @@ export function registerStreamingBettingRoutes(
     handleBettingEvents,
   );
 
+  // Cloudflare webhook bodies are small JSON events (live-input lifecycle +
+  // recording metadata). Cap at 32 KiB and require an object-shaped body so
+  // a compromised webhook secret can't be used to deliver arbitrarily large
+  // or non-object payloads.
   fastify.post<{
-    Body: unknown;
+    Body: Record<string, unknown>;
   }>(
     "/api/streaming/cloudflare/webhook",
     {
+      bodyLimit: 32 * 1024,
       config: { rateLimit: CLOUDFLARE_WEBHOOK_RATE_LIMIT },
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: true,
+        },
+      },
       preHandler: authorizeCloudflareWebhook,
     },
     handleCloudflareWebhook,
