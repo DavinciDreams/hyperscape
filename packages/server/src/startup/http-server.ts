@@ -351,14 +351,18 @@ export async function createHttpServer(
     console.log("[HTTP] ✅ Cloudflare origin secret enforcement enabled");
   }
 
-  // Configure rate limiting for production security
+  // Always register the rate-limit plugin so route-level limiters are wired.
+  // The global limiter remains policy-controlled for dev/test ergonomics.
   if (isRateLimitEnabled()) {
     await fastify.register(rateLimit, getGlobalRateLimit());
     console.log(
       "[HTTP] ✅ Rate limiting enabled (100 requests/min per IP globally)",
     );
   } else {
-    console.log("[HTTP] ⚠️  Rate limiting disabled (development mode)");
+    await fastify.register(rateLimit, { global: false });
+    console.log(
+      "[HTTP] ⚠️  Global rate limiting disabled (development mode); route-level rate limiters remain available",
+    );
   }
 
   // Configure CSRF protection for state-changing requests
