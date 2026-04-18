@@ -1998,11 +1998,16 @@ export function registerStreamingRoutes(
   );
 
   // Get RTMP bridge status
+  // Rate limit is declared as an inline object literal (not a constant
+  // reference) so CodeQL's js/missing-rate-limiting query can statically
+  // recognize it — that query follows config.rateLimit literals but has
+  // historically not resolved identifier indirection on this file's
+  // read-persisted-authority-state handlers.
   fastify.get(
     "/api/streaming/rtmp/status",
     {
-      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
-      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+      config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      preHandler: fastify.rateLimit({ max: 120, timeWindow: "1 minute" }),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
@@ -2118,11 +2123,13 @@ export function registerStreamingRoutes(
   );
 
   // Get stream capture status (headless browser → HLS pipeline)
+  // Inline-literal rate limit for CodeQL static detection; see comment
+  // above /rtmp/status for the reasoning.
   fastify.get(
     "/api/streaming/capture/status",
     {
-      config: { rateLimit: STREAMING_STATUS_RATE_LIMIT },
-      preHandler: fastify.rateLimit(STREAMING_STATUS_RATE_LIMIT),
+      config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      preHandler: fastify.rateLimit({ max: 120, timeWindow: "1 minute" }),
     },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
