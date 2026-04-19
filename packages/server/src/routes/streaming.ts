@@ -17,6 +17,8 @@ import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/ind
 import {
   STREAMING_TIMING,
   type StreamingPhase,
+  type StreamingSourceTimeline,
+  type StreamingStateUpdate,
 } from "../systems/StreamingDuelScheduler/types.js";
 import { peekRTMPBridge } from "../streaming/index.js";
 import { getStreamCapture } from "../streaming/stream-capture.js";
@@ -164,6 +166,75 @@ const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
   points: 120,
   duration: 60,
 });
+
+/**
+ * Opt-in additive contract for raw source-time fields on the canonical
+ * stream state. When false (default) the wire shape is unchanged and every
+ * existing consumer keeps working. When true the server also emits:
+ *   - `cycle.sourceTimeline` — raw phase + timing fields (unprojected)
+ *   - `emittedAt` on REST responses (SSE frames stamp this independently)
+ * Commit 1 of the viewer-aligned-bet-state rollout; see
+ * `docs/frontier_duel_bet_stream_sync_prd_sow.md` for the cross-rail plan.
+ */
+export function isRawSourceTimeEmissionEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    (env.STREAMING_EMIT_RAW_SOURCE_TIME ?? "").trim().toLowerCase() === "true"
+  );
+}
+
+/**
+ * Build a raw `sourceTimeline` projection of the given cycle. Every field
+ * mirrors the scheduler's underlying wall-clock value without any
+ * presentation-delay or replay-offset shift applied. `updatedAt` is the
+ * source-emission timestamp of the frame the cycle was pulled from —
+ * distinct from any downstream delivery time.
+ */
+export function buildSourceTimeline(
+  cycle: StreamingStateUpdate["cycle"],
+  updatedAt: number,
+): StreamingSourceTimeline {
+  return {
+    phase: cycle.phase,
+    betOpenTime: cycle.betOpenTime ?? null,
+    betCloseTime: cycle.betCloseTime ?? null,
+    fightStartTime: cycle.fightStartTime ?? null,
+    duelEndTime: cycle.duelEndTime ?? null,
+    updatedAt,
+  };
+}
+
+/**
+ * Attach raw source-time metadata to a streaming-state object, subject to
+ * the `STREAMING_EMIT_RAW_SOURCE_TIME` flag (resolved via `enabled`). When
+ * disabled, the wire shape is unchanged and every existing consumer keeps
+ * working. When enabled:
+ *   - `cycle.sourceTimeline` is populated with raw scheduler timings
+ *   - `emittedAt` is attached at the envelope root when `stampEmittedAt`
+ *     is true (REST responses want this; SSE frames already stamp
+ *     `emittedAt` from their own envelope construction upstream).
+ */
+export function attachRawSourceTime<
+  T extends { cycle: StreamingStateUpdate["cycle"] },
+>(
+  state: T,
+  sourceEmittedAt: number,
+  options: { stampEmittedAt: boolean; enabled: boolean },
+): T {
+  if (!options.enabled) return state;
+  const withTimeline: T = {
+    ...state,
+    cycle: {
+      ...state.cycle,
+      sourceTimeline: buildSourceTimeline(state.cycle, sourceEmittedAt),
+    },
+  };
+  if (!options.stampEmittedAt) return withTimeline;
+  return { ...withTimeline, emittedAt: sourceEmittedAt } as T & {
+    emittedAt: number;
+  };
+}
 
 /**
  * Standalone preHandler implementing the exact pattern CodeQL's
@@ -1236,11 +1307,17 @@ export function registerStreamingRoutes(
       cycle: redactOracleProofFromCycle(state.cycle),
     }) as T;
 
+  const rawSourceTimeEnabled = isRawSourceTimeEmissionEnabled();
+
   const getPublicStreamingState = (
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
   ): ReturnType<typeof scheduler.getStreamingState> | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      return redactOracleProofFromState(scheduler.getStreamingState());
+      const live = redactOracleProofFromState(scheduler.getStreamingState());
+      return attachRawSourceTime(live, Date.now(), {
+        stampEmittedAt: true,
+        enabled: rawSourceTimeEnabled,
+      });
     }
 
     // Keep delayed replay frames fresh for REST polling consumers
@@ -1253,10 +1330,11 @@ export function registerStreamingRoutes(
       captureStreamingFrame(true);
     }
 
-    const delayed = parseReplayFrameState(getLatestEligibleReplayFrame());
+    const delayedFrame = getLatestEligibleReplayFrame();
+    const delayed = parseReplayFrameState(delayedFrame);
     if (!delayed) return null;
 
-    return {
+    const base = {
       type: "STREAMING_STATE_UPDATE" as const,
       cycle: redactOracleProofFromCycle(delayed.cycle) as ReturnType<
         typeof scheduler.getStreamingState
@@ -1270,6 +1348,13 @@ export function registerStreamingRoutes(
           ? delayed.cameraTarget
           : null,
     };
+    // For REST polling consumers the source-emission anchor is the
+    // replay frame's original `emittedAt` — the raw time at which the
+    // frame was captured upstream, not the time of this REST response.
+    return attachRawSourceTime(base, delayedFrame?.emittedAt ?? Date.now(), {
+      stampEmittedAt: true,
+      enabled: rawSourceTimeEnabled,
+    });
   };
 
   const captureStreamingFrame = (
@@ -1292,8 +1377,17 @@ export function registerStreamingRoutes(
     sequence += 1;
 
     const emittedAt = Date.now();
+    // When the raw-source-time contract is enabled, inject `sourceTimeline`
+    // into the cycle BEFORE serialization so SSE consumers see it inside
+    // `cycle` alongside the existing fields. `emittedAt` at the envelope
+    // root stays unconditional — it's part of the long-standing SSE
+    // envelope contract, so `stampEmittedAt: false` here.
+    const stateWithTimeline = attachRawSourceTime(state, emittedAt, {
+      stampEmittedAt: false,
+      enabled: rawSourceTimeEnabled,
+    });
     const payload = JSON.stringify({
-      ...state,
+      ...stateWithTimeline,
       type: "STREAMING_STATE_UPDATE",
       seq: sequence,
       emittedAt,

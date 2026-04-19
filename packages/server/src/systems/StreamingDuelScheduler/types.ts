@@ -143,6 +143,24 @@ export interface StreamingCycleAgent {
   headToHeadLosses: number;
 }
 
+/**
+ * Raw source-time timeline emitted alongside the live-scheduler cycle when
+ * the `STREAMING_EMIT_RAW_SOURCE_TIME` flag is enabled. Every timestamp
+ * mirrors the underlying scheduler's wall-clock field without any
+ * presentation-delay projection applied; consumers (bettor-facing clients
+ * doing per-viewer alignment) are expected to key snapshot history off
+ * these fields rather than off `broadcastTimeline` values that the
+ * betting-feed rail pre-projects. See docs/frontier_duel_bet_stream_sync_prd_sow.md.
+ */
+export interface StreamingSourceTimeline {
+  phase: StreamingPhase;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  updatedAt: number;
+}
+
 export interface StreamingStateUpdate {
   type: "STREAMING_STATE_UPDATE";
   cycle: {
@@ -173,9 +191,24 @@ export interface StreamingStateUpdate {
     winReason: string | null;
     seed: string | null;
     replayHash: string | null;
+    /**
+     * Optional raw source-time timeline. Present only when
+     * `STREAMING_EMIT_RAW_SOURCE_TIME=true` on the server. Absent on default
+     * deployments to preserve the current wire contract for consumers that
+     * don't participate in viewer-clock alignment.
+     */
+    sourceTimeline?: StreamingSourceTimeline;
   };
   leaderboard: LeaderboardEntry[];
   cameraTarget: string | null;
+  /**
+   * Raw source-emission timestamp of the frame. Present on REST responses
+   * only when `STREAMING_EMIT_RAW_SOURCE_TIME=true`; SSE frames stamp this
+   * independently via their own envelope regardless of the flag. Consumers
+   * doing per-viewer clock alignment use this as the selector key for
+   * historical session snapshots.
+   */
+  emittedAt?: number;
 }
 
 const parseDurationEnv = (
