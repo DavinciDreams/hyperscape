@@ -17,6 +17,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { World } from "@hyperscape/shared";
+import { RateLimiterMemory } from "rate-limiter-flexible";
 import { getDefaultPublicWsUrl } from "../../shared/public-ws-url.js";
 import { createJWT } from "../../shared/utils.js";
 import {
@@ -35,6 +36,21 @@ const AGENT_MANAGEMENT_RATE_LIMIT = {
   max: 60,
   timeWindow: "1 minute",
 };
+const AGENT_MANAGEMENT_CODEQL_LIMITER = new RateLimiterMemory({
+  points: 60,
+  duration: 60,
+});
+
+async function codeqlAgentManagementRateLimitPreHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  try {
+    await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+  } catch {
+    await reply.code(429).send({ error: "Too Many Requests" });
+  }
+}
 
 type AgentRouteCharacterRecord = {
   accountId: string;
@@ -121,11 +137,6 @@ export function registerAgentRoutes(
     fastify.decorate("rateLimit", (() =>
       async () => {}) as FastifyInstance["rateLimit"]);
   }
-  const agentManagementRouteOptions = {
-    config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-    preHandler: fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
-  };
-
   const getVerifiedUserId = async (
     request: FastifyRequest,
   ): Promise<string | null> => {
@@ -460,7 +471,13 @@ export function registerAgentRoutes(
    */
   fastify.post(
     "/api/agents/credentials",
-    agentManagementRouteOptions,
+    {
+      config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
+      preHandler: [
+        codeqlAgentManagementRateLimitPreHandler,
+        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
+      ],
+    },
     async (request, reply) => {
       try {
         const body = request.body as {
@@ -774,7 +791,13 @@ export function registerAgentRoutes(
    */
   fastify.get(
     "/api/agents/mappings/:accountId",
-    agentManagementRouteOptions,
+    {
+      config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
+      preHandler: [
+        codeqlAgentManagementRateLimitPreHandler,
+        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
+      ],
+    },
     async (request, reply) => {
       try {
         const params = request.params as { accountId: string };
@@ -870,7 +893,13 @@ export function registerAgentRoutes(
    */
   fastify.post(
     "/api/agents/mappings",
-    agentManagementRouteOptions,
+    {
+      config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
+      preHandler: [
+        codeqlAgentManagementRateLimitPreHandler,
+        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
+      ],
+    },
     async (request, reply) => {
       try {
         const body = request.body as {
@@ -1200,7 +1229,13 @@ export function registerAgentRoutes(
    */
   fastify.delete(
     "/api/agents/mappings/:agentId",
-    agentManagementRouteOptions,
+    {
+      config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
+      preHandler: [
+        codeqlAgentManagementRateLimitPreHandler,
+        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
+      ],
+    },
     async (request, reply) => {
       try {
         const params = request.params as { agentId: string };
