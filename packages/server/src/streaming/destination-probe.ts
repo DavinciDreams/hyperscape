@@ -109,7 +109,8 @@ async function validateResolvedPlaybackProbeHost(
 ): Promise<string | null> {
   const allowPrivateHosts =
     process.env.NODE_ENV === "development" ||
-    process.env.STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES === "true";
+    (process.env.NODE_ENV !== "production" &&
+      process.env.STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES === "true");
   if (allowPrivateHosts) {
     return null;
   }

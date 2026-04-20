@@ -452,6 +452,9 @@ export function buildBettingFeedPayload(params: {
       ? buildSourceTimeline(cycle, params.emittedAt)
       : null;
   const publicPhase = broadcastTimeline.phase ?? cycle?.phase ?? null;
+  // Public RESOLUTION disclosure is bettor display state only. Settlement and
+  // oracle proof material stay on the authenticated result/keeper path; this
+  // feed never exposes duelKeyHex, seed, replayHash, or ingest credentials.
   const exposeResolutionOutcome = publicPhase === "RESOLUTION";
   const publicCycleBase = redactOracleProofFromCycle(
     cycle,
