@@ -23,6 +23,7 @@ const MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 10_000;
 const MAX_BATCH_SIZE = 10;
 const PROCESSING_LEASE_MS = 60_000;
+const MAX_PERSISTED_ERROR_LENGTH = 240;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let processing = false;
@@ -30,6 +31,16 @@ let processing = false;
 type PayoutDb = ReturnType<typeof getDatabase>;
 type PayoutTransaction = Parameters<Parameters<PayoutDb["transaction"]>[0]>[0];
 type PayoutDbClient = Pick<PayoutTransaction, "select" | "update">;
+
+function sanitizePayoutError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Unknown error";
+  const sanitized = raw
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/g, "[id]")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (sanitized || "Unknown error").slice(0, MAX_PERSISTED_ERROR_LENGTH);
+}
 
 /**
  * Start the payout keeper polling loop.
@@ -257,12 +268,7 @@ async function processOneJob(
       err instanceof Error ? err : null,
       { jobId: job.id, roundId: job.roundId },
     );
-    await scheduleRetry(
-      db,
-      job.id,
-      job.attempts,
-      err instanceof Error ? err.message : "Unknown error",
-    );
+    await scheduleRetry(db, job.id, job.attempts, sanitizePayoutError(err));
   }
 }
 

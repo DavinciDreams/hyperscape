@@ -287,9 +287,12 @@ export class BettingPoolManager {
         // original pg_advisory_xact_lock would queue everyone behind it —
         // that's an easy DoS vector on the payout path. Returning a conflict
         // error lets the caller retry.
-        const lockRows = await tx.execute<{ acquired: boolean }>(
-          sql`SELECT pg_try_advisory_xact_lock(hashtext(${`solana-payout:${roundId}:${walletAddress}`})) AS acquired`,
-        );
+        const lockRows = await tx.execute<{ acquired: boolean }>(sql`
+          SELECT pg_try_advisory_xact_lock(
+            hashtext(${roundId}),
+            hashtext(${walletAddress})
+          ) AS acquired
+        `);
         if (!lockRows.rows[0]?.acquired) {
           return {
             success: false,

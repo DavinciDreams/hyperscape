@@ -116,6 +116,9 @@ function hexToBytes32(hex: string): Uint8Array {
       `Expected 32-byte hex string, got ${normalized.length / 2} bytes`,
     );
   }
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error("Expected 32-byte hex string");
+  }
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     out[i] = parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
