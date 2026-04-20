@@ -57,13 +57,13 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  */
 const KNOWN_CROSS_ORIGIN_PATTERNS = [
   /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/,
-  /^https?:\/\/(www\.)?hyperscape\.gg$/,
-  /^https?:\/\/(www\.)?hyperbet\.win$/,
-  /^https?:\/\/(www\.)?bsc\.hyperbet\.win$/,
-  /^https?:\/\/(www\.)?hyperscape-betting\.pages\.dev$/,
-  /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/,
-  /^https?:\/\/.+\.hyperbet\.pages\.dev$/,
-  /^https?:\/\/.+\.hyperscape\.pages\.dev$/,
+  /^https:\/\/(www\.)?hyperscape\.gg$/,
+  /^https:\/\/(www\.)?hyperbet\.win$/,
+  /^https:\/\/(www\.)?bsc\.hyperbet\.win$/,
+  /^https:\/\/(www\.)?hyperscape-betting\.pages\.dev$/,
+  /^https:\/\/.+\.hyperscape-betting\.pages\.dev$/,
+  /^https:\/\/.+\.hyperbet\.pages\.dev$/,
+  /^https:\/\/.+\.hyperscape\.pages\.dev$/,
 ];
 
 function hasRequestCookie(request: FastifyRequest): boolean {

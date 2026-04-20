@@ -42,4 +42,31 @@ describe("shouldSkipCsrf", () => {
       ),
     ).toBe(false);
   });
+
+  it("does not trust non-TLS production origins", () => {
+    expect(
+      shouldSkipCsrf(
+        request({
+          origin: "http://hyperbet.win",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("still trusts TLS production origins and local development origins", () => {
+    expect(
+      shouldSkipCsrf(
+        request({
+          origin: "https://hyperbet.win",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldSkipCsrf(
+        request({
+          origin: "http://localhost:5173",
+        }),
+      ),
+    ).toBe(true);
+  });
 });

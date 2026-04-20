@@ -49,11 +49,13 @@ const _sunDirection = new THREE.Vector3(0, -1, 0);
 // Default: false — uses a single 2048 shadow map centered on the player.
 export function isCsmEnabled(): boolean {
   try {
-    if (
-      typeof import.meta !== "undefined" &&
-      (import.meta as any).env?.ENABLE_CSM
-    )
-      return (import.meta as any).env.ENABLE_CSM === "true";
+    const metaEnv = (
+      import.meta as unknown as {
+        env?: { ENABLE_CSM?: string };
+      }
+    ).env;
+    if (typeof import.meta !== "undefined" && metaEnv?.ENABLE_CSM)
+      return metaEnv.ENABLE_CSM === "true";
     if (typeof process !== "undefined" && process.env?.ENABLE_CSM)
       return process.env.ENABLE_CSM === "true";
   } catch {
