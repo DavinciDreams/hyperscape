@@ -110,6 +110,7 @@ function createFastifyRecorder() {
       routes.set(`PUT ${path}`, pickHandler(args));
       return this;
     },
+    rateLimit: () => async () => {},
   };
 
   return {

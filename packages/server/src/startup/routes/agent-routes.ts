@@ -117,6 +117,14 @@ export function registerAgentRoutes(
   world: World,
 ): void {
   console.log("[AgentRoutes] Registering agent credential routes...");
+  if (typeof fastify.rateLimit !== "function") {
+    fastify.decorate("rateLimit", (() =>
+      async () => {}) as FastifyInstance["rateLimit"]);
+  }
+  const agentManagementRouteOptions = {
+    config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
+    preHandler: fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
+  };
 
   const getVerifiedUserId = async (
     request: FastifyRequest,
@@ -452,7 +460,7 @@ export function registerAgentRoutes(
    */
   fastify.post(
     "/api/agents/credentials",
-    { config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT } },
+    agentManagementRouteOptions,
     async (request, reply) => {
       try {
         const body = request.body as {
@@ -766,7 +774,7 @@ export function registerAgentRoutes(
    */
   fastify.get(
     "/api/agents/mappings/:accountId",
-    { config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT } },
+    agentManagementRouteOptions,
     async (request, reply) => {
       try {
         const params = request.params as { accountId: string };
@@ -862,7 +870,7 @@ export function registerAgentRoutes(
    */
   fastify.post(
     "/api/agents/mappings",
-    { config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT } },
+    agentManagementRouteOptions,
     async (request, reply) => {
       try {
         const body = request.body as {
@@ -1192,7 +1200,7 @@ export function registerAgentRoutes(
    */
   fastify.delete(
     "/api/agents/mappings/:agentId",
-    { config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT } },
+    agentManagementRouteOptions,
     async (request, reply) => {
       try {
         const params = request.params as { agentId: string };
