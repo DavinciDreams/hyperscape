@@ -420,7 +420,10 @@ export class SolanaArenaOperator {
         .update(`replay:${params.roundSeedHex}`)
         .digest();
 
-      // Use a deterministic seed derived from the round
+      // This is deterministic proof material derived from the round seed,
+      // not fresh entropy. Reporter authorization on the Solana instruction
+      // remains the security boundary; these values let the keeper
+      // reconstruct the same report payload if it misses a live event.
       const seedBuf = createHash("sha256")
         .update(`seed:${params.roundSeedHex}`)
         .digest();

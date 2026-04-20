@@ -984,6 +984,47 @@ async function getThoughtsSnapshot(
   return thoughts.slice(0, Math.max(1, Math.min(limit, 50)));
 }
 
+export function normalizeStreamingThoughtLimit(
+  rawLimit: string | undefined,
+): number {
+  const parsed = Number.parseInt(rawLimit || "20", 10);
+  if (!Number.isFinite(parsed)) {
+    return 20;
+  }
+  return Math.max(1, Math.min(parsed, 50));
+}
+
+export function allocateNextStreamingSseClientId(
+  currentNextClientId: number,
+  clients: ReadonlyMap<number, unknown>,
+): { clientId: number; nextClientId: number } {
+  const maxClientId = Number.MAX_SAFE_INTEGER;
+  let candidate = currentNextClientId;
+
+  for (let attempts = 0; attempts <= maxClientId; attempts += 1) {
+    if (!Number.isSafeInteger(candidate) || candidate <= 0) {
+      candidate = 1;
+    }
+    if (!clients.has(candidate)) {
+      const nextClientId = candidate >= maxClientId ? 1 : candidate + 1;
+      return { clientId: candidate, nextClientId };
+    }
+    candidate = candidate >= maxClientId ? 1 : candidate + 1;
+  }
+
+  throw new Error("Streaming SSE client id space exhausted");
+}
+
+export function buildStreamingResultNotFoundPayload(): {
+  error: "Not found";
+  message: "Resolved duel not found";
+} {
+  return {
+    error: "Not found",
+    message: "Resolved duel not found",
+  };
+}
+
 /**
  * Register streaming routes
  */
@@ -1604,7 +1645,12 @@ export function registerStreamingRoutes(
       raw.flushHeaders?.();
       raw.write("retry: 2000\n\n");
 
-      const clientId = nextClientId++;
+      const allocation = allocateNextStreamingSseClientId(
+        nextClientId,
+        sseClients,
+      );
+      const clientId = allocation.clientId;
+      nextClientId = allocation.nextClientId;
       sseClients.set(clientId, reply);
       sseMetrics.totalConnected += 1;
       sseMetrics.peakConnected = Math.max(
@@ -1798,7 +1844,7 @@ export function registerStreamingRoutes(
           delayed: true,
         });
       }
-      const limit = Number.parseInt(request.query.limit || "20", 10);
+      const limit = normalizeStreamingThoughtLimit(request.query.limit);
       const thoughts = await getThoughtsSnapshot(
         request.params.characterId,
         limit,
@@ -1955,8 +2001,9 @@ export function registerStreamingRoutes(
   //
   // When the keeper misses a live `duel_ended` event (for example a restart
   // window), the bundle is stuck at LOCKED with no path forward because
-  // Solana resolution requires the seed + replayHash that only arrive on
-  // that event. This endpoint lets the keeper reconstruct the resolution
+  // Solana resolution requires the deterministic proof material
+  // (duelKeyHex + seed + replayHash) that only arrive on that event. This
+  // endpoint lets the keeper reconstruct the same authorized report payload
   // from the durable streaming_duel_history row.
   //
   // Bearer-auth prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
@@ -2051,10 +2098,7 @@ export function registerStreamingRoutes(
       const row = rows[0];
 
       if (!row) {
-        return reply.status(404).send({
-          error: "Not found",
-          message: `No resolved duel with duelId=${duelId}`,
-        });
+        return reply.status(404).send(buildStreamingResultNotFoundPayload());
       }
 
       // Audit trail: oracle-proof material (duelKeyHex, seed, replayHash) is

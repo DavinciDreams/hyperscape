@@ -2032,7 +2032,13 @@ export class StreamingDuelScheduler {
   }
 
   /**
-   * Get current streaming state for broadcast.
+   * Get current raw streaming state.
+   *
+   * This object may contain oracle-proof material (`duelKeyHex`, `seed`,
+   * `replayHash`, `duelEndTime`) while a duel is active or freshly resolved.
+   * Any public HTTP, SSE, or spectator-socket emission must redact those
+   * fields first.
+   *
    * MEMORY OPTIMIZATION: Reuses pre-allocated objects to avoid GC pressure.
    * Only creates new contestant objects when agents change.
    */

@@ -8,7 +8,7 @@
  * Implements exponential backoff on failure, max 5 attempts.
  */
 
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "../../database/client.js";
 import {
   solanaPayoutJobs,
@@ -21,9 +21,14 @@ import { redactWalletAddress } from "./BettingPoolManager.js";
 const POLL_INTERVAL_MS = 5_000;
 const MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 10_000;
+const MAX_BATCH_SIZE = 10;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let processing = false;
+
+type PayoutDb = ReturnType<typeof getDatabase>;
+type PayoutTransaction = Parameters<Parameters<PayoutDb["transaction"]>[0]>[0];
+type PayoutDbClient = Pick<PayoutTransaction, "select" | "update">;
 
 /**
  * Start the payout keeper polling loop.
@@ -59,23 +64,21 @@ async function processJobs(): Promise<void> {
 
   try {
     const db = getDatabase();
-    const now = Date.now();
+    await db.transaction(async (tx) => {
+      const claimedJobIds = await claimDuePayoutJobIds(
+        tx,
+        Date.now(),
+        MAX_BATCH_SIZE,
+      );
+      if (claimedJobIds.length === 0) {
+        return;
+      }
 
-    // Fetch PENDING jobs that are due for processing
-    const jobs = await db
-      .select()
-      .from(solanaPayoutJobs)
-      .where(
-        and(
-          eq(solanaPayoutJobs.status, "PENDING"),
-          sql`(${solanaPayoutJobs.nextAttemptAt} IS NULL OR ${solanaPayoutJobs.nextAttemptAt} <= ${now})`,
-        ),
-      )
-      .limit(10);
-
-    for (const job of jobs) {
-      await processOneJob(db, job);
-    }
+      const jobs = await loadClaimedPayoutJobs(tx, claimedJobIds);
+      for (const job of jobs) {
+        await processOneJob(tx, job);
+      }
+    });
   } catch (err) {
     Logger.error(
       "PayoutKeeper",
@@ -87,8 +90,48 @@ async function processJobs(): Promise<void> {
   }
 }
 
+export async function claimDuePayoutJobIds(
+  tx: Pick<PayoutTransaction, "execute">,
+  now: number,
+  limit: number,
+): Promise<string[]> {
+  const boundedLimit = Math.max(1, Math.min(Math.trunc(limit), MAX_BATCH_SIZE));
+  const result = await tx.execute<{ id: string }>(sql`
+    SELECT "id"
+    FROM "solana_payout_jobs"
+    WHERE "status" = 'PENDING'
+      AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${now})
+    ORDER BY "createdAt" ASC
+    LIMIT ${boundedLimit}
+    FOR UPDATE SKIP LOCKED
+  `);
+
+  return result.rows
+    .map((row) => (typeof row.id === "string" ? row.id : null))
+    .filter((id): id is string => Boolean(id));
+}
+
+async function loadClaimedPayoutJobs(
+  tx: Pick<PayoutTransaction, "select">,
+  jobIds: readonly string[],
+): Promise<Array<typeof solanaPayoutJobs.$inferSelect>> {
+  if (jobIds.length === 0) {
+    return [];
+  }
+
+  const jobs = await tx
+    .select()
+    .from(solanaPayoutJobs)
+    .where(inArray(solanaPayoutJobs.id, [...jobIds]));
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+
+  return jobIds
+    .map((jobId) => jobsById.get(jobId) ?? null)
+    .filter((job): job is typeof solanaPayoutJobs.$inferSelect => job !== null);
+}
+
 async function processOneJob(
-  db: ReturnType<typeof getDatabase>,
+  db: PayoutDbClient,
   job: typeof solanaPayoutJobs.$inferSelect,
 ): Promise<void> {
   try {
@@ -218,7 +261,7 @@ async function processOneJob(
 }
 
 async function scheduleRetry(
-  db: ReturnType<typeof getDatabase>,
+  db: PayoutDbClient,
   jobId: string,
   currentAttempts: number,
   error: string,
@@ -264,7 +307,7 @@ async function scheduleRetry(
 }
 
 async function markFailed(
-  db: ReturnType<typeof getDatabase>,
+  db: PayoutDbClient,
   jobId: string,
   error: string,
 ): Promise<void> {

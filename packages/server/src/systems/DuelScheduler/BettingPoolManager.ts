@@ -41,6 +41,9 @@ export interface BetRecord {
   createdAt: number;
 }
 
+const MAX_BETS_BY_WALLET_LIMIT = 100;
+const MAX_BETTING_LEADERBOARD_LIMIT = 100;
+
 export class BettingPoolManager {
   private readonly world: World;
 
@@ -233,6 +236,10 @@ export class BettingPoolManager {
     limit = 50,
   ): Promise<BetRecord[]> {
     const db = getDatabase();
+    const boundedLimit = Math.max(
+      1,
+      Math.min(Math.trunc(limit), MAX_BETS_BY_WALLET_LIMIT),
+    );
 
     try {
       const rows = await db
@@ -248,7 +255,7 @@ export class BettingPoolManager {
         .from(solanaBets)
         .where(eq(solanaBets.bettorWallet, walletAddress))
         .orderBy(sql`${solanaBets.createdAt} DESC`)
-        .limit(limit);
+        .limit(boundedLimit);
 
       return rows;
     } catch (err) {
@@ -412,6 +419,10 @@ export class BettingPoolManager {
     Array<{ wallet: string; totalBets: number; totalWagered: string }>
   > {
     const db = getDatabase();
+    const boundedLimit = Math.max(
+      1,
+      Math.min(Math.trunc(limit), MAX_BETTING_LEADERBOARD_LIMIT),
+    );
 
     try {
       const rows = await db
@@ -424,7 +435,7 @@ export class BettingPoolManager {
         .where(eq(solanaBets.status, "CONFIRMED"))
         .groupBy(solanaBets.bettorWallet)
         .orderBy(sql`SUM(CAST(${solanaBets.goldAmount} AS NUMERIC)) DESC`)
-        .limit(limit);
+        .limit(boundedLimit);
 
       return rows;
     } catch (err) {

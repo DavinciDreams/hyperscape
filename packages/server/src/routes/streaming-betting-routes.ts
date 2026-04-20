@@ -472,8 +472,15 @@ export function registerStreamingBettingRoutes(
       updatedAt: Date.now(),
     };
     getPersistedAuthorityState().canonicalProviderState = state;
-    void persistCanonicalProviderState(getStorageDb(), state).catch(() => {
+    void persistCanonicalProviderState(getStorageDb(), state).catch((error) => {
       lastPersistedCanonicalProviderStateJson = null;
+      fastify.log.warn(
+        {
+          err: error,
+          activeProvider: state.activeProvider,
+        },
+        "[streaming-betting] Failed to persist canonical provider state",
+      );
     });
   };
 
@@ -578,8 +585,12 @@ export function registerStreamingBettingRoutes(
     lastPersistedCloudflareLifecyclePollJson = comparisonPayload;
     getPersistedAuthorityState().cloudflareLifecyclePoll = state;
     void persistCloudflareLifecyclePollState(getStorageDb(), state).catch(
-      () => {
+      (error) => {
         lastPersistedCloudflareLifecyclePollJson = null;
+        fastify.log.warn(
+          { err: error },
+          "[streaming-betting] Failed to persist Cloudflare lifecycle poll state",
+        );
       },
     );
   };
@@ -597,8 +608,12 @@ export function registerStreamingBettingRoutes(
     lastPersistedCloudflarePlaybackProbeJson = comparisonPayload;
     getPersistedAuthorityState().cloudflarePlaybackProbe = state;
     void persistCloudflarePlaybackProbeState(getStorageDb(), state).catch(
-      () => {
+      (error) => {
         lastPersistedCloudflarePlaybackProbeJson = null;
+        fastify.log.warn(
+          { err: error },
+          "[streaming-betting] Failed to persist Cloudflare playback probe state",
+        );
       },
     );
   };
@@ -613,8 +628,12 @@ export function registerStreamingBettingRoutes(
     lastPersistedCloudflareReconciliationJson = comparisonPayload;
     getPersistedAuthorityState().cloudflareReconciliation = state;
     void persistCloudflareReconciliationState(getStorageDb(), state).catch(
-      () => {
+      (error) => {
         lastPersistedCloudflareReconciliationJson = null;
+        fastify.log.warn(
+          { err: error },
+          "[streaming-betting] Failed to persist Cloudflare reconciliation state",
+        );
       },
     );
   };
