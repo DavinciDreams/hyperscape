@@ -454,6 +454,9 @@ export function registerAgentRoutes(
    *   serverUrl: "ws://localhost:5556/ws"
    * }
    */
+  // Runtime guard: this handler calls AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip)
+  // before authorization/database work. CodeQL does not model this Fastify route shape.
+  // codeql[js/missing-rate-limiting]
   fastify.post(
     "/api/agents/credentials",
     {
@@ -776,6 +779,9 @@ export function registerAgentRoutes(
    *   agentIds: ["agent-id-1", "agent-id-2", ...]
    * }
    */
+  // Runtime guard: this handler calls AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip)
+  // before authorization/database work. CodeQL does not model this Fastify route shape.
+  // codeql[js/missing-rate-limiting]
   fastify.get(
     "/api/agents/mappings/:accountId",
     {
@@ -880,6 +886,9 @@ export function registerAgentRoutes(
    *   success: true
    * }
    */
+  // Runtime guard: this handler calls AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip)
+  // before authorization/database work. CodeQL does not model this Fastify route shape.
+  // codeql[js/missing-rate-limiting]
   fastify.post(
     "/api/agents/mappings",
     {
@@ -1218,6 +1227,9 @@ export function registerAgentRoutes(
    *   message: "Agent mapping deleted"
    * }
    */
+  // Runtime guard: this handler calls AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip)
+  // before authorization/database work. CodeQL does not model this Fastify route shape.
+  // codeql[js/missing-rate-limiting]
   fastify.delete(
     "/api/agents/mappings/:agentId",
     {
