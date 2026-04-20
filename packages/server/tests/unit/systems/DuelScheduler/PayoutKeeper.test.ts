@@ -76,6 +76,9 @@ describe("processOneJob", () => {
     let selectCall = 0;
     const updates: unknown[] = [];
     const db = {
+      execute: vi.fn(async () => ({
+        rows: [{ acquired: true }],
+      })),
       select: vi.fn(() => {
         const call = selectCall;
         selectCall += 1;
@@ -131,6 +134,7 @@ describe("processOneJob", () => {
 
     await internals.processOneJob(db, job);
 
+    expect(db.execute).toHaveBeenCalledOnce();
     expect(updates).toContainEqual(
       expect.objectContaining({ status: "READY_FOR_PAYOUT" }),
     );
@@ -141,8 +145,21 @@ describe("processOneJob", () => {
 
     await internals.processOneJob(db, job);
 
+    expect(db.execute).toHaveBeenCalledOnce();
     expect(updates).toContainEqual(
       expect.objectContaining({ status: "NO_PAYOUT" }),
     );
+  });
+
+  it("skips processing when another worker holds the advisory lock", async () => {
+    const { db, updates } = createDb({ betSide: "A", winnerId: "agent-a" });
+    db.execute = vi.fn(async () => ({
+      rows: [{ acquired: false }],
+    })) as typeof db.execute;
+
+    await internals.processOneJob(db, job);
+
+    expect(db.select).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
   });
 });

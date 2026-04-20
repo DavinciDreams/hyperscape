@@ -30,7 +30,7 @@ let processing = false;
 
 type PayoutDb = ReturnType<typeof getDatabase>;
 type PayoutTransaction = Parameters<Parameters<PayoutDb["transaction"]>[0]>[0];
-type PayoutDbClient = Pick<PayoutTransaction, "select" | "update">;
+type PayoutDbClient = Pick<PayoutTransaction, "execute" | "select" | "update">;
 
 function sanitizePayoutError(error: unknown): string {
   const raw = error instanceof Error ? error.message : "Unknown error";
@@ -90,7 +90,7 @@ async function processJobs(): Promise<void> {
     }
 
     for (const job of jobs) {
-      await processOneJob(db, job);
+      await db.transaction(async (tx) => processOneJob(tx, job));
     }
   } catch (err) {
     Logger.error(
@@ -156,6 +156,24 @@ async function processOneJob(
   job: typeof solanaPayoutJobs.$inferSelect,
 ): Promise<void> {
   try {
+    const lockRows = await db.execute<{ acquired: boolean }>(sql`
+      SELECT pg_try_advisory_xact_lock(
+        hashtext(${job.id}),
+        hashtext(${job.bettorWallet})
+      ) AS acquired
+    `);
+    if (!lockRows.rows[0]?.acquired) {
+      Logger.warn(
+        "PayoutKeeper",
+        "Payout job already locked by another worker",
+        {
+          jobId: job.id,
+          roundId: job.roundId,
+        },
+      );
+      return;
+    }
+
     // Look up the round to check if it's resolved and who won
     const rounds = await db
       .select()
