@@ -460,7 +460,14 @@ describe("streaming-betting-routes", () => {
     expect(fetchSpy).toHaveBeenCalled();
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    let payload: Record<string, any> | null = null;
+    let payload: {
+      canonicalAuthority?: {
+        playbackProbeStatusCode?: unknown;
+      } & Record<string, unknown>;
+      channel?: {
+        publicReadiness?: Record<string, unknown>;
+      };
+    } | null = null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await options.fastify.inject({
         method: "GET",

@@ -162,6 +162,7 @@ const STREAMING_STATUS_RATE_LIMIT: RateLimitOptions = {
   max: 120,
   timeWindow: "1 minute",
 };
+const STREAMING_RESULT_DUEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
 const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
   points: 120,
   duration: 60,
@@ -1023,6 +1024,10 @@ export function buildStreamingResultNotFoundPayload(): {
     error: "Not found",
     message: "Resolved duel not found",
   };
+}
+
+export function isValidStreamingResultDuelId(duelId: string): boolean {
+  return STREAMING_RESULT_DUEL_ID_PATTERN.test(duelId);
 }
 
 /**
@@ -2076,6 +2081,12 @@ export function registerStreamingRoutes(
         return reply.status(400).send({
           error: "Bad request",
           message: "duelId is required",
+        });
+      }
+      if (!isValidStreamingResultDuelId(duelId)) {
+        return reply.status(400).send({
+          error: "Bad request",
+          message: "Invalid duelId format",
         });
       }
 
