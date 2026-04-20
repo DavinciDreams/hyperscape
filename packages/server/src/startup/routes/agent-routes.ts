@@ -133,10 +133,6 @@ export function registerAgentRoutes(
   world: World,
 ): void {
   console.log("[AgentRoutes] Registering agent credential routes...");
-  if (typeof fastify.rateLimit !== "function") {
-    fastify.decorate("rateLimit", (() =>
-      async () => {}) as FastifyInstance["rateLimit"]);
-  }
   const getVerifiedUserId = async (
     request: FastifyRequest,
   ): Promise<string | null> => {
@@ -473,10 +469,7 @@ export function registerAgentRoutes(
     "/api/agents/credentials",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: [
-        codeqlAgentManagementRateLimitPreHandler,
-        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
-      ],
+      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
       try {
@@ -793,10 +786,7 @@ export function registerAgentRoutes(
     "/api/agents/mappings/:accountId",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: [
-        codeqlAgentManagementRateLimitPreHandler,
-        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
-      ],
+      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
       try {
@@ -895,10 +885,7 @@ export function registerAgentRoutes(
     "/api/agents/mappings",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: [
-        codeqlAgentManagementRateLimitPreHandler,
-        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
-      ],
+      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
       try {
@@ -1231,10 +1218,7 @@ export function registerAgentRoutes(
     "/api/agents/mappings/:agentId",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: [
-        codeqlAgentManagementRateLimitPreHandler,
-        fastify.rateLimit(AGENT_MANAGEMENT_RATE_LIMIT),
-      ],
+      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
       try {
