@@ -837,6 +837,7 @@ export function acquireExternalStatusPoller(
       }, refreshIntervalMs),
       refCount: 0,
     };
+    poller.interval.unref?.();
     externalStatusPollers.set(key, poller);
     void refreshExternalStatusPoller(
       poller,

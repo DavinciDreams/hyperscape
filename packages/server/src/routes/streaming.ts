@@ -2024,7 +2024,9 @@ export function registerStreamingRoutes(
     reply: FastifyReply,
   ) => {
     const env = process.env as Record<string, string | undefined>;
-    const skipAuth = shouldSkipBettingFeedAuth(env);
+    const skipAuth =
+      shouldSkipBettingFeedAuth(env) &&
+      env.ALLOW_UNAUTHENTICATED_ORACLE_PROOF?.trim().toLowerCase() === "true";
     const resolution = resolveOracleProofAccessToken(env);
     const requiredToken = resolution.token;
 
@@ -2047,7 +2049,7 @@ export function registerStreamingRoutes(
       }
       if (!oracleProofSkipAuthWarnLogged) {
         fastify.log.warn(
-          "[streaming] /api/streaming/results/:duelId is serving requests UNAUTHENTICATED (BETTING_FEED_SKIP_AUTH=true, NODE_ENV=development)",
+          "[streaming] /api/streaming/results/:duelId is serving requests UNAUTHENTICATED (BETTING_FEED_SKIP_AUTH=true, ALLOW_UNAUTHENTICATED_ORACLE_PROOF=true, NODE_ENV=development)",
         );
         oracleProofSkipAuthWarnLogged = true;
       }

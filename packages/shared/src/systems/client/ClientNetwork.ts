@@ -600,7 +600,11 @@ export class ClientNetwork extends SystemBase {
         .__HYPERSCAPE_EMBEDDED__;
       const embeddedConfig = (
         window as {
-          __HYPERSCAPE_CONFIG__?: { mode?: string; characterId?: string };
+          __HYPERSCAPE_CONFIG__?: {
+            mode?: string;
+            characterId?: string;
+            followEntity?: string;
+          };
         }
       ).__HYPERSCAPE_CONFIG__;
 
@@ -609,6 +613,14 @@ export class ClientNetwork extends SystemBase {
           embeddedConfig.mode === "spectator" ||
           embeddedConfig.mode === "stream";
         this.embeddedCharacterId = embeddedConfig.characterId || null;
+        const explicitFollow =
+          embeddedConfig.followEntity || embeddedConfig.characterId || null;
+        if (this.isEmbeddedSpectator && explicitFollow) {
+          const w = window as Window & {
+            __HYPERSCAPE_ORIGINAL_FOLLOW__?: string;
+          };
+          w.__HYPERSCAPE_ORIGINAL_FOLLOW__ ??= explicitFollow;
+        }
 
         this.logger.debug("[ClientNetwork] Embedded config loaded", {
           isSpectator: this.isEmbeddedSpectator,
@@ -5375,9 +5387,17 @@ export class ClientNetwork extends SystemBase {
         ? data.cameraTarget
         : null;
 
-    // Embedded spectators should follow scheduler camera target changes
-    // (prevents stale followEntity from pinning the camera to inactive agents).
-    if (!this.isEmbeddedSpectator || !nextTargetId) {
+    const hasDashboardFollowLock =
+      typeof window !== "undefined" &&
+      Boolean(
+        (window as { __HYPERSCAPE_ORIGINAL_FOLLOW__?: string })
+          .__HYPERSCAPE_ORIGINAL_FOLLOW__,
+      );
+
+    // Stream capture spectators should follow scheduler camera target changes.
+    // Dashboard viewfinders with an explicit follow target must stay pinned to
+    // that agent; the frozen value survives HMR/config churn.
+    if (!this.isEmbeddedSpectator || hasDashboardFollowLock || !nextTargetId) {
       return;
     }
 

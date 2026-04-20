@@ -74,6 +74,24 @@ describe("streaming results route", () => {
     await app.close();
   });
 
+  it("does not inherit unauthenticated betting-feed dev mode without explicit oracle opt-in", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.BETTING_FEED_SKIP_AUTH = "true";
+    const { app } = createApp([]);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/streaming/results/streaming-1",
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      error: "Service unavailable",
+      message: "Oracle proof auth token is not configured",
+    });
+    await app.close();
+  });
+
   it("rejects malformed duel ids", async () => {
     process.env.HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN = "result-secret";
     const { app } = createApp([]);
