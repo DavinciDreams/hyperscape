@@ -51,6 +51,19 @@ vi.mock("../../eliza/index.js", () => ({
 }));
 
 import { registerAgentRoutes } from "../routes/agent-routes";
+import { createJWT } from "../../shared/utils";
+
+async function withAuth<T extends Record<string, unknown>>(
+  userId: string,
+  request: T,
+): Promise<T & { headers: { authorization: string } }> {
+  return {
+    ...request,
+    headers: {
+      authorization: `Bearer ${await createJWT({ userId })}`,
+    },
+  };
+}
 
 function createReplyRecorder() {
   return {
@@ -214,6 +227,74 @@ describe("agent route mapping cache", () => {
     vi.restoreAllMocks();
   });
 
+  it("requires authentication for account-scoped mapping routes", async () => {
+    const { deleteMapping, listMappings, saveMapping } = setupRoutes([
+      {
+        agentId: "agent-1",
+        accountId: "account-old",
+        characterId: "character-1",
+        agentName: "Alpha",
+      },
+    ]);
+
+    const listReply = createReplyRecorder();
+    await listMappings(
+      { params: { accountId: "account-old" } } as never,
+      listReply as never,
+    );
+    expect(listReply.statusCode).toBe(401);
+
+    const saveReply = createReplyRecorder();
+    await saveMapping(
+      {
+        body: {
+          agentId: "agent-1",
+          accountId: "account-old",
+          characterId: "character-1",
+          agentName: "Alpha",
+        },
+      } as never,
+      saveReply as never,
+    );
+    expect(saveReply.statusCode).toBe(401);
+
+    const deleteReply = createReplyRecorder();
+    await deleteMapping(
+      { params: { agentId: "agent-1" } } as never,
+      deleteReply as never,
+    );
+    expect(deleteReply.statusCode).toBe(401);
+  });
+
+  it("rejects cross-account mapping access", async () => {
+    const { deleteMapping, listMappings } = setupRoutes([
+      {
+        agentId: "agent-1",
+        accountId: "account-owner",
+        characterId: "character-1",
+        agentName: "Alpha",
+      },
+    ]);
+
+    const listReply = createReplyRecorder();
+    await listMappings(
+      (await withAuth("account-other", {
+        params: { accountId: "account-owner" },
+      })) as never,
+      listReply as never,
+    );
+    expect(listReply.statusCode).toBe(403);
+
+    const deleteReply = createReplyRecorder();
+    await deleteMapping(
+      (await withAuth("account-other", {
+        params: { agentId: "agent-1" },
+      })) as never,
+      deleteReply as never,
+    );
+    expect(deleteReply.statusCode).toBe(403);
+  });
+
   it("invalidates old and new account mapping lists when ownership changes", async () => {
     const { getMapping, listMappings, saveMapping, state } = setupRoutes([
       {
@@ -226,7 +307,9 @@ describe("agent route mapping cache", () => {
 
     const firstListReply = createReplyRecorder();
     await listMappings(
-      { params: { accountId: "account-old" } } as never,
+      (await withAuth("account-old", {
+        params: { accountId: "account-old" },
+      })) as never,
       firstListReply as never,
     );
     expect(firstListReply.payload).toMatchObject({
@@ -237,14 +320,14 @@ describe("agent route mapping cache", () => {
 
     const saveReply = createReplyRecorder();
     await saveMapping(
-      {
+      (await withAuth("account-new", {
         body: {
           agentId: "agent-1",
           accountId: "account-new",
           characterId: "character-2",
           agentName: "Beta",
         },
-      } as never,
+      })) as never,
       saveReply as never,
     );
     expect(saveReply.payload).toMatchObject({ success: true });
@@ -259,7 +342,9 @@ describe("agent route mapping cache", () => {
 
     const oldAccountReply = createReplyRecorder();
     await listMappings(
-      { params: { accountId: "account-old" } } as never,
+      (await withAuth("account-old", {
+        params: { accountId: "account-old" },
+      })) as never,
       oldAccountReply as never,
     );
     expect(oldAccountReply.payload).toMatchObject({
@@ -270,7 +355,9 @@ describe("agent route mapping cache", () => {
 
     const newAccountReply = createReplyRecorder();
     await listMappings(
-      { params: { accountId: "account-new" } } as never,
+      (await withAuth("account-new", {
+        params: { accountId: "account-new" },
+      })) as never,
       newAccountReply as never,
     );
     expect(newAccountReply.payload).toMatchObject({
@@ -304,7 +391,9 @@ describe("agent route mapping cache", () => {
 
     const listReply = createReplyRecorder();
     await listMappings(
-      { params: { accountId: "account-old" } } as never,
+      (await withAuth("account-old", {
+        params: { accountId: "account-old" },
+      })) as never,
       listReply as never,
     );
     expect(listReply.payload).toMatchObject({
@@ -325,7 +414,9 @@ describe("agent route mapping cache", () => {
 
     const deleteReply = createReplyRecorder();
     await deleteMapping(
-      { params: { agentId: "agent-1" } } as never,
+      (await withAuth("account-old", {
+        params: { agentId: "agent-1" },
+      })) as never,
       deleteReply as never,
     );
     expect(deleteReply.payload).toMatchObject({ success: true });
@@ -343,7 +434,9 @@ describe("agent route mapping cache", () => {
 
     const deletedListReply = createReplyRecorder();
     await listMappings(
-      { params: { accountId: "account-old" } } as never,
+      (await withAuth("account-old", {
+        params: { accountId: "account-old" },
+      })) as never,
       deletedListReply as never,
     );
     expect(deletedListReply.payload).toMatchObject({
@@ -365,14 +458,14 @@ describe("agent route mapping cache", () => {
 
     const saveReply = createReplyRecorder();
     await saveMapping(
-      {
+      (await withAuth("account-new", {
         body: {
           agentId: "agent-2",
           accountId: "account-new",
           characterId: "character-2",
           agentName: "Gamma",
         },
-      } as never,
+      })) as never,
       saveReply as never,
     );
     expect(saveReply.payload).toMatchObject({ success: true });

@@ -117,7 +117,7 @@ export function registerAgentRoutes(
   const getVerifiedUserId = async (
     request: FastifyRequest,
   ): Promise<string | null> => {
-    const authHeader = request.headers.authorization;
+    const authHeader = request.headers?.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return null;
     }
@@ -145,6 +145,29 @@ export function registerAgentRoutes(
     }
 
     return null;
+  };
+
+  const authorizeAccountAccess = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    accountId: string,
+  ): Promise<boolean> => {
+    const verifiedUserId = await getVerifiedUserId(request);
+    if (!verifiedUserId) {
+      await reply.status(401).send({
+        success: false,
+        error: "Unauthorized",
+      });
+      return false;
+    }
+    if (verifiedUserId !== accountId) {
+      await reply.status(403).send({
+        success: false,
+        error: "Forbidden",
+      });
+      return false;
+    }
+    return true;
   };
 
   const agentMappingByIdCache = new Map<
@@ -438,6 +461,9 @@ export function registerAgentRoutes(
       }
 
       const { characterId, accountId } = body;
+      if (!(await authorizeAccountAccess(request, reply, accountId))) {
+        return;
+      }
 
       console.log("[AgentRoutes] Generating credentials for:", {
         characterId,
@@ -738,6 +764,9 @@ export function registerAgentRoutes(
           error: "Missing required parameter: accountId",
         });
       }
+      if (!(await authorizeAccountAccess(request, reply, accountId))) {
+        return;
+      }
 
       console.log("[AgentRoutes] Fetching agent mappings for:", accountId);
 
@@ -836,6 +865,9 @@ export function registerAgentRoutes(
       }
 
       const { agentId, accountId, characterId, agentName } = body;
+      if (!(await authorizeAccountAccess(request, reply, accountId))) {
+        return;
+      }
 
       console.log("[AgentRoutes] Saving agent mapping:", {
         agentId,
@@ -1160,6 +1192,22 @@ export function registerAgentRoutes(
       }
 
       const existingMapping = await getAgentMappingById(db, agentId, true);
+      if (!existingMapping) {
+        return reply.status(404).send({
+          success: false,
+          error: "Agent mapping not found",
+        });
+      }
+      if (
+        !(await authorizeAccountAccess(
+          request,
+          reply,
+          existingMapping.accountId,
+        ))
+      ) {
+        return;
+      }
+
       const { agentMappings } = await schemaModulePromise;
       const { eq } = await drizzleModulePromise;
 
