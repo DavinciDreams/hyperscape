@@ -388,6 +388,10 @@ export class BettingPoolManager {
           } as const;
         }
 
+        // Deliberately status-blind: any payout job for this
+        // (round, wallet) pair is the idempotency record, including
+        // READY_FOR_PAYOUT / FAILED rows. Narrowing this by status would allow
+        // duplicate claim jobs unless a database unique constraint is added.
         const existing = await tx
           .select()
           .from(solanaPayoutJobs)
