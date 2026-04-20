@@ -124,6 +124,17 @@ export class BettingPoolManager {
           } as const;
         }
 
+        // The round row lock above serializes market-close checks for this
+        // round. This per-wallet xact lock makes the bet-count invariant
+        // explicit too: concurrent requests for the same wallet/round cannot
+        // both count N and insert N+1.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            hashtext(${bet.roundId}),
+            hashtext(${bet.walletAddress})
+          )
+        `);
+
         const existingBetCountRows = await tx
           .select({
             count: sql<number>`COUNT(*)::INT`,

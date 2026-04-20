@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
 import { RateLimiterMemory } from "rate-limiter-flexible";
+import { createHash } from "node:crypto";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
@@ -322,6 +323,14 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function hashAuditValue(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
 }
 
 function redactIngestUrlFromDestination<T>(destination: T): T {
@@ -2010,13 +2019,9 @@ export function registerStreamingRoutes(
   // endpoint lets the keeper reconstruct the same authorized report payload
   // from the durable streaming_duel_history row.
   //
-  // Bearer-auth prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
-  // hyperbet keeper's consumption order). STREAMING_ORACLE_PROOF_TOKEN is a
-  // server-side alias kept for continuity. BETTING_FEED_ACCESS_TOKEN is
-  // accepted as a compatibility fallback so existing deployments keep working
-  // during rollout. Operators should migrate to the dedicated oracle-proof
-  // secret to narrow the blast radius of a feed-token leak.
-  let oracleProofFallbackWarnLogged = false;
+  // Bearer-auth requires HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
+  // hyperbet keeper). The endpoint intentionally never falls back to the
+  // general betting feed token because it returns settlement proof material.
   const authorizeResultsLookup = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -2024,16 +2029,6 @@ export function registerStreamingRoutes(
     const env = process.env as Record<string, string | undefined>;
     const resolution = resolveOracleProofAccessToken(env);
     const requiredToken = resolution.token;
-
-    if (
-      resolution.source === "betting-feed" &&
-      !oracleProofFallbackWarnLogged
-    ) {
-      fastify.log.warn(
-        "[streaming] /api/streaming/results/:duelId authenticated via BETTING_FEED_ACCESS_TOKEN; set HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches hyperbet keeper) to scope oracle-proof access independently",
-      );
-      oracleProofFallbackWarnLogged = true;
-    }
 
     if (!requiredToken) {
       return reply.status(503).send({
@@ -2101,14 +2096,13 @@ export function registerStreamingRoutes(
       }
 
       // Audit trail: oracle-proof material (duelKeyHex, seed, replayHash) is
-      // settlement-grade data. Every successful retrieval is logged at info
-      // with caller IP + user-agent so a token compromise can be traced.
+      // settlement-grade data. Hash the caller IP so logs can correlate access
+      // patterns without storing direct keeper network identifiers.
       fastify.log.info(
         {
           duelId: row.duelId,
           cycleId: row.cycleId,
-          ip: request.ip,
-          userAgent: request.headers["user-agent"] ?? null,
+          callerIpHash: hashAuditValue(request.ip),
         },
         "[streaming] oracle-proof retrieval",
       );

@@ -170,7 +170,10 @@ function parseStoredJson<T>(rawValue: string | null | undefined): T | null {
   if (!rawValue) return null;
   try {
     return JSON.parse(rawValue) as T;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[CloudflareAuthority] Failed to parse persisted JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return null;
   }
 }
@@ -238,10 +241,24 @@ function isFreshTimestamp(
   );
 }
 
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableJsonValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, stableJsonValue(entry)]),
+    );
+  }
+  return value;
+}
+
 function buildReconciliationComparable(
   state: Omit<PersistedCloudflareReconciliationState, "revision" | "updatedAt">,
 ): string {
-  return JSON.stringify(state);
+  return JSON.stringify(stableJsonValue(state));
 }
 
 type CloudflareProviderEvidence = {

@@ -11,7 +11,7 @@ export type BettingFeedAccessTokenResolution = {
 
 export type OracleProofAccessTokenResolution = {
   token: string | null;
-  source: "oracle-proof" | "betting-feed" | null;
+  source: "oracle-proof" | null;
 };
 
 export function shouldSkipBettingFeedAuth(
@@ -21,6 +21,19 @@ export function shouldSkipBettingFeedAuth(
     env.NODE_ENV === "development" &&
     (env.BETTING_FEED_SKIP_AUTH || "").trim().toLowerCase() === "true"
   );
+}
+
+export function assertSafeBettingFeedAuthConfig(
+  env: Record<string, string | undefined>,
+): void {
+  if (
+    env.NODE_ENV === "production" &&
+    (env.BETTING_FEED_SKIP_AUTH || "").trim().toLowerCase() === "true"
+  ) {
+    throw new Error(
+      "BETTING_FEED_SKIP_AUTH=true is forbidden when NODE_ENV=production",
+    );
+  }
 }
 
 function digestToken(token: string): Buffer {
@@ -33,12 +46,9 @@ export function extractBettingFeedToken(
   const authHeader = Array.isArray(params.authorizationHeader)
     ? params.authorizationHeader[0]
     : params.authorizationHeader;
-  const headerToken =
-    authHeader && /^Bearer\s+/i.test(authHeader)
-      ? authHeader.replace(/^Bearer\s+/i, "").trim()
-      : null;
-  if (headerToken) {
-    return headerToken;
+  const match = authHeader?.match(/^Bearer\s+(\S+)\s*$/i);
+  if (match) {
+    return match[1];
   }
   return null;
 }
@@ -78,17 +88,8 @@ export function resolveBettingFeedAccessToken(
 
 // Oracle-proof retrieval (`/api/streaming/results/:duelId`) exposes
 // `duelKeyHex` + `seed` + `replayHash` — the material needed to submit a
-// Solana resolution. This secret must be scopable narrower than the general
-// betting feed token.
-//
-// Env precedence (must match the hyperbet keeper's consumption order in
-// `packages/hyperbet-evm/keeper/src/bot.ts` RESULT_CATCHUP_BEARER_TOKEN):
-//   1. HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN — canonical dedicated secret
-//   2. STREAMING_ORACLE_PROOF_TOKEN — alias for the same secret
-//   3. BETTING_FEED_ACCESS_TOKEN — compatibility fallback so existing
-//      single-token deployments keep working during non-production rollout
-// Operators should migrate to (1) to narrow the blast radius of a
-// feed-token leak and to keep the naming aligned with the keeper side.
+// Solana resolution. It intentionally has one dedicated secret boundary and
+// never falls back to the general betting feed token.
 export function resolveOracleProofAccessToken(
   env: Record<string, string | undefined>,
 ): OracleProofAccessTokenResolution {
@@ -96,14 +97,6 @@ export function resolveOracleProofAccessToken(
     env.HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN?.trim() || null;
   if (keeperAlignedToken) {
     return { token: keeperAlignedToken, source: "oracle-proof" };
-  }
-  const oracleToken = env.STREAMING_ORACLE_PROOF_TOKEN?.trim() || null;
-  if (oracleToken) {
-    return { token: oracleToken, source: "oracle-proof" };
-  }
-  const bettingFeedToken = env.BETTING_FEED_ACCESS_TOKEN?.trim() || null;
-  if (bettingFeedToken && env.NODE_ENV !== "production") {
-    return { token: bettingFeedToken, source: "betting-feed" };
   }
   return { token: null, source: null };
 }

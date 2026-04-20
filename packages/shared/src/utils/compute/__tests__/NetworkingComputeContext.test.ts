@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   NetworkingComputeContext,
+  MAX_INTEREST_MANAGEMENT_ENTITIES,
   isNetworkingComputeAvailable,
   type GPUEntityInterest,
   type GPUPlayerPosition,
@@ -50,6 +51,10 @@ describe("NetworkingComputeContext", () => {
       expect(INTEREST_MANAGEMENT_PER_ENTITY_SHADER).toContain(
         "workgroupBarrier",
       );
+    });
+
+    it("documents the one-workgroup-per-entity interest limit", () => {
+      expect(MAX_INTEREST_MANAGEMENT_ENTITIES).toBe(65_535);
     });
 
     it("should export spatial range query shader", () => {

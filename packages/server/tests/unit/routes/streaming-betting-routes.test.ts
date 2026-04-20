@@ -602,21 +602,15 @@ describe("streaming-betting-routes", () => {
     await options.fastify.close();
   });
 
-  it("ignores skip-auth in production", async () => {
+  it("rejects skip-auth in production during route registration", async () => {
     stubEnv("NODE_ENV", "production");
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
     stubEnv("BETTING_FEED_SKIP_AUTH", "true");
 
     const options = createRouteOptions();
-    const routes = registerStreamingBettingRoutes(options);
-
-    const response = await options.fastify.inject({
-      method: "GET",
-      url: "/api/internal/bet-sync/state",
-    });
-
-    expect(response.statusCode).toBe(503);
-    routes.close();
+    expect(() => registerStreamingBettingRoutes(options)).toThrow(
+      "BETTING_FEED_SKIP_AUTH=true is forbidden",
+    );
     await options.fastify.close();
   });
 

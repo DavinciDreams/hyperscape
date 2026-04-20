@@ -133,7 +133,7 @@ describe("BettingPoolManager.placeBet", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(tx.execute).toHaveBeenCalledOnce();
+    expect(tx.execute).toHaveBeenCalledTimes(2);
     expect(tx.select).toHaveBeenCalledOnce();
     expect(insertedBets).toHaveLength(1);
     expect(insertedBets[0]).toMatchObject({
@@ -174,6 +174,7 @@ describe("BettingPoolManager.placeBet", () => {
       success: false,
       error: "Too many bets for this wallet on this round",
     });
+    expect(tx.execute).toHaveBeenCalledTimes(2);
     expect(tx.select).toHaveBeenCalledOnce();
     expect(tx.insert).not.toHaveBeenCalled();
     expect(insertedBets).toHaveLength(0);

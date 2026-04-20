@@ -21,6 +21,8 @@ import {
   LOOT_DISTRIBUTION_SHADER,
 } from "./shaders/networking.wgsl";
 
+export const MAX_INTEREST_MANAGEMENT_ENTITIES = 65_535;
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -340,6 +342,11 @@ export class NetworkingComputeContext {
     const entityCount = entities.length;
     const playerCount = players.length;
     const u32PerEntity = Math.ceil(playerCount / 32);
+    if (entityCount > MAX_INTEREST_MANAGEMENT_ENTITIES) {
+      throw new Error(
+        `Interest management supports at most ${MAX_INTEREST_MANAGEMENT_ENTITIES} entities per dispatch; received ${entityCount}`,
+      );
+    }
 
     // Pack entity data (4 floats per entity)
     const entityData = new Float32Array(entityCount * 4);

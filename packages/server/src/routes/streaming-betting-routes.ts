@@ -17,6 +17,7 @@ import {
   type BettingFeedRendererHealth,
 } from "./streaming-betting-feed.js";
 import {
+  assertSafeBettingFeedAuthConfig,
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
@@ -274,6 +275,7 @@ export function registerStreamingBettingRoutes(
     getStreamCaptureStats,
   } = options;
   ensureRateLimitDecorator(fastify);
+  assertSafeBettingFeedAuthConfig(process.env);
 
   const tokenResolution = resolveBettingFeedAccessToken(process.env);
   const skipAuth = shouldSkipBettingFeedAuth(process.env);
@@ -326,10 +328,9 @@ export function registerStreamingBettingRoutes(
     );
   } else if (!tokenResolution.token && skipAuth) {
     // Log at error severity so the auth-bypass state is impossible to miss
-    // even during normal startup log volume. Also log whether the oracle
-    // proof endpoint is affected — the same skipAuth flag gates it too.
+    // even during normal startup log volume.
     fastify.log.error(
-      "BETTING_FEED_SKIP_AUTH=true AND NODE_ENV=development — internal betting feed AND /api/streaming/results/:duelId are serving UNAUTHENTICATED. This must never land in production.",
+      "BETTING_FEED_SKIP_AUTH=true AND NODE_ENV=development — internal betting feed is serving UNAUTHENTICATED. This must never land in production.",
     );
   } else if (!tokenResolution.token && viewerTokenConfigured) {
     fastify.log.warn(
