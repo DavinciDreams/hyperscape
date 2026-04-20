@@ -30,6 +30,7 @@ describe("TerrainComputeContext", () => {
       expect(ROAD_INFLUENCE_SHADER).toBeDefined();
       expect(ROAD_INFLUENCE_SHADER).toContain("@compute");
       expect(ROAD_INFLUENCE_SHADER).toContain("distanceToLineSegment");
+      expect(ROAD_INFLUENCE_TEXTURE_SHADER).toContain("pixelCount: u32");
       expect(ROAD_INFLUENCE_TEXTURE_SHADER).toContain("numWorkgroupsX: u32");
       // Shader multiplies by a named WGSL const bound to the host-side
       // workgroup constant. Accept either the named form or the literal
@@ -84,6 +85,9 @@ describe("TerrainComputeContext", () => {
       const totalWorkgroups = Math.ceil(pixelCount / WORKGROUP);
       const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX);
       const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
+      if (dispatchY > WEBGPU_MAX) {
+        throw new Error("dispatchY exceeds WebGPU limit");
+      }
       return { totalWorkgroups, dispatchX, dispatchY };
     };
 
@@ -130,6 +134,13 @@ describe("TerrainComputeContext", () => {
       expect(
         d8192.dispatchX * d8192.dispatchY * WORKGROUP,
       ).toBeGreaterThanOrEqual(pc8192);
+    });
+
+    it("rejects impossible 2D dispatch shapes instead of overflowing Y", () => {
+      const maxCoveredPixels = WEBGPU_MAX * WEBGPU_MAX * WORKGROUP;
+      expect(() => dispatch(maxCoveredPixels + 1)).toThrow(
+        "dispatchY exceeds WebGPU limit",
+      );
     });
   });
 

@@ -173,7 +173,7 @@ struct Road {
 }
 
 struct Uniforms {
-  pixelCount: f32,
+  pixelCount: u32,
   roadCount: f32,
   textureSize: f32,
   worldSize: f32,
@@ -233,8 +233,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // per y index.
   let threadsPerRow = uniforms.numWorkgroupsX * WORKGROUP_SIZE_1D;
   let idx = global_id.y * threadsPerRow + global_id.x;
-  let pixelCount = u32(uniforms.pixelCount);
-  if (idx >= pixelCount) {
+  if (idx >= uniforms.pixelCount) {
     return;
   }
 

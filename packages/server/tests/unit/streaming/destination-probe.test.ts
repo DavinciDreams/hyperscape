@@ -39,6 +39,18 @@ describe("probePlaybackUrl", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("blocks private hosts in staging unless explicitly enabled", async () => {
+    process.env.NODE_ENV = "staging";
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const result = await probePlaybackUrl("http://169.254.169.254/latest");
+
+    expect(result.ready).toBe(false);
+    expect(result.lastError).toBe("private_playback_host_blocked");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("blocks public hostnames that resolve to private addresses in production", async () => {
     process.env.NODE_ENV = "production";
     const lookupSpy = vi

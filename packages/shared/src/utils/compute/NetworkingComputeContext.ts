@@ -755,6 +755,11 @@ export class NetworkingComputeContext {
     const WEBGPU_MAX_WORKGROUPS_PER_DIM = 65535;
     const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
     const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
+    if (dispatchY > WEBGPU_MAX_WORKGROUPS_PER_DIM) {
+      throw new Error(
+        `Broadphase dispatch exceeds WebGPU 2D workgroup limits: totalWorkgroups=${totalWorkgroups}, dispatch=${dispatchX}x${dispatchY}`,
+      );
+    }
 
     const uniformBuffer = this.ctx.createUniformBuffer(
       "bp_uniforms",

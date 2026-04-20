@@ -56,6 +56,7 @@ export function stopPayoutKeeper(): void {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  processing = false;
   Logger.info("PayoutKeeper", "Payout keeper stopped");
 }
 

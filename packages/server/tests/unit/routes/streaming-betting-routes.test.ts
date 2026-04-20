@@ -273,6 +273,7 @@ describe("streaming-betting-routes", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -384,6 +385,7 @@ describe("streaming-betting-routes", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
