@@ -41,17 +41,6 @@ const AGENT_MANAGEMENT_CODEQL_LIMITER = new RateLimiterMemory({
   duration: 60,
 });
 
-async function codeqlAgentManagementRateLimitPreHandler(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
-  try {
-    await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
-  } catch {
-    await reply.code(429).send({ error: "Too Many Requests" });
-  }
-}
-
 type AgentRouteCharacterRecord = {
   accountId: string;
   id: string;
@@ -469,9 +458,14 @@ export function registerAgentRoutes(
     "/api/agents/credentials",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const body = request.body as {
           characterId: string;
@@ -786,9 +780,14 @@ export function registerAgentRoutes(
     "/api/agents/mappings/:accountId",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const params = request.params as { accountId: string };
         const { accountId } = params;
@@ -885,9 +884,14 @@ export function registerAgentRoutes(
     "/api/agents/mappings",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const body = request.body as {
           agentId: string;
@@ -1218,9 +1222,14 @@ export function registerAgentRoutes(
     "/api/agents/mappings/:agentId",
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
-      preHandler: codeqlAgentManagementRateLimitPreHandler,
     },
     async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const params = request.params as { agentId: string };
         const { agentId } = params;
