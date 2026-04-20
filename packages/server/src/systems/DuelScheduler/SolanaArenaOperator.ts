@@ -581,3 +581,16 @@ function parseKeypair(raw: string): Keypair {
 
   return Keypair.fromSecretKey(assertSecretKeyLength(bs58.decode(trimmed)));
 }
+
+/** @internal Pure helpers exposed for byte-layout regression tests. */
+export const __solanaArenaOperatorTestInternals = {
+  DUEL_STATUS,
+  MARKET_SIDE,
+  REPORT_RESULT_DISCRIMINATOR,
+  UPSERT_DUEL_DISCRIMINATOR,
+  buildReportResultInstruction,
+  buildUpsertDuelInstruction,
+  hashParticipant,
+  hexToBytes32,
+  parseKeypair,
+};

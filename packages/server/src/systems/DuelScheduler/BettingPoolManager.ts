@@ -470,6 +470,12 @@ function isValidPositiveDecimalAmount(amount: string): boolean {
   return !/^0+(?:\.0+)?$/.test(normalized);
 }
 
+/** @internal Pure helpers exposed for financial input-validation tests. */
+export const __bettingPoolManagerTestInternals = {
+  isValidPositiveDecimalAmount,
+  isValidSolanaWalletAddress,
+};
+
 export function redactWalletAddress(walletAddress: string): string {
   const trimmed = walletAddress.trim();
   if (trimmed.length <= 12) {

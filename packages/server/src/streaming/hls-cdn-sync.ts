@@ -54,8 +54,9 @@ function signS3PutRequest(params: {
   accessKeyId: string;
   secretAccessKey: string;
   region: string;
+  now?: Date;
 }): { url: string; headers: Record<string, string> } {
-  const now = new Date();
+  const now = params.now ?? new Date();
   const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, "");
   const amzDate = now
     .toISOString()
@@ -117,6 +118,11 @@ function signS3PutRequest(params: {
     },
   };
 }
+
+/** @internal Pure helpers exposed for SigV4 regression tests. */
+export const __hlsCdnSyncTestInternals = {
+  signS3PutRequest,
+};
 
 // ============================================================================
 // HLS CDN Syncer
