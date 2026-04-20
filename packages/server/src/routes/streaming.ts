@@ -43,7 +43,6 @@ import {
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
   resolveOracleProofAccessToken,
-  shouldSkipBettingFeedAuth,
 } from "./streaming-betting-auth.js";
 import {
   readLocalHlsManifestSnapshot,
@@ -2018,15 +2017,11 @@ export function registerStreamingRoutes(
   // during rollout. Operators should migrate to the dedicated oracle-proof
   // secret to narrow the blast radius of a feed-token leak.
   let oracleProofFallbackWarnLogged = false;
-  let oracleProofSkipAuthWarnLogged = false;
   const authorizeResultsLookup = async (
     request: FastifyRequest,
     reply: FastifyReply,
   ) => {
     const env = process.env as Record<string, string | undefined>;
-    const skipAuth =
-      shouldSkipBettingFeedAuth(env) &&
-      env.ALLOW_UNAUTHENTICATED_ORACLE_PROOF?.trim().toLowerCase() === "true";
     const resolution = resolveOracleProofAccessToken(env);
     const requiredToken = resolution.token;
 
@@ -2041,19 +2036,10 @@ export function registerStreamingRoutes(
     }
 
     if (!requiredToken) {
-      if (process.env.NODE_ENV === "production" || !skipAuth) {
-        return reply.status(503).send({
-          error: "Service unavailable",
-          message: "Oracle proof auth token is not configured",
-        });
-      }
-      if (!oracleProofSkipAuthWarnLogged) {
-        fastify.log.warn(
-          "[streaming] /api/streaming/results/:duelId is serving requests UNAUTHENTICATED (BETTING_FEED_SKIP_AUTH=true, ALLOW_UNAUTHENTICATED_ORACLE_PROOF=true, NODE_ENV=development)",
-        );
-        oracleProofSkipAuthWarnLogged = true;
-      }
-      return;
+      return reply.status(503).send({
+        error: "Service unavailable",
+        message: "Oracle proof auth token is not configured",
+      });
     }
 
     const token = extractBettingFeedToken({

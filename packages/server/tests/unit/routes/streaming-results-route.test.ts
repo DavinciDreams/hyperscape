@@ -74,9 +74,10 @@ describe("streaming results route", () => {
     await app.close();
   });
 
-  it("does not inherit unauthenticated betting-feed dev mode without explicit oracle opt-in", async () => {
+  it("does not serve oracle proof material unauthenticated in dev mode", async () => {
     process.env.NODE_ENV = "development";
     process.env.BETTING_FEED_SKIP_AUTH = "true";
+    process.env.ALLOW_UNAUTHENTICATED_ORACLE_PROOF = "true";
     const { app } = createApp([]);
 
     const response = await app.inject({

@@ -107,10 +107,7 @@ async function validateResolvedPlaybackProbeHost(
   parsed: URL,
   lookup: typeof dnsPromises.lookup = dnsPromises.lookup,
 ): Promise<string | null> {
-  const allowPrivateHosts =
-    process.env.NODE_ENV === "development" ||
-    (process.env.NODE_ENV !== "production" &&
-      process.env.STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES === "true");
+  const allowPrivateHosts = process.env.NODE_ENV === "development";
   if (allowPrivateHosts) {
     return null;
   }
