@@ -21,6 +21,11 @@ type PlaybackProbePoller = {
   refCount: number;
 };
 
+type PlaybackProbeDependencies = {
+  lookup?: typeof dnsPromises.lookup;
+  fetch?: typeof fetch;
+};
+
 const playbackProbePollers = new Map<string, PlaybackProbePoller>();
 
 function isPrivateIpv4Address(hostname: string): boolean {
@@ -100,6 +105,7 @@ function validatePlaybackProbeUrlSyntax(playbackUrl: string): {
 
 async function validateResolvedPlaybackProbeHost(
   parsed: URL,
+  lookup: typeof dnsPromises.lookup = dnsPromises.lookup,
 ): Promise<string | null> {
   const allowPrivateHosts =
     process.env.NODE_ENV !== "production" ||
@@ -113,7 +119,7 @@ async function validateResolvedPlaybackProbeHost(
   }
 
   try {
-    const resolvedAddresses = await dnsPromises.lookup(parsed.hostname, {
+    const resolvedAddresses = await lookup(parsed.hostname, {
       all: true,
       verbatim: true,
     });
@@ -179,6 +185,7 @@ function classifyProbeResult(params: {
 export async function probePlaybackUrl(
   playbackUrl: string,
   timeoutMs = 4_000,
+  dependencies: PlaybackProbeDependencies = {},
 ): Promise<StreamPlaybackProbeResult> {
   const { parsed, error } = validatePlaybackProbeUrlSyntax(playbackUrl);
   if (error || !parsed) {
@@ -192,7 +199,10 @@ export async function probePlaybackUrl(
     };
   }
 
-  const validationError = await validateResolvedPlaybackProbeHost(parsed);
+  const validationError = await validateResolvedPlaybackProbeHost(
+    parsed,
+    dependencies.lookup,
+  );
   if (validationError) {
     return {
       playbackUrl,
@@ -208,7 +218,8 @@ export async function probePlaybackUrl(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(parsed, {
+    const fetchImpl = dependencies.fetch ?? fetch;
+    const response = await fetchImpl(parsed, {
       method: "GET",
       cache: "no-store",
       redirect: "manual",

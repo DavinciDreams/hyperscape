@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { IncomingHttpHeaders } from "node:http";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
@@ -305,28 +305,20 @@ export function verifyCloudflareWebhookSecret(
   headers: IncomingHttpHeaders | Record<string, unknown>,
   secret: string | null | undefined,
 ): boolean {
-  const expectedSecret = secret?.trim();
-  if (!expectedSecret) {
-    return false;
-  }
+  const expectedSecret = secret?.trim() ?? "";
   const rawHeader =
     headers["cf-webhook-auth"] ??
     Object.entries(headers).find(
       ([headerName]) => headerName.toLowerCase() === "cf-webhook-auth",
     )?.[1];
   const receivedSecret = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-  if (
-    typeof receivedSecret !== "string" ||
-    receivedSecret.trim().length === 0
-  ) {
-    return false;
-  }
-  const left = Buffer.from(receivedSecret.trim());
-  const right = Buffer.from(expectedSecret);
-  if (left.length !== right.length) {
-    return false;
-  }
-  return timingSafeEqual(left, right);
+  const normalizedReceived =
+    typeof receivedSecret === "string" ? receivedSecret.trim() : "";
+  const left = createHash("sha256").update(normalizedReceived).digest();
+  const right = createHash("sha256").update(expectedSecret).digest();
+  return Boolean(
+    expectedSecret && normalizedReceived && timingSafeEqual(left, right),
+  );
 }
 
 export function summarizeCloudflareLiveWebhook(params: {
