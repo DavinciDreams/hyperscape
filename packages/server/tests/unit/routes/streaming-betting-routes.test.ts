@@ -876,4 +876,15 @@ describe("streaming-betting-routes", () => {
       nextCursor: 4,
     });
   });
+
+  it("normalizes invalid betting client id cursors before allocation", () => {
+    expect(allocateNextBettingClientId(Number.NaN, [1, 2])).toEqual({
+      clientId: 3,
+      nextCursor: 4,
+    });
+    expect(allocateNextBettingClientId(-1, [])).toEqual({
+      clientId: 1,
+      nextCursor: 2,
+    });
+  });
 });

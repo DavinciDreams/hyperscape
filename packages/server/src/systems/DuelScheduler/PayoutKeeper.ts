@@ -77,14 +77,18 @@ async function processJobs(): Promise<void> {
 
   try {
     const db = getDatabase();
-    const claimedJobIds = await db.transaction((tx) =>
-      claimDuePayoutJobIds(tx, Date.now(), MAX_BATCH_SIZE),
-    );
-    if (claimedJobIds.length === 0) {
+    const jobs = await db.transaction(async (tx) => {
+      const claimedJobIds = await claimDuePayoutJobIds(
+        tx,
+        Date.now(),
+        MAX_BATCH_SIZE,
+      );
+      return loadClaimedPayoutJobs(tx, claimedJobIds);
+    });
+    if (jobs.length === 0) {
       return;
     }
 
-    const jobs = await loadClaimedPayoutJobs(db, claimedJobIds);
     for (const job of jobs) {
       await processOneJob(db, job);
     }

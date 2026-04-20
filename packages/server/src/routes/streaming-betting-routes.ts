@@ -218,10 +218,21 @@ export function allocateNextBettingClientId(
 ): BettingClientIdAllocation {
   const activeIds = new Set(activeClientIds);
   const maxClientId = Number.MAX_SAFE_INTEGER - 1;
-  let clientId = nextCursor;
+  let clientId =
+    Number.isSafeInteger(nextCursor) &&
+    nextCursor >= 1 &&
+    nextCursor <= maxClientId
+      ? nextCursor
+      : 1;
   let wrapped = false;
+  let attempts = 0;
+  const maxAttempts = activeIds.size + 1;
 
   while (activeIds.has(clientId)) {
+    attempts += 1;
+    if (attempts > maxAttempts) {
+      throw new Error("No betting SSE client ids available");
+    }
     clientId += 1;
     if (clientId > maxClientId) {
       clientId = 1;
