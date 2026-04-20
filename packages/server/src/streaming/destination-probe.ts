@@ -2,6 +2,7 @@ import type {
   StreamManifestStatus,
   StreamPublicReadiness,
 } from "./delivery-config.js";
+import * as dnsPromises from "node:dns/promises";
 import { isIP } from "node:net";
 
 export type StreamPlaybackProbeResult = {
@@ -29,11 +30,14 @@ function isPrivateIpv4Address(hostname: string): boolean {
   }
   const [a, b] = parts;
   return (
+    a === 0 ||
     a === 10 ||
+    (a === 100 && b >= 64 && b <= 127) ||
     a === 127 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168)
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19))
   );
 }
 
@@ -54,28 +58,76 @@ function isBlockedPrivateHost(hostname: string): boolean {
     return isPrivateIpv4Address(normalized);
   }
   if (ipVersion === 6) {
-    return normalized === "::1" || normalized.startsWith("fe80:");
+    if (normalized.startsWith("::ffff:")) {
+      return isPrivateIpv4Address(normalized.slice("::ffff:".length));
+    }
+    return (
+      normalized === "::1" ||
+      normalized.startsWith("fe80:") ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd")
+    );
   }
   return false;
 }
 
-function validatePlaybackProbeUrl(playbackUrl: string): string | null {
+function validatePlaybackProbeUrlSyntax(playbackUrl: string): {
+  parsed: URL | null;
+  error: string | null;
+} {
   let parsed: URL;
   try {
     parsed = new URL(playbackUrl);
   } catch {
-    return "invalid_playback_url";
+    return {
+      parsed: null,
+      error: "invalid_playback_url",
+    };
   }
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return "unsupported_playback_protocol";
+    return {
+      parsed: null,
+      error: "unsupported_playback_protocol",
+    };
   }
 
+  return {
+    parsed,
+    error: null,
+  };
+}
+
+async function validateResolvedPlaybackProbeHost(
+  parsed: URL,
+): Promise<string | null> {
   const allowPrivateHosts =
     process.env.NODE_ENV !== "production" ||
     process.env.STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES === "true";
-  if (!allowPrivateHosts && isBlockedPrivateHost(parsed.hostname)) {
+  if (allowPrivateHosts) {
+    return null;
+  }
+
+  if (isBlockedPrivateHost(parsed.hostname)) {
     return "private_playback_host_blocked";
+  }
+
+  try {
+    const resolvedAddresses = await dnsPromises.lookup(parsed.hostname, {
+      all: true,
+      verbatim: true,
+    });
+    if (
+      resolvedAddresses.some((candidate) =>
+        isBlockedPrivateHost(candidate.address),
+      )
+    ) {
+      return "private_playback_host_blocked";
+    }
+  } catch {
+    // Let the normal fetch path report DNS/network failures. This validation
+    // layer is only responsible for fail-closing when the hostname resolves
+    // to a blocked private target.
   }
 
   return null;
@@ -128,7 +180,19 @@ export async function probePlaybackUrl(
   playbackUrl: string,
   timeoutMs = 4_000,
 ): Promise<StreamPlaybackProbeResult> {
-  const validationError = validatePlaybackProbeUrl(playbackUrl);
+  const { parsed, error } = validatePlaybackProbeUrlSyntax(playbackUrl);
+  if (error || !parsed) {
+    return {
+      playbackUrl,
+      ready: false,
+      manifestStatus: "unknown",
+      statusCode: null,
+      lastError: error ?? "invalid_playback_url",
+      updatedAt: Date.now(),
+    };
+  }
+
+  const validationError = await validateResolvedPlaybackProbeHost(parsed);
   if (validationError) {
     return {
       playbackUrl,
@@ -144,9 +208,10 @@ export async function probePlaybackUrl(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(playbackUrl, {
+    const response = await fetch(parsed, {
       method: "GET",
       cache: "no-store",
+      redirect: "manual",
       headers: {
         accept: "application/vnd.apple.mpegurl,text/plain,*/*",
       },

@@ -220,14 +220,21 @@ export function attachRawSourceTime<
 >(
   state: T,
   sourceEmittedAt: number,
-  options: { stampEmittedAt: boolean; enabled: boolean },
+  options: {
+    stampEmittedAt: boolean;
+    enabled: boolean;
+    sourceCycle?: StreamingStateUpdate["cycle"] | null;
+  },
 ): T {
   if (!options.enabled) return state;
+  const sourceTimeline =
+    state.cycle.sourceTimeline ??
+    buildSourceTimeline(options.sourceCycle ?? state.cycle, sourceEmittedAt);
   const withTimeline: T = {
     ...state,
     cycle: {
       ...state.cycle,
-      sourceTimeline: buildSourceTimeline(state.cycle, sourceEmittedAt),
+      sourceTimeline,
     },
   };
   if (!options.stampEmittedAt) return withTimeline;
@@ -1313,10 +1320,12 @@ export function registerStreamingRoutes(
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
   ): ReturnType<typeof scheduler.getStreamingState> | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      const live = redactOracleProofFromState(scheduler.getStreamingState());
+      const rawState = scheduler.getStreamingState();
+      const live = redactOracleProofFromState(rawState);
       return attachRawSourceTime(live, Date.now(), {
         stampEmittedAt: true,
         enabled: rawSourceTimeEnabled,
+        sourceCycle: rawState.cycle,
       });
     }
 
@@ -1363,7 +1372,8 @@ export function registerStreamingRoutes(
     const scheduler = getStreamingDuelScheduler();
     if (!scheduler) return null;
 
-    const state = redactOracleProofFromState(scheduler.getStreamingState());
+    const rawState = scheduler.getStreamingState();
+    const state = redactOracleProofFromState(rawState);
     const serialized = JSON.stringify(state);
     if (
       !forceNewFrame &&
@@ -1385,6 +1395,7 @@ export function registerStreamingRoutes(
     const stateWithTimeline = attachRawSourceTime(state, emittedAt, {
       stampEmittedAt: false,
       enabled: rawSourceTimeEnabled,
+      sourceCycle: rawState.cycle,
     });
     const payload = JSON.stringify({
       ...stateWithTimeline,

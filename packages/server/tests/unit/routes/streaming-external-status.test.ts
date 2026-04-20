@@ -11,7 +11,8 @@ describe("parseExternalRtmpStatusSnapshot", () => {
         captureMode: "cdp",
         smoke: {
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           deliveryMode: "external_hls",
           captureFpsP50: 29.5,
           captureFpsP95: 30,
@@ -39,7 +40,8 @@ describe("parseExternalRtmpStatusSnapshot", () => {
           captureMode: "cdp",
           degradedReason: null,
           currentSceneUrl: "https://staging.example/stream",
-          activeBundle: "https://staging.example/assets/StreamingMode-abc123.js",
+          activeBundle:
+            "https://staging.example/assets/StreamingMode-abc123.js",
           lastFrameAt: 1230,
           lastRenderTickAt: 1231,
           lastVisualChangeAt: 1232,
@@ -204,5 +206,27 @@ describe("parseExternalRtmpStatusSnapshot", () => {
       bytesReceived: 8_192,
       healthy: true,
     });
+  });
+
+  it("accepts x11_nvenc capture mode from external worker snapshots", () => {
+    const parsed = parseExternalRtmpStatusSnapshot(
+      JSON.stringify({
+        destinations: [],
+        stats: {},
+        updatedAt: Date.now(),
+        captureMode: "x11_nvenc",
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "x11_nvenc",
+          degradedReason: null,
+        },
+      }),
+      15_000,
+      { allowStale: true },
+    );
+
+    expect(parsed?.captureMode).toBe("x11_nvenc");
+    expect(parsed?.sourceRuntime?.captureMode).toBe("x11_nvenc");
   });
 });

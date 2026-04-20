@@ -7,6 +7,7 @@ export type StreamSourceCaptureMode =
   | "cdp"
   | "webcodecs"
   | "mediarecorder"
+  | "x11_nvenc"
   | "none";
 
 export type StreamSourceDegradedReason =
@@ -80,6 +81,7 @@ export function normalizeStreamSourceCaptureMode(
   return value === "cdp" ||
     value === "webcodecs" ||
     value === "mediarecorder" ||
+    value === "x11_nvenc" ||
     value === "none"
     ? value
     : null;

@@ -305,6 +305,7 @@ export function parseExternalRtmpStatusSnapshot(
       parsed.captureMode === "cdp" ||
       parsed.captureMode === "webcodecs" ||
       parsed.captureMode === "mediarecorder" ||
+      parsed.captureMode === "x11_nvenc" ||
       parsed.captureMode === "none"
     ) {
       snapshot.captureMode = parsed.captureMode;
