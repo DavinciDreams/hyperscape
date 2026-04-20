@@ -43,6 +43,7 @@ export interface BetRecord {
 
 const MAX_BETS_BY_WALLET_LIMIT = 100;
 const MAX_BETTING_LEADERBOARD_LIMIT = 100;
+const MAX_BETS_PER_WALLET_PER_ROUND = 100;
 
 export class BettingPoolManager {
   private readonly world: World;
@@ -120,6 +121,26 @@ export class BettingPoolManager {
           return {
             success: false,
             error: "Market is locked, betting is closed",
+          } as const;
+        }
+
+        const existingBetCountRows = await tx
+          .select({
+            count: sql<number>`COUNT(*)::INT`,
+          })
+          .from(solanaBets)
+          .where(
+            and(
+              eq(solanaBets.roundId, bet.roundId),
+              eq(solanaBets.bettorWallet, bet.walletAddress),
+              eq(solanaBets.status, "CONFIRMED"),
+            ),
+          );
+        const existingBetCount = Number(existingBetCountRows[0]?.count ?? 0);
+        if (existingBetCount >= MAX_BETS_PER_WALLET_PER_ROUND) {
+          return {
+            success: false,
+            error: "Too many bets for this wallet on this round",
           } as const;
         }
 
@@ -472,6 +493,7 @@ function isValidPositiveDecimalAmount(amount: string): boolean {
 
 /** @internal Pure helpers exposed for financial input-validation tests. */
 export const __bettingPoolManagerTestInternals = {
+  MAX_BETS_PER_WALLET_PER_ROUND,
   isValidPositiveDecimalAmount,
   isValidSolanaWalletAddress,
 };

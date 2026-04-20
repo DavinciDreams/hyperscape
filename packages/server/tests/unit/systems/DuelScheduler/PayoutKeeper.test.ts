@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { claimDuePayoutJobIds } from "../../../../src/systems/DuelScheduler/PayoutKeeper.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  __payoutKeeperTestInternals as internals,
+  claimDuePayoutJobIds,
+} from "../../../../src/systems/DuelScheduler/PayoutKeeper.js";
 
 function extractSqlText(query: unknown): string {
   if (!query || typeof query !== "object" || !("queryChunks" in query)) {
@@ -62,5 +65,84 @@ describe("claimDuePayoutJobIds", () => {
     expect(await claimDuePayoutJobIds(createTx(), 1_000, 1)).toEqual(["job-1"]);
     expect(await claimDuePayoutJobIds(createTx(), 1_000, 1)).toEqual(["job-2"]);
     expect(await claimDuePayoutJobIds(createTx(), 1_000, 1)).toEqual([]);
+  });
+});
+
+describe("processOneJob", () => {
+  function createDb(params: { betSide: "A" | "B"; winnerId: string }): {
+    db: Parameters<typeof internals.processOneJob>[0];
+    updates: unknown[];
+  } {
+    let selectCall = 0;
+    const updates: unknown[] = [];
+    const db = {
+      select: vi.fn(() => {
+        const call = selectCall;
+        selectCall += 1;
+        if (call === 0) {
+          return {
+            from: () => ({
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "round-1",
+                    agentAId: "agent-a",
+                    agentBId: "agent-b",
+                    winnerId: params.winnerId,
+                  },
+                ],
+              }),
+            }),
+          };
+        }
+        return {
+          from: () => ({
+            where: async () => [
+              {
+                side: params.betSide,
+              },
+            ],
+          }),
+        };
+      }),
+      update: vi.fn(() => ({
+        set: (value: unknown) => {
+          updates.push(value);
+          return {
+            where: () => ({
+              returning: async () => [{ id: "job-1" }],
+            }),
+          };
+        },
+      })),
+    } as Parameters<typeof internals.processOneJob>[0];
+    return { db, updates };
+  }
+
+  const job = {
+    id: "job-1",
+    roundId: "round-1",
+    bettorWallet: "wallet-1",
+    attempts: 0,
+  } as Parameters<typeof internals.processOneJob>[1];
+
+  it("marks a winning confirmed bet ready for payout", async () => {
+    const { db, updates } = createDb({ betSide: "A", winnerId: "agent-a" });
+
+    await internals.processOneJob(db, job);
+
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: "READY_FOR_PAYOUT" }),
+    );
+  });
+
+  it("marks losing confirmed bets as no-payout", async () => {
+    const { db, updates } = createDb({ betSide: "B", winnerId: "agent-a" });
+
+    await internals.processOneJob(db, job);
+
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: "NO_PAYOUT" }),
+    );
   });
 });

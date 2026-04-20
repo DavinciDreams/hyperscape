@@ -86,7 +86,7 @@ export function resolveBettingFeedAccessToken(
 //   1. HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN — canonical dedicated secret
 //   2. STREAMING_ORACLE_PROOF_TOKEN — alias for the same secret
 //   3. BETTING_FEED_ACCESS_TOKEN — compatibility fallback so existing
-//      single-token deployments keep working during rollout
+//      single-token deployments keep working during non-production rollout
 // Operators should migrate to (1) to narrow the blast radius of a
 // feed-token leak and to keep the naming aligned with the keeper side.
 export function resolveOracleProofAccessToken(
@@ -102,7 +102,7 @@ export function resolveOracleProofAccessToken(
     return { token: oracleToken, source: "oracle-proof" };
   }
   const bettingFeedToken = env.BETTING_FEED_ACCESS_TOKEN?.trim() || null;
-  if (bettingFeedToken) {
+  if (bettingFeedToken && env.NODE_ENV !== "production") {
     return { token: bettingFeedToken, source: "betting-feed" };
   }
   return { token: null, source: null };

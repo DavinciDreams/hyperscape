@@ -109,14 +109,27 @@ describe("streaming-betting-auth", () => {
     });
   });
 
-  it("falls back to BETTING_FEED_ACCESS_TOKEN when the oracle-proof token is unset", () => {
+  it("falls back to BETTING_FEED_ACCESS_TOKEN outside production when the oracle-proof token is unset", () => {
     expect(
       resolveOracleProofAccessToken({
+        NODE_ENV: "development",
         BETTING_FEED_ACCESS_TOKEN: "bet-secret",
       }),
     ).toEqual({
       token: "bet-secret",
       source: "betting-feed",
+    });
+  });
+
+  it("does not fall back to BETTING_FEED_ACCESS_TOKEN in production", () => {
+    expect(
+      resolveOracleProofAccessToken({
+        NODE_ENV: "production",
+        BETTING_FEED_ACCESS_TOKEN: "bet-secret",
+      }),
+    ).toEqual({
+      token: null,
+      source: null,
     });
   });
 

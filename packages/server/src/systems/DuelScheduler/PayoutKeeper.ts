@@ -352,3 +352,8 @@ async function markFailed(
     error,
   });
 }
+
+/** @internal Transactional helpers exposed for payout keeper regression tests. */
+export const __payoutKeeperTestInternals = {
+  processOneJob,
+};
