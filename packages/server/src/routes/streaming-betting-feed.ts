@@ -1,6 +1,7 @@
 import type {
   StreamingDuelCycle,
   StreamingPhase,
+  StreamingSourceTimeline,
 } from "../systems/StreamingDuelScheduler/types.js";
 import type {
   StreamChannelState,
@@ -96,17 +97,24 @@ export type BettingFeedBroadcastTimeline = {
   updatedAt: number;
 };
 
+export type BettingFeedSourceTimeline = StreamingSourceTimeline;
+
+export type BettingFeedCycle = StreamingDuelCycle & {
+  sourceTimeline?: BettingFeedSourceTimeline;
+};
+
 export type BettingFeedPayload = {
   schemaVersion: number;
   sourceEpoch: number;
   seq: number;
   emittedAt: number;
-  cycle: StreamingDuelCycle | null;
+  cycle: BettingFeedCycle | null;
   duelId: string | null;
   duelKey: string | null;
   phase: StreamingPhase | null;
   phaseVersion: number;
   broadcastTimeline: BettingFeedBroadcastTimeline;
+  sourceTimeline: BettingFeedSourceTimeline | null;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -187,10 +195,32 @@ function resolveWinnerName(cycle: StreamingDuelCycle): string | null {
   return null;
 }
 
+function isRawSourceTimeEmissionEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    (env.STREAMING_EMIT_RAW_SOURCE_TIME ?? "").trim().toLowerCase() === "true"
+  );
+}
+
+function buildSourceTimeline(
+  cycle: StreamingDuelCycle,
+  updatedAt: number,
+): BettingFeedSourceTimeline {
+  return {
+    phase: cycle.phase,
+    betOpenTime: cycle.betOpenTime ?? null,
+    betCloseTime: cycle.betCloseTime ?? null,
+    fightStartTime: cycle.fightStartTime ?? null,
+    duelEndTime: cycle.duelEndTime ?? null,
+    updatedAt,
+  };
+}
+
 function redactOracleProofFromCycle(
   cycle: StreamingDuelCycle | null,
   exposeResolutionOutcome: boolean,
-): StreamingDuelCycle | null {
+): BettingFeedCycle | null {
   if (!cycle) {
     return null;
   }
@@ -417,12 +447,23 @@ export function buildBettingFeedPayload(params: {
     emittedAt: params.emittedAt,
     presentationDelayMs,
   });
+  const sourceTimeline =
+    isRawSourceTimeEmissionEnabled() && cycle
+      ? buildSourceTimeline(cycle, params.emittedAt)
+      : null;
   const publicPhase = broadcastTimeline.phase ?? cycle?.phase ?? null;
   const exposeResolutionOutcome = publicPhase === "RESOLUTION";
-  const publicCycle = redactOracleProofFromCycle(
+  const publicCycleBase = redactOracleProofFromCycle(
     cycle,
     exposeResolutionOutcome,
   );
+  const publicCycle =
+    publicCycleBase && sourceTimeline
+      ? {
+          ...publicCycleBase,
+          sourceTimeline,
+        }
+      : publicCycleBase;
   const publicChannel = redactIngestUrlFromChannel(channel);
   const publicCanonicalDestination =
     redactIngestUrlFromDestination(canonicalDestination);
@@ -445,6 +486,7 @@ export function buildBettingFeedPayload(params: {
     phase: publicPhase,
     phaseVersion: cycle?.phaseVersion ?? 0,
     broadcastTimeline,
+    sourceTimeline,
     betOpenTime: broadcastTimeline.betOpenTime,
     betCloseTime: broadcastTimeline.betCloseTime,
     fightStartTime: broadcastTimeline.fightStartTime,
@@ -488,10 +530,27 @@ export function buildBettingFeedDedupKey(payload: BettingFeedPayload): string {
   return JSON.stringify({
     ...payload,
     emittedAt: 0,
+    cycle: payload.cycle
+      ? {
+          ...payload.cycle,
+          sourceTimeline: payload.cycle.sourceTimeline
+            ? {
+                ...payload.cycle.sourceTimeline,
+                updatedAt: 0,
+              }
+            : undefined,
+        }
+      : null,
     broadcastTimeline: {
       ...payload.broadcastTimeline,
       updatedAt: 0,
     },
+    sourceTimeline: payload.sourceTimeline
+      ? {
+          ...payload.sourceTimeline,
+          updatedAt: 0,
+        }
+      : null,
     latestFrameAt: 0,
     latestRenderTickAt: 0,
     latestDuelStateTickAt: 0,

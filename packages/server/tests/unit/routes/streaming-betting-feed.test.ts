@@ -641,6 +641,85 @@ describe("streaming-betting-feed", () => {
     );
   });
 
+  it("emits raw sourceTimeline on the betting feed when enabled", () => {
+    const previous = process.env.STREAMING_EMIT_RAW_SOURCE_TIME;
+    process.env.STREAMING_EMIT_RAW_SOURCE_TIME = "true";
+
+    try {
+      const payload = buildBettingFeedPayload({
+        sourceEpoch: 42,
+        seq: 7,
+        emittedAt: 123_456,
+        cycle: createCycle({
+          phase: "FIGHTING",
+          fightStartTime: 3_000,
+          duelEndTime: 4_000,
+        }),
+      });
+
+      expect(payload.sourceTimeline).toEqual({
+        phase: "FIGHTING",
+        betOpenTime: 1_000,
+        betCloseTime: 2_000,
+        fightStartTime: 3_000,
+        duelEndTime: 4_000,
+        updatedAt: 123_456,
+      });
+      expect(payload.cycle?.sourceTimeline).toEqual(payload.sourceTimeline);
+      expect(payload.broadcastTimeline.presentationDelayMs).toBe(0);
+    } finally {
+      if (previous == null) {
+        delete process.env.STREAMING_EMIT_RAW_SOURCE_TIME;
+      } else {
+        process.env.STREAMING_EMIT_RAW_SOURCE_TIME = previous;
+      }
+    }
+  });
+
+  it("ignores sourceTimeline updatedAt when building dedup keys", () => {
+    const previous = process.env.STREAMING_EMIT_RAW_SOURCE_TIME;
+    process.env.STREAMING_EMIT_RAW_SOURCE_TIME = "true";
+
+    try {
+      const basePayload = buildBettingFeedPayload({
+        sourceEpoch: 42,
+        seq: 7,
+        emittedAt: 123_456,
+        cycle: createCycle(),
+      });
+      const laterPayload = {
+        ...basePayload,
+        sourceTimeline: basePayload.sourceTimeline
+          ? {
+              ...basePayload.sourceTimeline,
+              updatedAt: 999_999,
+            }
+          : null,
+        cycle: basePayload.cycle
+          ? {
+              ...basePayload.cycle,
+              sourceTimeline: basePayload.cycle.sourceTimeline
+                ? {
+                    ...basePayload.cycle.sourceTimeline,
+                    updatedAt: 999_999,
+                  }
+                : undefined,
+            }
+          : null,
+      };
+
+      expect(buildBettingFeedDedupKey(basePayload)).toBe(
+        buildBettingFeedDedupKey(laterPayload),
+      );
+    } finally {
+      if (previous == null) {
+        delete process.env.STREAMING_EMIT_RAW_SOURCE_TIME;
+      } else {
+        process.env.STREAMING_EMIT_RAW_SOURCE_TIME = previous;
+      }
+    }
+  });
+
   it("handles empty replay buffers cleanly", () => {
     expect(selectReplayDelivery([], 0)).toMatchObject({
       mode: "bootstrap",
