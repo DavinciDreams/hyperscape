@@ -82,25 +82,32 @@ function createReplyRecorder() {
 
 function createFastifyRecorder() {
   const routes = new Map<string, Function>();
+  const pickHandler = (args: unknown[]): Function => {
+    const handler = args[args.length - 1];
+    if (typeof handler !== "function") {
+      throw new Error("Expected route handler");
+    }
+    return handler;
+  };
   const fastify = {
-    delete(path: string, handler: Function) {
-      routes.set(`DELETE ${path}`, handler);
+    delete(path: string, ...args: unknown[]) {
+      routes.set(`DELETE ${path}`, pickHandler(args));
       return this;
     },
-    get(path: string, handler: Function) {
-      routes.set(`GET ${path}`, handler);
+    get(path: string, ...args: unknown[]) {
+      routes.set(`GET ${path}`, pickHandler(args));
       return this;
     },
-    post(path: string, handler: Function) {
-      routes.set(`POST ${path}`, handler);
+    post(path: string, ...args: unknown[]) {
+      routes.set(`POST ${path}`, pickHandler(args));
       return this;
     },
-    patch(path: string, handler: Function) {
-      routes.set(`PATCH ${path}`, handler);
+    patch(path: string, ...args: unknown[]) {
+      routes.set(`PATCH ${path}`, pickHandler(args));
       return this;
     },
-    put(path: string, handler: Function) {
-      routes.set(`PUT ${path}`, handler);
+    put(path: string, ...args: unknown[]) {
+      routes.set(`PUT ${path}`, pickHandler(args));
       return this;
     },
   };
