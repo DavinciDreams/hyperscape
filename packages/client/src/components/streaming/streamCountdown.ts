@@ -62,10 +62,10 @@ export function resolveStreamCountdownDisplay(
 
     if (phase === "ANNOUNCEMENT") {
       return {
-        text: "Preparing arena",
+        text: "__:__",
         kind: "hold",
         holdState: "preparing_arena",
-        label: "Preparing arena",
+        label: "",
         remainingMs: 0,
       };
     }
