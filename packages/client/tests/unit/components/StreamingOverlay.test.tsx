@@ -131,4 +131,16 @@ describe("StreamingOverlay", () => {
 
     expect(screen.getAllByText("0:50").length).toBeGreaterThan(0);
   });
+
+  it("does not render the persistent lower-third banner during fights", () => {
+    render(
+      <StreamingOverlay state={createStreamingState({ phase: "FIGHTING" })} />,
+    );
+
+    expect(screen.queryByText("Hyperscape")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Live — round in progress"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("AI duel arena")).not.toBeInTheDocument();
+  });
 });

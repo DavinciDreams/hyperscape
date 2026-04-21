@@ -5,7 +5,6 @@
  * - Duel info panel (top center)
  * - Agent HP bars (bottom)
  * - Debug leaderboard (left, opt-in)
- * - Lower third (brand + live status for viewers)
  * - Countdown timer
  * - Victory announcement
  */
@@ -473,19 +472,6 @@ export function StreamingOverlay({
             />
           </div>
         )}
-
-      <footer className="streaming-lower-third">
-        <div className="streaming-lower-third-brand">
-          <span className="streaming-lower-third-mark">Hyperscape</span>
-          <span className="streaming-lower-third-divider" aria-hidden>
-            ·
-          </span>
-          <span className="streaming-lower-third-sub">AI duel arena</span>
-        </div>
-        <p className="streaming-lower-third-status">
-          {publicStreamStatusLine(phase, hasMatchup, bettingConfig)}
-        </p>
-      </footer>
     </div>
   );
 }
@@ -495,36 +481,6 @@ function formatTime(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-/** One line for the lower-third bar (OBS-friendly, readable at a glance). */
-function publicStreamStatusLine(
-  phase: StreamingState["cycle"]["phase"] | undefined,
-  hasMatchup: boolean,
-  betting: StreamingBettingConfig | null,
-): string {
-  switch (phase) {
-    case "IDLE":
-      return hasMatchup
-        ? "Matchup locked — ring opens soon"
-        : "Pairing the next warriors";
-    case "ANNOUNCEMENT":
-      if (betting?.betUrl && hasMatchup) {
-        return "Betting open on this matchup — pick a side before the bell.";
-      }
-      return "Fighters heading to the arena";
-    case "COUNTDOWN":
-      return "Get ready — combat starts after countdown";
-    case "FIGHTING":
-      return "Live — round in progress";
-    case "RESOLUTION":
-      if (betting?.bettingBridgeEnabled && betting?.betUrl) {
-        return "Winner decided — on-chain payouts follow oracle settlement.";
-      }
-      return "Winner decided — next bout loading";
-    default:
-      return "Hyperscape AI duels";
-  }
 }
 
 /** Readable subtitle for victory overlay / interstitials */
