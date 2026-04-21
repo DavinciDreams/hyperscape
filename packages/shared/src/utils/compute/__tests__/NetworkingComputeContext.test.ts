@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   NetworkingComputeContext,
+  MAX_INTEREST_MANAGEMENT_ENTITIES,
   isNetworkingComputeAvailable,
   type GPUEntityInterest,
   type GPUPlayerPosition,
@@ -50,6 +51,10 @@ describe("NetworkingComputeContext", () => {
       expect(INTEREST_MANAGEMENT_PER_ENTITY_SHADER).toContain(
         "workgroupBarrier",
       );
+    });
+
+    it("documents the one-workgroup-per-entity interest limit", () => {
+      expect(MAX_INTEREST_MANAGEMENT_ENTITIES).toBe(65_535);
     });
 
     it("should export spatial range query shader", () => {
@@ -128,6 +133,9 @@ describe("NetworkingComputeContext", () => {
         const workgroups = Math.ceil(totalPairs / 64);
         const dispatchX = Math.min(workgroups, WEBGPU_MAX);
         const dispatchY = Math.ceil(workgroups / dispatchX);
+        if (dispatchY > WEBGPU_MAX) {
+          throw new Error("dispatchY exceeds WebGPU limit");
+        }
         return { totalPairs, workgroups, dispatchX, dispatchY };
       };
 
@@ -141,6 +149,28 @@ describe("NetworkingComputeContext", () => {
           r.totalPairs,
         );
       }
+    });
+
+    it("rejects impossible broadphase dispatch shapes instead of overflowing Y", () => {
+      // totalPairs = WEBGPU_MAX² * 64 + 1 forces dispatchY one over the
+      // per-dimension ceiling after the 2D reshape.
+      const WEBGPU_MAX = 65535;
+      const reshape = (aabbCount: number) => {
+        const totalPairs = (aabbCount * (aabbCount - 1)) / 2;
+        const workgroups = Math.ceil(totalPairs / 64);
+        const dispatchX = Math.min(workgroups, WEBGPU_MAX);
+        const dispatchY = Math.ceil(workgroups / dispatchX);
+        if (dispatchY > WEBGPU_MAX) {
+          throw new Error("dispatchY exceeds WebGPU limit");
+        }
+        return { dispatchX, dispatchY };
+      };
+      const impossiblePairs = WEBGPU_MAX * WEBGPU_MAX * 64 + 1;
+      const aabbCount = Math.ceil((1 + Math.sqrt(1 + 8 * impossiblePairs)) / 2);
+
+      expect(() => reshape(aabbCount)).toThrow(
+        "dispatchY exceeds WebGPU limit",
+      );
     });
 
     it("should export sound occlusion shader", () => {

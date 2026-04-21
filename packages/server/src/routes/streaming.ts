@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { RateLimitOptions } from "@fastify/rate-limit";
 import type { World } from "@hyperscape/shared";
 import { RateLimiterMemory } from "rate-limiter-flexible";
+import { createHash } from "node:crypto";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
 import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/index.js";
 import {
@@ -43,7 +44,6 @@ import {
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
   resolveOracleProofAccessToken,
-  shouldSkipBettingFeedAuth,
 } from "./streaming-betting-auth.js";
 import {
   readLocalHlsManifestSnapshot,
@@ -162,6 +162,7 @@ const STREAMING_STATUS_RATE_LIMIT: RateLimitOptions = {
   max: 120,
   timeWindow: "1 minute",
 };
+const STREAMING_RESULT_DUEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
 const STREAMING_STATUS_CODEQL_LIMITER = new RateLimiterMemory({
   points: 120,
   duration: 60,
@@ -220,14 +221,21 @@ export function attachRawSourceTime<
 >(
   state: T,
   sourceEmittedAt: number,
-  options: { stampEmittedAt: boolean; enabled: boolean },
+  options: {
+    stampEmittedAt: boolean;
+    enabled: boolean;
+    sourceCycle?: StreamingStateUpdate["cycle"] | null;
+  },
 ): T {
   if (!options.enabled) return state;
+  const sourceTimeline =
+    state.cycle.sourceTimeline ??
+    buildSourceTimeline(options.sourceCycle ?? state.cycle, sourceEmittedAt);
   const withTimeline: T = {
     ...state,
     cycle: {
       ...state.cycle,
-      sourceTimeline: buildSourceTimeline(state.cycle, sourceEmittedAt),
+      sourceTimeline,
     },
   };
   if (!options.stampEmittedAt) return withTimeline;
@@ -315,6 +323,14 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function hashAuditValue(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
 }
 
 function redactIngestUrlFromDestination<T>(destination: T): T {
@@ -977,6 +993,51 @@ async function getThoughtsSnapshot(
   return thoughts.slice(0, Math.max(1, Math.min(limit, 50)));
 }
 
+export function normalizeStreamingThoughtLimit(
+  rawLimit: string | undefined,
+): number {
+  const parsed = Number.parseInt(rawLimit || "20", 10);
+  if (!Number.isFinite(parsed)) {
+    return 20;
+  }
+  return Math.max(1, Math.min(parsed, 50));
+}
+
+export function allocateNextStreamingSseClientId(
+  currentNextClientId: number,
+  clients: ReadonlyMap<number, unknown>,
+): { clientId: number; nextClientId: number } {
+  const maxClientId = Number.MAX_SAFE_INTEGER;
+  let candidate = currentNextClientId;
+
+  for (let attempts = 0; attempts <= maxClientId; attempts += 1) {
+    if (!Number.isSafeInteger(candidate) || candidate <= 0) {
+      candidate = 1;
+    }
+    if (!clients.has(candidate)) {
+      const nextClientId = candidate >= maxClientId ? 1 : candidate + 1;
+      return { clientId: candidate, nextClientId };
+    }
+    candidate = candidate >= maxClientId ? 1 : candidate + 1;
+  }
+
+  throw new Error("Streaming SSE client id space exhausted");
+}
+
+export function buildStreamingResultNotFoundPayload(): {
+  error: "Not found";
+  message: "Resolved duel not found";
+} {
+  return {
+    error: "Not found",
+    message: "Resolved duel not found",
+  };
+}
+
+export function isValidStreamingResultDuelId(duelId: string): boolean {
+  return STREAMING_RESULT_DUEL_ID_PATTERN.test(duelId);
+}
+
 /**
  * Register streaming routes
  */
@@ -1313,10 +1374,12 @@ export function registerStreamingRoutes(
     scheduler: NonNullable<ReturnType<typeof getStreamingDuelScheduler>>,
   ): ReturnType<typeof scheduler.getStreamingState> | null => {
     if (STREAMING_PUBLIC_DELAY_MS <= 0) {
-      const live = redactOracleProofFromState(scheduler.getStreamingState());
+      const rawState = scheduler.getStreamingState();
+      const live = redactOracleProofFromState(rawState);
       return attachRawSourceTime(live, Date.now(), {
         stampEmittedAt: true,
         enabled: rawSourceTimeEnabled,
+        sourceCycle: rawState.cycle,
       });
     }
 
@@ -1363,7 +1426,8 @@ export function registerStreamingRoutes(
     const scheduler = getStreamingDuelScheduler();
     if (!scheduler) return null;
 
-    const state = redactOracleProofFromState(scheduler.getStreamingState());
+    const rawState = scheduler.getStreamingState();
+    const state = redactOracleProofFromState(rawState);
     const serialized = JSON.stringify(state);
     if (
       !forceNewFrame &&
@@ -1385,6 +1449,7 @@ export function registerStreamingRoutes(
     const stateWithTimeline = attachRawSourceTime(state, emittedAt, {
       stampEmittedAt: false,
       enabled: rawSourceTimeEnabled,
+      sourceCycle: rawState.cycle,
     });
     const payload = JSON.stringify({
       ...stateWithTimeline,
@@ -1593,7 +1658,12 @@ export function registerStreamingRoutes(
       raw.flushHeaders?.();
       raw.write("retry: 2000\n\n");
 
-      const clientId = nextClientId++;
+      const allocation = allocateNextStreamingSseClientId(
+        nextClientId,
+        sseClients,
+      );
+      const clientId = allocation.clientId;
+      nextClientId = allocation.nextClientId;
       sseClients.set(clientId, reply);
       sseMetrics.totalConnected += 1;
       sseMetrics.peakConnected = Math.max(
@@ -1787,7 +1857,7 @@ export function registerStreamingRoutes(
           delayed: true,
         });
       }
-      const limit = Number.parseInt(request.query.limit || "20", 10);
+      const limit = normalizeStreamingThoughtLimit(request.query.limit);
       const thoughts = await getThoughtsSnapshot(
         request.params.characterId,
         limit,
@@ -1944,51 +2014,27 @@ export function registerStreamingRoutes(
   //
   // When the keeper misses a live `duel_ended` event (for example a restart
   // window), the bundle is stuck at LOCKED with no path forward because
-  // Solana resolution requires the seed + replayHash that only arrive on
-  // that event. This endpoint lets the keeper reconstruct the resolution
+  // Solana resolution requires the deterministic proof material
+  // (duelKeyHex + seed + replayHash) that only arrive on that event. This
+  // endpoint lets the keeper reconstruct the same authorized report payload
   // from the durable streaming_duel_history row.
   //
-  // Bearer-auth prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
-  // hyperbet keeper's consumption order). STREAMING_ORACLE_PROOF_TOKEN is a
-  // server-side alias kept for continuity. BETTING_FEED_ACCESS_TOKEN is
-  // accepted as a compatibility fallback so existing deployments keep working
-  // during rollout. Operators should migrate to the dedicated oracle-proof
-  // secret to narrow the blast radius of a feed-token leak.
-  let oracleProofFallbackWarnLogged = false;
-  let oracleProofSkipAuthWarnLogged = false;
+  // Bearer-auth requires HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches the
+  // hyperbet keeper). The endpoint intentionally never falls back to the
+  // general betting feed token because it returns settlement proof material.
   const authorizeResultsLookup = async (
     request: FastifyRequest,
     reply: FastifyReply,
   ) => {
     const env = process.env as Record<string, string | undefined>;
-    const skipAuth = shouldSkipBettingFeedAuth(env);
     const resolution = resolveOracleProofAccessToken(env);
     const requiredToken = resolution.token;
 
-    if (
-      resolution.source === "betting-feed" &&
-      !oracleProofFallbackWarnLogged
-    ) {
-      fastify.log.warn(
-        "[streaming] /api/streaming/results/:duelId authenticated via BETTING_FEED_ACCESS_TOKEN; set HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN (matches hyperbet keeper) to scope oracle-proof access independently",
-      );
-      oracleProofFallbackWarnLogged = true;
-    }
-
     if (!requiredToken) {
-      if (process.env.NODE_ENV === "production" || !skipAuth) {
-        return reply.status(503).send({
-          error: "Service unavailable",
-          message: "Oracle proof auth token is not configured",
-        });
-      }
-      if (!oracleProofSkipAuthWarnLogged) {
-        fastify.log.warn(
-          "[streaming] /api/streaming/results/:duelId is serving requests UNAUTHENTICATED (BETTING_FEED_SKIP_AUTH=true, NODE_ENV=development)",
-        );
-        oracleProofSkipAuthWarnLogged = true;
-      }
-      return;
+      return reply.status(503).send({
+        error: "Service unavailable",
+        message: "Oracle proof auth token is not configured",
+      });
     }
 
     const token = extractBettingFeedToken({
@@ -2020,6 +2066,12 @@ export function registerStreamingRoutes(
           message: "duelId is required",
         });
       }
+      if (!isValidStreamingResultDuelId(duelId)) {
+        return reply.status(400).send({
+          error: "Bad request",
+          message: "Invalid duelId format",
+        });
+      }
 
       const db = getStorageDb();
       if (!db) {
@@ -2040,21 +2092,17 @@ export function registerStreamingRoutes(
       const row = rows[0];
 
       if (!row) {
-        return reply.status(404).send({
-          error: "Not found",
-          message: `No resolved duel with duelId=${duelId}`,
-        });
+        return reply.status(404).send(buildStreamingResultNotFoundPayload());
       }
 
       // Audit trail: oracle-proof material (duelKeyHex, seed, replayHash) is
-      // settlement-grade data. Every successful retrieval is logged at info
-      // with caller IP + user-agent so a token compromise can be traced.
+      // settlement-grade data. Hash the caller IP so logs can correlate access
+      // patterns without storing direct keeper network identifiers.
       fastify.log.info(
         {
           duelId: row.duelId,
           cycleId: row.cycleId,
-          ip: request.ip,
-          userAgent: request.headers["user-agent"] ?? null,
+          callerIpHash: hashAuditValue(request.ip),
         },
         "[streaming] oracle-proof retrieval",
       );

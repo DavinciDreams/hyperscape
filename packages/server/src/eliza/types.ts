@@ -336,4 +336,13 @@ export interface IEmbeddedHyperscapeService {
 
   /** Remove the arena movement constraint set by setArenaBounds(). */
   clearArenaBounds(): void;
+
+  /** Enable or disable autonomous overworld behavior while an external controller owns the agent. */
+  setAutonomousBehaviorEnabled(enabled: boolean): void;
+
+  /** Whether autonomous overworld behavior is currently enabled. */
+  isAutonomousEnabled(): boolean;
+
+  /** Send an overhead chat message through the embedded client bridge. */
+  sendChatMessage(text: string): Promise<string>;
 }

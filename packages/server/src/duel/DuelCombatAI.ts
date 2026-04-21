@@ -1324,7 +1324,11 @@ export class DuelCombatAI {
     }
 
     try {
-      void this.service.executeMove([targetX, ownPos[1], targetZ], run);
+      void this.service
+        .executeMove([targetX, ownPos[1], targetZ], run)
+        .catch((err) =>
+          duelLogDebug("DuelCombatAI", "Move failed:", errMsg(err)),
+        );
       this.lastMoveTime = now;
       this.strafeMoveCount++;
       // Flip orbit direction every 5 moves — creates longer, more readable arcs

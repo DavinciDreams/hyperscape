@@ -204,6 +204,56 @@ describe("attachRawSourceTime", () => {
     expect(result.cycle.sourceTimeline?.updatedAt).toBe(9_000);
   });
 
+  it("builds sourceTimeline from the explicit raw source cycle when provided", () => {
+    const redactedCycle = makeCycle({
+      duelEndTime: null,
+    });
+    const rawCycle = makeCycle({
+      duelEndTime: 44_000,
+    });
+    const state = makeState(redactedCycle);
+
+    const result = attachRawSourceTime(state, 9_000, {
+      stampEmittedAt: true,
+      enabled: true,
+      sourceCycle: rawCycle,
+    });
+
+    expect(result.cycle.duelEndTime).toBeNull();
+    expect(result.cycle.sourceTimeline).toEqual({
+      phase: rawCycle.phase,
+      betOpenTime: rawCycle.betOpenTime,
+      betCloseTime: rawCycle.betCloseTime,
+      fightStartTime: rawCycle.fightStartTime,
+      duelEndTime: 44_000,
+      updatedAt: 9_000,
+    });
+  });
+
+  it("preserves a pre-existing sourceTimeline instead of rebuilding it from the public cycle", () => {
+    const existingSourceTimeline = {
+      phase: "RESOLUTION" as const,
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 4_000,
+      updatedAt: 5_000,
+    };
+    const state = makeState({
+      ...makeCycle({
+        phase: "RESOLUTION",
+      }),
+      sourceTimeline: existingSourceTimeline,
+    });
+
+    const result = attachRawSourceTime(state, 9_999, {
+      stampEmittedAt: true,
+      enabled: true,
+    });
+
+    expect(result.cycle.sourceTimeline).toEqual(existingSourceTimeline);
+  });
+
   it("leaves all existing fields untouched (additive only)", () => {
     const state = makeState(
       makeCycle({

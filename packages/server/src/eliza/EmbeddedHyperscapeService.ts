@@ -113,7 +113,7 @@ function getSharedEntitySnapshot(
     now - cached.time < SHARED_SNAPSHOT_TTL_MS &&
     cached.snapshot.length > 0
   ) {
-    return cached.snapshot;
+    return cached.snapshot.slice();
   }
   const snapshot: EntitySnapshot[] = [];
   for (const [id, entity] of world.entities.items.entries()) {
@@ -124,7 +124,7 @@ function getSharedEntitySnapshot(
     snapshot.push({ id, position: pos, data, entity });
   }
   _snapshotCache.set(world, { snapshot, time: now });
-  return snapshot;
+  return snapshot.slice();
 }
 
 // Event handler type

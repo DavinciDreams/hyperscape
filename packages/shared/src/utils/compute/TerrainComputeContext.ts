@@ -339,17 +339,23 @@ export class TerrainComputeContext {
     const WEBGPU_MAX_WORKGROUPS_PER_DIM = 65535;
     const dispatchX = Math.min(totalWorkgroups, WEBGPU_MAX_WORKGROUPS_PER_DIM);
     const dispatchY = Math.ceil(totalWorkgroups / dispatchX);
+    if (dispatchY > WEBGPU_MAX_WORKGROUPS_PER_DIM) {
+      throw new Error(
+        `Road influence texture dispatch exceeds WebGPU 2D workgroup limits: totalWorkgroups=${totalWorkgroups}, dispatch=${dispatchX}x${dispatchY}`,
+      );
+    }
 
     const roadInfluenceUniformData = new ArrayBuffer(8 * 4);
     const roadInfluenceUniformF32 = new Float32Array(roadInfluenceUniformData);
-    roadInfluenceUniformF32[0] = pixelCount;
+    const roadInfluenceUniformU32 = new Uint32Array(roadInfluenceUniformData);
+    roadInfluenceUniformU32[0] = pixelCount;
     roadInfluenceUniformF32[1] = roadCount;
     roadInfluenceUniformF32[2] = textureSize;
     roadInfluenceUniformF32[3] = worldSize;
     roadInfluenceUniformF32[4] = centerX;
     roadInfluenceUniformF32[5] = centerZ;
     roadInfluenceUniformF32[6] = blendWidth;
-    new Uint32Array(roadInfluenceUniformData)[7] = dispatchX;
+    roadInfluenceUniformU32[7] = dispatchX;
 
     const uniformBuffer = this.ctx.createUniformBuffer(
       "rtex_uniforms",

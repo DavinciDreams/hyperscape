@@ -207,4 +207,120 @@ describe("parseExternalRtmpStatusSnapshot", () => {
       healthy: true,
     });
   });
+
+  it("accepts x11_nvenc capture mode from external worker snapshots", () => {
+    const parsed = parseExternalRtmpStatusSnapshot(
+      JSON.stringify({
+        destinations: [],
+        stats: {},
+        updatedAt: Date.now(),
+        captureMode: "x11_nvenc",
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "x11_nvenc",
+          degradedReason: null,
+        },
+      }),
+      15_000,
+      { allowStale: true },
+    );
+
+    expect(parsed?.captureMode).toBe("x11_nvenc");
+    expect(parsed?.sourceRuntime?.captureMode).toBe("x11_nvenc");
+  });
+
+  it("drops malformed nested fields while preserving valid siblings", () => {
+    const parsed = parseExternalRtmpStatusSnapshot(
+      JSON.stringify({
+        destinations: [],
+        stats: {},
+        updatedAt: Date.now(),
+        rendererHealth: {
+          ready: true,
+          degradedReason: 123,
+          updatedAt: "late",
+          phase: "fight",
+        },
+        delivery: {
+          mode: "external_hls",
+          provider: "cloudflare_stream",
+          playbackUrl: "https://customer.example/live.m3u8",
+          ingestUrl: 42,
+        },
+        sourceRuntime: {
+          ready: true,
+          captureMode: "cdp",
+          recoveryCount: "two",
+          workerHeartbeatAt: 5000,
+        },
+        captureDiagnostics: {
+          recentFrames: [
+            {
+              at: 10,
+              size: "bad",
+              cdpTimestamp: 11.5,
+            },
+            "bad-frame",
+          ],
+          recentFrameCadenceMs: [33, "slow", null],
+          lastFatalWriteError: {
+            at: 12,
+            message: "Broken pipe",
+            frameCount: "bad",
+            backpressured: false,
+          },
+          manifestStatus: "ok",
+        },
+      }),
+      15_000,
+      { allowStale: true },
+    );
+
+    expect(parsed?.rendererHealth).toEqual({
+      ready: true,
+      degradedReason: null,
+      updatedAt: null,
+      phase: "fight",
+    });
+    expect(parsed?.delivery).toEqual({
+      mode: "external_hls",
+      provider: "cloudflare_stream",
+      playbackUrl: "https://customer.example/live.m3u8",
+      hlsUrl: null,
+      llhlsUrl: null,
+      ingestUrl: null,
+    });
+    expect(parsed?.sourceRuntime).toEqual({
+      ready: true,
+      statusSource: "none",
+      captureMode: "cdp",
+      degradedReason: null,
+      currentSceneUrl: null,
+      activeBundle: null,
+      lastFrameAt: null,
+      lastRenderTickAt: null,
+      lastVisualChangeAt: null,
+      lastRecoveryAt: null,
+      recoveryCount: 0,
+      workerHeartbeatAt: 5000,
+    });
+    expect(parsed?.captureDiagnostics).toEqual({
+      recentFrames: [
+        {
+          at: 10,
+          size: null,
+          cdpTimestamp: 11.5,
+        },
+      ],
+      recentFrameCadenceMs: [33, null],
+      lastFatalWriteError: {
+        at: 12,
+        message: "Broken pipe",
+        frameCount: null,
+        backpressured: false,
+      },
+      manifestStatus: "ok",
+    });
+  });
 });

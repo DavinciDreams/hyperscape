@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertSafeBettingFeedAuthConfig,
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
@@ -32,6 +33,19 @@ describe("streaming-betting-auth", () => {
         authorizationHeader: "bearer secret-token",
       }),
     ).toBe("secret-token");
+  });
+
+  it("rejects empty or malformed bearer headers", () => {
+    expect(
+      extractBettingFeedToken({
+        authorizationHeader: "Bearer ",
+      }),
+    ).toBeNull();
+    expect(
+      extractBettingFeedToken({
+        authorizationHeader: "Bearer secret extra",
+      }),
+    ).toBeNull();
   });
 
   it("does not accept query tokens unless the route explicitly allows them", () => {
@@ -84,11 +98,19 @@ describe("streaming-betting-auth", () => {
     ).toBe(false);
   });
 
-  it("prefers HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN over aliases (matches hyperbet keeper)", () => {
+  it("throws when skip-auth is configured in production", () => {
+    expect(() =>
+      assertSafeBettingFeedAuthConfig({
+        NODE_ENV: "production",
+        BETTING_FEED_SKIP_AUTH: "true",
+      }),
+    ).toThrow("BETTING_FEED_SKIP_AUTH=true is forbidden");
+  });
+
+  it("requires HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN for oracle proof retrieval", () => {
     expect(
       resolveOracleProofAccessToken({
         HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN: "keeper-aligned-secret",
-        STREAMING_ORACLE_PROOF_TOKEN: "oracle-secret",
         BETTING_FEED_ACCESS_TOKEN: "bet-secret",
       }),
     ).toEqual({
@@ -97,26 +119,15 @@ describe("streaming-betting-auth", () => {
     });
   });
 
-  it("prefers STREAMING_ORACLE_PROOF_TOKEN over the betting feed token for oracle proof retrieval", () => {
+  it("does not fall back to BETTING_FEED_ACCESS_TOKEN for oracle proof retrieval", () => {
     expect(
       resolveOracleProofAccessToken({
-        STREAMING_ORACLE_PROOF_TOKEN: "oracle-secret",
+        NODE_ENV: "development",
         BETTING_FEED_ACCESS_TOKEN: "bet-secret",
       }),
     ).toEqual({
-      token: "oracle-secret",
-      source: "oracle-proof",
-    });
-  });
-
-  it("falls back to BETTING_FEED_ACCESS_TOKEN when the oracle-proof token is unset", () => {
-    expect(
-      resolveOracleProofAccessToken({
-        BETTING_FEED_ACCESS_TOKEN: "bet-secret",
-      }),
-    ).toEqual({
-      token: "bet-secret",
-      source: "betting-feed",
+      token: null,
+      source: null,
     });
   });
 

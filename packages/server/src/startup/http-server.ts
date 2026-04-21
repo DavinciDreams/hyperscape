@@ -888,11 +888,15 @@ function setAssetHeaders(
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 }
 
-function normalizeGameAssetPath(rawPath: string): string | null {
+export function normalizeGameAssetPath(rawPath: string): string | null {
   let decodedPath: string;
   try {
     decodedPath = decodeURIComponent(rawPath);
   } catch {
+    return null;
+  }
+
+  if (decodedPath.includes("\0")) {
     return null;
   }
 

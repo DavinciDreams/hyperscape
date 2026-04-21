@@ -311,11 +311,18 @@ export class AgentBehaviorTicker {
     // QuestSystem can load the player's quest state from the database.
     // Additional stagger offset prevents simultaneous first ticks.
     instance.behaviorStartTimeout = setTimeout(() => {
-      instance.behaviorStartTimeout = null;
+      const current = this.getAgent(characterId);
+      if (!current || current.state !== "running") {
+        return;
+      }
+      current.behaviorStartTimeout = null;
+      if (!current.service.isAutonomousEnabled()) {
+        return;
+      }
       void runTick();
 
       // Start the recurring interval AFTER the first tick completes its stagger
-      instance.behaviorInterval = setInterval(() => {
+      current.behaviorInterval = setInterval(() => {
         if (tickInProgress) return;
         tickInProgress = true;
         void runTick();

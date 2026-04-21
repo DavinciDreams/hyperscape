@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { IncomingHttpHeaders } from "node:http";
 import type { DatabaseSystem } from "../systems/DatabaseSystem/index.js";
@@ -170,7 +170,10 @@ function parseStoredJson<T>(rawValue: string | null | undefined): T | null {
   if (!rawValue) return null;
   try {
     return JSON.parse(rawValue) as T;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[CloudflareAuthority] Failed to parse persisted JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return null;
   }
 }
@@ -180,7 +183,11 @@ async function readStoredJson<T>(
   key: string,
 ): Promise<T | null> {
   if (!db) return null;
-  const rows = await db.select().from(storage).where(eq(storage.key, key)).limit(1);
+  const rows = await db
+    .select()
+    .from(storage)
+    .where(eq(storage.key, key))
+    .limit(1);
   return parseStoredJson<T>(rows[0]?.value);
 }
 
@@ -234,10 +241,24 @@ function isFreshTimestamp(
   );
 }
 
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableJsonValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, stableJsonValue(entry)]),
+    );
+  }
+  return value;
+}
+
 function buildReconciliationComparable(
   state: Omit<PersistedCloudflareReconciliationState, "revision" | "updatedAt">,
 ): string {
-  return JSON.stringify(state);
+  return JSON.stringify(stableJsonValue(state));
 }
 
 type CloudflareProviderEvidence = {
@@ -258,7 +279,11 @@ function resolveCloudflareProviderEvidence(params: {
 
   if (
     params.lifecycle &&
-    isFreshTimestamp(params.lifecycle.receivedAt, params.nowMs, params.freshnessMs)
+    isFreshTimestamp(
+      params.lifecycle.receivedAt,
+      params.nowMs,
+      params.freshnessMs,
+    )
   ) {
     candidates.push({
       liveInputId: params.lifecycle.liveInputId,
@@ -297,24 +322,20 @@ export function verifyCloudflareWebhookSecret(
   headers: IncomingHttpHeaders | Record<string, unknown>,
   secret: string | null | undefined,
 ): boolean {
-  const expectedSecret = secret?.trim();
-  if (!expectedSecret) {
-    return false;
-  }
+  const expectedSecret = secret?.trim() ?? "";
   const rawHeader =
     headers["cf-webhook-auth"] ??
-    headers["CF-WEBHOOK-AUTH"] ??
-    headers["Cf-Webhook-Auth"];
+    Object.entries(headers).find(
+      ([headerName]) => headerName.toLowerCase() === "cf-webhook-auth",
+    )?.[1];
   const receivedSecret = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-  if (typeof receivedSecret !== "string" || receivedSecret.trim().length === 0) {
-    return false;
-  }
-  const left = Buffer.from(receivedSecret.trim());
-  const right = Buffer.from(expectedSecret);
-  if (left.length !== right.length) {
-    return false;
-  }
-  return timingSafeEqual(left, right);
+  const normalizedReceived =
+    typeof receivedSecret === "string" ? receivedSecret.trim() : "";
+  const left = createHash("sha256").update(normalizedReceived).digest();
+  const right = createHash("sha256").update(expectedSecret).digest();
+  return Boolean(
+    expectedSecret && normalizedReceived && timingSafeEqual(left, right),
+  );
 }
 
 export function summarizeCloudflareLiveWebhook(params: {
@@ -413,7 +434,12 @@ export function reconcileCloudflareAuthority(params: {
     reason = "source_unready";
   } else if (providerEvidence && !providerLive) {
     reason = "provider_not_live";
-  } else if (providerEvidence && providerLive && playbackProbeFresh && !playbackProbeReady) {
+  } else if (
+    providerEvidence &&
+    providerLive &&
+    playbackProbeFresh &&
+    !playbackProbeReady
+  ) {
     reason = "probe_unready";
   } else if (!providerEvidence || !playbackProbeFresh) {
     reason = "authority_stale";
@@ -422,7 +448,8 @@ export function reconcileCloudflareAuthority(params: {
   const comparableState = {
     decision: reason == null ? "ready" : "blocked",
     reason,
-    liveInputId: providerEvidence?.liveInputId ?? params.lifecycle?.liveInputId ?? null,
+    liveInputId:
+      providerEvidence?.liveInputId ?? params.lifecycle?.liveInputId ?? null,
     videoUid: providerEvidence?.videoUid ?? params.lifecycle?.videoId ?? null,
     lifecycleStatus: providerEvidence?.lifecycleStatus ?? null,
     providerLive,
@@ -434,8 +461,12 @@ export function reconcileCloudflareAuthority(params: {
     playbackProbeReady,
     playbackProbeStatusCode: playbackProbeFresh?.statusCode ?? null,
     playbackManifestStatus:
-      playbackProbeFresh?.manifestStatus ?? ("unknown" satisfies StreamManifestStatus),
-  } satisfies Omit<PersistedCloudflareReconciliationState, "revision" | "updatedAt">;
+      playbackProbeFresh?.manifestStatus ??
+      ("unknown" satisfies StreamManifestStatus),
+  } satisfies Omit<
+    PersistedCloudflareReconciliationState,
+    "revision" | "updatedAt"
+  >;
 
   const previousComparable =
     params.previous == null
@@ -457,7 +488,7 @@ export function reconcileCloudflareAuthority(params: {
   return {
     revision:
       previousComparable === nextComparable
-        ? params.previous?.revision ?? 1
+        ? (params.previous?.revision ?? 1)
         : (params.previous?.revision ?? 0) + 1,
     updatedAt: nowMs,
     ...comparableState,
@@ -468,18 +499,21 @@ export async function loadPersistedStreamingAuthorityState(
   db: StorageDb | null | undefined,
 ): Promise<PersistedStreamingAuthorityState> {
   return {
-    canonicalProviderState: await readStoredJson<PersistedCanonicalProviderState>(
-      db,
-      CANONICAL_PROVIDER_STATE_STORAGE_KEY,
-    ),
-    cloudflareLifecycle: await readStoredJson<PersistedCloudflareLifecycleState>(
-      db,
-      CLOUDFLARE_LIFECYCLE_STORAGE_KEY,
-    ),
-    cloudflareLastWebhook: await readStoredJson<PersistedCloudflareWebhookState>(
-      db,
-      CLOUDFLARE_LAST_WEBHOOK_STORAGE_KEY,
-    ),
+    canonicalProviderState:
+      await readStoredJson<PersistedCanonicalProviderState>(
+        db,
+        CANONICAL_PROVIDER_STATE_STORAGE_KEY,
+      ),
+    cloudflareLifecycle:
+      await readStoredJson<PersistedCloudflareLifecycleState>(
+        db,
+        CLOUDFLARE_LIFECYCLE_STORAGE_KEY,
+      ),
+    cloudflareLastWebhook:
+      await readStoredJson<PersistedCloudflareWebhookState>(
+        db,
+        CLOUDFLARE_LAST_WEBHOOK_STORAGE_KEY,
+      ),
     cloudflareLifecyclePoll:
       await readStoredJson<PersistedCloudflareLifecyclePollState>(
         db,

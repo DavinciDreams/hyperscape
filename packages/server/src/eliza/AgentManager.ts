@@ -23,8 +23,6 @@ import {
   stringToUuid,
   type Character,
   type Plugin,
-  // @ts-ignore - exported at runtime but missing from .d.ts
-  InMemoryDatabaseAdapter,
 } from "@elizaos/core";
 import { createJWT } from "../shared/utils.js";
 import { errMsg } from "../shared/errMsg.js";
@@ -40,6 +38,10 @@ import {
   ejectAgentFromCombatArena,
   recoverAgentFromDeathLoop,
 } from "./agentRecovery.js";
+import {
+  CharacterWithModelProvider,
+  InMemoryDatabaseAdapter,
+} from "./elizaCoreCompat.js";
 
 /**
  * Dynamically import the Hyperscape plugin to avoid hard dependency in dev.
@@ -1219,7 +1221,7 @@ export class AgentManager {
       instance.config.characterConfig?.system ||
       `You are ${instance.config.name}, an embedded Hyperscape agent. Respond as yourself, stay grounded in the current game world, and keep replies concise and useful.`;
 
-    return {
+    const character = {
       id: stringToUuid(`embedded-chat-${instance.config.characterId}`),
       name: instance.config.name,
       username:
@@ -1260,9 +1262,9 @@ export class AgentManager {
         },
       },
       plugins: [],
-      // @ts-ignore - runtime supports modelProvider even if core type lags.
       modelProvider: provider.provider,
-    } as unknown as Character;
+    } as unknown as CharacterWithModelProvider;
+    return character as Character;
   }
 
   private buildDashboardChatPrompt(

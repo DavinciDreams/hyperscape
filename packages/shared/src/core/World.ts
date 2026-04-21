@@ -2177,7 +2177,7 @@ export class World extends EventEmitter {
       url = `asset://avatars/${filename}${suffix}`;
     } else {
       const relativeAvatarMatch = url.match(
-        /^(?:\.\/|\/)?(avatars\/[A-Za-z0-9_./-]+\.vrm)([?#].*)?$/i,
+        /^(?:\.\/|\/)?(avatars\/[A-Za-z0-9_.-]+\.vrm)([?#].*)?$/i,
       );
       if (relativeAvatarMatch) {
         const [, relativePathRaw, suffix = ""] = relativeAvatarMatch;
@@ -2221,7 +2221,7 @@ export class World extends EventEmitter {
         ) {
           if (this._resolvedCdnFallback === undefined) {
             this._resolvedCdnFallback =
-              (window as any).__CDN_URL ||
+              (window as unknown as { __CDN_URL?: string }).__CDN_URL ||
               `${window.location.origin}/game-assets`;
             console.warn(
               `[resolveURL] Origin is ${window.location.origin}, falling back from ${finalAssetsUrl} to local ${this._resolvedCdnFallback}`,

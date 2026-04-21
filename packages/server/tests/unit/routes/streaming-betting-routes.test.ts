@@ -273,6 +273,8 @@ describe("streaming-betting-routes", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -384,6 +386,8 @@ describe("streaming-betting-routes", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -460,7 +464,14 @@ describe("streaming-betting-routes", () => {
     expect(fetchSpy).toHaveBeenCalled();
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    let payload: Record<string, any> | null = null;
+    let payload: {
+      canonicalAuthority?: {
+        playbackProbeStatusCode?: unknown;
+      } & Record<string, unknown>;
+      channel?: {
+        publicReadiness?: Record<string, unknown>;
+      };
+    } | null = null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await options.fastify.inject({
         method: "GET",
@@ -591,21 +602,15 @@ describe("streaming-betting-routes", () => {
     await options.fastify.close();
   });
 
-  it("ignores skip-auth in production", async () => {
+  it("rejects skip-auth in production during route registration", async () => {
     stubEnv("NODE_ENV", "production");
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "");
     stubEnv("BETTING_FEED_SKIP_AUTH", "true");
 
     const options = createRouteOptions();
-    const routes = registerStreamingBettingRoutes(options);
-
-    const response = await options.fastify.inject({
-      method: "GET",
-      url: "/api/internal/bet-sync/state",
-    });
-
-    expect(response.statusCode).toBe(503);
-    routes.close();
+    expect(() => registerStreamingBettingRoutes(options)).toThrow(
+      "BETTING_FEED_SKIP_AUTH=true is forbidden",
+    );
     await options.fastify.close();
   });
 
@@ -865,6 +870,17 @@ describe("streaming-betting-routes", () => {
     expect(wrapped).toEqual({
       clientId: 3,
       nextCursor: 4,
+    });
+  });
+
+  it("normalizes invalid betting client id cursors before allocation", () => {
+    expect(allocateNextBettingClientId(Number.NaN, [1, 2])).toEqual({
+      clientId: 3,
+      nextCursor: 4,
+    });
+    expect(allocateNextBettingClientId(-1, [])).toEqual({
+      clientId: 1,
+      nextCursor: 2,
     });
   });
 });

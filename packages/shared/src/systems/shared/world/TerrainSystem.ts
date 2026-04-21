@@ -3530,7 +3530,9 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Compute height using noise (expensive). Skips flat zone check — caller must check first.
+   * Compute height using noise (expensive). The caller skips the outer
+   * getFlatZoneHeight() check, but the underlying base-height path still
+   * respects flat zones before shoreline shaping is applied.
    * PERF: Avoids redundant getFlatZoneHeight() when called from getHeightAt().
    */
   private getHeightAtComputedSkipFlatZone(

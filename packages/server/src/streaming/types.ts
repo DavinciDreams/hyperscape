@@ -40,7 +40,7 @@ export interface StreamingConfig {
   preset: "ultrafast" | "veryfast" | "fast" | "medium";
   /** Keyframe interval in frames */
   gopSize: number;
-  /** Capture mode: 'cdp' uses Page.startScreencast, 'mediarecorder' uses legacy WebSocket path, 'webcodecs' uses hardware VideoEncoder, 'x11_nvenc' uses FFmpeg x11grab + NVENC (no in-browser encode) */
+  /** Capture mode: 'cdp' uses Page.startScreencast, 'mediarecorder' uses legacy WebSocket path, 'webcodecs' uses hardware VideoEncoder, 'x11_nvenc' uses X11 desktop capture + NVENC encode */
   captureMode: "cdp" | "mediarecorder" | "webcodecs" | "x11_nvenc";
   /** JPEG quality for CDP screencast frames (1-100, default 80) */
   jpegQuality: number;

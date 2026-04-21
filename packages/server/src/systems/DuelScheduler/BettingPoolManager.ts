@@ -41,6 +41,10 @@ export interface BetRecord {
   createdAt: number;
 }
 
+const MAX_BETS_BY_WALLET_LIMIT = 100;
+const MAX_BETTING_LEADERBOARD_LIMIT = 100;
+const MAX_BETS_PER_WALLET_PER_ROUND = 100;
+
 export class BettingPoolManager {
   private readonly world: World;
 
@@ -117,6 +121,37 @@ export class BettingPoolManager {
           return {
             success: false,
             error: "Market is locked, betting is closed",
+          } as const;
+        }
+
+        // The round row lock above serializes market-close checks for this
+        // round. This per-wallet xact lock makes the bet-count invariant
+        // explicit too: concurrent requests for the same wallet/round cannot
+        // both count N and insert N+1.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            hashtext(${bet.roundId}),
+            hashtext(${bet.walletAddress})
+          )
+        `);
+
+        const existingBetCountRows = await tx
+          .select({
+            count: sql<number>`COUNT(*)::INT`,
+          })
+          .from(solanaBets)
+          .where(
+            and(
+              eq(solanaBets.roundId, bet.roundId),
+              eq(solanaBets.bettorWallet, bet.walletAddress),
+              eq(solanaBets.status, "CONFIRMED"),
+            ),
+          );
+        const existingBetCount = Number(existingBetCountRows[0]?.count ?? 0);
+        if (existingBetCount >= MAX_BETS_PER_WALLET_PER_ROUND) {
+          return {
+            success: false,
+            error: "Too many bets for this wallet on this round",
           } as const;
         }
 
@@ -233,6 +268,10 @@ export class BettingPoolManager {
     limit = 50,
   ): Promise<BetRecord[]> {
     const db = getDatabase();
+    const boundedLimit = Math.max(
+      1,
+      Math.min(Math.trunc(limit), MAX_BETS_BY_WALLET_LIMIT),
+    );
 
     try {
       const rows = await db
@@ -248,7 +287,7 @@ export class BettingPoolManager {
         .from(solanaBets)
         .where(eq(solanaBets.bettorWallet, walletAddress))
         .orderBy(sql`${solanaBets.createdAt} DESC`)
-        .limit(limit);
+        .limit(boundedLimit);
 
       return rows;
     } catch (err) {
@@ -280,9 +319,12 @@ export class BettingPoolManager {
         // original pg_advisory_xact_lock would queue everyone behind it —
         // that's an easy DoS vector on the payout path. Returning a conflict
         // error lets the caller retry.
-        const lockRows = await tx.execute<{ acquired: boolean }>(
-          sql`SELECT pg_try_advisory_xact_lock(hashtext(${`solana-payout:${roundId}:${walletAddress}`})) AS acquired`,
-        );
+        const lockRows = await tx.execute<{ acquired: boolean }>(sql`
+          SELECT pg_try_advisory_xact_lock(
+            hashtext(${roundId}),
+            hashtext(${walletAddress})
+          ) AS acquired
+        `);
         if (!lockRows.rows[0]?.acquired) {
           return {
             success: false,
@@ -357,6 +399,10 @@ export class BettingPoolManager {
           } as const;
         }
 
+        // Deliberately status-blind: any payout job for this
+        // (round, wallet) pair is the idempotency record, including
+        // READY_FOR_PAYOUT / FAILED rows. Narrowing this by status would allow
+        // duplicate claim jobs unless a database unique constraint is added.
         const existing = await tx
           .select()
           .from(solanaPayoutJobs)
@@ -412,6 +458,10 @@ export class BettingPoolManager {
     Array<{ wallet: string; totalBets: number; totalWagered: string }>
   > {
     const db = getDatabase();
+    const boundedLimit = Math.max(
+      1,
+      Math.min(Math.trunc(limit), MAX_BETTING_LEADERBOARD_LIMIT),
+    );
 
     try {
       const rows = await db
@@ -424,7 +474,7 @@ export class BettingPoolManager {
         .where(eq(solanaBets.status, "CONFIRMED"))
         .groupBy(solanaBets.bettorWallet)
         .orderBy(sql`SUM(CAST(${solanaBets.goldAmount} AS NUMERIC)) DESC`)
-        .limit(limit);
+        .limit(boundedLimit);
 
       return rows;
     } catch (err) {
@@ -455,6 +505,13 @@ function isValidPositiveDecimalAmount(amount: string): boolean {
   }
   return !/^0+(?:\.0+)?$/.test(normalized);
 }
+
+/** @internal Pure helpers exposed for financial input-validation tests. */
+export const __bettingPoolManagerTestInternals = {
+  MAX_BETS_PER_WALLET_PER_ROUND,
+  isValidPositiveDecimalAmount,
+  isValidSolanaWalletAddress,
+};
 
 export function redactWalletAddress(walletAddress: string): string {
   const trimmed = walletAddress.trim();

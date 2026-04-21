@@ -85,6 +85,8 @@ describe("streaming-betting canonical convergence", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -197,6 +199,8 @@ describe("streaming-betting canonical convergence", () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -337,6 +341,8 @@ describe("streaming-betting canonical convergence", () => {
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
     stubEnv("STREAM_ENABLE_AUTOMATIC_FAILOVER", "true");
     stubEnv("STREAM_CANONICAL_PROVIDER_PRIORITY", "self_hls,cloudflare_stream");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -442,6 +448,8 @@ describe("streaming-betting canonical convergence", () => {
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
     stubEnv("STREAM_DELIVERY_PROVIDER", "cloudflare_stream");
     stubEnv("STREAM_CANONICAL_PROVIDER_PRIORITY", "self_hls,cloudflare_stream");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",
@@ -549,6 +557,8 @@ describe("streaming-betting canonical convergence", () => {
     stubEnv("STREAM_ENABLE_AUTOMATIC_FAILOVER", "true");
     stubEnv("STREAM_CANONICAL_PROVIDER_PRIORITY", "cloudflare_stream,self_hls");
     stubEnv("STREAM_FAILBACK_SOAK_MS", "150");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_ALLOW_PRIVATE_PLAYBACK_PROBES", "true");
     stubEnv("STREAM_PLAYBACK_HLS_URL", "https://customer.example/live.m3u8");
     stubEnv(
       "STREAM_PLAYBACK_LLHLS_URL",

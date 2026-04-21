@@ -54,8 +54,9 @@ function signS3PutRequest(params: {
   accessKeyId: string;
   secretAccessKey: string;
   region: string;
+  now?: Date;
 }): { url: string; headers: Record<string, string> } {
-  const now = new Date();
+  const now = params.now ?? new Date();
   const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, "");
   const amzDate = now
     .toISOString()
@@ -117,6 +118,11 @@ function signS3PutRequest(params: {
     },
   };
 }
+
+/** @internal Pure helpers exposed for SigV4 regression tests. */
+export const __hlsCdnSyncTestInternals = {
+  signS3PutRequest,
+};
 
 // ============================================================================
 // HLS CDN Syncer
@@ -304,6 +310,15 @@ export function startHlsCdnSync(): string | null {
     return null;
   }
 
+  const publicUrl = config.publicUrl
+    ? `${config.publicUrl.replace(/\/$/, "")}/${config.prefix}stream.m3u8`
+    : `${config.endpoint}/${config.bucket}/${config.prefix}stream.m3u8`;
+
+  if (watcher || syncInterval) {
+    console.warn("[HLS-CDN] CDN sync already running");
+    return publicUrl;
+  }
+
   console.log(
     `[HLS-CDN] Starting CDN sync: ${config.hlsDir} → ${config.endpoint}/${config.bucket}/${config.prefix}`,
   );
@@ -347,10 +362,6 @@ export function startHlsCdnSync(): string | null {
 
   // Initial sync
   void syncDirectory(config);
-
-  const publicUrl = config.publicUrl
-    ? `${config.publicUrl.replace(/\/$/, "")}/${config.prefix}stream.m3u8`
-    : `${config.endpoint}/${config.bucket}/${config.prefix}stream.m3u8`;
 
   console.log(`[HLS-CDN] Public stream URL: ${publicUrl}`);
   return publicUrl;

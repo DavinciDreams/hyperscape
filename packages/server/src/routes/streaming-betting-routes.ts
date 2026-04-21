@@ -17,6 +17,7 @@ import {
   type BettingFeedRendererHealth,
 } from "./streaming-betting-feed.js";
 import {
+  assertSafeBettingFeedAuthConfig,
   extractBettingFeedToken,
   hasValidBettingFeedToken,
   resolveBettingFeedAccessToken,
@@ -218,10 +219,21 @@ export function allocateNextBettingClientId(
 ): BettingClientIdAllocation {
   const activeIds = new Set(activeClientIds);
   const maxClientId = Number.MAX_SAFE_INTEGER - 1;
-  let clientId = nextCursor;
+  let clientId =
+    Number.isSafeInteger(nextCursor) &&
+    nextCursor >= 1 &&
+    nextCursor <= maxClientId
+      ? nextCursor
+      : 1;
   let wrapped = false;
+  let attempts = 0;
+  const maxAttempts = activeIds.size + 1;
 
   while (activeIds.has(clientId)) {
+    attempts += 1;
+    if (attempts > maxAttempts) {
+      throw new Error("No betting SSE client ids available");
+    }
     clientId += 1;
     if (clientId > maxClientId) {
       clientId = 1;
@@ -263,6 +275,7 @@ export function registerStreamingBettingRoutes(
     getStreamCaptureStats,
   } = options;
   ensureRateLimitDecorator(fastify);
+  assertSafeBettingFeedAuthConfig(process.env);
 
   const tokenResolution = resolveBettingFeedAccessToken(process.env);
   const skipAuth = shouldSkipBettingFeedAuth(process.env);
@@ -315,10 +328,9 @@ export function registerStreamingBettingRoutes(
     );
   } else if (!tokenResolution.token && skipAuth) {
     // Log at error severity so the auth-bypass state is impossible to miss
-    // even during normal startup log volume. Also log whether the oracle
-    // proof endpoint is affected — the same skipAuth flag gates it too.
+    // even during normal startup log volume.
     fastify.log.error(
-      "BETTING_FEED_SKIP_AUTH=true AND NODE_ENV=development — internal betting feed AND /api/streaming/results/:duelId are serving UNAUTHENTICATED. This must never land in production.",
+      "BETTING_FEED_SKIP_AUTH=true AND NODE_ENV=development — internal betting feed is serving UNAUTHENTICATED. This must never land in production.",
     );
   } else if (!tokenResolution.token && viewerTokenConfigured) {
     fastify.log.warn(
@@ -472,8 +484,15 @@ export function registerStreamingBettingRoutes(
       updatedAt: Date.now(),
     };
     getPersistedAuthorityState().canonicalProviderState = state;
-    void persistCanonicalProviderState(getStorageDb(), state).catch(() => {
+    void persistCanonicalProviderState(getStorageDb(), state).catch((error) => {
       lastPersistedCanonicalProviderStateJson = null;
+      fastify.log.warn(
+        {
+          err: error,
+          activeProvider: state.activeProvider,
+        },
+        "[streaming-betting] Failed to persist canonical provider state",
+      );
     });
   };
 
@@ -578,8 +597,12 @@ export function registerStreamingBettingRoutes(
     lastPersistedCloudflareLifecyclePollJson = comparisonPayload;
     getPersistedAuthorityState().cloudflareLifecyclePoll = state;
     void persistCloudflareLifecyclePollState(getStorageDb(), state).catch(
-      () => {
+      (error) => {
         lastPersistedCloudflareLifecyclePollJson = null;
+        fastify.log.warn(
+          { err: error },
+          "[streaming-betting] Failed to persist Cloudflare lifecycle poll state",
+        );
       },
     );
   };
@@ -597,8 +620,12 @@ export function registerStreamingBettingRoutes(
     lastPersistedCloudflarePlaybackProbeJson = comparisonPayload;
     getPersistedAuthorityState().cloudflarePlaybackProbe = state;
     void persistCloudflarePlaybackProbeState(getStorageDb(), state).catch(
-      () => {
+      (error) => {
         lastPersistedCloudflarePlaybackProbeJson = null;
+        fastify.log.warn(
+          { err: error },
+          "[streaming-betting] Failed to persist Cloudflare playback probe state",
+        );
       },
     );
   };
@@ -613,8 +640,12 @@ export function registerStreamingBettingRoutes(
     lastPersistedCloudflareReconciliationJson = comparisonPayload;
     getPersistedAuthorityState().cloudflareReconciliation = state;
     void persistCloudflareReconciliationState(getStorageDb(), state).catch(
-      () => {
+      (error) => {
         lastPersistedCloudflareReconciliationJson = null;
+        fastify.log.warn(
+          { err: error },
+          "[streaming-betting] Failed to persist Cloudflare reconciliation state",
+        );
       },
     );
   };

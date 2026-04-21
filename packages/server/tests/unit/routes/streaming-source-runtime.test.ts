@@ -81,6 +81,47 @@ describe("deriveStreamSourceRuntime", () => {
     expect(runtime.captureMode).toBe("cdp");
   });
 
+  it("preserves x11_nvenc capture mode from the external worker snapshot", () => {
+    const runtime = deriveStreamSourceRuntime({
+      externalStatusSnapshot: {
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        captureMode: "x11_nvenc",
+        destinations: [],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: 1_000,
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "x11_nvenc",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle: "bundle-a",
+          lastFrameAt: 999,
+          lastRenderTickAt: 998,
+          lastVisualChangeAt: 997,
+          lastRecoveryAt: 900,
+          recoveryCount: 2,
+          workerHeartbeatAt: 1_000,
+        },
+      },
+      externalStatusMaxAgeMs: 15_000,
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1_000,
+      },
+      requireExternalWorker: true,
+      nowMs: 1_500,
+    });
+
+    expect(runtime.ready).toBe(true);
+    expect(runtime.captureMode).toBe("x11_nvenc");
+  });
+
   it("does not downgrade source runtime solely because a delivery destination is disconnected", () => {
     const runtime = deriveStreamSourceRuntime({
       externalStatusSnapshot: {

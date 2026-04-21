@@ -116,6 +116,9 @@ function hexToBytes32(hex: string): Uint8Array {
       `Expected 32-byte hex string, got ${normalized.length / 2} bytes`,
     );
   }
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error("Expected 32-byte hex string");
+  }
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     out[i] = parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
@@ -420,7 +423,10 @@ export class SolanaArenaOperator {
         .update(`replay:${params.roundSeedHex}`)
         .digest();
 
-      // Use a deterministic seed derived from the round
+      // This is deterministic proof material derived from the round seed,
+      // not fresh entropy. Reporter authorization on the Solana instruction
+      // remains the security boundary; these values let the keeper
+      // reconstruct the same report payload if it misses a live event.
       const seedBuf = createHash("sha256")
         .update(`seed:${params.roundSeedHex}`)
         .digest();
@@ -575,3 +581,16 @@ function parseKeypair(raw: string): Keypair {
 
   return Keypair.fromSecretKey(assertSecretKeyLength(bs58.decode(trimmed)));
 }
+
+/** @internal Pure helpers exposed for byte-layout regression tests. */
+export const __solanaArenaOperatorTestInternals = {
+  DUEL_STATUS,
+  MARKET_SIDE,
+  REPORT_RESULT_DISCRIMINATOR,
+  UPSERT_DUEL_DISCRIMINATOR,
+  buildReportResultInstruction,
+  buildUpsertDuelInstruction,
+  hashParticipant,
+  hexToBytes32,
+  parseKeypair,
+};

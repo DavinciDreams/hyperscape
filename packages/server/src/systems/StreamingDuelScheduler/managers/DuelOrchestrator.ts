@@ -243,6 +243,8 @@ export class DuelOrchestrator {
   private combatLoopInterval: ReturnType<typeof setInterval> | null = null;
   private combatLoopTickCount: number = 0;
   private combatRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private victoryPresentationTimeout: ReturnType<typeof setTimeout> | null =
+    null;
   private combatRetryCount: number = 0;
   private static readonly MAX_COMBAT_RETRIES = 5;
   private duelFoodSlotsByAgent: Map<string, DuelFoodProvisionedSlot[]> =
@@ -2405,9 +2407,10 @@ export class DuelOrchestrator {
 
     // Start DuelCombatAI for each agent (tick-based heal/buff/attack decisions)
     this.startCombatAIs().catch((err) => {
-      Logger.warn(
+      Logger.error(
         "StreamingDuelScheduler",
         `Failed to start combat AIs: ${errMsg(err)}`,
+        err instanceof Error ? err : null,
       );
     });
   }
@@ -2418,9 +2421,6 @@ export class DuelOrchestrator {
    * potion usage, and combat phase awareness (opening, trading, finishing).
    */
   async startCombatAIs(): Promise<void> {
-    this.stopCombatAIs();
-    this.combatRetryCount = 0;
-
     const cycle = this.getCurrentCycle();
     if (!cycle?.agent1 || !cycle?.agent2) return;
 
@@ -2429,6 +2429,8 @@ export class DuelOrchestrator {
         .toLowerCase()
         .trim() !== "false";
     if (!combatAiEnabled) {
+      this.stopCombatAIs();
+      this.combatRetryCount = 0;
       Logger.info(
         "StreamingDuelScheduler",
         "Combat AI disabled via STREAMING_DUEL_COMBAT_AI_ENABLED=false; relying on combat system re-engagement loop",
@@ -2446,6 +2448,11 @@ export class DuelOrchestrator {
     const { getAgentRuntimeByCharacterId } =
       await import("../../../eliza/ModelAgentSpawner.js");
     const manager = getAgentManager();
+
+    // Stop/relock after async imports so autonomy is not briefly restored while
+    // the module loader yields.
+    this.stopCombatAIs();
+    this.combatRetryCount = 0;
 
     const service1 = manager?.getAgentService(agent1.characterId) ?? null;
     const service2 = manager?.getAgentService(agent2.characterId) ?? null;
@@ -2519,6 +2526,20 @@ export class DuelOrchestrator {
       Logger.info(
         "StreamingDuelScheduler",
         `Combat AI started for ${agent2.name} (role=${role2}, ${llmTacticsEnabled && !!runtime2 ? "LLM strategy" : "scripted"})`,
+      );
+    }
+
+    if (this.combatAIs.size === 0) {
+      Logger.error(
+        "StreamingDuelScheduler",
+        "No combat AIs started; fight will rely only on combat re-engagement loop",
+        null,
+        {
+          agent1Id: agent1.characterId,
+          agent2Id: agent2.characterId,
+          service1Available: !!service1,
+          service2Available: !!service2,
+        },
       );
     }
   }
@@ -2783,6 +2804,13 @@ export class DuelOrchestrator {
     if (this.combatRetryTimeout) {
       clearTimeout(this.combatRetryTimeout);
       this.combatRetryTimeout = null;
+    }
+  }
+
+  clearVictoryPresentationTimeout(): void {
+    if (this.victoryPresentationTimeout) {
+      clearTimeout(this.victoryPresentationTimeout);
+      this.victoryPresentationTimeout = null;
     }
   }
 
@@ -3265,7 +3293,9 @@ export class DuelOrchestrator {
     // combat state teardown, scheduled animation resets) finishes first.
     // Without this, the "victory" emote gets immediately overwritten by
     // stale "idle" resets from the combat animation system.
-    setTimeout(() => {
+    this.clearVictoryPresentationTimeout();
+    this.victoryPresentationTimeout = setTimeout(() => {
+      this.victoryPresentationTimeout = null;
       this.triggerVictoryEmote(winnerId);
       this.fireVictoryTrashTalk(winnerId);
     }, 600);
@@ -3548,6 +3578,7 @@ export class DuelOrchestrator {
   reset(): void {
     this.stopCombatLoop();
     this.clearCombatRetryTimeout();
+    this.clearVictoryPresentationTimeout();
     this.stopCombatAIs();
     this._lastFightStats.clear();
     this.duelFoodSlotsByAgent.clear();
