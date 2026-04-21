@@ -442,6 +442,36 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     return { ctx, scheduler };
   }
 
+  it("uses betCloseTime as the announcement phase deadline in streaming state snapshots", () => {
+    const { scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    const now = Date.now();
+    (scheduler as any).currentCycle.phaseStartTime = now - 55_000;
+    (scheduler as any).currentCycle.betCloseTime = now + 51_000;
+
+    const state = scheduler.getStreamingState();
+
+    expect(state.cycle?.phase).toBe("ANNOUNCEMENT");
+    expect(state.cycle?.phaseEndTime).toBe(now + 51_000);
+    expect(state.cycle?.timeRemaining).toBe(51_000);
+
+    scheduler.destroy();
+  });
+
+  it("does not leave announcement before betCloseTime even if phaseStartTime drifted earlier", () => {
+    const { scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    const now = Date.now();
+    const startCountdownSpy = vi.spyOn(scheduler as any, "startCountdown");
+    (scheduler as any).currentCycle.phaseStartTime = now - 120_000;
+    (scheduler as any).currentCycle.betCloseTime = now + 30_000;
+
+    (scheduler as any).tickAnnouncement(now);
+
+    expect(startCountdownSpy).not.toHaveBeenCalled();
+    expect(scheduler.getCurrentCycle()?.phase).toBe("ANNOUNCEMENT");
+
+    scheduler.destroy();
+  });
+
   it("starts the fight on tick once fightStartTime has passed even if the timeout is still pending", async () => {
     const { ctx, scheduler } = createSchedulerWithActiveAnnouncementCycle();
     await (scheduler as any).startCountdown();
@@ -483,9 +513,9 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     (scheduler as any).tick();
 
     const lagLog = infoSpy.mock.calls.find(
-      ([system, message]: [string, string]) =>
-        system === "StreamingDuelScheduler" &&
-        message === "Fight start committed",
+      (call) =>
+        call[0] === "StreamingDuelScheduler" &&
+        call[1] === "Fight start committed",
     );
     expect(lagLog).toBeDefined();
     expect(lagLog?.[2]).toMatchObject({
@@ -508,8 +538,9 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     await (scheduler as any).startCountdown();
 
     const countdownLog = infoSpy.mock.calls.find(
-      ([system, message]: [string, string]) =>
-        system === "StreamingDuelScheduler" && message === "Starting countdown",
+      (call) =>
+        call[0] === "StreamingDuelScheduler" &&
+        call[1] === "Starting countdown",
     );
     expect(countdownLog).toBeDefined();
     expect(countdownLog?.[2]).toMatchObject({

@@ -1102,12 +1102,14 @@ export class StreamingDuelScheduler {
   private tickAnnouncement(now: number): void {
     if (!this.currentCycle) return;
 
-    const elapsed = now - this.currentCycle.phaseStartTime;
+    const announcementEndTime =
+      this.currentCycle.betCloseTime ??
+      this.currentCycle.phaseStartTime + STREAMING_TIMING.ANNOUNCEMENT_DURATION;
 
     // Check if announcement phase is over
-    if (elapsed >= STREAMING_TIMING.ANNOUNCEMENT_DURATION) {
+    if (now >= announcementEndTime) {
       if (this.currentCycle.announcementExpiredAt == null) {
-        this.currentCycle.announcementExpiredAt = now;
+        this.currentCycle.announcementExpiredAt = announcementEndTime;
       }
       void this.startCountdown();
       return;
@@ -1117,7 +1119,9 @@ export class StreamingDuelScheduler {
     // immutable oracle timing. Keep it opt-in only.
     if (
       STREAMING_ALLOW_READY_SKIP &&
-      elapsed >= STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION
+      now >=
+        this.currentCycle.phaseStartTime +
+          STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION
     ) {
       const { agent1, agent2 } = this.currentCycle;
       if (agent1 && agent2) {
@@ -2386,15 +2390,9 @@ export class StreamingDuelScheduler {
 
     switch (phase) {
       case "ANNOUNCEMENT":
-        return (
-          this.currentCycle.betCloseTime ??
-          phaseStartTime + STREAMING_TIMING.ANNOUNCEMENT_DURATION
-        );
+        return this.getAnnouncementEndTime();
       case "COUNTDOWN":
-        return (
-          this.currentCycle.fightStartTime ??
-          phaseStartTime + STREAMING_TIMING.COUNTDOWN_DURATION
-        );
+        return this.getCountdownEndTime();
       case "FIGHTING":
         return (
           phaseStartTime +
@@ -2406,6 +2404,22 @@ export class StreamingDuelScheduler {
       default:
         return Date.now();
     }
+  }
+
+  private getAnnouncementEndTime(): number {
+    if (!this.currentCycle) return Date.now();
+    return (
+      this.currentCycle.betCloseTime ??
+      this.currentCycle.phaseStartTime + STREAMING_TIMING.ANNOUNCEMENT_DURATION
+    );
+  }
+
+  private getCountdownEndTime(): number {
+    if (!this.currentCycle) return Date.now();
+    return (
+      this.currentCycle.fightStartTime ??
+      this.currentCycle.phaseStartTime + STREAMING_TIMING.COUNTDOWN_DURATION
+    );
   }
 
   private toStreamingCycleAgent(
