@@ -52,6 +52,7 @@ export function StreamingOverlay({
   bettingConfig = null,
 }: StreamingOverlayProps) {
   const [showVictory, setShowVictory] = useState(false);
+  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
   const victoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track when the FIGHTING phase starts so the "FIGHT!" text can linger
@@ -93,6 +94,29 @@ export function StreamingOverlay({
       }
     };
   }, [phase]);
+
+  useEffect(() => {
+    const targetTimeMs =
+      phase === "ANNOUNCEMENT"
+        ? (state?.cycle?.betCloseTime ?? null)
+        : phase === "COUNTDOWN"
+          ? (state?.cycle?.fightStartTime ?? null)
+          : null;
+
+    setCountdownNowMs(Date.now());
+
+    if (targetTimeMs == null || !Number.isFinite(targetTimeMs)) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setCountdownNowMs(Date.now());
+    }, 250);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [phase, state?.cycle?.betCloseTime, state?.cycle?.fightStartTime]);
 
   useEffect(() => {
     const prev = prevHpRef.current;
@@ -199,6 +223,7 @@ export function StreamingOverlay({
     betCloseTime,
     fightStartTime,
     fallbackTimeRemainingMs: timeRemaining,
+    nowMs: countdownNowMs,
   });
 
   // Get winner agent info

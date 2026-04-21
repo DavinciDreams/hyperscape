@@ -100,6 +100,29 @@ export interface StreamingRendererHealth {
   phase: StreamingState["cycle"]["phase"] | null;
 }
 
+export function shouldReuseStreamingState(
+  prev: StreamingState,
+  next: StreamingState,
+): boolean {
+  const p = prev.cycle;
+  const c = next.cycle;
+
+  return (
+    c.phase === p.phase &&
+    c.phaseEndTime === p.phaseEndTime &&
+    c.betCloseTime === p.betCloseTime &&
+    c.fightStartTime === p.fightStartTime &&
+    c.countdown === p.countdown &&
+    c.winnerId === p.winnerId &&
+    c.agent1?.hp === p.agent1?.hp &&
+    c.agent2?.hp === p.agent2?.hp &&
+    c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
+    c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
+    Math.floor(c.timeRemaining / 1000) === Math.floor(p.timeRemaining / 1000) &&
+    next.leaderboard.length === prev.leaderboard.length
+  );
+}
+
 function toGuardrailAgent(
   agent: AgentInfo | null,
 ): StreamingGuardrailAgentSnapshot | null {
@@ -384,21 +407,9 @@ export function StreamingMode() {
         // Only trigger React re-render when visible state actually changed
         setStreamingState((prev) => {
           if (!prev) return state;
-          // Skip re-render if phase, HP, countdown, and leaderboard are unchanged
-          const c = state.cycle;
-          const p = prev.cycle;
-          if (
-            c.phase === p.phase &&
-            c.countdown === p.countdown &&
-            c.winnerId === p.winnerId &&
-            c.agent1?.hp === p.agent1?.hp &&
-            c.agent2?.hp === p.agent2?.hp &&
-            c.agent1?.damageDealtThisFight === p.agent1?.damageDealtThisFight &&
-            c.agent2?.damageDealtThisFight === p.agent2?.damageDealtThisFight &&
-            Math.floor(c.timeRemaining / 1000) ===
-              Math.floor(p.timeRemaining / 1000) &&
-            state.leaderboard.length === prev.leaderboard.length
-          ) {
+          // Skip re-render only if both the visible combat state and the
+          // timing anchors are unchanged.
+          if (shouldReuseStreamingState(prev, state)) {
             return prev; // Same reference = no re-render
           }
           return state;
