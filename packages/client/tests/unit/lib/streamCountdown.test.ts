@@ -16,7 +16,7 @@ describe("resolveStreamCountdownDisplay", () => {
     expect(display.text).toBe("0:01");
   });
 
-  it("shows Preparing arena once announcement time has crossed zero", () => {
+  it("shows a blank timer hold once announcement time has crossed zero", () => {
     const display = resolveStreamCountdownDisplay({
       phase: "ANNOUNCEMENT",
       betCloseTime: 20_000,
@@ -26,7 +26,8 @@ describe("resolveStreamCountdownDisplay", () => {
 
     expect(display.kind).toBe("hold");
     expect(display.holdState).toBe("preparing_arena");
-    expect(display.text).toBe("Preparing arena");
+    expect(display.text).toBe("__:__");
+    expect(display.label).toBe("");
   });
 
   it("shows Starting... once countdown crossed zero before phase flip", () => {
