@@ -43,6 +43,8 @@ export interface StreamingState {
     timeRemaining: number;
     agent1: AgentInfo | null;
     agent2: AgentInfo | null;
+    betOpenTime?: number | null;
+    betCloseTime?: number | null;
     countdown: number | null;
     fightStartTime: number | null;
     arenaPositions: {

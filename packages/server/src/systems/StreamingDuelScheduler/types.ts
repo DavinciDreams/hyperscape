@@ -56,6 +56,8 @@ export interface StreamingDuelCycle {
   betCloseTime: number | null;
   countdownValue: number | null; // 3, 2, 1, 0
   fightStartTime: number | null;
+  announcementExpiredAt: number | null;
+  countdownBeganAt: number | null;
   duelEndTime: number | null;
   arenaPositions: {
     agent1: [number, number, number];

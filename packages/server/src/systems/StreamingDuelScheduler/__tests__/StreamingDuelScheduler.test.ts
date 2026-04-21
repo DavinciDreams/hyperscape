@@ -4,6 +4,7 @@ import { StreamingDuelScheduler } from "../index";
 /** Legacy constant kept for test assertions. */
 const DUEL_FOOD_ITEM = "shark";
 import { isDuelFoodItemId } from "../../duelFood";
+import { Logger } from "../../ServerNetwork/services/Logger";
 
 type SkillMap = Record<string, { level: number; xp: number }>;
 
@@ -415,6 +416,113 @@ describe("StreamingDuelScheduler endCycle guard", () => {
     expect((scheduler as any)._endCycleInProgress).toBe(false);
     expect((scheduler as any).schedulerState).toBe("IDLE");
     expect(scheduler.getCurrentCycle()).toBeNull();
+
+    scheduler.destroy();
+  });
+});
+
+describe("StreamingDuelScheduler deterministic countdown start", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  function createSchedulerWithActiveAnnouncementCycle() {
+    const ctx = createMockWorld();
+    const scheduler = new StreamingDuelScheduler(ctx.world as never);
+    scheduler.init();
+    scheduler.registerAgent("agent-alpha");
+    scheduler.registerAgent("agent-beta");
+    (scheduler as any).startNewCycle();
+    return { ctx, scheduler };
+  }
+
+  it("starts the fight on tick once fightStartTime has passed even if the timeout is still pending", async () => {
+    const { ctx, scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    await (scheduler as any).startCountdown();
+
+    expect(scheduler.getCurrentCycle()?.phase).toBe("COUNTDOWN");
+    expect((scheduler as any).countdownTimeout).not.toBeNull();
+
+    (scheduler as any).currentCycle.fightStartTime = Date.now() - 250;
+    (scheduler as any).tick();
+
+    expect(scheduler.getCurrentCycle()?.phase).toBe("FIGHTING");
+    expect((scheduler as any).countdownTimeout).toBeNull();
+
+    scheduler.destroy();
+  });
+
+  it("treats a late timeout callback as a no-op once the fight already started", async () => {
+    const { ctx, scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    await (scheduler as any).startCountdown();
+
+    (scheduler as any).currentCycle.fightStartTime = Date.now() - 250;
+    (scheduler as any).tick();
+    const combatCallsAfterStart = ctx.combatCalls.length;
+
+    (scheduler as any).doStartFight(Date.now() + 50, "timeout");
+
+    expect(scheduler.getCurrentCycle()?.phase).toBe("FIGHTING");
+    expect(ctx.combatCalls.length).toBe(combatCallsAfterStart);
+
+    scheduler.destroy();
+  });
+
+  it("logs structured fight-start lag diagnostics", async () => {
+    const infoSpy = vi.spyOn(Logger, "info");
+    const { scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    await (scheduler as any).startCountdown();
+
+    (scheduler as any).currentCycle.fightStartTime = Date.now() - 300;
+    (scheduler as any).tick();
+
+    const lagLog = infoSpy.mock.calls.find(
+      ([system, message]: [string, string]) =>
+        system === "StreamingDuelScheduler" &&
+        message === "Fight start committed",
+    );
+    expect(lagLog).toBeDefined();
+    expect(lagLog?.[2]).toMatchObject({
+      scheduledFightStartAt: Date.now() - 300,
+      actualFightStartAt: Date.now(),
+      startTrigger: "tick_fallback",
+    });
+    expect((lagLog?.[2] as { fightStartLagMs?: number }).fightStartLagMs).toBe(
+      300,
+    );
+
+    scheduler.destroy();
+  });
+
+  it("logs prep lag when countdown begins after announcement zero", async () => {
+    const infoSpy = vi.spyOn(Logger, "info");
+    const { scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    (scheduler as any).currentCycle.announcementExpiredAt = Date.now() - 1_500;
+
+    await (scheduler as any).startCountdown();
+
+    const countdownLog = infoSpy.mock.calls.find(
+      ([system, message]: [string, string]) =>
+        system === "StreamingDuelScheduler" && message === "Starting countdown",
+    );
+    expect(countdownLog).toBeDefined();
+    expect(countdownLog?.[2]).toMatchObject({
+      announcementExpiredAt: Date.now() - 1_500,
+      countdownBeganAt: Date.now(),
+    });
+    expect(
+      (countdownLog?.[2] as { announcementZeroToCountdownMs?: number })
+        .announcementZeroToCountdownMs,
+    ).toBeGreaterThanOrEqual(1_500);
+    expect(
+      (countdownLog?.[2] as { prepDurationMs?: number }).prepDurationMs,
+    ).toBeGreaterThanOrEqual(0);
 
     scheduler.destroy();
   });

@@ -126,6 +126,8 @@ function createCycle(
     betCloseTime: 2_000,
     countdownValue: null,
     fightStartTime: 3_000,
+    announcementExpiredAt: null,
+    countdownBeganAt: null,
     duelEndTime: null,
     arenaPositions: {
       agent1: [10, 11, 12],
