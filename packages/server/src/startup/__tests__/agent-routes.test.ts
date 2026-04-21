@@ -9,13 +9,35 @@ type MappingRow = {
   updatedAt?: Date;
 };
 
-const { agentMappingsTable, usersTable, charactersTable } = vi.hoisted(() => ({
+type ThoughtRow = {
+  characterId: string;
+  content: string;
+  decisionPath?: string | null;
+  timestamp: number;
+  type: string;
+};
+
+const {
+  agentMappingsTable,
+  agentThoughtsTable,
+  charactersTable,
+  serverNetworkState,
+  usersTable,
+} = vi.hoisted(() => ({
   agentMappingsTable: {
     __table: "agentMappings",
     accountId: "accountId",
     agentId: "agentId",
     agentName: "agentName",
     characterId: "characterId",
+  },
+  agentThoughtsTable: {
+    __table: "agentThoughts",
+    characterId: "characterId",
+    content: "content",
+    decisionPath: "decisionPath",
+    timestamp: "timestamp",
+    type: "type",
   },
   usersTable: {
     __table: "users",
@@ -26,10 +48,14 @@ const { agentMappingsTable, usersTable, charactersTable } = vi.hoisted(() => ({
     accountId: "accountId",
     id: "id",
   },
+  serverNetworkState: {
+    agentThoughts: new Map<string, ThoughtRow[]>(),
+  },
 }));
 
 vi.mock("../../database/schema.js", () => ({
   agentMappings: agentMappingsTable,
+  agentThoughts: agentThoughtsTable,
   characters: charactersTable,
   users: usersTable,
 }));
@@ -48,6 +74,10 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 vi.mock("../../eliza/index.js", () => ({
   getAgentManager: () => null,
   getRunningAgents: () => new Map(),
+}));
+
+vi.mock("../../systems/ServerNetwork/index.js", () => ({
+  ServerNetwork: serverNetworkState,
 }));
 
 import { registerAgentRoutes } from "../routes/agent-routes";
@@ -119,9 +149,13 @@ function createFastifyRecorder() {
   };
 }
 
-function createMockDatabase(initialMappings: MappingRow[]) {
+function createMockDatabase(
+  initialMappings: MappingRow[],
+  initialThoughts: ThoughtRow[] = [],
+) {
   const state = {
     mappings: [...initialMappings],
+    thoughts: [...initialThoughts],
   };
 
   const db = {
@@ -173,29 +207,89 @@ function createMockDatabase(initialMappings: MappingRow[]) {
     },
     select: () => ({
       from: (table: { __table: string }) => {
-        const filterRows = (condition: {
-          column?: keyof MappingRow;
-          value?: unknown;
-        }) => {
-          if (table.__table === "agentMappings" && condition.column) {
-            return state.mappings.filter(
-              (mapping) => mapping[condition.column!] === condition.value,
+        const applyCondition = (
+          row: MappingRow | ThoughtRow,
+          condition: {
+            column?: string;
+            conditions?: Array<{
+              column?: string;
+              op?: string;
+              value?: unknown;
+            }>;
+            op?: string;
+            value?: unknown;
+          },
+        ): boolean => {
+          if (condition.op === "and" && condition.conditions) {
+            return condition.conditions.every((entry) =>
+              applyCondition(row, entry),
             );
           }
-          return [];
+          if (!condition.column) {
+            return true;
+          }
+          const value = (row as Record<string, unknown>)[condition.column];
+          if (condition.op === "gt") {
+            return Number(value) > Number(condition.value);
+          }
+          return value === condition.value;
+        };
+        const filterRows = (condition: {
+          column?: string;
+          conditions?: Array<{ column?: string; op?: string; value?: unknown }>;
+          op?: string;
+          value?: unknown;
+        }) => {
+          if (table.__table === "agentMappings") {
+            return state.mappings.filter((mapping) =>
+              applyCondition(mapping, condition),
+            );
+          }
+          if (table.__table === "agentThoughts") {
+            return state.thoughts.filter((thought) =>
+              applyCondition(thought, condition),
+            );
+          }
+          return [] as Array<MappingRow | ThoughtRow>;
         };
         return {
           where: (condition: {
-            column?: keyof MappingRow;
+            column?: string;
+            conditions?: Array<{
+              column?: string;
+              op?: string;
+              value?: unknown;
+            }>;
+            op?: string;
             value?: unknown;
           }) => {
             const rows = filterRows(condition);
             return {
-              then: (onfulfilled: (value: MappingRow[]) => unknown) =>
-                Promise.resolve(onfulfilled(rows)),
-              orderBy: () => ({
-                limit: async () => rows,
-              }),
+              then: (
+                onfulfilled: (value: Array<MappingRow | ThoughtRow>) => unknown,
+              ) => Promise.resolve(onfulfilled(rows)),
+              orderBy: (order?: {
+                column?: string;
+                direction?: "desc" | "asc";
+              }) => {
+                const sorted = [...rows];
+                if (order?.column) {
+                  sorted.sort((left, right) => {
+                    const leftValue = (left as Record<string, unknown>)[
+                      order.column!
+                    ];
+                    const rightValue = (right as Record<string, unknown>)[
+                      order.column!
+                    ];
+                    const direction = order.direction === "desc" ? -1 : 1;
+                    if (leftValue === rightValue) return 0;
+                    return leftValue! > rightValue! ? direction : -direction;
+                  });
+                }
+                return {
+                  limit: async (count: number) => sorted.slice(0, count),
+                };
+              },
             };
           },
         };
@@ -206,9 +300,12 @@ function createMockDatabase(initialMappings: MappingRow[]) {
   return { db, state };
 }
 
-function setupRoutes(initialMappings: MappingRow[]) {
+function setupRoutes(
+  initialMappings: MappingRow[],
+  initialThoughts: ThoughtRow[] = [],
+) {
   const { fastify, routes } = createFastifyRecorder();
-  const { db, state } = createMockDatabase(initialMappings);
+  const { db, state } = createMockDatabase(initialMappings, initialThoughts);
   const world = {
     getSystem: (name: string) => (name === "database" ? { db } : undefined),
   };
@@ -218,6 +315,7 @@ function setupRoutes(initialMappings: MappingRow[]) {
   return {
     deleteMapping: routes.get("DELETE /api/agents/mappings/:agentId")!,
     getMapping: routes.get("GET /api/agents/mapping/:agentId")!,
+    getThoughts: routes.get("GET /api/agents/:agentId/thoughts")!,
     listMappings: routes.get("GET /api/agents/mappings/:accountId")!,
     saveMapping: routes.get("POST /api/agents/mappings")!,
     state,
@@ -229,6 +327,7 @@ describe("agent route mapping cache", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    serverNetworkState.agentThoughts.clear();
   });
 
   afterEach(() => {
@@ -490,6 +589,54 @@ describe("agent route mapping cache", () => {
       agentName: "Gamma",
       characterId: "character-2",
       success: true,
+    });
+  });
+
+  it("defaults invalid thoughts limit before cold-start DB hydrate", async () => {
+    const { getThoughts } = setupRoutes(
+      [
+        {
+          agentId: "agent-1",
+          accountId: "account-1",
+          characterId: "character-1",
+          agentName: "Alpha",
+        },
+      ],
+      [
+        {
+          characterId: "character-1",
+          content: "fresh thought",
+          decisionPath: null,
+          timestamp: 200,
+          type: "reasoning",
+        },
+        {
+          characterId: "character-1",
+          content: "older thought",
+          decisionPath: null,
+          timestamp: 100,
+          type: "reasoning",
+        },
+      ],
+    );
+
+    const reply = createReplyRecorder();
+    await getThoughts(
+      {
+        params: { agentId: "agent-1" },
+        query: { limit: "foo" },
+      } as never,
+      reply as never,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.payload).toMatchObject({
+      success: true,
+      count: 2,
+      thoughts: [
+        expect.objectContaining({ content: "fresh thought", timestamp: 200 }),
+        expect.objectContaining({ content: "older thought", timestamp: 100 }),
+      ],
     });
   });
 });

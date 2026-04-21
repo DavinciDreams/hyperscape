@@ -60,6 +60,14 @@ type CachedValue<T> = {
   value: T;
 };
 
+function normalizeThoughtsLimit(rawLimit: string | undefined): number {
+  const parsed = Number.parseInt(rawLimit || "100", 10);
+  if (!Number.isFinite(parsed)) {
+    return 100;
+  }
+  return Math.max(1, Math.min(parsed, 200));
+}
+
 type AgentRouteSelectQuery = PromiseLike<unknown[]> & {
   orderBy: (order: unknown) => {
     limit: (count: number) => Promise<unknown[]>;
@@ -2974,7 +2982,7 @@ export function registerAgentRoutes(
       }
 
       // Parse query params
-      const limit = Math.min(parseInt(query.limit || "100", 10), 200);
+      const limit = normalizeThoughtsLimit(query.limit);
       const since = query.since ? parseInt(query.since, 10) : 0;
 
       const db = getDatabaseDb();

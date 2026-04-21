@@ -409,6 +409,10 @@ export class ClientNetwork extends SystemBase {
           "[ClientNetwork] Optimistic inventory action timed out, rolling back",
         );
       }
+      if (!this.inventoryTracker.hasPending()) {
+        clearInterval(this.inventoryPrunerInterval!);
+        this.inventoryPrunerInterval = null;
+      }
     }, 1000);
   }
 
