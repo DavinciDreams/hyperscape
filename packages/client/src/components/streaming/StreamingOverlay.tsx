@@ -23,6 +23,7 @@ import {
   type StreamingBettingConfig,
 } from "./StreamingBettingRail";
 import { CombatLog } from "./CombatLog";
+import { resolveStreamCountdownDisplay } from "./streamCountdown";
 import "./StreamingOverlay.css";
 
 // Delay before showing victory overlay during RESOLUTION phase (ms).
@@ -184,7 +185,21 @@ export function StreamingOverlay({
   }
 
   const { cycle, leaderboard } = state;
-  const { winnerId, winnerName, winReason, timeRemaining, duelId } = cycle;
+  const {
+    winnerId,
+    winnerName,
+    winReason,
+    timeRemaining,
+    duelId,
+    betCloseTime,
+    fightStartTime,
+  } = cycle;
+  const countdownDisplay = resolveStreamCountdownDisplay({
+    phase,
+    betCloseTime,
+    fightStartTime,
+    fallbackTimeRemainingMs: timeRemaining,
+  });
 
   // Get winner agent info
   const winnerAgent =
@@ -258,7 +273,8 @@ export function StreamingOverlay({
         duelId={duelId ?? null}
         agent1Name={agent1?.name}
         agent2Name={agent2?.name}
-        timeRemainingMs={timeRemaining}
+        countdownText={countdownDisplay.text}
+        countdownHoldState={countdownDisplay.holdState}
       />
 
       {/* Duel Info - Top Center (live fight + countdown to first swing) */}
@@ -266,11 +282,17 @@ export function StreamingOverlay({
         <div style={styles.duelInfoContainer}>
           <AgentStatsDisplay agent={agent1} side="left" />
           <div style={styles.timerContainer}>
-            <span className="streaming-fight-timer-eyebrow">Round timer</span>
+            <span className="streaming-fight-timer-eyebrow">
+              {phase === "COUNTDOWN"
+                ? countdownDisplay.label || "Fight starts"
+                : "Round timer"}
+            </span>
             <div style={styles.timerHexOuter}>
               <div style={styles.timerHexInner}>
                 <div style={styles.timerHighlight} />
-                {formatTime(timeRemaining)}
+                {phase === "COUNTDOWN"
+                  ? countdownDisplay.text || "Starting..."
+                  : formatTime(timeRemaining)}
               </div>
               <div style={styles.timerInsetShadow} />
             </div>
@@ -315,7 +337,7 @@ export function StreamingOverlay({
             </span>
             <div className="streaming-between-timer-wrap">
               <div className="streaming-between-timer-inner">
-                {timeRemaining > 0 ? formatTime(timeRemaining) : "—"}
+                {countdownDisplay.text || "—"}
               </div>
             </div>
             <span
@@ -328,7 +350,9 @@ export function StreamingOverlay({
                 color: "rgba(148, 163, 184, 0.9)",
               }}
             >
-              {phase === "RESOLUTION" ? "Next duel" : "Starts in"}
+              {phase === "RESOLUTION"
+                ? "Next duel"
+                : countdownDisplay.label || "Up next"}
             </span>
           </div>
           <div
@@ -364,7 +388,7 @@ export function StreamingOverlay({
             ) : null}
             <div className="streaming-interstitial-rule" />
             <div className="streaming-interstitial-timer">
-              {timeRemaining > 0 ? formatTime(timeRemaining) : "—"}
+              {countdownDisplay.text || "—"}
             </div>
             <span
               style={{
@@ -375,7 +399,9 @@ export function StreamingOverlay({
                 color: "rgba(148, 163, 184, 0.85)",
               }}
             >
-              {phase === "RESOLUTION" ? "Next round" : "Time to ring"}
+              {phase === "RESOLUTION"
+                ? "Next round"
+                : countdownDisplay.label || "Time to ring"}
             </span>
           </div>
         )}

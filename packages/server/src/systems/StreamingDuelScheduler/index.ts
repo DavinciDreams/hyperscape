@@ -803,18 +803,12 @@ export class StreamingDuelScheduler {
         this.tickAnnouncement(now);
         break;
       case "COUNTDOWN":
-        // Fix N — COUNTDOWN fallback. If fightStartTime has passed by >2s and
-        // the countdownTimeout was lost (GC'd, cleared by accident), force-start.
+        // fightStartTime is the authority; the timeout is only a wake-up path.
         if (
-          this.currentCycle.fightStartTime &&
-          now > this.currentCycle.fightStartTime + 2000 &&
-          this.countdownTimeout === null
+          this.currentCycle.fightStartTime != null &&
+          now >= this.currentCycle.fightStartTime
         ) {
-          Logger.warn(
-            "StreamingDuelScheduler",
-            "COUNTDOWN fallback: fightStartTime passed and countdownTimeout lost, force-starting fight",
-          );
-          this.doStartFight(now);
+          this.doStartFight(now, "tick_fallback");
         }
         break;
       case "FIGHTING":
@@ -1007,6 +1001,8 @@ export class StreamingDuelScheduler {
       betCloseTime,
       countdownValue: null,
       fightStartTime: null,
+      announcementExpiredAt: null,
+      countdownBeganAt: null,
       duelEndTime: null,
       arenaPositions: null,
       winnerId: null,
@@ -1110,6 +1106,9 @@ export class StreamingDuelScheduler {
 
     // Check if announcement phase is over
     if (elapsed >= STREAMING_TIMING.ANNOUNCEMENT_DURATION) {
+      if (this.currentCycle.announcementExpiredAt == null) {
+        this.currentCycle.announcementExpiredAt = now;
+      }
       void this.startCountdown();
       return;
     }
@@ -1153,6 +1152,7 @@ export class StreamingDuelScheduler {
     if (this._startCountdownInProgress) return;
     this._startCountdownInProgress = true;
     try {
+      const prepStartedAt = Date.now();
       Logger.info(
         "StreamingDuelScheduler",
         "Preparing contestants for countdown",
@@ -1279,13 +1279,27 @@ export class StreamingDuelScheduler {
         fightStartTime,
       );
       this.currentCycle.fightStartTime = fightStartTime;
+      this.currentCycle.countdownBeganAt = now;
       this.currentCycle.countdownValue = null;
       this.camera.setCameraTarget(
         this.currentCycle.agent1?.characterId ?? null,
         now,
       );
 
-      Logger.info("StreamingDuelScheduler", "Starting countdown");
+      const announcementExpiredAt =
+        this.currentCycle.announcementExpiredAt ?? prepStartedAt;
+      const prepDurationMs = Math.max(0, now - prepStartedAt);
+      const announcementZeroToCountdownMs = Math.max(
+        0,
+        now - announcementExpiredAt,
+      );
+
+      Logger.info("StreamingDuelScheduler", "Starting countdown", {
+        announcementExpiredAt,
+        countdownBeganAt: now,
+        announcementZeroToCountdownMs,
+        prepDurationMs,
+      });
 
       // Force immediate broadcast so clients see COUNTDOWN state.
       this.broadcastState();
@@ -1296,7 +1310,7 @@ export class StreamingDuelScheduler {
       }
       this.countdownTimeout = setTimeout(() => {
         this.countdownTimeout = null;
-        this.doStartFight(Date.now());
+        this.doStartFight(Date.now(), "timeout");
       }, STREAMING_TIMING.COUNTDOWN_DURATION);
     } finally {
       this._startCountdownInProgress = false;
@@ -1307,9 +1321,18 @@ export class StreamingDuelScheduler {
    * Wrapper that calls orchestrator.startFight() and handles facade-owned
    * camera logic around the fight start transition.
    */
-  private doStartFight(now: number): void {
+  private doStartFight(
+    now: number,
+    startTrigger: "timeout" | "tick_fallback",
+  ): void {
     if (!this.currentCycle || this.currentCycle.phase !== "COUNTDOWN") {
       return;
+    }
+
+    const scheduledFightStartAt = this.currentCycle.fightStartTime ?? now;
+    if (this.countdownTimeout) {
+      clearTimeout(this.countdownTimeout);
+      this.countdownTimeout = null;
     }
 
     // Both-dead check: abort if neither agent is alive (startFight just returns).
@@ -1339,6 +1362,12 @@ export class StreamingDuelScheduler {
       cycleAfterFight &&
       (cycleAfterFight.phase as StreamingPhase) === "FIGHTING"
     ) {
+      Logger.info("StreamingDuelScheduler", "Fight start committed", {
+        scheduledFightStartAt,
+        actualFightStartAt: now,
+        fightStartLagMs: Math.max(0, now - scheduledFightStartAt),
+        startTrigger,
+      });
       this.camera.setCameraTarget(
         cycleAfterFight.agent1?.characterId ?? null,
         now,
@@ -2357,11 +2386,10 @@ export class StreamingDuelScheduler {
 
     switch (phase) {
       case "ANNOUNCEMENT":
-        // Use MIN_ANNOUNCEMENT_DURATION for the timer since the phase
-        // early-exits as soon as both agents are alive (which is almost
-        // always immediate). ANNOUNCEMENT_DURATION is only a maximum
-        // fallback and would make the timer misleadingly long.
-        return phaseStartTime + STREAMING_TIMING.MIN_ANNOUNCEMENT_DURATION;
+        return (
+          this.currentCycle.betCloseTime ??
+          phaseStartTime + STREAMING_TIMING.ANNOUNCEMENT_DURATION
+        );
       case "COUNTDOWN":
         return (
           this.currentCycle.fightStartTime ??
