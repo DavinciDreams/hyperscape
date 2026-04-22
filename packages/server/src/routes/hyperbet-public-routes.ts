@@ -7,6 +7,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { World } from "@hyperscape/shared";
+import { RateLimiterMemory } from "rate-limiter-flexible";
 import { verifyWalletSignature } from "./hyperbet-wallet-auth.js";
 import { BettingPoolManager } from "../systems/DuelScheduler/BettingPoolManager.js";
 import { getHlsStreamUrl } from "../streaming/hls-cdn-sync.js";
@@ -44,6 +45,14 @@ type WorldWithBridge = World & {
 /** SSE clients for betting events */
 const sseClients = new Map<number, FastifyReply>();
 let nextSseId = 1;
+const HYPERBET_PUBLIC_WRITE_RATE_LIMIT = {
+  max: 20,
+  timeWindow: "1 minute",
+};
+const HYPERBET_PUBLIC_WRITE_CODEQL_LIMITER = new RateLimiterMemory({
+  points: 20,
+  duration: 60,
+});
 
 export function registerHyperBetPublicRoutes(
   fastify: FastifyInstance,
@@ -220,45 +229,59 @@ export function registerHyperBetPublicRoutes(
       signature: string;
       message: string;
     };
-  }>("/api/hyperbet/bets", async (req, reply) => {
-    const { roundId, side, amount, walletAddress, signature, message } =
-      req.body || {};
+  }>(
+    "/api/hyperbet/bets",
+    {
+      config: { rateLimit: HYPERBET_PUBLIC_WRITE_RATE_LIMIT },
+    },
+    async (req, reply) => {
+      try {
+        await HYPERBET_PUBLIC_WRITE_CODEQL_LIMITER.consume(req.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
 
-    if (
-      !roundId ||
-      !side ||
-      !amount ||
-      !walletAddress ||
-      !signature ||
-      !message
-    ) {
-      return reply.code(400).send({ error: "Missing required fields" });
-    }
+      const { roundId, side, amount, walletAddress, signature, message } =
+        req.body || {};
 
-    if (side !== "A" && side !== "B") {
-      return reply.code(400).send({ error: "Side must be A or B" });
-    }
+      if (
+        !roundId ||
+        !side ||
+        !amount ||
+        !walletAddress ||
+        !signature ||
+        !message
+      ) {
+        return reply.code(400).send({ error: "Missing required fields" });
+      }
 
-    // Verify wallet signature
-    const auth = verifyWalletSignature({ walletAddress, signature, message });
-    if (!auth.valid) {
-      return reply.code(401).send({ error: auth.error || "Invalid signature" });
-    }
+      if (side !== "A" && side !== "B") {
+        return reply.code(400).send({ error: "Side must be A or B" });
+      }
 
-    // Place the bet
-    const result = await poolManager.placeBet({
-      roundId,
-      side,
-      amount,
-      walletAddress,
-    });
+      // Verify wallet signature
+      const auth = verifyWalletSignature({ walletAddress, signature, message });
+      if (!auth.valid) {
+        return reply
+          .code(401)
+          .send({ error: auth.error || "Invalid signature" });
+      }
 
-    if (!result.success) {
-      return reply.code(400).send({ error: result.error });
-    }
+      // Place the bet
+      const result = await poolManager.placeBet({
+        roundId,
+        side,
+        amount,
+        walletAddress,
+      });
 
-    return reply.send({ success: true, betId: result.betId });
-  });
+      if (!result.success) {
+        return reply.code(400).send({ error: result.error });
+      }
+
+      return reply.send({ success: true, betId: result.betId });
+    },
+  );
 
   // ========================================================================
   // GET /api/hyperbet/bets/:walletAddress — Bet history
@@ -281,25 +304,39 @@ export function registerHyperBetPublicRoutes(
       signature: string;
       message: string;
     };
-  }>("/api/hyperbet/claims", async (req, reply) => {
-    const { roundId, walletAddress, signature, message } = req.body || {};
+  }>(
+    "/api/hyperbet/claims",
+    {
+      config: { rateLimit: HYPERBET_PUBLIC_WRITE_RATE_LIMIT },
+    },
+    async (req, reply) => {
+      try {
+        await HYPERBET_PUBLIC_WRITE_CODEQL_LIMITER.consume(req.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
 
-    if (!roundId || !walletAddress || !signature || !message) {
-      return reply.code(400).send({ error: "Missing required fields" });
-    }
+      const { roundId, walletAddress, signature, message } = req.body || {};
 
-    const auth = verifyWalletSignature({ walletAddress, signature, message });
-    if (!auth.valid) {
-      return reply.code(401).send({ error: auth.error || "Invalid signature" });
-    }
+      if (!roundId || !walletAddress || !signature || !message) {
+        return reply.code(400).send({ error: "Missing required fields" });
+      }
 
-    const result = await poolManager.createClaimJob(roundId, walletAddress);
-    if (!result.success) {
-      return reply.code(400).send({ error: result.error });
-    }
+      const auth = verifyWalletSignature({ walletAddress, signature, message });
+      if (!auth.valid) {
+        return reply
+          .code(401)
+          .send({ error: auth.error || "Invalid signature" });
+      }
 
-    return reply.send({ success: true, jobId: result.jobId });
-  });
+      const result = await poolManager.createClaimJob(roundId, walletAddress);
+      if (!result.success) {
+        return reply.code(400).send({ error: result.error });
+      }
+
+      return reply.send({ success: true, jobId: result.jobId });
+    },
+  );
 
   // ========================================================================
   // GET /api/hyperbet/leaderboard — Top bettors
