@@ -22,6 +22,17 @@ const DEAD_TREE_VARIANTS = [
   "asset://models/trees/dead/dead_04.glb",
 ] as const;
 
+const RESOURCE_ID_ALIASES: Record<string, string> = {
+  // Legacy/default terrain subtype ids that are still present in staging
+  // world data or emitted by older terrain generators. Map them onto
+  // currently supported resource manifest ids so the stream client does not
+  // spend whole frames throwing on missing tree definitions.
+  tree_normal: "tree_general",
+  tree_cactus: "tree_palm",
+  tree_coconut: "tree_palm",
+  tree_windPine: "tree_pine",
+};
+
 const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
   tree_banana: {
     id: "tree_banana",
@@ -278,7 +289,17 @@ export function getExternalResource(id: string): ExternalResourceData | null {
   if (existing) {
     return existing;
   }
-  const fallback = RESOURCE_FALLBACKS[id];
+
+  const canonicalId = RESOURCE_ID_ALIASES[id] ?? id;
+  if (canonicalId !== id) {
+    const aliased = resources.get(canonicalId) ?? RESOURCE_FALLBACKS[canonicalId];
+    if (aliased) {
+      resources.set(id, aliased);
+      return aliased;
+    }
+  }
+
+  const fallback = RESOURCE_FALLBACKS[canonicalId];
   if (!fallback) {
     return null;
   }
