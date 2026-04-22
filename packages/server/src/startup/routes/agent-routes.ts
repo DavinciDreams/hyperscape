@@ -484,7 +484,13 @@ export function registerAgentRoutes(
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
     },
-    withAgentManagementRateLimit(async (request, reply) => {
+    async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const body = request.body as {
           characterId: string;
@@ -578,7 +584,7 @@ export function registerAgentRoutes(
               : "Failed to generate credentials",
         });
       }
-    }),
+    },
   );
 
   /**
@@ -800,7 +806,13 @@ export function registerAgentRoutes(
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
     },
-    withAgentManagementRateLimit(async (request, reply) => {
+    async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const params = request.params as { accountId: string };
         const { accountId } = params;
@@ -871,7 +883,7 @@ export function registerAgentRoutes(
               : "Failed to fetch agent mappings",
         });
       }
-    }),
+    },
   );
 
   /**
@@ -1230,7 +1242,13 @@ export function registerAgentRoutes(
     {
       config: { rateLimit: AGENT_MANAGEMENT_RATE_LIMIT },
     },
-    withAgentManagementRateLimit(async (request, reply) => {
+    async (request, reply) => {
+      try {
+        await AGENT_MANAGEMENT_CODEQL_LIMITER.consume(request.ip);
+      } catch {
+        return reply.code(429).send({ error: "Too Many Requests" });
+      }
+
       try {
         const params = request.params as { agentId: string };
         const { agentId } = params;
@@ -1298,7 +1316,7 @@ export function registerAgentRoutes(
               : "Failed to delete agent mapping",
         });
       }
-    }),
+    },
   );
 
   /**
