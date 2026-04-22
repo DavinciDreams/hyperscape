@@ -1116,6 +1116,14 @@ export class StreamingDuelScheduler {
   private tickAnnouncement(now: number): void {
     if (!this.currentCycle) return;
 
+    if (
+      !this.currentCycle.arenaPositions &&
+      (!this.announcementArenaPrepPromise ||
+        this.announcementArenaPrepCycleId !== this.currentCycle.cycleId)
+    ) {
+      this.beginAnnouncementArenaPrep(this.currentCycle.cycleId);
+    }
+
     const announcementEndTime =
       this.currentCycle.betCloseTime ??
       this.currentCycle.phaseStartTime + STREAMING_TIMING.ANNOUNCEMENT_DURATION;
