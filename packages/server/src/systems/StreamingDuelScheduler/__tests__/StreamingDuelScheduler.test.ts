@@ -525,6 +525,38 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     scheduler.destroy();
   });
 
+  it("starts announcement arena prep before downstream cycle event listeners run", async () => {
+    const ctx = createMockWorld();
+    const scheduler = new StreamingDuelScheduler(ctx.world as never);
+    const originalEmit = ctx.world.emit;
+
+    ctx.world.emit = ((event: string, payload: unknown) => {
+      if (event === "duel:scheduled") {
+        throw new Error("duel scheduling listener failed");
+      }
+      originalEmit(event, payload);
+    }) as typeof ctx.world.emit;
+
+    scheduler.init();
+    scheduler.registerAgent("agent-alpha");
+    scheduler.registerAgent("agent-beta");
+
+    expect(() => (scheduler as any).startNewCycle()).toThrow(
+      "duel scheduling listener failed",
+    );
+
+    await Promise.resolve();
+
+    const state = scheduler.getStreamingState();
+    expect(state.cycle?.phase).toBe("ANNOUNCEMENT");
+    expect(state.cycle?.arenaPositions).toMatchObject({
+      agent1: expect.any(Array),
+      agent2: expect.any(Array),
+    });
+
+    scheduler.destroy();
+  });
+
   it("reuses announcement arena prep when countdown starts", async () => {
     const ctx = createMockWorld();
     const scheduler = new StreamingDuelScheduler(ctx.world as never);

@@ -1038,6 +1038,11 @@ export class StreamingDuelScheduler {
     // Set initial camera target
     this.camera.setCameraTarget(agent1.characterId, now);
 
+    // Prime arena prep before downstream event listeners run. Some staging
+    // listeners can throw during cycle scheduling; the visual pre-fight handoff
+    // must still start even if a later emit fails.
+    this.beginAnnouncementArenaPrep(cycleId);
+
     Logger.info(
       "StreamingDuelScheduler",
       `New cycle started: ${agent1.name} vs ${agent2.name}`,
@@ -1074,8 +1079,6 @@ export class StreamingDuelScheduler {
       agent2Name: agent2.name,
       startTime: betCloseTime,
     });
-
-    this.beginAnnouncementArenaPrep(cycleId);
   }
 
   /**
