@@ -38,6 +38,7 @@ const ENV_KEYS = [
   "STREAM_DELIVERY_RECOVERY_FAILURES",
   "STREAM_DELIVERY_RECOVERY_PROBE_TIMEOUT_MS",
   "STREAM_DELIVERY_RECOVERY_RESTART_COOLDOWN_MS",
+  "NODE_ENV",
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -376,6 +377,7 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(mockProbeResponse(404));
+    process.env.NODE_ENV = "development";
     process.env.STREAM_DELIVERY_RECOVERY_GRACE_MS = "0";
     process.env.STREAM_DELIVERY_RECOVERY_FAILURES = "1";
     process.env.STREAM_DELIVERY_RECOVERY_RESTART_COOLDOWN_MS = "5000";
@@ -413,6 +415,8 @@ describe("RTMPBridge Cloudflare ingest profile", () => {
 
     (bridge as any).checkHealth();
     await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect((bridge as any).status.destinations[0]?.connected).toBe(false);
