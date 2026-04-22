@@ -1336,6 +1336,61 @@ export class StreamingDuelScheduler {
 
     const prepStartedAt = Date.now();
 
+    if (!this.currentCycle.arenaPositions) {
+      try {
+        await this.orchestrator.teleportToArena(
+          this.currentCycle.agent1.characterId,
+          this.currentCycle.agent2.characterId,
+          true,
+        );
+      } catch (err) {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `Failed to teleport contestants into arena: ${errMsg(err)}`,
+        );
+        if (
+          this.currentCycle &&
+          this.currentCycle.cycleId === cycleId &&
+          (this.currentCycle.phase === "ANNOUNCEMENT" ||
+            this.currentCycle.phase === "COUNTDOWN")
+        ) {
+          this.abortCycleToIdle("arena_teleport_failed");
+        }
+        return;
+      }
+    }
+
+    if (
+      !this.currentCycle ||
+      this.currentCycle.cycleId !== cycleId ||
+      !this.currentCycle.agent1 ||
+      !this.currentCycle.agent2 ||
+      (this.currentCycle.phase !== "ANNOUNCEMENT" &&
+        this.currentCycle.phase !== "COUNTDOWN")
+    ) {
+      return;
+    }
+
+    const arenaPrimedAt = Date.now();
+    this.world.emit("player:movement:cancel", {
+      playerId: this.currentCycle.agent1.characterId,
+    });
+    this.world.emit("player:movement:cancel", {
+      playerId: this.currentCycle.agent2.characterId,
+    });
+    this.camera.setCameraTarget(
+      this.currentCycle.agent1.characterId,
+      arenaPrimedAt,
+    );
+
+    Logger.info("StreamingDuelScheduler", "Announcement arena visually primed", {
+      cycleId,
+      arenaPrimeLagMs: Math.max(0, arenaPrimedAt - prepStartedAt),
+      phase: this.currentCycle.phase,
+    });
+
+    this.broadcastState();
+
     try {
       await Promise.race([
         this.orchestrator.prepareContestantsForDuel(),
@@ -1370,40 +1425,6 @@ export class StreamingDuelScheduler {
       return;
     }
 
-    if (!this.currentCycle.arenaPositions) {
-      try {
-        await this.orchestrator.teleportToArena(
-          this.currentCycle.agent1.characterId,
-          this.currentCycle.agent2.characterId,
-          true,
-        );
-      } catch (err) {
-        Logger.warn(
-          "StreamingDuelScheduler",
-          `Failed to teleport contestants into arena: ${errMsg(err)}`,
-        );
-        if (
-          this.currentCycle &&
-          this.currentCycle.cycleId === cycleId &&
-          (this.currentCycle.phase === "ANNOUNCEMENT" ||
-            this.currentCycle.phase === "COUNTDOWN")
-        ) {
-          this.abortCycleToIdle("arena_teleport_failed");
-        }
-        return;
-      }
-    }
-
-    if (
-      !this.currentCycle ||
-      this.currentCycle.cycleId !== cycleId ||
-      !this.currentCycle.agent1 ||
-      (this.currentCycle.phase !== "ANNOUNCEMENT" &&
-        this.currentCycle.phase !== "COUNTDOWN")
-    ) {
-      return;
-    }
-
     const now = Date.now();
     this.world.emit("player:movement:cancel", {
       playerId: this.currentCycle.agent1.characterId,
@@ -1413,7 +1434,7 @@ export class StreamingDuelScheduler {
     });
     this.camera.setCameraTarget(this.currentCycle.agent1.characterId, now);
 
-    Logger.info("StreamingDuelScheduler", "Announcement arena primed", {
+    Logger.info("StreamingDuelScheduler", "Announcement contestants prepared", {
       cycleId,
       prepDurationMs: Math.max(0, now - prepStartedAt),
       phase: this.currentCycle.phase,
