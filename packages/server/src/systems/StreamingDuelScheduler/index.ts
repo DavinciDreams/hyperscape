@@ -203,6 +203,8 @@ export class StreamingDuelScheduler {
   private _lastStreamingStatePhase: StreamingPhase | null = null;
   /** Last cycle ID when state was generated */
   private _lastStreamingStateCycleId: string | null = null;
+  /** Last announcement snapshot mismatch warning signature to avoid log spam */
+  private _lastAnnouncementSnapshotWarningSignature: string | null = null;
   /** Cached agent objects to avoid recreation (reused in getStreamingState) */
   private _cachedAgent1: StreamingStateUpdate["cycle"]["agent1"] = null;
   private _cachedAgent2: StreamingStateUpdate["cycle"]["agent1"] = null;
@@ -2374,6 +2376,35 @@ export class StreamingDuelScheduler {
     const phaseEndTime = this.getPhaseEndTime();
     const timeRemaining = Math.max(0, phaseEndTime - now);
     const cameraTarget = this.getCycleCameraTargetSnapshot();
+    if (this.currentCycle.phase === "ANNOUNCEMENT") {
+      const signature = [
+        this.currentCycle.cycleId,
+        phaseEndTime,
+        this.currentCycle.betCloseTime ?? "null",
+        this.currentCycle.arenaPositions ? "arena-ready" : "arena-missing",
+      ].join(":");
+      if (
+        signature !== this._lastAnnouncementSnapshotWarningSignature &&
+        ((this.currentCycle.betCloseTime != null &&
+          phaseEndTime !== this.currentCycle.betCloseTime) ||
+          (!this.currentCycle.arenaPositions &&
+            now - this.currentCycle.phaseStartTime >= 2_000))
+      ) {
+        this._lastAnnouncementSnapshotWarningSignature = signature;
+        Logger.warn(
+          "StreamingDuelScheduler",
+          "Announcement snapshot mismatch",
+          {
+            cycleId: this.currentCycle.cycleId,
+            phaseStartTime: this.currentCycle.phaseStartTime,
+            phaseEndTime,
+            betCloseTime: this.currentCycle.betCloseTime ?? null,
+            timeRemaining,
+            hasArenaPositions: Boolean(this.currentCycle.arenaPositions),
+          },
+        );
+      }
+    }
 
     // Check if we need to update agent objects (only when agent changes or health changes)
     const currentCycleId = this.currentCycle.cycleId;
