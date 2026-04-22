@@ -22,18 +22,121 @@ const DEAD_TREE_VARIANTS = [
   "asset://models/trees/dead/dead_04.glb",
 ] as const;
 
+const PINE_TREE_VARIANTS = [
+  "asset://models/trees/pine/pine_01.glb",
+  "asset://models/trees/pine/pine_02.glb",
+  "asset://models/trees/pine/pine_03.glb",
+  "asset://models/trees/pine/pine_04.glb",
+  "asset://models/trees/pine/pine_05.glb",
+] as const;
+
+const MAPLE_TREE_VARIANTS = [
+  "asset://models/trees/maple/maple_01.glb",
+  "asset://models/trees/maple/maple_02.glb",
+  "asset://models/trees/maple/maple_03.glb",
+  "asset://models/trees/maple/maple_04.glb",
+] as const;
+
 const RESOURCE_ID_ALIASES: Record<string, string> = {
   // Legacy/default terrain subtype ids that are still present in staging
   // world data or emitted by older terrain generators. Map them onto
-  // currently supported resource manifest ids so the stream client does not
-  // spend whole frames throwing on missing tree definitions.
+  // stable fallback-backed resource ids so both the stream client and the
+  // staging server can survive partial manifest loads.
   tree_normal: "tree_general",
-  tree_cactus: "tree_palm",
-  tree_coconut: "tree_palm",
+  tree_cactus: "tree_general",
+  tree_coconut: "tree_general",
+  tree_birch: "tree_maple",
   tree_windPine: "tree_pine",
+  tree_chinaPine: "tree_pine",
+  tree_fir: "tree_pine",
+  tree_knotwood: "tree_dead",
 };
 
 const RESOURCE_FALLBACKS: Record<string, ExternalResourceData> = {
+  tree_dead: {
+    id: "tree_dead",
+    name: "Dead Tree",
+    type: "tree",
+    examine: "A dead tree with brittle, weathered branches.",
+    modelPath: null,
+    modelVariants: [...DEAD_TREE_VARIANTS],
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    scale: 1,
+    depletedScale: 0.1,
+    harvestSkill: "woodcutting",
+    toolRequired: "bronze_hatchet",
+    levelRequired: 1,
+    baseCycleTicks: 4,
+    depleteChance: 0.125,
+    respawnTicks: 80,
+    harvestYield: [
+      {
+        itemId: "logs",
+        itemName: "Logs",
+        quantity: 1,
+        chance: 1,
+        xpAmount: 25,
+        stackable: true,
+      },
+    ],
+  },
+  tree_pine: {
+    id: "tree_pine",
+    name: "Pine Tree",
+    type: "tree",
+    examine: "A tall pine tree with dense evergreen needles.",
+    modelPath: null,
+    modelVariants: [...PINE_TREE_VARIANTS],
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    scale: 1,
+    depletedScale: 0.1,
+    harvestSkill: "woodcutting",
+    toolRequired: "bronze_hatchet",
+    levelRequired: 1,
+    baseCycleTicks: 4,
+    depleteChance: 0.125,
+    respawnTicks: 80,
+    harvestYield: [
+      {
+        itemId: "logs",
+        itemName: "Logs",
+        quantity: 1,
+        chance: 1,
+        xpAmount: 25,
+        stackable: true,
+      },
+    ],
+  },
+  tree_maple: {
+    id: "tree_maple",
+    name: "Maple Tree",
+    type: "tree",
+    examine: "A broad maple tree with a thick trunk.",
+    modelPath: null,
+    modelVariants: [...MAPLE_TREE_VARIANTS],
+    depletedModelPath:
+      "asset://models/trees/wood-tree-stump/wood-tree-stump.glb",
+    scale: 1,
+    depletedScale: 0.1,
+    harvestSkill: "woodcutting",
+    toolRequired: "bronze_hatchet",
+    levelRequired: 1,
+    baseCycleTicks: 4,
+    depleteChance: 0.125,
+    respawnTicks: 80,
+    harvestYield: [
+      {
+        itemId: "logs",
+        itemName: "Logs",
+        quantity: 1,
+        chance: 1,
+        xpAmount: 25,
+        stackable: true,
+      },
+    ],
+  },
   tree_banana: {
     id: "tree_banana",
     name: "Banana Tree",

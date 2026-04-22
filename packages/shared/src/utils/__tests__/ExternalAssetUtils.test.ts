@@ -81,9 +81,9 @@ describe("ExternalAssetUtils", () => {
 
   it("aliases legacy terrain tree ids onto supported manifest resources", () => {
     const resources = getExternalResources();
-    resources.set("tree_palm", {
-      id: "tree_palm",
-      name: "Loaded Palm",
+    resources.set("tree_general", {
+      id: "tree_general",
+      name: "Loaded General",
       type: "tree",
       modelPath: null,
       depletedModelPath: null,
@@ -131,9 +131,9 @@ describe("ExternalAssetUtils", () => {
         },
       ],
     });
-    resources.set("tree_general", {
-      id: "tree_general",
-      name: "Loaded General",
+    resources.set("tree_maple", {
+      id: "tree_maple",
+      name: "Loaded Maple",
       type: "tree",
       modelPath: null,
       depletedModelPath: null,
@@ -156,23 +156,70 @@ describe("ExternalAssetUtils", () => {
         },
       ],
     });
+    resources.set("tree_dead", {
+      id: "tree_dead",
+      name: "Loaded Dead",
+      type: "tree",
+      modelPath: null,
+      depletedModelPath: null,
+      scale: 5,
+      depletedScale: 1,
+      harvestSkill: "woodcutting",
+      toolRequired: "bronze_hatchet",
+      levelRequired: 1,
+      baseCycleTicks: 4,
+      depleteChance: 0.5,
+      respawnTicks: 10,
+      harvestYield: [
+        {
+          itemId: "logs",
+          itemName: "Logs",
+          quantity: 1,
+          chance: 1,
+          xpAmount: 1,
+          stackable: true,
+        },
+      ],
+    });
 
     const cactus = getExternalResource("tree_cactus");
     const coconut = getExternalResource("tree_coconut");
+    const birch = getExternalResource("tree_birch");
     const windPine = getExternalResource("tree_windPine");
+    const chinaPine = getExternalResource("tree_chinaPine");
+    const fir = getExternalResource("tree_fir");
+    const knotwood = getExternalResource("tree_knotwood");
     const normal = getExternalResource("tree_normal");
 
     expect(cactus).not.toBeNull();
-    expect(cactus?.id).toBe("tree_palm");
+    expect(cactus?.id).toBe("tree_general");
     expect(coconut).not.toBeNull();
-    expect(coconut?.id).toBe("tree_palm");
+    expect(coconut?.id).toBe("tree_general");
+    expect(birch).not.toBeNull();
+    expect(birch?.id).toBe("tree_maple");
     expect(windPine).not.toBeNull();
     expect(windPine?.id).toBe("tree_pine");
+    expect(chinaPine).not.toBeNull();
+    expect(chinaPine?.id).toBe("tree_pine");
+    expect(fir).not.toBeNull();
+    expect(fir?.id).toBe("tree_pine");
+    expect(knotwood).not.toBeNull();
+    expect(knotwood?.id).toBe("tree_dead");
     expect(normal).not.toBeNull();
     expect(normal?.id).toBe("tree_general");
-    expect(getExternalResources().get("tree_cactus")?.id).toBe("tree_palm");
-    expect(getExternalResources().get("tree_coconut")?.id).toBe("tree_palm");
+    expect(getExternalResources().get("tree_cactus")?.id).toBe(
+      "tree_general",
+    );
+    expect(getExternalResources().get("tree_coconut")?.id).toBe(
+      "tree_general",
+    );
+    expect(getExternalResources().get("tree_birch")?.id).toBe("tree_maple");
     expect(getExternalResources().get("tree_windPine")?.id).toBe("tree_pine");
+    expect(getExternalResources().get("tree_chinaPine")?.id).toBe(
+      "tree_pine",
+    );
+    expect(getExternalResources().get("tree_fir")?.id).toBe("tree_pine");
+    expect(getExternalResources().get("tree_knotwood")?.id).toBe("tree_dead");
     expect(getExternalResources().get("tree_normal")?.id).toBe(
       "tree_general",
     );
