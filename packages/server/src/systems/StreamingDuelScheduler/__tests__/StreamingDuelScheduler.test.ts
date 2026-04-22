@@ -487,6 +487,44 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     scheduler.destroy();
   });
 
+  it("teleports contestants into the arena before async duel prep finishes", async () => {
+    const ctx = createMockWorld();
+    const scheduler = new StreamingDuelScheduler(ctx.world as never);
+    let resolvePrep: (() => void) | null = null;
+    const prepPromise = new Promise<void>((resolve) => {
+      resolvePrep = resolve;
+    });
+    const prepareSpy = vi
+      .spyOn((scheduler as any).orchestrator, "prepareContestantsForDuel")
+      .mockImplementation(() => prepPromise);
+    const teleportSpy = vi.spyOn(
+      (scheduler as any).orchestrator,
+      "teleportToArena",
+    );
+
+    scheduler.init();
+    scheduler.registerAgent("agent-alpha");
+    scheduler.registerAgent("agent-beta");
+    (scheduler as any).startNewCycle();
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const state = scheduler.getStreamingState();
+    expect(state.cycle?.phase).toBe("ANNOUNCEMENT");
+    expect(state.cycle?.arenaPositions).toMatchObject({
+      agent1: expect.any(Array),
+      agent2: expect.any(Array),
+    });
+    expect(teleportSpy).toHaveBeenCalledTimes(1);
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+
+    resolvePrep?.();
+    await (scheduler as any).announcementArenaPrepPromise;
+
+    scheduler.destroy();
+  });
+
   it("reuses announcement arena prep when countdown starts", async () => {
     const ctx = createMockWorld();
     const scheduler = new StreamingDuelScheduler(ctx.world as never);
