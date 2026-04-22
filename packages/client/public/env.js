@@ -16,8 +16,9 @@
   const env = typeof window.env === "object" && window.env ? window.env : {};
   const hostname = window.location.hostname || "";
   const currentPort = window.location.port;
-  const enoomianStagingRailwayOrigin =
-    "https://hyperscapes-staging-production.up.railway.app";
+  const enoomianStagingPublicApiOrigin = "https://46.4.80.150.sslip.io";
+  const enoomianStagingPublicCdnOrigin =
+    "https://hyperscapes-staging-production.up.railway.app/game-assets";
   const isLocalDevServer =
     currentPort === "3333" || currentPort === "4173" || currentPort === "5173";
   const isEnoomianStagingPagesHost =
@@ -25,10 +26,10 @@
     hostname.endsWith(".hyperscape-enoomian-staging.pages.dev");
 
   if (isEnoomianStagingPagesHost) {
-    env.PUBLIC_API_URL ||= enoomianStagingRailwayOrigin;
-    env.PUBLIC_WS_URL ||= "wss://hyperscapes-staging-production.up.railway.app/ws";
-    env.PUBLIC_CDN_URL ||= `${enoomianStagingRailwayOrigin}/game-assets`;
-    env.PUBLIC_ELIZAOS_URL ||= enoomianStagingRailwayOrigin;
+    env.PUBLIC_API_URL ||= enoomianStagingPublicApiOrigin;
+    env.PUBLIC_WS_URL ||= "wss://46.4.80.150.sslip.io/ws";
+    env.PUBLIC_CDN_URL ||= enoomianStagingPublicCdnOrigin;
+    env.PUBLIC_ELIZAOS_URL ||= enoomianStagingPublicApiOrigin;
   }
 
   if (isLocalDevServer) {
