@@ -1121,6 +1121,18 @@ export class StreamingDuelScheduler {
       (!this.announcementArenaPrepPromise ||
         this.announcementArenaPrepCycleId !== this.currentCycle.cycleId)
     ) {
+      const elapsedMs = Math.max(0, now - this.currentCycle.phaseStartTime);
+      Logger.warn(
+        "StreamingDuelScheduler",
+        "Announcement arena still unprimed; retrying kickoff",
+        {
+          cycleId: this.currentCycle.cycleId,
+          phase: this.currentCycle.phase,
+          elapsedMs,
+          betCloseTime: this.currentCycle.betCloseTime ?? null,
+          fightStartTime: this.currentCycle.fightStartTime ?? null,
+        },
+      );
       this.beginAnnouncementArenaPrep(this.currentCycle.cycleId);
     }
 
@@ -1297,6 +1309,11 @@ export class StreamingDuelScheduler {
   }
 
   private beginAnnouncementArenaPrep(cycleId: string): void {
+    Logger.warn("StreamingDuelScheduler", "Announcement arena prep kickoff", {
+      cycleId,
+      phase: this.currentCycle?.phase ?? null,
+      hasArenaPositions: Boolean(this.currentCycle?.arenaPositions),
+    });
     this.announcementArenaPrepCycleId = cycleId;
     this.announcementArenaPrepPromise =
       this.prepareAnnouncementArenaForCycle(cycleId).finally(() => {
@@ -1398,6 +1415,12 @@ export class StreamingDuelScheduler {
       cycleId,
       arenaPrimeLagMs: Math.max(0, arenaPrimedAt - prepStartedAt),
       phase: this.currentCycle.phase,
+    });
+    Logger.warn("StreamingDuelScheduler", "Announcement arena visually primed", {
+      cycleId,
+      arenaPrimeLagMs: Math.max(0, arenaPrimedAt - prepStartedAt),
+      phase: this.currentCycle.phase,
+      hasArenaPositions: Boolean(this.currentCycle.arenaPositions),
     });
 
     this.broadcastState();
