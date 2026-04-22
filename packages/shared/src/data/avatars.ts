@@ -66,40 +66,28 @@ export const AVATAR_OPTIONS: AvatarOption[] = [
   {
     id: "male-01",
     name: "Male Avatar 01",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
     url: "asset://avatars/avatar-male-01.vrm",
-    lod1Url: "asset://avatars/avatar-male-01_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-male-01_lod2.vrm",
     previewPath: "/avatars/avatar-male-01.vrm",
     description: "Standard male humanoid avatar",
   },
   {
     id: "male-02",
     name: "Male Avatar 02",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
     url: "asset://avatars/avatar-male-02.vrm",
-    lod1Url: "asset://avatars/avatar-male-02_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-male-02_lod2.vrm",
     previewPath: "/avatars/avatar-male-02.vrm",
     description: "Standard male humanoid avatar",
   },
   {
     id: "female-01",
     name: "Female Avatar 01",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
     url: "asset://avatars/avatar-female-01.vrm",
-    lod1Url: "asset://avatars/avatar-female-01_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-female-01_lod2.vrm",
     previewPath: "/avatars/avatar-female-01.vrm",
     description: "Standard female humanoid avatar",
   },
   {
     id: "female-02",
     name: "Female Avatar 02",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
     url: "asset://avatars/avatar-female-02.vrm",
-    lod1Url: "asset://avatars/avatar-female-02_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-female-02_lod2.vrm",
     previewPath: "/avatars/avatar-female-02.vrm",
     description: "Standard female humanoid avatar",
   },
