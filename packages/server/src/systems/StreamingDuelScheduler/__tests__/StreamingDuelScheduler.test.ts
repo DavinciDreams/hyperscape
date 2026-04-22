@@ -557,6 +557,23 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     scheduler.destroy();
   });
 
+  it("restarts announcement arena prep from tick if kickoff was skipped", () => {
+    const { scheduler } = createSchedulerWithActiveAnnouncementCycle();
+    const restartSpy = vi.spyOn(scheduler as any, "beginAnnouncementArenaPrep");
+
+    (scheduler as any).announcementArenaPrepPromise = null;
+    (scheduler as any).announcementArenaPrepCycleId = null;
+    (scheduler as any).currentCycle.arenaPositions = null;
+
+    (scheduler as any).tickAnnouncement(Date.now());
+
+    expect(restartSpy).toHaveBeenCalledWith(
+      (scheduler as any).currentCycle.cycleId,
+    );
+
+    scheduler.destroy();
+  });
+
   it("reuses announcement arena prep when countdown starts", async () => {
     const ctx = createMockWorld();
     const scheduler = new StreamingDuelScheduler(ctx.world as never);
