@@ -30,6 +30,7 @@ import {
   type JsonValue,
   type Plugin,
 } from "@elizaos/core";
+import type { JSONObject } from "@ai-sdk/provider";
 import { embed, generateObject, generateText } from "ai";
 import { createOllama, type OllamaProvider } from "ollama-ai-provider-v2";
 
@@ -243,7 +244,7 @@ async function generateOllamaText(
     // Ollama's default is 1.1, neutral is 1.0. We average the caller's
     // presence+frequency signal and offset from the neutral baseline so
     // that the upstream plugin's 0.7/0.7 defaults map to a sensible ~1.1.
-    const ollamaOptions: Record<string, unknown> = {};
+    const ollamaOptions: JSONObject = {};
     if (typeof params.temperature === "number") {
       ollamaOptions.temperature = params.temperature;
     }
@@ -259,6 +260,15 @@ async function generateOllamaText(
       ollamaOptions.repeat_penalty = 1 + penaltySignal * 0.2;
     }
 
+    const providerOptions: Record<string, JSONObject> | undefined =
+      Object.keys(ollamaOptions).length > 0
+        ? {
+            ollama: {
+              options: ollamaOptions,
+            },
+          }
+        : undefined;
+
     const { text } = await generateText({
       model: provider(modelName),
       prompt: params.prompt,
@@ -269,10 +279,7 @@ async function generateOllamaText(
       // primary source of truth.
       temperature: params.temperature,
       maxOutputTokens: params.maxOutputTokens,
-      providerOptions:
-        Object.keys(ollamaOptions).length > 0
-          ? { ollama: { options: ollamaOptions } }
-          : undefined,
+      providerOptions,
     });
     return text;
   } catch (err) {
