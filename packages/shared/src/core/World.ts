@@ -31,6 +31,7 @@ import {
   FrameBudgetManager,
   type FrameTimingStats,
 } from "../utils/FrameBudgetManager";
+import { normalizeAvatarAssetUrl } from "../data/avatars";
 
 // NOTE: Import directly to avoid circular dependency through barrel file
 // The barrel imports combat which imports MobEntity which extends Entity (circular)
@@ -2160,6 +2161,7 @@ export class World extends EventEmitter {
   resolveURL(url: string, allowLocal?: boolean): string {
     if (!url) return url;
     url = url.trim();
+    url = normalizeAvatarAssetUrl(url, url);
 
     // Some persisted player records store shorthand avatar filenames like "ws-avatar.vrm".
     // Treat these as local avatar assets instead of mistaken bare hostnames.

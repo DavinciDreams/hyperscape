@@ -181,8 +181,12 @@ export { TERRAIN_CONSTANTS } from "./constants/GameConstants";
 // Client input constants (click-to-move distance, drag threshold, raycast range)
 export { INPUT } from "./systems/client/interaction/constants";
 
-// Export avatar options for character creation
-export { AVATAR_OPTIONS } from "./data/avatars";
+// Export avatar helpers for character creation and runtime normalization
+export {
+  AVATAR_OPTIONS,
+  DEFAULT_AVATAR_URL,
+  normalizeAvatarAssetUrl,
+} from "./data/avatars";
 
 // Export skill data for UI displays
 export {

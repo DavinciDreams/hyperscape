@@ -13,6 +13,8 @@ import {
   getDuelArenaConfig,
   getItem,
   isPositionInsideCombatArena,
+  normalizeAvatarAssetUrl,
+  DEFAULT_AVATAR_URL,
   ALL_WORLD_AREAS,
   type World,
 } from "@hyperscape/shared";
@@ -441,10 +443,11 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
           name: savedData?.name || this.name,
           health,
           maxHealth: health,
-          avatar:
+          avatar: normalizeAvatarAssetUrl(
             savedData?.avatar ||
-            this.world.settings?.avatar?.url ||
-            "asset://avatars/avatar-male-01.vrm",
+              this.world.settings?.avatar?.url ||
+              DEFAULT_AVATAR_URL,
+          ),
           wallet: savedData?.wallet || undefined,
           roles: [],
           skills,
