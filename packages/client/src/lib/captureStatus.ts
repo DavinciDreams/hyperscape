@@ -1,3 +1,5 @@
+/* global MediaRecorder */
+
 import type { CaptureControlStatus } from "./streamingWindow";
 
 export function buildCaptureControlStatus(params: {
