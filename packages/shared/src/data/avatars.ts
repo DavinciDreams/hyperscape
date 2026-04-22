@@ -31,6 +31,71 @@ export interface AvatarOption {
   description?: string;
 }
 
+export const DEFAULT_AVATAR_FILENAME = "avatar-male-01.vrm";
+export const DEFAULT_AVATAR_URL = `asset://avatars/${DEFAULT_AVATAR_FILENAME}`;
+
+const LEGACY_AVATAR_ALIASES: Record<string, string> = {
+  "ws-avatar.vrm": DEFAULT_AVATAR_FILENAME,
+  "avatar.vrm": DEFAULT_AVATAR_FILENAME,
+};
+
+const AVATAR_LOD_SUFFIX_PATTERN = /_lod[12](?=\.vrm$)/i;
+
+function normalizeAvatarFilename(filename: string): string {
+  const withoutLod = filename.replace(AVATAR_LOD_SUFFIX_PATTERN, "");
+  return LEGACY_AVATAR_ALIASES[withoutLod.toLowerCase()] ?? withoutLod;
+}
+
+function getAvatarLookupKey(url?: string | null): string | null {
+  const normalized = normalizeAvatarAssetUrl(url, "");
+  if (!normalized) return null;
+  const match = normalized.match(/([A-Za-z0-9_.-]+\.vrm)(?:[?#].*)?$/i);
+  return match ? normalizeAvatarFilename(match[1]).toLowerCase() : null;
+}
+
+export function normalizeAvatarAssetUrl(
+  url?: string | null,
+  fallbackUrl = DEFAULT_AVATAR_URL,
+): string {
+  const candidate = url?.trim() ?? "";
+  if (!candidate) return fallbackUrl;
+
+  const bareAvatarMatch = candidate.match(/^([A-Za-z0-9_.-]+\.vrm)([?#].*)?$/i);
+  if (bareAvatarMatch) {
+    const [, filenameRaw, suffix = ""] = bareAvatarMatch;
+    return `asset://avatars/${normalizeAvatarFilename(filenameRaw)}${suffix}`;
+  }
+
+  const relativeAvatarMatch = candidate.match(
+    /^(?:\.\/|\/)?avatars\/([A-Za-z0-9_.-]+\.vrm)([?#].*)?$/i,
+  );
+  if (relativeAvatarMatch) {
+    const [, filenameRaw, suffix = ""] = relativeAvatarMatch;
+    return `asset://avatars/${normalizeAvatarFilename(filenameRaw)}${suffix}`;
+  }
+
+  const assetAvatarMatch = candidate.match(
+    /^asset:\/\/avatars\/([A-Za-z0-9_.-]+\.vrm)([?#].*)?$/i,
+  );
+  if (assetAvatarMatch) {
+    const [, filenameRaw, suffix = ""] = assetAvatarMatch;
+    return `asset://avatars/${normalizeAvatarFilename(filenameRaw)}${suffix}`;
+  }
+
+  const absoluteAvatarMatch = candidate.match(
+    /^(https?:\/\/[^?#]+\/avatars\/)([A-Za-z0-9_.-]+\.vrm)([?#].*)?$/i,
+  );
+  if (absoluteAvatarMatch) {
+    const [, prefix, filenameRaw, suffix = ""] = absoluteAvatarMatch;
+    return `${prefix}${normalizeAvatarFilename(filenameRaw)}${suffix}`;
+  }
+
+  return candidate.replace(
+    /_lod[12](?=\.vrm(?:[?#].*)?$)/i,
+    "",
+  );
+}
+
 /** LOD level enum for avatar selection */
 export enum AvatarLOD {
   /** Full detail - 30K triangles (close range) */
@@ -104,12 +169,13 @@ export function getAvatarById(id: string): AvatarOption | undefined {
  * Get avatar by URL (checks url, lod1Url, lod2Url, and previewPath)
  */
 export function getAvatarByUrl(url: string): AvatarOption | undefined {
+  const lookupKey = getAvatarLookupKey(url);
   return AVATAR_OPTIONS.find(
     (avatar) =>
-      avatar.url === url ||
-      avatar.lod1Url === url ||
-      avatar.lod2Url === url ||
-      url.endsWith(avatar.previewPath),
+      getAvatarLookupKey(avatar.url) === lookupKey ||
+      getAvatarLookupKey(avatar.lod1Url) === lookupKey ||
+      getAvatarLookupKey(avatar.lod2Url) === lookupKey ||
+      getAvatarLookupKey(avatar.previewPath) === lookupKey,
   );
 }
 
@@ -142,12 +208,14 @@ export function getAvatarUrlForLOD(
 ): string {
   switch (lod) {
     case AvatarLOD.LOD2:
-      return avatar.lod2Url ?? avatar.lod1Url ?? avatar.url;
+      return normalizeAvatarAssetUrl(
+        avatar.lod2Url ?? avatar.lod1Url ?? avatar.url,
+      );
     case AvatarLOD.LOD1:
-      return avatar.lod1Url ?? avatar.url;
+      return normalizeAvatarAssetUrl(avatar.lod1Url ?? avatar.url);
     case AvatarLOD.LOD0:
     default:
-      return avatar.url;
+      return normalizeAvatarAssetUrl(avatar.url);
   }
 }
 
@@ -157,8 +225,11 @@ export function getAvatarUrlForLOD(
  * @returns Array of all available LOD URLs
  */
 export function getAllAvatarLODUrls(avatar: AvatarOption): string[] {
-  const urls = [avatar.url];
-  if (avatar.lod1Url) urls.push(avatar.lod1Url);
-  if (avatar.lod2Url) urls.push(avatar.lod2Url);
-  return urls;
+  return Array.from(
+    new Set(
+      [avatar.url, avatar.lod1Url, avatar.lod2Url]
+        .filter((url): url is string => Boolean(url))
+        .map((url) => normalizeAvatarAssetUrl(url)),
+    ),
+  );
 }

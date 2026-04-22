@@ -54,4 +54,26 @@ describe("World.resolveURL", () => {
       "https://cdn.example.com/game-assets/models/trees/oak_03.glb",
     );
   });
+
+  it("normalizes avatar LOD URLs before resolving fetch paths", () => {
+    const world = new World();
+    world.assetsUrl = "https://cdn.example.com/game-assets";
+
+    expect(
+      world.resolveURL("asset://avatars/avatar-male-01_lod1.vrm"),
+    ).toBe("https://cdn.example.com/game-assets/avatars/avatar-male-01.vrm");
+    expect(
+      world.resolveURL("avatars/avatar-female-02_lod2.vrm?cache=1"),
+    ).toBe(
+      "https://cdn.example.com/game-assets/avatars/avatar-female-02.vrm?cache=1",
+    );
+    expect(world.resolveURL("avatar-male-01_lod2.vrm#preview")).toBe(
+      "https://cdn.example.com/game-assets/avatars/avatar-male-01.vrm#preview",
+    );
+    expect(
+      world.resolveURL(
+        "https://assets.example.com/avatars/avatar-female-01_lod1.vrm",
+      ),
+    ).toBe("https://assets.example.com/avatars/avatar-female-01.vrm");
+  });
 });

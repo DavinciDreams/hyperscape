@@ -366,8 +366,12 @@ export {
 // Export store helpers used by server store handler
 export { getStoreById } from "./data/banks-stores";
 
-// Export avatar options for character creation
-export { AVATAR_OPTIONS } from "./data/avatars";
+// Export avatar helpers for character creation and runtime normalization
+export {
+  AVATAR_OPTIONS,
+  DEFAULT_AVATAR_URL,
+  normalizeAvatarAssetUrl,
+} from "./data/avatars";
 
 // Export skill data for UI displays
 export {
