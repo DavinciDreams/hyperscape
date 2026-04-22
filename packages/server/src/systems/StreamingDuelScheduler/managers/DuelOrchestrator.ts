@@ -3293,9 +3293,9 @@ export class DuelOrchestrator {
         winReason = "damage_advantage";
       } else {
         // True draw — both HP and damage equal (#24)
-        // Resolve as a proper draw: no winner/loser, just record it
-        this.onResolution(agent1.characterId, agent2.characterId, "draw");
-        return;
+        winnerId = agent1.characterId;
+        loserId = agent2.characterId;
+        winReason = "draw";
       }
     }
 
