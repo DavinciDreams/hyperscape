@@ -252,9 +252,12 @@ export { NodeClient } from "./systems/client/NodeClient";
 // Environment system works in both browser and Node contexts
 export { Node } from "./nodes/Node";
 // Re-export commonly used node classes to satisfy API extractor
+// @internal — These are engine-internal 3D UI nodes using Yoga layout.
+// Client UI uses React/CSS, not these canvas-based nodes.
 export { UI } from "./nodes/UI";
 export { UIView } from "./nodes/UIView";
 export { UIText } from "./nodes/UIText";
+export { UIImage } from "./nodes/UIImage";
 export { Group } from "./nodes/Group";
 export { Mesh } from "./nodes/Mesh";
 export { Avatar } from "./nodes/Avatar";
@@ -426,7 +429,8 @@ export type {
   EquipmentSlot,
 } from "./types/core/core";
 export type { Physics as PhysicsInterface } from "./types/index";
-// Re-export UI-related types used by UIView/UIText/UI
+// @internal — UI node types for engine-internal 3D UI system (Yoga layout).
+// Client UI uses React/CSS, not these types.
 export type {
   UIData,
   UIViewData,
@@ -720,3 +724,82 @@ export type {
   StairTile,
   FloorCollisionData,
 } from "./types/world/building-collision-types";
+
+// Accessibility types and constants (OSRS-accurate colorblind palettes)
+export {
+  COLORBLIND_PALETTES,
+  FONT_SIZE_SCALE,
+  DEFAULT_ACCESSIBILITY_SETTINGS,
+  type ColorblindMode,
+  type ColorOverrides,
+  type AccessibilitySettings,
+  type FontSizeOption,
+} from "./types/interface/accessibility";
+
+// UI complexity mode types and constants
+export {
+  COMPLEXITY_MODE_CONFIGS,
+  DEFAULT_PROGRESSION_THRESHOLDS,
+  type ComplexityMode,
+  type ComplexityFeatures,
+  type ComplexityModeConfig,
+  type ProgressionThresholds,
+} from "./types/interface/complexity";
+
+// Combat level color utilities (OSRS-accurate threat coloring)
+export {
+  getCombatLevelColor,
+  getCombatLevelDescription,
+} from "./systems/client/interaction/utils/combatLevelColor";
+
+// Combat level calculation (OSRS-accurate formula)
+export {
+  calculateCombatLevel,
+  normalizeCombatSkills,
+  type CombatSkills,
+  type CombatType,
+  MIN_COMBAT_LEVEL,
+  MAX_COMBAT_LEVEL,
+} from "./utils/game/CombatLevelCalculator";
+
+// XP ↔ Level calculations (OSRS-accurate, standalone utilities for UI)
+export {
+  getXPForLevel,
+  getLevelForXP,
+  getXPToNextLevel,
+  getXPProgress,
+} from "./utils/game/XPCalculator";
+
+// HP bar utilities (OSRS-style)
+export { getHpPercent, getHpColor } from "./utils/game/CombatUtils";
+
+// Currency constants (single source of truth for coin caps)
+export {
+  MAX_COINS,
+  DEFAULT_STARTING_COINS,
+} from "./systems/shared/character/CoinPouchSystem";
+
+// Prayer event type guards (runtime validation for UI components)
+export {
+  isPrayerStateSyncPayload,
+  isPrayerToggledPayload,
+} from "./types/game/prayer-types";
+export type {
+  PrayerStateSyncPayload,
+  PrayerToggledEvent,
+  PrayerState,
+} from "./types/game/prayer-types";
+
+// Minimap Worker - 2D Canvas minimap rendering in web worker
+export {
+  MinimapWorkerManager,
+  isMinimapWorkerSupported,
+  type MinimapTile,
+  type MinimapEntity,
+  type MinimapRoad,
+  type MinimapBuilding,
+  type MinimapCamera,
+  type MinimapConfig,
+  type MinimapWorkerInput,
+  type MinimapWorkerOutput,
+} from "./utils/workers/MinimapWorker";
