@@ -132,11 +132,6 @@ const PUBLIC_DEBUG_CODEQL_LIMITER = new RateLimiterMemory({
   duration: 60,
 });
 
-const GAME_ASSETS_CODEQL_LIMITER = new RateLimiterMemory({
-  points: 240,
-  duration: 60,
-});
-
 async function resolvePublicRoot(
   config: ServerConfig,
 ): Promise<PublicRootInfo> {
@@ -977,16 +972,11 @@ function registerGameAssetsRoute(
   const fallbackRoot = fallbackBaseUrl.endsWith("/")
     ? fallbackBaseUrl
     : `${fallbackBaseUrl}/`;
-  ensureRateLimitDecorator(fastify);
   fastify.route({
     method: ["GET", "HEAD"],
     url: "/game-assets/*",
+    config: { rateLimit: false },
     handler: async (request, reply) => {
-      try {
-        await GAME_ASSETS_CODEQL_LIMITER.consume(request.ip);
-      } catch {
-        return reply.code(429).send({ error: "Too Many Requests" });
-      }
       const rawPath = String((request.params as { "*": string })["*"] || "");
       const normalizedPath = normalizeGameAssetPath(rawPath);
       if (!normalizedPath) {
