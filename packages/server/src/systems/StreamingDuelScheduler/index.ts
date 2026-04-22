@@ -154,6 +154,13 @@ export class StreamingDuelScheduler {
   /** Countdown timeout for starting fight after countdown */
   private countdownTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Background prep started during ANNOUNCEMENT so the arena is already live
+   * before the countdown window begins.
+   */
+  private announcementArenaPrepPromise: Promise<void> | null = null;
+  private announcementArenaPrepCycleId: string | null = null;
+
   /** Event listeners for cleanup */
   private eventListeners: Array<{
     event: string;
@@ -626,6 +633,8 @@ export class StreamingDuelScheduler {
     // Reset facade state
     this._startCountdownInProgress = false;
     this._endCycleInProgress = false;
+    this.announcementArenaPrepPromise = null;
+    this.announcementArenaPrepCycleId = null;
     this.schedulerState = "IDLE";
     this.currentCycle = null;
     this.phaseStateMachine.forceIdle();
@@ -1065,6 +1074,8 @@ export class StreamingDuelScheduler {
       agent2Name: agent2.name,
       startTime: betCloseTime,
     });
+
+    this.beginAnnouncementArenaPrep(cycleId);
   }
 
   /**
@@ -1162,35 +1173,7 @@ export class StreamingDuelScheduler {
         "Preparing contestants for countdown",
       );
 
-      // Duel flags are already set at ANNOUNCEMENT start (startNewCycle), but
-      // re-apply as a safety net in case they were cleared by recovery logic.
-      this.orchestrator.setDuelFlags(true);
-
-      // Prepare contestants (fill food, restore HP) but NOT teleport yet.
-      // Fix J — timeout wrapper so prep can't block forever.
-      const PREP_TIMEOUT_MS = Math.max(
-        5_000,
-        Number.parseInt(process.env.STREAMING_PREP_TIMEOUT_MS || "30000", 10) ||
-          30_000,
-      );
-      try {
-        await Promise.race([
-          this.orchestrator.prepareContestantsForDuel(),
-          new Promise<void>((_, reject) =>
-            setTimeout(
-              () => reject(new Error("Prep timed out")),
-              PREP_TIMEOUT_MS,
-            ),
-          ),
-        ]);
-      } catch (err) {
-        Logger.warn(
-          "StreamingDuelScheduler",
-          `Contestant prep failed: ${errMsg(err)}`,
-        );
-        this.abortCycleToIdle("contestant_prep_failed");
-        return;
-      }
+      await this.ensureAnnouncementArenaReadyForCountdown();
 
       // Scheduler may have advanced/ended while awaiting prep.
       if (!this.currentCycle || this.currentCycle.phase !== "ANNOUNCEMENT") {
@@ -1229,25 +1212,6 @@ export class StreamingDuelScheduler {
           this.currentCycle.agent2?.characterId ?? "",
           "kill",
         );
-        return;
-      }
-
-      // Teleport agents to arena NOW — right as countdown begins.
-      try {
-        await this.orchestrator.teleportToArena(
-          this.currentCycle.agent1.characterId,
-          this.currentCycle.agent2.characterId,
-        );
-      } catch (err) {
-        Logger.warn(
-          "StreamingDuelScheduler",
-          `Failed to teleport contestants into arena: ${errMsg(err)}`,
-        );
-        this.abortCycleToIdle("arena_teleport_failed");
-        return;
-      }
-
-      if (!this.currentCycle || this.currentCycle.phase !== "ANNOUNCEMENT") {
         return;
       }
 
@@ -1319,6 +1283,143 @@ export class StreamingDuelScheduler {
     } finally {
       this._startCountdownInProgress = false;
     }
+  }
+
+  private beginAnnouncementArenaPrep(cycleId: string): void {
+    this.announcementArenaPrepCycleId = cycleId;
+    this.announcementArenaPrepPromise =
+      this.prepareAnnouncementArenaForCycle(cycleId).finally(() => {
+        if (this.announcementArenaPrepCycleId === cycleId) {
+          this.announcementArenaPrepPromise = null;
+          this.announcementArenaPrepCycleId = null;
+        }
+      });
+  }
+
+  private async ensureAnnouncementArenaReadyForCountdown(): Promise<void> {
+    if (!this.currentCycle?.agent1 || !this.currentCycle.agent2) {
+      return;
+    }
+
+    if (this.currentCycle.arenaPositions) {
+      return;
+    }
+
+    if (
+      this.announcementArenaPrepPromise &&
+      this.announcementArenaPrepCycleId === this.currentCycle.cycleId
+    ) {
+      await this.announcementArenaPrepPromise;
+      return;
+    }
+
+    await this.prepareAnnouncementArenaForCycle(this.currentCycle.cycleId);
+  }
+
+  private async prepareAnnouncementArenaForCycle(
+    cycleId: string,
+  ): Promise<void> {
+    const cycle = this.currentCycle;
+    if (!cycle?.agent1 || !cycle.agent2 || cycle.cycleId !== cycleId) {
+      return;
+    }
+
+    // Duel flags are already set at ANNOUNCEMENT start, but re-apply as a
+    // safety net in case recovery logic cleared them mid-cycle.
+    this.orchestrator.setDuelFlags(true);
+
+    const PREP_TIMEOUT_MS = Math.max(
+      5_000,
+      Number.parseInt(process.env.STREAMING_PREP_TIMEOUT_MS || "30000", 10) ||
+        30_000,
+    );
+
+    const prepStartedAt = Date.now();
+
+    try {
+      await Promise.race([
+        this.orchestrator.prepareContestantsForDuel(),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("Prep timed out")), PREP_TIMEOUT_MS),
+        ),
+      ]);
+    } catch (err) {
+      Logger.warn(
+        "StreamingDuelScheduler",
+        `Contestant prep failed: ${errMsg(err)}`,
+      );
+      if (
+        this.currentCycle &&
+        this.currentCycle.cycleId === cycleId &&
+        (this.currentCycle.phase === "ANNOUNCEMENT" ||
+          this.currentCycle.phase === "COUNTDOWN")
+      ) {
+        this.abortCycleToIdle("contestant_prep_failed");
+      }
+      return;
+    }
+
+    if (
+      !this.currentCycle ||
+      this.currentCycle.cycleId !== cycleId ||
+      !this.currentCycle.agent1 ||
+      !this.currentCycle.agent2 ||
+      (this.currentCycle.phase !== "ANNOUNCEMENT" &&
+        this.currentCycle.phase !== "COUNTDOWN")
+    ) {
+      return;
+    }
+
+    if (!this.currentCycle.arenaPositions) {
+      try {
+        await this.orchestrator.teleportToArena(
+          this.currentCycle.agent1.characterId,
+          this.currentCycle.agent2.characterId,
+          true,
+        );
+      } catch (err) {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `Failed to teleport contestants into arena: ${errMsg(err)}`,
+        );
+        if (
+          this.currentCycle &&
+          this.currentCycle.cycleId === cycleId &&
+          (this.currentCycle.phase === "ANNOUNCEMENT" ||
+            this.currentCycle.phase === "COUNTDOWN")
+        ) {
+          this.abortCycleToIdle("arena_teleport_failed");
+        }
+        return;
+      }
+    }
+
+    if (
+      !this.currentCycle ||
+      this.currentCycle.cycleId !== cycleId ||
+      !this.currentCycle.agent1 ||
+      (this.currentCycle.phase !== "ANNOUNCEMENT" &&
+        this.currentCycle.phase !== "COUNTDOWN")
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    this.world.emit("player:movement:cancel", {
+      playerId: this.currentCycle.agent1.characterId,
+    });
+    this.world.emit("player:movement:cancel", {
+      playerId: this.currentCycle.agent2.characterId,
+    });
+    this.camera.setCameraTarget(this.currentCycle.agent1.characterId, now);
+
+    Logger.info("StreamingDuelScheduler", "Announcement arena primed", {
+      cycleId,
+      prepDurationMs: Math.max(0, now - prepStartedAt),
+      phase: this.currentCycle.phase,
+    });
+
+    this.broadcastState();
   }
 
   /**
@@ -1729,6 +1830,8 @@ export class StreamingDuelScheduler {
 
       // Clear current cycle
       this.currentCycle = null;
+      this.announcementArenaPrepPromise = null;
+      this.announcementArenaPrepCycleId = null;
 
       // Transition phase state machine back to IDLE
       this.phaseStateMachine.forceIdle();
@@ -1817,6 +1920,8 @@ export class StreamingDuelScheduler {
   private abortCycleToIdle(reason: string): void {
     Logger.warn("StreamingDuelScheduler", `Aborting cycle to IDLE: ${reason}`);
     const cycleSnapshot = this.currentCycle;
+    this.announcementArenaPrepPromise = null;
+    this.announcementArenaPrepCycleId = null;
 
     this.orchestrator.stopCombatLoop();
     this.orchestrator.clearCombatRetryTimeout();

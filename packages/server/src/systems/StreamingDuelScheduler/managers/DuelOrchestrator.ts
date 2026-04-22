@@ -2056,6 +2056,10 @@ export class DuelOrchestrator {
       };
     }
 
+    this.applyArenaBoundsToCurrentContestants(
+      this.getStreamingArenaMovementBounds(),
+    );
+
     Logger.info(
       "StreamingDuelScheduler",
       "Contestants teleported to arena, facing each other",
@@ -2171,6 +2175,33 @@ export class DuelOrchestrator {
       minZ: centerZ - arenaConfig.arenaLength / 2,
       maxZ: centerZ + arenaConfig.arenaLength / 2,
     };
+  }
+
+  private applyArenaBoundsToCurrentContestants(
+    bounds:
+      | {
+          minX: number;
+          maxX: number;
+          minZ: number;
+          maxZ: number;
+        }
+      | null,
+  ): void {
+    const cycle = this.getCurrentCycle();
+    if (!cycle?.agent1 || !cycle.agent2) {
+      return;
+    }
+
+    for (const playerId of [
+      cycle.agent1.characterId,
+      cycle.agent2.characterId,
+    ]) {
+      const entity = this.world.entities.get(playerId);
+      if (!entity) {
+        continue;
+      }
+      (entity.data as Record<string, unknown>).arenaBounds = bounds;
+    }
   }
 
   /**
@@ -2467,6 +2498,8 @@ export class DuelOrchestrator {
       movementClampBounds,
     };
 
+    this.applyArenaBoundsToCurrentContestants(movementClampBounds);
+
     // Lock both services into arena mode:
     // 1. Clamp all movement to arena bounds (no reactive correction teleports).
     // 2. Disable autonomous behavior loop so agents don't wander off to quest
@@ -2565,6 +2598,7 @@ export class DuelOrchestrator {
       svc.setAutonomousBehaviorEnabled(true);
     }
     this._arenaModeServices = [];
+    this.applyArenaBoundsToCurrentContestants(null);
   }
 
   /** Returns AI stats captured at the end of the last fight, keyed by characterId */
