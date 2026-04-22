@@ -91,6 +91,7 @@ export interface LeaderboardEntry {
   winRate: number;
   combatLevel: number;
   currentStreak: number;
+  lossStreak?: number;
 }
 
 export interface StreamingRendererHealth {
@@ -236,6 +237,13 @@ export function shouldDismissStreamingLoading(params: {
       phase: params.phase ?? null,
     }) === null
   );
+}
+
+export function shouldShowStreamingLoadingOverlay(params: {
+  initError?: string | null;
+  loadingDismissed: boolean;
+}): boolean {
+  return !params.loadingDismissed && !params.initError?.trim();
 }
 
 export function StreamingMode() {

@@ -3,6 +3,8 @@
  * Replaces useBettingPanel (which requires the game world network).
  */
 
+/* global EventSource */
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { GAME_API_URL } from "../lib/api-config";
 

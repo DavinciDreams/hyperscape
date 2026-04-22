@@ -1,3 +1,5 @@
+/* global EventSource */
+
 import { GAME_API_URL } from "@/lib/api-config";
 import React, {
   useCallback,

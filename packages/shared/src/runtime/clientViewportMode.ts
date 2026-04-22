@@ -1,9 +1,9 @@
-interface HyperscapeViewportWindow extends Window {
+type HyperscapeViewportWindow = Window & {
   __HYPERSCAPE_EMBEDDED__?: boolean;
   __HYPERSCAPE_CONFIG__?: {
     mode?: string;
   };
-}
+};
 
 export type HyperscapeViewportMode = "spectator" | "stream" | "free";
 
@@ -36,9 +36,7 @@ function getSearchParams(
   }
 }
 
-function normalizeViewportMode(
-  value: unknown,
-): HyperscapeViewportMode | null {
+function normalizeViewportMode(value: unknown): HyperscapeViewportMode | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
   return normalized === "spectator" ||
@@ -52,9 +50,7 @@ function isStreamPath(pathname: string): boolean {
   return /\/stream(?:\.html)?\/?$/.test(pathname);
 }
 
-export function getViewportMode(
-  win?: Window,
-): HyperscapeViewportMode | null {
+export function getViewportMode(win?: Window): HyperscapeViewportMode | null {
   const windowRef = getWindowRef(win);
   if (!windowRef) return null;
 

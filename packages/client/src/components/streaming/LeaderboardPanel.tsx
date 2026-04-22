@@ -46,7 +46,7 @@ export function LeaderboardPanel({ leaderboard }: LeaderboardPanelProps) {
               {entry.currentStreak > 0 && (
                 <div style={styles.streak}>🔥{entry.currentStreak}</div>
               )}
-              {entry.lossStreak > 1 && (
+              {entry.lossStreak != null && entry.lossStreak > 1 && (
                 <div style={styles.streak}>❄️{entry.lossStreak}</div>
               )}
             </div>
