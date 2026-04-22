@@ -123,12 +123,16 @@ import { isStreamingLikeViewport } from "../../runtime/clientViewportMode";
 import { PlayerLocal } from "../../entities/player/PlayerLocal";
 import { TileInterpolator } from "./TileInterpolator";
 import { type TileCoord } from "../shared/movement/TileSystem"; // Internal import within shared package
+import { resolveClientAssetBase } from "../../utils/clientAssetBase";
 
 type ClientNetworkEnv = {
   PUBLIC_DISABLE_NETWORK?: string;
   DISABLE_NETWORK?: string;
   PUBLIC_INTERPOLATION_MAX_PER_FRAME?: string;
   INTERPOLATION_MAX_PER_FRAME?: string;
+  PUBLIC_API_URL?: string;
+  PUBLIC_CDN_URL?: string;
+  PUBLIC_ASSETS_URL?: string;
 };
 
 const isTruthy = (value?: string): boolean =>
@@ -1129,16 +1133,30 @@ export class ClientNetwork extends SystemBase {
     }
     this.maxUploadSize = data.maxUploadSize || 10 * 1024 * 1024; // Default 10MB
 
-    // Use assetsUrl from server (always absolute URL to CDN)
-    this.world.assetsUrl = data.assetsUrl || "/";
+    const resolvedAssetsUrl =
+      typeof window !== "undefined"
+        ? resolveClientAssetBase(
+            data.assetsUrl,
+            data.apiUrl,
+            window.location.href,
+          )
+        : data.assetsUrl;
+    const normalizedAssetsUrl = resolvedAssetsUrl
+      ? resolvedAssetsUrl.endsWith("/")
+        ? resolvedAssetsUrl
+        : `${resolvedAssetsUrl}/`
+      : "/";
+
+    // Use assetsUrl from server/runtime, but sanitize problematic staging hosts first.
+    this.world.assetsUrl = normalizedAssetsUrl;
     if (typeof window !== "undefined") {
       const windowWithAssets = window as Window & {
         __CDN_URL?: string;
         __ASSETS_URL?: string;
       };
-      if (data.assetsUrl) {
-        windowWithAssets.__ASSETS_URL = data.assetsUrl;
-        windowWithAssets.__CDN_URL = data.assetsUrl;
+      if (resolvedAssetsUrl) {
+        windowWithAssets.__ASSETS_URL = resolvedAssetsUrl;
+        windowWithAssets.__CDN_URL = resolvedAssetsUrl;
       }
     }
 
