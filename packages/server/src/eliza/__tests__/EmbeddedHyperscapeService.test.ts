@@ -163,7 +163,9 @@ describe("EmbeddedHyperscapeService", () => {
 
   it("falls back to the default stock avatar when no avatar is configured", async () => {
     const world = createMockWorld();
-    world.settings = {};
+    // Intentionally clearing avatar to exercise the fallback path; the
+    // production code treats the settings shape as partial.
+    (world as { settings: Record<string, unknown> }).settings = {};
 
     const service = new EmbeddedHyperscapeService(
       world as any,

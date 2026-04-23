@@ -1366,11 +1366,11 @@ export class StreamingDuelScheduler {
 
     const prepStartedAt = Date.now();
 
-    if (!this.currentCycle.arenaPositions) {
+    if (!cycle.arenaPositions) {
       try {
         await this.orchestrator.teleportToArena(
-          this.currentCycle.agent1.characterId,
-          this.currentCycle.agent2.characterId,
+          cycle.agent1.characterId,
+          cycle.agent2.characterId,
           true,
         );
       } catch (err) {

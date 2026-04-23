@@ -490,9 +490,13 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
   it("teleports contestants into the arena before async duel prep finishes", async () => {
     const ctx = createMockWorld();
     const scheduler = new StreamingDuelScheduler(ctx.world as never);
-    let resolvePrep: (() => void) | null = null;
+    // TS's control-flow analysis cannot prove the Promise executor
+    // synchronously assigns `resolvePrep`, so narrow it up-front with
+    // a definite-assignment assertion rather than a `| null` union
+    // that ends up narrowed to `null` at the call site.
+    let resolvePrep!: () => void;
     const prepPromise = new Promise<void>((resolve) => {
-      resolvePrep = resolve;
+      resolvePrep = () => resolve();
     });
     const prepareSpy = vi
       .spyOn((scheduler as any).orchestrator, "prepareContestantsForDuel")
@@ -519,7 +523,7 @@ describe("StreamingDuelScheduler deterministic countdown start", () => {
     expect(teleportSpy).toHaveBeenCalledTimes(1);
     expect(prepareSpy).toHaveBeenCalledTimes(1);
 
-    resolvePrep?.();
+    resolvePrep();
     await (scheduler as any).announcementArenaPrepPromise;
 
     scheduler.destroy();
