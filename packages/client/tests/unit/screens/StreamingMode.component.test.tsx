@@ -252,27 +252,9 @@ describe("StreamingMode component", () => {
     await waitFor(() => {
       expect(queryByTestId("loading-screen")).toBeNull();
       expect(
-        (window as Window & { __HYPERSCAPE_STREAM_READY__?: boolean })
-          .__HYPERSCAPE_STREAM_READY__,
-      ).toBe(true);
-      expect(getByTestId("streaming-overlay").textContent).toBe("FIGHTING");
-    });
-  });
-
-  it("dismisses the loading overlay without a READY event once stream data and terrain are ready", async () => {
-    gameClientState.emitReadyEvent = false;
-
-    const { queryByTestId, getByTestId } = render(<StreamingMode />);
-
-    expect(getByTestId("loading-screen")).toBeTruthy();
-
-    await waitFor(() => {
-      expect(queryByTestId("loading-screen")).toBeNull();
-      expect(
         (
           window as Window & {
             __HYPERSCAPE_STREAM_BOOT_READY__?: boolean;
-            __HYPERSCAPE_STREAM_READY__?: boolean;
           }
         ).__HYPERSCAPE_STREAM_BOOT_READY__,
       ).toBe(true);
@@ -280,6 +262,31 @@ describe("StreamingMode component", () => {
         (window as Window & { __HYPERSCAPE_STREAM_READY__?: boolean })
           .__HYPERSCAPE_STREAM_READY__,
       ).toBe(true);
+      expect(getByTestId("streaming-overlay").textContent).toBe("FIGHTING");
+    });
+  });
+
+  it("keeps the loading overlay up without a READY event even when stream data arrives", async () => {
+    gameClientState.emitReadyEvent = false;
+
+    const { queryByTestId, getByTestId } = render(<StreamingMode />);
+
+    expect(getByTestId("loading-screen")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(queryByTestId("loading-screen")).toBeTruthy();
+      expect(
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_BOOT_READY__?: boolean;
+            __HYPERSCAPE_STREAM_READY__?: boolean;
+          }
+        ).__HYPERSCAPE_STREAM_BOOT_READY__,
+      ).toBe(false);
+      expect(
+        (window as Window & { __HYPERSCAPE_STREAM_READY__?: boolean })
+          .__HYPERSCAPE_STREAM_READY__,
+      ).toBe(false);
       expect(getByTestId("streaming-overlay").textContent).toBe("FIGHTING");
     });
   });

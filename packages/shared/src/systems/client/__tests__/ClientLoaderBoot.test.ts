@@ -58,22 +58,34 @@ describe("ClientLoader boot safeguards", () => {
     await rejection;
   });
 
-  it("emits READY after the stream preload watchdog expires", async () => {
+  it("does not emit READY early while preload work is still unresolved", async () => {
     const world = createMockWorld();
     const loader = new ClientLoader(world as never);
+    let resolveCritical: ((value: unknown) => void) | null = null;
 
-    vi.spyOn(loader, "load").mockImplementation((_type: string, url: string) => {
-      if (url === "critical.glb") {
-        return new Promise(() => {});
-      }
-      return Promise.resolve({} as never);
-    });
+    vi.spyOn(loader, "load").mockImplementation(
+      (_type: string, url: string) => {
+        if (url === "critical.glb") {
+          return new Promise((resolve) => {
+            resolveCritical = resolve;
+          }) as Promise<never>;
+        }
+        return Promise.resolve({} as never);
+      },
+    );
 
-    loader.preload("model", "critical.glb", { blocking: true });
-    loader.preload("emote", "background.glb", { blocking: false });
+    loader.preload("model", "critical.glb");
+    loader.preload("emote", "background.glb");
 
-    loader.execPreload({ readyTimeoutMs: 5000 });
-    await vi.advanceTimersByTimeAsync(5000);
+    loader.execPreload();
+    await vi.advanceTimersByTimeAsync(20000);
+
+    expect(world.emit).not.toHaveBeenCalledWith(EventType.READY);
+    expect(world.network.send).not.toHaveBeenCalledWith("clientReady", {});
+
+    resolveCritical?.({} as never);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(world.emit).toHaveBeenCalledWith(EventType.READY);
     expect(world.network.send).toHaveBeenCalledWith("clientReady", {});

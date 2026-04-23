@@ -138,6 +138,7 @@ function toGuardrailAgent(
 
 function deriveStreamingSurfaceBlockReason(params: {
   connected: boolean;
+  worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
   initError: string | null;
@@ -156,6 +157,9 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (!params.hasStreamingState) {
     return activePhase ? "stream_state_missing" : "waiting_for_duel_data";
   }
+  if (!params.worldReady) {
+    return "world_not_ready";
+  }
   if (!params.terrainReady) {
     return "terrain_not_ready";
   }
@@ -167,6 +171,7 @@ function deriveStreamingSurfaceBlockReason(params: {
 
 export function deriveStreamingRendererHealth(params: {
   connected: boolean;
+  worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
   initError: string | null;
@@ -181,6 +186,7 @@ export function deriveStreamingRendererHealth(params: {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
   const blockingReason = deriveStreamingSurfaceBlockReason({
     connected: params.connected,
+    worldReady: params.worldReady,
     terrainReady: params.terrainReady,
     hasStreamingState: params.hasStreamingState,
     initError: params.initError,
@@ -211,6 +217,7 @@ export function deriveStreamingRendererHealth(params: {
 
 export function shouldDismissStreamingLoading(params: {
   connected: boolean;
+  worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
   initError?: string | null;
@@ -221,6 +228,7 @@ export function shouldDismissStreamingLoading(params: {
   return (
     deriveStreamingSurfaceBlockReason({
       connected: params.connected,
+      worldReady: params.worldReady,
       terrainReady: params.terrainReady,
       hasStreamingState: params.hasStreamingState,
       initError: params.initError ?? null,
@@ -392,6 +400,7 @@ export function StreamingMode() {
         // the loading screen can dismiss.  After that, ClientCameraSystem
         // handles all target switches via its own streaming:state:update
         // subscription with smooth cinematic transitions — no loading screen.
+        markWorldReady();
         if (
           state.cameraTarget &&
           state.cameraTarget !== lastCameraTargetRef.current
@@ -594,6 +603,7 @@ export function StreamingMode() {
   const needsCameraLock = Boolean(streamingState?.cameraTarget);
   const streamBootReady = shouldDismissStreamingLoading({
     connected,
+    worldReady,
     terrainReady,
     hasStreamingState: streamingState !== null,
     initError: clientInitError,
@@ -602,9 +612,9 @@ export function StreamingMode() {
     phase: streamingState?.cycle.phase ?? null,
   });
 
-  // Auto-start canvas capture for HLS streaming when the stream surface is boot-ready
+  // Auto-start canvas capture for HLS streaming when world and terrain are ready
   useEffect(() => {
-    if (!streamBootReady) return;
+    if (!worldReady || !terrainReady) return;
 
     const searchParams = new URLSearchParams(window.location.search);
     const disableBridgeCaptureValue = (
@@ -933,7 +943,7 @@ export function StreamingMode() {
       delete win.__captureControl__;
       delete win.__captureStatus__;
     };
-  }, [streamBootReady]);
+  }, [worldReady, terrainReady]);
 
   useEffect(() => {
     return () => {
@@ -963,6 +973,7 @@ export function StreamingMode() {
     () =>
       deriveStreamingRendererHealth({
         connected,
+        worldReady,
         terrainReady,
         hasStreamingState: streamingState !== null,
         initError: clientInitError,
@@ -982,6 +993,7 @@ export function StreamingMode() {
       needsCameraLock,
       streamingState,
       terrainReady,
+      worldReady,
     ],
   );
 
@@ -1009,14 +1021,14 @@ export function StreamingMode() {
       }
     } else if (!connected) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "connecting";
-    } else if (!streamingState) {
+    } else if (!worldReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
     } else if (!terrainReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
     } else {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
     }
-  }, [clientInitError, connected, loadingDismissed, streamingState, terrainReady]);
+  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -1043,17 +1055,17 @@ export function StreamingMode() {
 
   const loadingHeadline = !connected
     ? "Connecting to Hyperscape..."
-    : !streamingState
+    : !worldReady
       ? "Initializing world systems..."
       : !terrainReady
         ? "Generating terrain..."
         : "Preparing stream view...";
   const loadingDetail = !connected
     ? "Opening duel stream connection"
-    : !streamingState
+    : !worldReady
       ? readyEventDelayed
         ? "Still waiting for the READY event from the live world"
-        : "Waiting for the first streaming state"
+        : "Bootstrapping stream world"
       : !terrainReady
         ? terrainStalled
           ? "Terrain is taking longer than expected; waiting for a real ready signal"
