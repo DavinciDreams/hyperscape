@@ -129,6 +129,24 @@ function resolveFallbackSourceReason(params: {
   return null;
 }
 
+function resolveEffectiveExternalCaptureMode(params: {
+  externalSnapshot: ExternalRtmpStatusSnapshot | null;
+  normalizedExternalRuntime: StreamSourceRuntime | null;
+}): StreamSourceRuntime["captureMode"] {
+  const runtimeCaptureMode = normalizeStreamSourceCaptureMode(
+    params.normalizedExternalRuntime?.captureMode,
+  );
+  if (runtimeCaptureMode && runtimeCaptureMode !== "none") {
+    return runtimeCaptureMode;
+  }
+
+  return (
+    normalizeStreamSourceCaptureMode(params.externalSnapshot?.captureMode) ??
+    runtimeCaptureMode ??
+    "none"
+  );
+}
+
 export function deriveStreamSourceRuntime(params: {
   externalStatusSnapshot?: ExternalRtmpStatusSnapshot | null;
   externalStatusMaxAgeMs: number;
@@ -149,6 +167,10 @@ export function deriveStreamSourceRuntime(params: {
   const normalizedExternalRuntime = normalizeStreamSourceRuntime(
     externalSnapshot?.sourceRuntime,
   );
+  const effectiveCaptureMode = resolveEffectiveExternalCaptureMode({
+    externalSnapshot,
+    normalizedExternalRuntime,
+  });
   const snapshotHeartbeatAt =
     normalizedExternalRuntime?.workerHeartbeatAt ??
     asFiniteNumber(externalSnapshot?.updatedAt);
@@ -169,7 +191,7 @@ export function deriveStreamSourceRuntime(params: {
   ) {
     return buildUnavailableStreamSourceRuntime({
       statusSource: "external_worker",
-      captureMode: normalizedExternalRuntime?.captureMode ?? "none",
+      captureMode: effectiveCaptureMode,
       degradedReason: "status_stale",
       currentSceneUrl: normalizedExternalRuntime?.currentSceneUrl ?? null,
       activeBundle: normalizedExternalRuntime?.activeBundle ?? null,
@@ -183,7 +205,10 @@ export function deriveStreamSourceRuntime(params: {
   }
 
   if (normalizedExternalRuntime) {
-    return normalizedExternalRuntime;
+    return {
+      ...normalizedExternalRuntime,
+      captureMode: effectiveCaptureMode,
+    };
   }
 
   const degradedReason = resolveFallbackSourceReason({
@@ -198,8 +223,7 @@ export function deriveStreamSourceRuntime(params: {
   return {
     ready: degradedReason == null,
     statusSource: externalSnapshot ? "external_worker" : "in_process_bridge",
-    captureMode:
-      normalizeStreamSourceCaptureMode(externalSnapshot?.captureMode) ?? "none",
+    captureMode: effectiveCaptureMode,
     degradedReason,
     currentSceneUrl: externalSnapshot?.smoke?.currentSceneUrl ?? null,
     activeBundle: externalSnapshot?.smoke?.activeBundle ?? null,

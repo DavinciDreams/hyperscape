@@ -614,11 +614,68 @@ describe("buildStreamingStatusPayload", () => {
       updatedAt: 3_500,
     });
     expect(payload.cloudflare).toEqual({
-      liveInputId: null,
-      lifecycle: null,
-      lastWebhook: null,
+      liveInputId: "live-input-123",
+      lifecycle: {
+        eventType: "stream_live_input.disconnected",
+        eventName: "Stream Live Input Disconnected",
+        liveInputId: "live-input-123",
+        videoId: "video-456",
+        status: "disconnected",
+        errorCode: "publish_disconnected",
+        errorMessage: "Publisher disconnected unexpectedly",
+        occurredAt: 4_000,
+        receivedAt: 4_100,
+      },
+      lastWebhook: {
+        eventType: "stream_live_input.disconnected",
+        eventName: "Stream Live Input Disconnected",
+        liveInputId: "live-input-123",
+        videoId: "video-456",
+        occurredAt: 4_000,
+        receivedAt: 4_100,
+      },
       lastPlaybackProbe: null,
       lastExternalTransportError: null,
+    });
+  });
+
+  it("uses the configured Cloudflare live input id even without persisted lifecycle state", () => {
+    const payload = buildStreamingStatusPayload({
+      base: { running: true },
+      externalSnapshot: {
+        destinations: [],
+        stats: {},
+        updatedAt: 1_000,
+        captureMode: "x11_nvenc",
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "none",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle: null,
+          lastFrameAt: 999,
+          lastRenderTickAt: 998,
+          lastVisualChangeAt: 997,
+          lastRecoveryAt: null,
+          recoveryCount: 0,
+          workerHeartbeatAt: 1_000,
+        },
+      },
+      bridgeStats: null,
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1_000,
+      },
+      cloudflareLiveInputId: "875a27392a87d2149a1c7e012ef6212c",
+    });
+
+    expect(payload.sourceRuntime.captureMode).toBe("x11_nvenc");
+    expect(payload.cloudflare).toMatchObject({
+      liveInputId: "875a27392a87d2149a1c7e012ef6212c",
+      lifecycle: null,
+      lastWebhook: null,
     });
   });
 });

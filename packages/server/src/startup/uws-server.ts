@@ -102,6 +102,21 @@ export async function createUwsServer(
       ).toString();
       const wsId = `SERVER-UWS-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+      if (query.mode === "streaming") {
+        console.info(
+          "[uWS] Streaming viewer upgrade",
+          JSON.stringify({
+            path: "/ws",
+            route: "/ws",
+            mode: query.mode ?? null,
+            hasStreamToken:
+              typeof query.streamToken === "string" &&
+              query.streamToken.trim().length > 0,
+            remoteAddress,
+          }),
+        );
+      }
+
       res.upgrade<UwsUserData>(
         { wsId, remoteAddress, query, adapter: null },
         req.getHeader("sec-websocket-key"),

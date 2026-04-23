@@ -892,10 +892,15 @@ export function buildStreamingStatusPayload(params: {
           updatedAt: params.canonicalProbeSnapshot.updatedAt,
         }
       : null;
+  const publicCloudflareLiveInputId =
+    params.cloudflareLiveInputId?.trim() ||
+    persistedAuthority?.cloudflareLifecycle?.liveInputId ||
+    persistedAuthority?.cloudflareLastWebhook?.liveInputId ||
+    null;
   const publicCloudflareStatus = {
-    liveInputId: null,
-    lifecycle: null,
-    lastWebhook: null,
+    liveInputId: publicCloudflareLiveInputId,
+    lifecycle: persistedAuthority?.cloudflareLifecycle ?? null,
+    lastWebhook: persistedAuthority?.cloudflareLastWebhook ?? null,
     lastPlaybackProbe: cloudflarePlaybackProbe,
     lastExternalTransportError: null,
   };

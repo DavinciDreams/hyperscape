@@ -713,15 +713,14 @@ export function parseExternalRtmpStatusSnapshot(
     if (typeof parsed.clientConnected === "boolean") {
       snapshot.clientConnected = parsed.clientConnected;
     }
-    if (
+    const rootCaptureMode =
       parsed.captureMode === "cdp" ||
       parsed.captureMode === "webcodecs" ||
       parsed.captureMode === "mediarecorder" ||
       parsed.captureMode === "x11_nvenc" ||
       parsed.captureMode === "none"
-    ) {
-      snapshot.captureMode = parsed.captureMode;
-    }
+        ? parsed.captureMode
+        : undefined;
 
     const rendererHealth = parseExternalRendererHealthBlob(
       parsed.rendererHealth,
@@ -743,6 +742,11 @@ export function parseExternalRtmpStatusSnapshot(
     if (smoke) snapshot.smoke = smoke;
     if (ingest) snapshot.ingest = ingest;
     if (sourceRuntime) snapshot.sourceRuntime = sourceRuntime;
+    if (rootCaptureMode) {
+      snapshot.captureMode = rootCaptureMode;
+    } else if (sourceRuntime?.captureMode) {
+      snapshot.captureMode = sourceRuntime.captureMode;
+    }
     if (captureDiagnostics) snapshot.captureDiagnostics = captureDiagnostics;
 
     return snapshot;

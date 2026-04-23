@@ -230,6 +230,35 @@ describe("parseExternalRtmpStatusSnapshot", () => {
     expect(parsed?.sourceRuntime?.captureMode).toBe("x11_nvenc");
   });
 
+  it("falls back to nested sourceRuntime capture mode when the root field is missing", () => {
+    const parsed = parseExternalRtmpStatusSnapshot(
+      JSON.stringify({
+        destinations: [],
+        stats: {},
+        updatedAt: Date.now(),
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "x11_nvenc",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle: null,
+          lastFrameAt: 1230,
+          lastRenderTickAt: 1231,
+          lastVisualChangeAt: 1232,
+          lastRecoveryAt: 1000,
+          recoveryCount: 2,
+          workerHeartbeatAt: 1234,
+        },
+      }),
+      15_000,
+      { allowStale: true },
+    );
+
+    expect(parsed?.captureMode).toBe("x11_nvenc");
+    expect(parsed?.sourceRuntime?.captureMode).toBe("x11_nvenc");
+  });
+
   it("drops malformed nested fields while preserving valid siblings", () => {
     const parsed = parseExternalRtmpStatusSnapshot(
       JSON.stringify({
