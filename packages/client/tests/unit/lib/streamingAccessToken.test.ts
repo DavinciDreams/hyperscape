@@ -68,6 +68,30 @@ describe("streamingAccessToken", () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 
+  it("retries runtime env resolution when primed before env.js populates window.env", () => {
+    const replaceState = vi.fn();
+    const fakeWindow = {
+      location: {
+        href: "https://example.com/stream?foo=bar#mode=stream",
+      },
+      history: {
+        state: { page: "stream" },
+        replaceState,
+      },
+    } as unknown as Window & {
+      env?: { PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN?: string };
+    };
+
+    expect(primeStreamingAccessTokenFromWindow(fakeWindow)).toBeNull();
+
+    fakeWindow.env = {
+      PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN: "viewer-token",
+    };
+
+    expect(primeStreamingAccessTokenFromWindow(fakeWindow)).toBe("viewer-token");
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
   it("primes from window state, scrubs the URL, and caches the token", () => {
     const replaceState = vi.fn();
     const fakeWindow = {

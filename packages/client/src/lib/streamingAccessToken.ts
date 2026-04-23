@@ -70,15 +70,19 @@ export function resolveStreamingAccessTokenFromHref(
 export function primeStreamingAccessTokenFromWindow(
   targetWindow: Window,
 ): string | null {
-  if (cachedStreamingAccessToken !== undefined) {
+  if (typeof cachedStreamingAccessToken === "string") {
     return cachedStreamingAccessToken;
   }
 
   const resolved = resolveStreamingAccessTokenFromHref(
     targetWindow.location.href,
   );
-  cachedStreamingAccessToken =
+  const token =
     resolved.token ?? resolveStreamingAccessTokenFromEnv(targetWindow);
+
+  if (token) {
+    cachedStreamingAccessToken = token;
+  }
 
   if (resolved.nextUrl) {
     targetWindow.history.replaceState(
@@ -88,11 +92,11 @@ export function primeStreamingAccessTokenFromWindow(
     );
   }
 
-  return cachedStreamingAccessToken;
+  return token;
 }
 
 export function getStreamingAccessToken(): string | null {
-  if (cachedStreamingAccessToken !== undefined) {
+  if (typeof cachedStreamingAccessToken === "string") {
     return cachedStreamingAccessToken;
   }
 
