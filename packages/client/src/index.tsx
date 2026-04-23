@@ -794,6 +794,7 @@ async function mountApp() {
   const rootElement = document.getElementById("root")!;
 
   await ensurePublicRuntimeEnv();
+  primeStreamingAccessTokenFromWindow(window);
   refreshApiConfig();
   syncRuntimeAssetBaseUrls();
 

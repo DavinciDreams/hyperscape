@@ -5,6 +5,8 @@ import { installThreeJSExtensions } from "@hyperscape/shared";
 import { Buffer } from "buffer";
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { ensurePublicRuntimeEnv } from "./lib/publicEnv";
+import { primeStreamingAccessTokenFromWindow } from "./lib/streamingAccessToken";
 import { resolveCaptureAssetBase } from "./lib/streamingWindow";
 import { StreamingMode } from "./screens/StreamingMode";
 
@@ -62,8 +64,11 @@ globalFlags.Buffer = Buffer;
 globalFlags.isBrowser = true;
 globalFlags.isServer = false;
 
-// Early CDN URL initialization to prevent PhysX WASM loading race condition
-if (typeof window !== "undefined") {
+function syncStreamRuntimeConfig(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   const searchParams = new URLSearchParams(window.location.search);
   const isSourceCapture = ["1", "true", "yes", "on"].includes(
     (searchParams.get("streamCapture") || "").toLowerCase(),
@@ -105,24 +110,27 @@ if (typeof window !== "undefined") {
   }
 
   const existingViewportConfig =
-    (windowWithEnv.__HYPERSCAPE_CONFIG__ as Record<string, unknown> | undefined) ||
-    {};
+    (windowWithEnv.__HYPERSCAPE_CONFIG__ as
+      | Record<string, unknown>
+      | undefined) || {};
   windowWithEnv.__HYPERSCAPE_CONFIG__ = {
     ...existingViewportConfig,
     mode: "stream",
     quality:
       (existingViewportConfig["quality"] as string | undefined) ??
       (isSourceCapture ? "high" : "low"),
-    hiddenUI:
-      (existingViewportConfig["hiddenUI"] as string[] | undefined) ?? [
-        "chat",
-        "inventory",
-        "minimap",
-        "hotbar",
-        "stats",
-      ],
+    hiddenUI: (existingViewportConfig["hiddenUI"] as string[] | undefined) ?? [
+      "chat",
+      "inventory",
+      "minimap",
+      "hotbar",
+      "stats",
+    ],
   } as typeof windowWithEnv.__HYPERSCAPE_CONFIG__;
 }
+
+// Early CDN URL initialization to prevent PhysX WASM loading race condition
+syncStreamRuntimeConfig();
 
 installThreeJSExtensions();
 
@@ -205,6 +213,9 @@ async function resetLocalStreamingCaches(): Promise<void> {
 
 async function bootstrapStreamApp(): Promise<void> {
   await resetLocalStreamingCaches();
+  await ensurePublicRuntimeEnv();
+  primeStreamingAccessTokenFromWindow(window);
+  syncStreamRuntimeConfig();
   mountStreamApp();
 }
 
