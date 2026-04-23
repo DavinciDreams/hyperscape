@@ -42,13 +42,12 @@ describe("buildCaptureControlStatus", () => {
 });
 
 describe("shouldDismissStreamingLoading", () => {
-  it("keeps the overlay up until the world is ready", () => {
+  it("keeps the overlay up until streaming state is present", () => {
     expect(
       shouldDismissStreamingLoading({
         connected: true,
-        worldReady: false,
         terrainReady: true,
-        hasStreamingState: true,
+        hasStreamingState: false,
         initError: null,
         needsCameraLock: false,
         cameraLocked: false,
@@ -61,7 +60,6 @@ describe("shouldDismissStreamingLoading", () => {
     expect(
       shouldDismissStreamingLoading({
         connected: true,
-        worldReady: true,
         terrainReady: true,
         hasStreamingState: true,
         initError: null,
@@ -76,7 +74,6 @@ describe("shouldDismissStreamingLoading", () => {
     expect(
       shouldDismissStreamingLoading({
         connected: false,
-        worldReady: true,
         terrainReady: true,
         hasStreamingState: true,
         initError: null,
@@ -91,7 +88,6 @@ describe("shouldDismissStreamingLoading", () => {
     expect(
       shouldDismissStreamingLoading({
         connected: true,
-        worldReady: true,
         terrainReady: false,
         hasStreamingState: true,
         initError: null,
@@ -106,7 +102,6 @@ describe("shouldDismissStreamingLoading", () => {
     expect(
       shouldDismissStreamingLoading({
         connected: true,
-        worldReady: true,
         terrainReady: true,
         hasStreamingState: false,
         initError: null,
@@ -139,7 +134,6 @@ describe("shouldDismissStreamingLoading", () => {
     expect(
       deriveStreamingRendererHealth({
         connected: true,
-        worldReady: true,
         terrainReady: true,
         hasStreamingState: true,
         initError: null,
@@ -199,7 +193,6 @@ describe("shouldDismissStreamingLoading", () => {
     expect(
       deriveStreamingRendererHealth({
         connected: true,
-        worldReady: true,
         terrainReady: true,
         hasStreamingState: true,
         initError: null,
@@ -258,7 +251,6 @@ describe("shouldDismissStreamingLoading", () => {
   it("reports ready only after the live duel surface is sane and the overlay is gone", () => {
     const health = deriveStreamingRendererHealth({
       connected: true,
-      worldReady: true,
       terrainReady: true,
       hasStreamingState: true,
       initError: null,
@@ -319,7 +311,6 @@ describe("shouldDismissStreamingLoading", () => {
   it("does not report ready during idle when streaming state is still absent", () => {
     const health = deriveStreamingRendererHealth({
       connected: true,
-      worldReady: true,
       terrainReady: true,
       hasStreamingState: false,
       initError: null,
@@ -339,7 +330,6 @@ describe("shouldDismissStreamingLoading", () => {
   it("marks the stream as unhealthy when the game client reports an init error", () => {
     const health = deriveStreamingRendererHealth({
       connected: true,
-      worldReady: true,
       terrainReady: true,
       hasStreamingState: true,
       initError: "HTTP error! status: 404",

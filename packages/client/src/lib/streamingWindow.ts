@@ -110,6 +110,7 @@ export type StreamingWindow = Window & {
   env?: PublicRuntimeEnv;
   __CDN_URL?: string;
   __ASSETS_URL?: string;
+  __HYPERSCAPE_STREAM_BOOT_READY__?: boolean;
   __HYPERSCAPE_STREAM_READY__?: boolean;
   __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: StreamingWindowRendererHealth | null;
   __HYPERSCAPE_STREAM_HEARTBEAT__?: StreamingWindowHeartbeat | null;

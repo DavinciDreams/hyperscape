@@ -27,7 +27,7 @@ import type {
 } from "@hyperscape/shared";
 import { EventType, deriveStreamingGuardrailReason } from "@hyperscape/shared";
 import type { StreamingWindow } from "@/lib/streamingWindow";
-import { GAME_WS_URL, GAME_API_URL } from "../lib/api-config";
+import { GAME_API_URL, GAME_WS_URL, refreshApiConfig } from "../lib/api-config";
 import { getStreamingAccessToken } from "../lib/streamingAccessToken";
 
 /** Streaming state from server */
@@ -138,7 +138,6 @@ function toGuardrailAgent(
 
 function deriveStreamingSurfaceBlockReason(params: {
   connected: boolean;
-  worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
   initError: string | null;
@@ -157,9 +156,6 @@ function deriveStreamingSurfaceBlockReason(params: {
   if (!params.hasStreamingState) {
     return activePhase ? "stream_state_missing" : "waiting_for_duel_data";
   }
-  if (!params.worldReady) {
-    return "world_not_ready";
-  }
   if (!params.terrainReady) {
     return "terrain_not_ready";
   }
@@ -171,7 +167,6 @@ function deriveStreamingSurfaceBlockReason(params: {
 
 export function deriveStreamingRendererHealth(params: {
   connected: boolean;
-  worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
   initError: string | null;
@@ -186,7 +181,6 @@ export function deriveStreamingRendererHealth(params: {
   const activePhase = Boolean(params.phase && params.phase !== "IDLE");
   const blockingReason = deriveStreamingSurfaceBlockReason({
     connected: params.connected,
-    worldReady: params.worldReady,
     terrainReady: params.terrainReady,
     hasStreamingState: params.hasStreamingState,
     initError: params.initError,
@@ -217,7 +211,6 @@ export function deriveStreamingRendererHealth(params: {
 
 export function shouldDismissStreamingLoading(params: {
   connected: boolean;
-  worldReady: boolean;
   terrainReady: boolean;
   hasStreamingState: boolean;
   initError?: string | null;
@@ -228,7 +221,6 @@ export function shouldDismissStreamingLoading(params: {
   return (
     deriveStreamingSurfaceBlockReason({
       connected: params.connected,
-      worldReady: params.worldReady,
       terrainReady: params.terrainReady,
       hasStreamingState: params.hasStreamingState,
       initError: params.initError ?? null,
@@ -274,10 +266,11 @@ export function StreamingMode() {
   const [streamAccessToken] = useState<string | null>(() =>
     getStreamingAccessToken(),
   );
+  const apiConfigRef = useRef(refreshApiConfig());
 
   // WebSocket URL for streaming mode (supports optional streamToken gate)
   const wsUrl = useMemo(() => {
-    const baseWsUrl = GAME_WS_URL;
+    const baseWsUrl = apiConfigRef.current.gameWsUrl || GAME_WS_URL;
     const url = new URL(baseWsUrl, window.location.href);
     url.searchParams.set("mode", "streaming");
     if (streamAccessToken) {
@@ -312,6 +305,7 @@ export function StreamingMode() {
       worldRef.current = world;
       setConnected(true);
       const win = window as StreamingWindow;
+      win.__HYPERSCAPE_STREAM_BOOT_READY__ = false;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
@@ -398,7 +392,6 @@ export function StreamingMode() {
         // the loading screen can dismiss.  After that, ClientCameraSystem
         // handles all target switches via its own streaming:state:update
         // subscription with smooth cinematic transitions — no loading screen.
-        markWorldReady();
         if (
           state.cameraTarget &&
           state.cameraTarget !== lastCameraTargetRef.current
@@ -525,8 +518,8 @@ export function StreamingMode() {
     let warnedOnce = false;
 
     // Try to fetch initial state via HTTP. Keep retrying until WS/state arrives.
-    const baseApiUrl = GAME_API_URL;
-    const stateUrl = `${baseApiUrl}/api/streaming/state`;
+    const baseApiUrl = apiConfigRef.current.gameApiUrl || GAME_API_URL;
+    const stateUrl = new URL("/api/streaming/state", baseApiUrl).toString();
     const fetchState = () => {
       if (!mounted) return;
       const controller = new AbortController();
@@ -598,9 +591,20 @@ export function StreamingMode() {
     };
   }, [worldReady]);
 
-  // Auto-start canvas capture for HLS streaming when world is ready
+  const needsCameraLock = Boolean(streamingState?.cameraTarget);
+  const streamBootReady = shouldDismissStreamingLoading({
+    connected,
+    terrainReady,
+    hasStreamingState: streamingState !== null,
+    initError: clientInitError,
+    needsCameraLock,
+    cameraLocked,
+    phase: streamingState?.cycle.phase ?? null,
+  });
+
+  // Auto-start canvas capture for HLS streaming when the stream surface is boot-ready
   useEffect(() => {
-    if (!worldReady || !terrainReady) return;
+    if (!streamBootReady) return;
 
     const searchParams = new URLSearchParams(window.location.search);
     const disableBridgeCaptureValue = (
@@ -929,11 +933,12 @@ export function StreamingMode() {
       delete win.__captureControl__;
       delete win.__captureStatus__;
     };
-  }, [worldReady, terrainReady]);
+  }, [streamBootReady]);
 
   useEffect(() => {
     return () => {
       const win = window as StreamingWindow;
+      win.__HYPERSCAPE_STREAM_BOOT_READY__ = false;
       win.__HYPERSCAPE_STREAM_READY__ = false;
       win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = null;
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = null;
@@ -953,22 +958,11 @@ export function StreamingMode() {
   // Loading screen is shown only during initial boot. Once everything is
   // ready for the first time, we fade out and never show it again — camera
   // target switches are handled seamlessly by ClientCameraSystem.
-  const needsCameraLock = Boolean(streamingState?.cameraTarget);
-  const isInitiallyReady = shouldDismissStreamingLoading({
-    connected,
-    worldReady,
-    terrainReady,
-    hasStreamingState: streamingState !== null,
-    initError: clientInitError,
-    needsCameraLock,
-    cameraLocked,
-    phase: streamingState?.cycle.phase ?? null,
-  });
+  const isInitiallyReady = streamBootReady;
   const rendererHealth = useMemo(
     () =>
       deriveStreamingRendererHealth({
         connected,
-        worldReady,
         terrainReady,
         hasStreamingState: streamingState !== null,
         initError: clientInitError,
@@ -988,15 +982,15 @@ export function StreamingMode() {
       needsCameraLock,
       streamingState,
       terrainReady,
-      worldReady,
     ],
   );
 
   useEffect(() => {
     const win = window as StreamingWindow;
+    win.__HYPERSCAPE_STREAM_BOOT_READY__ = streamBootReady;
     win.__HYPERSCAPE_STREAM_READY__ = rendererHealth.ready;
     win.__HYPERSCAPE_STREAM_RENDERER_HEALTH__ = rendererHealth;
-  }, [rendererHealth]);
+  }, [rendererHealth, streamBootReady]);
 
   // Write boot status to a window global so the capture pipeline's renderer
   // health probe can detect loading/error state without reading DOM textContent.
@@ -1015,14 +1009,14 @@ export function StreamingMode() {
       }
     } else if (!connected) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "connecting";
-    } else if (!worldReady) {
+    } else if (!streamingState) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "initializing";
     } else if (!terrainReady) {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "loading_assets";
     } else {
       win.__HYPERSCAPE_STREAM_BOOT_STATUS__ = "finalizing";
     }
-  }, [clientInitError, connected, loadingDismissed, terrainReady, worldReady]);
+  }, [clientInitError, connected, loadingDismissed, streamingState, terrainReady]);
 
   // Trigger fade-out once when the stream is first ready.
   useEffect(() => {
@@ -1049,17 +1043,17 @@ export function StreamingMode() {
 
   const loadingHeadline = !connected
     ? "Connecting to Hyperscape..."
-    : !worldReady
+    : !streamingState
       ? "Initializing world systems..."
       : !terrainReady
         ? "Generating terrain..."
         : "Preparing stream view...";
   const loadingDetail = !connected
     ? "Opening duel stream connection"
-    : !worldReady
+    : !streamingState
       ? readyEventDelayed
         ? "Still waiting for the READY event from the live world"
-        : "Bootstrapping stream world"
+        : "Waiting for the first streaming state"
       : !terrainReady
         ? terrainStalled
           ? "Terrain is taking longer than expected; waiting for a real ready signal"

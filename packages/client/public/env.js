@@ -14,25 +14,12 @@
 // stale workspace-root PUBLIC_* values intended for the game server process.
 (() => {
   const env = typeof window.env === "object" && window.env ? window.env : {};
-  const hostname = window.location.hostname || "";
   const currentPort = window.location.port;
-  const enoomianStagingPublicApiOrigin = "https://46.4.80.150.sslip.io";
-  const enoomianStagingPublicCdnOrigin =
-    "https://hyperscapes-staging-production.up.railway.app/game-assets";
   const isLocalDevServer =
     currentPort === "3333" || currentPort === "4173" || currentPort === "5173";
-  const isEnoomianStagingPagesHost =
-    hostname === "hyperscape-enoomian-staging.pages.dev" ||
-    hostname.endsWith(".hyperscape-enoomian-staging.pages.dev");
-
-  if (isEnoomianStagingPagesHost) {
-    env.PUBLIC_API_URL ||= enoomianStagingPublicApiOrigin;
-    env.PUBLIC_WS_URL ||= "wss://46.4.80.150.sslip.io/ws";
-    env.PUBLIC_CDN_URL ||= enoomianStagingPublicCdnOrigin;
-    env.PUBLIC_ELIZAOS_URL ||= enoomianStagingPublicApiOrigin;
-  }
 
   if (isLocalDevServer) {
+    const hostname = window.location.hostname || "127.0.0.1";
     const host = hostname || "127.0.0.1";
     env.PUBLIC_API_URL ||= `http://${host}:5555`;
     env.PUBLIC_WS_URL ||= `ws://${host}:5556/ws`;
