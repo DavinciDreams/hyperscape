@@ -47,7 +47,7 @@ export interface WalletAuthResult {
 /**
  * Verify a wallet signature for a HyperBet action.
  */
-export function verifyWalletSignature(
+export function checkWalletSignature(
   payload: WalletAuthPayload,
 ): WalletAuthResult {
   const { walletAddress, signature, message } = payload;

@@ -163,7 +163,7 @@ export function registerAgentRoutes(
     return null;
   };
 
-  const authorizeAccountAccess = async (
+  const ensureAccountAccess = async (
     request: FastifyRequest,
     reply: FastifyReply,
     accountId: string,
@@ -505,7 +505,7 @@ export function registerAgentRoutes(
         }
 
         const { characterId, accountId } = body;
-        if (!(await authorizeAccountAccess(request, reply, accountId))) {
+        if (!(await ensureAccountAccess(request, reply, accountId))) {
           return;
         }
 
@@ -823,7 +823,7 @@ export function registerAgentRoutes(
             error: "Missing required parameter: accountId",
           });
         }
-        if (!(await authorizeAccountAccess(request, reply, accountId))) {
+        if (!(await ensureAccountAccess(request, reply, accountId))) {
           return;
         }
 
@@ -933,7 +933,7 @@ export function registerAgentRoutes(
         }
 
         const { agentId, accountId, characterId, agentName } = body;
-        if (!(await authorizeAccountAccess(request, reply, accountId))) {
+        if (!(await ensureAccountAccess(request, reply, accountId))) {
           return;
         }
 
@@ -1279,7 +1279,7 @@ export function registerAgentRoutes(
           });
         }
         if (
-          !(await authorizeAccountAccess(
+          !(await ensureAccountAccess(
             request,
             reply,
             existingMapping.accountId,

@@ -8,7 +8,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { World } from "@hyperscape/shared";
 import { RateLimiterMemory } from "rate-limiter-flexible";
-import { verifyWalletSignature } from "./hyperbet-wallet-auth.js";
+import { checkWalletSignature } from "./hyperbet-wallet-auth.js";
 import { BettingPoolManager } from "../systems/DuelScheduler/BettingPoolManager.js";
 import { getHlsStreamUrl } from "../streaming/hls-cdn-sync.js";
 
@@ -260,7 +260,7 @@ export function registerHyperBetPublicRoutes(
       }
 
       // Verify wallet signature
-      const auth = verifyWalletSignature({ walletAddress, signature, message });
+      const auth = checkWalletSignature({ walletAddress, signature, message });
       if (!auth.valid) {
         return reply
           .code(401)
@@ -322,7 +322,7 @@ export function registerHyperBetPublicRoutes(
         return reply.code(400).send({ error: "Missing required fields" });
       }
 
-      const auth = verifyWalletSignature({ walletAddress, signature, message });
+      const auth = checkWalletSignature({ walletAddress, signature, message });
       if (!auth.valid) {
         return reply
           .code(401)
