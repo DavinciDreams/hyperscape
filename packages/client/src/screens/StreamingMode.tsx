@@ -396,11 +396,9 @@ export function StreamingMode() {
       const onStreamingStateUpdate = (data: unknown) => {
         const state = data as StreamingState;
 
-        // Initial camera lock: only needed for the very first target so
-        // the loading screen can dismiss.  After that, ClientCameraSystem
-        // handles all target switches via its own streaming:state:update
-        // subscription with smooth cinematic transitions — no loading screen.
-        markWorldReady();
+        // Initial camera lock: only needed for the very first target. READY
+        // remains the sole authority for world readiness; a live state packet
+        // must not dismiss the loading gate on its own.
         if (
           state.cameraTarget &&
           state.cameraTarget !== lastCameraTargetRef.current

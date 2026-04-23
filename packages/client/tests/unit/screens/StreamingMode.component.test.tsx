@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventType } from "@hyperscape/shared";
 import { StreamingMode } from "../../../src/screens/StreamingMode";
@@ -272,6 +272,40 @@ describe("StreamingMode component", () => {
     const { queryByTestId, getByTestId } = render(<StreamingMode />);
 
     expect(getByTestId("loading-screen")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(queryByTestId("loading-screen")).toBeTruthy();
+      expect(
+        (
+          window as Window & {
+            __HYPERSCAPE_STREAM_BOOT_READY__?: boolean;
+            __HYPERSCAPE_STREAM_READY__?: boolean;
+          }
+        ).__HYPERSCAPE_STREAM_BOOT_READY__,
+      ).toBe(false);
+      expect(
+        (window as Window & { __HYPERSCAPE_STREAM_READY__?: boolean })
+          .__HYPERSCAPE_STREAM_READY__,
+      ).toBe(false);
+      expect(getByTestId("streaming-overlay").textContent).toBe("FIGHTING");
+    });
+  });
+
+  it("keeps the loading overlay up when websocket state arrives before READY", async () => {
+    gameClientState.emitReadyEvent = false;
+
+    const { queryByTestId, getByTestId } = render(<StreamingMode />);
+
+    await waitFor(() => {
+      expect(gameClientState.world).toBeTruthy();
+    });
+
+    act(() => {
+      gameClientState.world?.emitLocal(
+        "streaming:state:update",
+        createStreamingState(),
+      );
+    });
 
     await waitFor(() => {
       expect(queryByTestId("loading-screen")).toBeTruthy();
