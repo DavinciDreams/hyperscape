@@ -30,12 +30,13 @@
   <div id="root"></div>
   <script>
     (() => {
+      const globalWindow = window;
       const isTruthyUrlFlag = (rawValue) =>
         ["1", "true", "yes", "on"].includes(
           String(rawValue || "").toLowerCase(),
         );
 
-      void (async () => {
+      globalWindow.__HYPERSCAPE_STREAM_PREBOOT__ = (async () => {
         const searchParams = new URLSearchParams(window.location.search);
         const isInternalCapture = isTruthyUrlFlag(
           searchParams.get("internalCapture"),
@@ -43,6 +44,9 @@
         const isSourceCapture = isTruthyUrlFlag(
           searchParams.get("streamCapture"),
         );
+        const isPublicStreamPage =
+          window.location.pathname === "/stream" ||
+          window.location.pathname === "/stream.html";
         const isLoopbackHost = [
           "localhost",
           "127.0.0.1",
@@ -50,7 +54,10 @@
           "::1",
         ].includes(window.location.hostname);
         const shouldResetLocalCaches =
-          isInternalCapture || isSourceCapture || isLoopbackHost;
+          isPublicStreamPage ||
+          isInternalCapture ||
+          isSourceCapture ||
+          isLoopbackHost;
         const reloadMarker = "__hyperscape_stream_sw_reset__";
         let shouldReload = false;
 
@@ -112,7 +119,15 @@
       })();
     })();
   </script>
-  <script type="module" src="./stream.tsx"></script>
+  <script type="module">
+    try {
+      await window.__HYPERSCAPE_STREAM_PREBOOT__;
+      await import("./stream.tsx");
+    } catch (error) {
+      console.error("[stream.html] Stream bootstrap import failed:", error);
+      throw error;
+    }
+  </script>
 </body>
 
 </html>
