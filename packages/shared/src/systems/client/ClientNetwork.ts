@@ -138,6 +138,8 @@ type ClientNetworkEnv = {
 const isTruthy = (value?: string): boolean =>
   value === "1" || value === "true" || value === "yes" || value === "on";
 
+const STREAMING_PRELOAD_READY_TIMEOUT_MS = 12000;
+
 const isNetworkDisabled = (): boolean => {
   const runtimeEnv = (globalThis as { env?: ClientNetworkEnv }).env;
   const processEnv =
@@ -1133,12 +1135,18 @@ export class ClientNetwork extends SystemBase {
     }
     this.maxUploadSize = data.maxUploadSize || 10 * 1024 * 1024; // Default 10MB
 
+    const isStreamingLikeClient =
+      isSpectatorMode || this.isEmbeddedSpectator || isStreamingLikeViewport();
+
     const resolvedAssetsUrl =
       typeof window !== "undefined"
         ? resolveClientAssetBase(
             data.assetsUrl,
             data.apiUrl,
             window.location.href,
+            {
+              preferRuntimeAssetBase: isStreamingLikeClient,
+            },
           )
         : data.assetsUrl;
     const normalizedAssetsUrl = resolvedAssetsUrl
@@ -1161,8 +1169,7 @@ export class ClientNetwork extends SystemBase {
     }
 
     const loader = this.world.loader!;
-    // Assume preload and execPreload methods exist on loader
-    // preload environment model and avatar
+
     if (loader) {
       if (
         data.settings &&
@@ -1171,10 +1178,14 @@ export class ClientNetwork extends SystemBase {
       ) {
         const settings = data.settings as { model?: string };
         if (settings?.model) {
-          loader.preload("model", settings.model);
+          loader.preload("model", settings.model, {
+            blocking: true,
+          });
         }
       } else if (this.world.environment?.base?.model) {
-        loader.preload("model", this.world.environment.base.model);
+        loader.preload("model", this.world.environment.base.model, {
+          blocking: true,
+        });
       }
       if (
         data.settings &&
@@ -1183,14 +1194,21 @@ export class ClientNetwork extends SystemBase {
       ) {
         const settings = data.settings as { avatar?: { url?: string } };
         if (settings?.avatar?.url) {
-          loader.preload("avatar", settings.avatar.url);
+          loader.preload("avatar", settings.avatar.url, {
+            blocking: !isStreamingLikeClient,
+          });
         }
       }
-      // preload emotes
       for (const url of emoteUrls) {
-        loader.preload("emote", url as string);
+        loader.preload("emote", url as string, {
+          blocking: !isStreamingLikeClient,
+        });
       }
-      // We'll preload local player avatar after entities are deserialized
+      if (isStreamingLikeClient) {
+        this.logger.info(
+          "[ClientNetwork] Streaming/spectator snapshot preload will degrade noncritical assets to background loading",
+        );
+      }
     }
 
     // Deserialize settings if method exists
@@ -1237,7 +1255,9 @@ export class ClientNetwork extends SystemBase {
           ) {
             const url = entity.data.sessionAvatar || entity.data.avatar;
             if (typeof url === "string" && url.length > 0) {
-              loader.preload("avatar", url);
+              loader.preload("avatar", url, {
+                blocking: !isStreamingLikeClient,
+              });
               playerAvatarPreloaded = true;
               break;
             }
@@ -1255,7 +1275,9 @@ export class ClientNetwork extends SystemBase {
             if (entity.type === "player" && entity.owner === this.id) {
               const url = entity.sessionAvatar || entity.avatar;
               if (typeof url === "string" && url.length > 0) {
-                loader.preload("avatar", url);
+                loader.preload("avatar", url, {
+                  blocking: !isStreamingLikeClient,
+                });
                 playerAvatarPreloaded = true;
                 break;
               }
@@ -1263,7 +1285,11 @@ export class ClientNetwork extends SystemBase {
           }
         }
         // Now execute preload after all assets are queued
-        loader.execPreload();
+        loader.execPreload(
+          isStreamingLikeClient
+            ? { readyTimeoutMs: STREAMING_PRELOAD_READY_TIMEOUT_MS }
+            : undefined,
+        );
       }
 
       // Set initial serverPosition for local player immediately to avoid Y=0 flash

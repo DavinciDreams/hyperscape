@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getRuntimeClientAssetBase,
@@ -31,16 +33,36 @@ describe("clientAssetBase", () => {
         "https://46.4.80.150.sslip.io/game-assets",
         "https://46.4.80.150.sslip.io",
         "https://enoomian-staging.hyperscape-enoomian-staging.pages.dev/stream",
+        { preferRuntimeAssetBase: true },
       ),
     ).toBe("https://hyperscapes-staging-production.up.railway.app/game-assets");
   });
 
-  it("prefers runtime window asset bases over stale build-time values", () => {
+  it("prefers runtime env asset bases over stale window overrides", () => {
+    (window as TestWindow).env = {
+      PUBLIC_CDN_URL:
+        "https://hyperscapes-staging-production.up.railway.app/game-assets",
+    };
     (window as TestWindow).__ASSETS_URL =
-      "https://hyperscapes-staging-production.up.railway.app/game-assets";
+      "https://46.4.80.150.sslip.io/game-assets";
 
     expect(
       getRuntimeClientAssetBase("https://46.4.80.150.sslip.io/game-assets"),
     ).toBe("https://hyperscapes-staging-production.up.railway.app/game-assets");
+  });
+
+  it("preserves the server asset base for generic clients when runtime override is not requested", () => {
+    (window as TestWindow).env = {
+      PUBLIC_CDN_URL:
+        "https://hyperscapes-staging-production.up.railway.app/game-assets",
+    };
+
+    expect(
+      resolveClientAssetBase(
+        "https://cdn.example.com/game-assets",
+        "https://api.example.com",
+        "https://example.com/play",
+      ),
+    ).toBe("https://cdn.example.com/game-assets");
   });
 });

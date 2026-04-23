@@ -329,6 +329,16 @@ export interface LoadingStats {
   totalLoadTime: number;
 }
 
+type PreloadItem = {
+  type: string;
+  url: string;
+  blocking: boolean;
+};
+
+type ExecPreloadOptions = {
+  readyTimeoutMs?: number;
+};
+
 export class ClientLoader extends SystemBase {
   files: Map<string, File>;
   /** In-flight file fetch promises - prevents duplicate network requests */
@@ -338,7 +348,7 @@ export class ClientLoader extends SystemBase {
   hdrLoader: HDRLoader;
   texLoader: THREE.TextureLoader;
   gltfLoader: GLTFLoader;
-  preloadItems: Array<{ type: string; url: string }> = [];
+  preloadItems: PreloadItem[] = [];
   vrmHooks?: {
     camera: THREE.Camera;
     scene: THREE.Scene;
@@ -372,6 +382,7 @@ export class ClientLoader extends SystemBase {
   private maxConcurrentFetches = 16; // Higher during preload, lowered after
   private readonly PRELOAD_CONCURRENCY = 16;
   private readonly RUNTIME_CONCURRENCY = 6;
+  private readonly FETCH_TIMEOUT_MS = 15000;
   private activeFetches = 0;
   private fetchQueue: Array<() => void> = [];
   private isPreloading = false;
@@ -444,11 +455,15 @@ export class ClientLoader extends SystemBase {
     return this.results.get(key);
   }
 
-  preload(type: string, url: string) {
-    this.preloadItems.push({ type, url });
+  preload(type: string, url: string, options?: { blocking?: boolean }) {
+    this.preloadItems.push({
+      type,
+      url,
+      blocking: options?.blocking !== false,
+    });
   }
 
-  execPreload() {
+  execPreload(options: ExecPreloadOptions = {}) {
     if (this.preloadItems.length === 0) {
       this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
         progress: 100,
@@ -458,6 +473,8 @@ export class ClientLoader extends SystemBase {
       return;
     }
 
+    const blockingItems = this.preloadItems.filter((item) => item.blocking);
+
     // Enable high concurrency mode for preload
     this.isPreloading = true;
     this.maxConcurrentFetches = this.PRELOAD_CONCURRENCY;
@@ -466,39 +483,92 @@ export class ClientLoader extends SystemBase {
     this.loadStartTime = performance.now();
 
     let loadedItems = 0;
-    const totalItems = this.preloadItems.length;
+    const totalItems = blockingItems.length;
     let progress = 0;
+    let readyEmitted = false;
+    let readyTimeout: ReturnType<typeof setTimeout> | null = null;
 
     // Log what we're preloading
     this.logger.info(
-      `[ClientLoader] Starting preload of ${totalItems} assets (parallel loading enabled, concurrency: ${this.maxConcurrentFetches})`,
+      `[ClientLoader] Starting preload of ${this.preloadItems.length} assets (${totalItems} blocking, concurrency: ${this.maxConcurrentFetches})`,
     );
 
+    const emitReady = (reason: "complete" | "timeout" | "nonblocking") => {
+      if (readyEmitted) {
+        return;
+      }
+      readyEmitted = true;
+      if (readyTimeout) {
+        clearTimeout(readyTimeout);
+        readyTimeout = null;
+      }
+      this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
+        progress: 100,
+        total: totalItems,
+      });
+      this.world.emit(EventType.READY);
+
+      const network = this.world.network as
+        | { send?: (name: string, data: unknown) => void }
+        | undefined;
+      if (network?.send) {
+        network.send("clientReady", {});
+      }
+
+      if (reason === "timeout") {
+        this.logger.warn(
+          `[ClientLoader] Preload ready timeout reached after ${options.readyTimeoutMs}ms; continuing with background asset loading`,
+        );
+      }
+    };
+
     // All items are loaded in parallel via Promise.allSettled
-    const promises = this.preloadItems.map((item) => {
-      return this.load(item.type, item.url)
+    const preloadEntries = this.preloadItems.map((item) => {
+      const promise = this.load(item.type, item.url)
         .then(() => {
-          loadedItems++;
-          progress = (loadedItems / totalItems) * 100;
-          this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
-            progress,
-            total: totalItems,
-          });
+          if (item.blocking && totalItems > 0) {
+            loadedItems++;
+            progress = (loadedItems / totalItems) * 100;
+            this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
+              progress,
+              total: totalItems,
+            });
+          }
         })
         .catch((error) => {
           this.logger.error(
             `Failed to load ${item.type}: ${item.url}: ${error instanceof Error ? error.message : String(error)}`,
           );
-          // Count failed items toward overall progress so UI can reach 100%
-          loadedItems++;
-          progress = (loadedItems / totalItems) * 100;
-          this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
-            progress,
-            total: totalItems,
-          });
+          if (item.blocking && totalItems > 0) {
+            // Count failed items toward overall progress so UI can reach 100%
+            loadedItems++;
+            progress = (loadedItems / totalItems) * 100;
+            this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
+              progress,
+              total: totalItems,
+            });
+          }
           // Re-throw so allSettled can record the failure (for logging/metrics)
           throw error;
         });
+      return { item, promise };
+    });
+
+    const promises = preloadEntries.map(({ promise }) => promise);
+    const blockingPromises = preloadEntries
+      .filter(({ item }) => item.blocking)
+      .map(({ promise }) => promise);
+
+    if (totalItems === 0) {
+      emitReady("nonblocking");
+    } else if (options.readyTimeoutMs && options.readyTimeoutMs > 0) {
+      readyTimeout = setTimeout(() => {
+        emitReady("timeout");
+      }, options.readyTimeoutMs);
+    }
+
+    void Promise.allSettled(blockingPromises).then(() => {
+      emitReady("complete");
     });
 
     this.preloader = Promise.allSettled(promises).then((results) => {
@@ -520,25 +590,7 @@ export class ClientLoader extends SystemBase {
       this.logStats();
 
       this.preloader = null;
-      // Ensure a final 100% progress event is emitted (defensive in case of rounding)
-      this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
-        progress: 100,
-        total: totalItems,
-      });
-      this.world.emit(EventType.READY);
-
-      // Notify server that client is ready - player can now be targeted
-      // This completes the client-ready handshake for spawn protection
-      const network = this.world.network as
-        | { send?: (name: string, data: unknown) => void }
-        | undefined;
-      if (network?.send) {
-        console.log(
-          `[PlayerLoading] Assets loaded, sending clientReady to server`,
-        );
-        console.log(`[PlayerLoading] Total assets loaded: ${totalItems}`);
-        network.send("clientReady", {});
-      }
+      emitReady("complete");
     });
   }
 
@@ -594,14 +646,41 @@ export class ClientLoader extends SystemBase {
         try {
           this.stats.networkRequests++;
           const fetchStart = performance.now();
+          const abortController =
+            typeof AbortController !== "undefined"
+              ? new AbortController()
+              : null;
+          let timedOut = false;
+          const timeoutId =
+            abortController !== null
+              ? setTimeout(() => {
+                  timedOut = true;
+                  abortController.abort();
+                }, this.FETCH_TIMEOUT_MS)
+              : null;
 
           console.log(`[ClientLoader] Fetching: ${url}`);
           // Use 'default' cache mode to leverage browser HTTP cache
           // This will use cached response if available and not stale
-          const resp = await fetch(url, {
-            cache: "default",
-            mode: "cors",
-          });
+          let resp: Response;
+          try {
+            resp = await fetch(url, {
+              cache: "default",
+              mode: "cors",
+              signal: abortController?.signal,
+            });
+          } catch (error) {
+            if (timedOut) {
+              throw new Error(
+                `Request timed out after ${this.FETCH_TIMEOUT_MS}ms`,
+              );
+            }
+            throw error;
+          } finally {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+          }
 
           if (!resp.ok) {
             console.error(

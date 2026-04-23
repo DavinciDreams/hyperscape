@@ -9,6 +9,10 @@ type BrowserAssetWindow = Window & {
   __ASSETS_URL?: string;
 };
 
+type ResolveClientAssetBaseOptions = {
+  preferRuntimeAssetBase?: boolean;
+};
+
 function normalizeBaseUrl(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
@@ -34,6 +38,18 @@ function getRuntimeAssetBase(): string | undefined {
   return candidate;
 }
 
+function resolveRuntimeAssetBase(pageUrl: string): string | null {
+  const runtimeAssetBase = getRuntimeAssetBase();
+  if (!runtimeAssetBase) return null;
+
+  try {
+    const page = new URL(pageUrl);
+    return normalizeBaseUrl(new URL(runtimeAssetBase, page).toString());
+  } catch {
+    return normalizeBaseUrl(runtimeAssetBase);
+  }
+}
+
 function getRuntimeApiBase(): string | undefined {
   const runtimeEnv = getRuntimeAssetEnv();
   const candidate = runtimeEnv?.PUBLIC_API_URL;
@@ -45,13 +61,17 @@ export function resolveClientAssetBase(
   assetBaseUrl: string | undefined,
   apiBaseUrl: string | undefined,
   pageUrl: string,
+  options: ResolveClientAssetBaseOptions = {},
 ): string | null {
-  if (!assetBaseUrl) return null;
+  const runtimeAssetBase = resolveRuntimeAssetBase(pageUrl);
+  if (options.preferRuntimeAssetBase && runtimeAssetBase) {
+    return runtimeAssetBase;
+  }
+  if (!assetBaseUrl) return runtimeAssetBase;
 
   try {
     const page = new URL(pageUrl);
     const asset = new URL(assetBaseUrl, page);
-    const runtimeAssetBase = getRuntimeAssetBase();
 
     if (
       asset.origin !== page.origin &&
@@ -70,27 +90,37 @@ export function resolveClientAssetBase(
       return normalizeBaseUrl(new URL("/game-assets", api.origin).toString());
     }
 
+    if (
+      options.preferRuntimeAssetBase &&
+      runtimeAssetBase &&
+      asset.origin !== page.origin &&
+      normalizeBaseUrl(asset.toString()) !== runtimeAssetBase
+    ) {
+      return runtimeAssetBase;
+    }
+
     return normalizeBaseUrl(asset.toString());
   } catch {
-    return normalizeBaseUrl(assetBaseUrl);
+    return runtimeAssetBase ?? normalizeBaseUrl(assetBaseUrl);
   }
 }
 
 export function getRuntimeClientAssetBase(buildPublicCdnUrl?: string): string {
-  let assetBase =
-    buildPublicCdnUrl ||
-    (typeof process !== "undefined" ? process.env.PUBLIC_CDN_URL : undefined) ||
-    "http://localhost:5555/game-assets";
-  let windowProvidedAssetBase = false;
-
   if (typeof window !== "undefined") {
+    const runtimeAssetBase = resolveRuntimeAssetBase(window.location.href);
+    if (runtimeAssetBase) {
+      return runtimeAssetBase;
+    }
+
+    let assetBase =
+      buildPublicCdnUrl ||
+      (typeof process !== "undefined" ? process.env.PUBLIC_CDN_URL : undefined) ||
+      "http://localhost:5555/game-assets";
     const windowWithCdn = window as BrowserAssetWindow;
     if (windowWithCdn.__ASSETS_URL) {
       assetBase = windowWithCdn.__ASSETS_URL;
-      windowProvidedAssetBase = true;
     } else if (windowWithCdn.__CDN_URL) {
       assetBase = windowWithCdn.__CDN_URL;
-      windowProvidedAssetBase = true;
     } else if (
       typeof import.meta !== "undefined" &&
       import.meta.env?.PUBLIC_CDN_URL
@@ -104,12 +134,16 @@ export function getRuntimeClientAssetBase(buildPublicCdnUrl?: string): string {
         assetBase,
         getRuntimeApiBase(),
         window.location.href,
+        { preferRuntimeAssetBase: false },
       ) || assetBase;
     return resolved;
   }
 
+  let assetBase =
+    buildPublicCdnUrl ||
+    (typeof process !== "undefined" ? process.env.PUBLIC_CDN_URL : undefined) ||
+    "http://localhost:5555/game-assets";
   if (
-    !windowProvidedAssetBase &&
     typeof process !== "undefined" &&
     process.env.PUBLIC_CDN_URL &&
     !assetBase.includes("localhost")
