@@ -138,8 +138,6 @@ type ClientNetworkEnv = {
 const isTruthy = (value?: string): boolean =>
   value === "1" || value === "true" || value === "yes" || value === "on";
 
-const STREAMING_PRELOAD_READY_TIMEOUT_MS = 12000;
-
 const isNetworkDisabled = (): boolean => {
   const runtimeEnv = (globalThis as { env?: ClientNetworkEnv }).env;
   const processEnv =
@@ -1178,14 +1176,10 @@ export class ClientNetwork extends SystemBase {
       ) {
         const settings = data.settings as { model?: string };
         if (settings?.model) {
-          loader.preload("model", settings.model, {
-            blocking: true,
-          });
+          loader.preload("model", settings.model);
         }
       } else if (this.world.environment?.base?.model) {
-        loader.preload("model", this.world.environment.base.model, {
-          blocking: true,
-        });
+        loader.preload("model", this.world.environment.base.model);
       }
       if (
         data.settings &&
@@ -1194,20 +1188,11 @@ export class ClientNetwork extends SystemBase {
       ) {
         const settings = data.settings as { avatar?: { url?: string } };
         if (settings?.avatar?.url) {
-          loader.preload("avatar", settings.avatar.url, {
-            blocking: !isStreamingLikeClient,
-          });
+          loader.preload("avatar", settings.avatar.url);
         }
       }
       for (const url of emoteUrls) {
-        loader.preload("emote", url as string, {
-          blocking: !isStreamingLikeClient,
-        });
-      }
-      if (isStreamingLikeClient) {
-        this.logger.info(
-          "[ClientNetwork] Streaming/spectator snapshot preload will degrade noncritical assets to background loading",
-        );
+        loader.preload("emote", url as string);
       }
     }
 
@@ -1255,9 +1240,7 @@ export class ClientNetwork extends SystemBase {
           ) {
             const url = entity.data.sessionAvatar || entity.data.avatar;
             if (typeof url === "string" && url.length > 0) {
-              loader.preload("avatar", url, {
-                blocking: !isStreamingLikeClient,
-              });
+              loader.preload("avatar", url);
               playerAvatarPreloaded = true;
               break;
             }
@@ -1275,9 +1258,7 @@ export class ClientNetwork extends SystemBase {
             if (entity.type === "player" && entity.owner === this.id) {
               const url = entity.sessionAvatar || entity.avatar;
               if (typeof url === "string" && url.length > 0) {
-                loader.preload("avatar", url, {
-                  blocking: !isStreamingLikeClient,
-                });
+                loader.preload("avatar", url);
                 playerAvatarPreloaded = true;
                 break;
               }
@@ -1285,11 +1266,7 @@ export class ClientNetwork extends SystemBase {
           }
         }
         // Now execute preload after all assets are queued
-        loader.execPreload(
-          isStreamingLikeClient
-            ? { readyTimeoutMs: STREAMING_PRELOAD_READY_TIMEOUT_MS }
-            : undefined,
-        );
+        loader.execPreload();
       }
 
       // Set initial serverPosition for local player immediately to avoid Y=0 flash

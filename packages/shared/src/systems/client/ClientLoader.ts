@@ -329,16 +329,6 @@ export interface LoadingStats {
   totalLoadTime: number;
 }
 
-type PreloadItem = {
-  type: string;
-  url: string;
-  blocking: boolean;
-};
-
-type ExecPreloadOptions = {
-  readyTimeoutMs?: number;
-};
-
 export class ClientLoader extends SystemBase {
   files: Map<string, File>;
   /** In-flight file fetch promises - prevents duplicate network requests */
@@ -348,7 +338,7 @@ export class ClientLoader extends SystemBase {
   hdrLoader: HDRLoader;
   texLoader: THREE.TextureLoader;
   gltfLoader: GLTFLoader;
-  preloadItems: PreloadItem[] = [];
+  preloadItems: Array<{ type: string; url: string }> = [];
   vrmHooks?: {
     camera: THREE.Camera;
     scene: THREE.Scene;
@@ -455,15 +445,11 @@ export class ClientLoader extends SystemBase {
     return this.results.get(key);
   }
 
-  preload(type: string, url: string, options?: { blocking?: boolean }) {
-    this.preloadItems.push({
-      type,
-      url,
-      blocking: options?.blocking !== false,
-    });
+  preload(type: string, url: string) {
+    this.preloadItems.push({ type, url });
   }
 
-  execPreload(options: ExecPreloadOptions = {}) {
+  execPreload() {
     if (this.preloadItems.length === 0) {
       this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
         progress: 100,
@@ -473,8 +459,6 @@ export class ClientLoader extends SystemBase {
       return;
     }
 
-    const blockingItems = this.preloadItems.filter((item) => item.blocking);
-
     // Enable high concurrency mode for preload
     this.isPreloading = true;
     this.maxConcurrentFetches = this.PRELOAD_CONCURRENCY;
@@ -483,92 +467,39 @@ export class ClientLoader extends SystemBase {
     this.loadStartTime = performance.now();
 
     let loadedItems = 0;
-    const totalItems = blockingItems.length;
+    const totalItems = this.preloadItems.length;
     let progress = 0;
-    let readyEmitted = false;
-    let readyTimeout: ReturnType<typeof setTimeout> | null = null;
 
     // Log what we're preloading
     this.logger.info(
-      `[ClientLoader] Starting preload of ${this.preloadItems.length} assets (${totalItems} blocking, concurrency: ${this.maxConcurrentFetches})`,
+      `[ClientLoader] Starting preload of ${totalItems} assets (parallel loading enabled, concurrency: ${this.maxConcurrentFetches})`,
     );
 
-    const emitReady = (reason: "complete" | "timeout" | "nonblocking") => {
-      if (readyEmitted) {
-        return;
-      }
-      readyEmitted = true;
-      if (readyTimeout) {
-        clearTimeout(readyTimeout);
-        readyTimeout = null;
-      }
-      this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
-        progress: 100,
-        total: totalItems,
-      });
-      this.world.emit(EventType.READY);
-
-      const network = this.world.network as
-        | { send?: (name: string, data: unknown) => void }
-        | undefined;
-      if (network?.send) {
-        network.send("clientReady", {});
-      }
-
-      if (reason === "timeout") {
-        this.logger.warn(
-          `[ClientLoader] Preload ready timeout reached after ${options.readyTimeoutMs}ms; continuing with background asset loading`,
-        );
-      }
-    };
-
     // All items are loaded in parallel via Promise.allSettled
-    const preloadEntries = this.preloadItems.map((item) => {
-      const promise = this.load(item.type, item.url)
+    const promises = this.preloadItems.map((item) => {
+      return this.load(item.type, item.url)
         .then(() => {
-          if (item.blocking && totalItems > 0) {
-            loadedItems++;
-            progress = (loadedItems / totalItems) * 100;
-            this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
-              progress,
-              total: totalItems,
-            });
-          }
+          loadedItems++;
+          progress = (loadedItems / totalItems) * 100;
+          this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
+            progress,
+            total: totalItems,
+          });
         })
         .catch((error) => {
           this.logger.error(
             `Failed to load ${item.type}: ${item.url}: ${error instanceof Error ? error.message : String(error)}`,
           );
-          if (item.blocking && totalItems > 0) {
-            // Count failed items toward overall progress so UI can reach 100%
-            loadedItems++;
-            progress = (loadedItems / totalItems) * 100;
-            this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
-              progress,
-              total: totalItems,
-            });
-          }
+          // Count failed items toward overall progress so UI can reach 100%
+          loadedItems++;
+          progress = (loadedItems / totalItems) * 100;
+          this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
+            progress,
+            total: totalItems,
+          });
           // Re-throw so allSettled can record the failure (for logging/metrics)
           throw error;
         });
-      return { item, promise };
-    });
-
-    const promises = preloadEntries.map(({ promise }) => promise);
-    const blockingPromises = preloadEntries
-      .filter(({ item }) => item.blocking)
-      .map(({ promise }) => promise);
-
-    if (totalItems === 0) {
-      emitReady("nonblocking");
-    } else if (options.readyTimeoutMs && options.readyTimeoutMs > 0) {
-      readyTimeout = setTimeout(() => {
-        emitReady("timeout");
-      }, options.readyTimeoutMs);
-    }
-
-    void Promise.allSettled(blockingPromises).then(() => {
-      emitReady("complete");
     });
 
     this.preloader = Promise.allSettled(promises).then((results) => {
@@ -590,7 +521,25 @@ export class ClientLoader extends SystemBase {
       this.logStats();
 
       this.preloader = null;
-      emitReady("complete");
+      // Ensure a final 100% progress event is emitted (defensive in case of rounding)
+      this.emitTypedEvent(EventType.ASSETS_LOADING_PROGRESS, {
+        progress: 100,
+        total: totalItems,
+      });
+      this.world.emit(EventType.READY);
+
+      // Notify server that client is ready - player can now be targeted
+      // This completes the client-ready handshake for spawn protection
+      const network = this.world.network as
+        | { send?: (name: string, data: unknown) => void }
+        | undefined;
+      if (network?.send) {
+        console.log(
+          `[PlayerLoading] Assets loaded, sending clientReady to server`,
+        );
+        console.log(`[PlayerLoading] Total assets loaded: ${totalItems}`);
+        network.send("clientReady", {});
+      }
     });
   }
 
