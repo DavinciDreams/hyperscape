@@ -70,15 +70,11 @@ export function resolveStreamingAccessTokenFromHref(
 export function primeStreamingAccessTokenFromWindow(
   targetWindow: Window,
 ): string | null {
-  if (typeof cachedStreamingAccessToken === "string") {
-    return cachedStreamingAccessToken;
-  }
-
   const resolved = resolveStreamingAccessTokenFromHref(
     targetWindow.location.href,
   );
-  const token =
-    resolved.token ?? resolveStreamingAccessTokenFromEnv(targetWindow);
+  const runtimeToken = resolveStreamingAccessTokenFromEnv(targetWindow);
+  const token = resolved.token ?? runtimeToken ?? cachedStreamingAccessToken ?? null;
 
   if (token) {
     cachedStreamingAccessToken = token;

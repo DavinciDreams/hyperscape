@@ -93,25 +93,26 @@ describe("streamingAccessToken", () => {
   });
 
   it("primes from window state, scrubs the URL, and caches the token", () => {
-    const replaceState = vi.fn();
     const fakeWindow = {
       location: {
         href: "https://example.com/stream?foo=bar&streamToken=query-token#mode=stream",
       },
       history: {
         state: { page: "stream" },
-        replaceState,
+        replaceState: vi.fn((_: unknown, __: string, nextUrl: string) => {
+          fakeWindow.location.href = `https://example.com${nextUrl}`;
+        }),
       },
     } as unknown as Window;
 
     expect(primeStreamingAccessTokenFromWindow(fakeWindow)).toBe("query-token");
-    expect(replaceState).toHaveBeenCalledWith(
+    expect(fakeWindow.history.replaceState).toHaveBeenCalledWith(
       fakeWindow.history.state,
       "",
       "/stream?foo=bar#mode=stream",
     );
     expect(primeStreamingAccessTokenFromWindow(fakeWindow)).toBe("query-token");
-    expect(replaceState).toHaveBeenCalledTimes(1);
+    expect(fakeWindow.history.replaceState).toHaveBeenCalledTimes(1);
   });
 
   it("reads the cached token without rereading window state", () => {
@@ -150,6 +151,68 @@ describe("streamingAccessToken", () => {
         value: originalWindow,
       });
     }
+  });
+
+  it("replaces the cached token when a later URL carries a new stream token", () => {
+    const replaceStateA = vi.fn();
+    const replaceStateB = vi.fn();
+    const firstWindow = {
+      location: {
+        href: "https://example.com/stream?streamToken=token-a",
+      },
+      history: {
+        state: null,
+        replaceState: replaceStateA,
+      },
+    } as unknown as Window;
+    const secondWindow = {
+      location: {
+        href: "https://example.com/stream?streamToken=token-b&foo=bar",
+      },
+      history: {
+        state: { page: "stream" },
+        replaceState: replaceStateB,
+      },
+    } as unknown as Window;
+
+    expect(primeStreamingAccessTokenFromWindow(firstWindow)).toBe("token-a");
+    expect(primeStreamingAccessTokenFromWindow(secondWindow)).toBe("token-b");
+    expect(replaceStateA).toHaveBeenCalledWith(null, "", "/stream");
+    expect(replaceStateB).toHaveBeenCalledWith(
+      secondWindow.history.state,
+      "",
+      "/stream?foo=bar",
+    );
+  });
+
+  it("replaces the cached token when the runtime env publishes a new viewer token", () => {
+    const firstWindow = {
+      env: {
+        PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN: "viewer-a",
+      },
+      location: {
+        href: "https://example.com/stream",
+      },
+      history: {
+        state: null,
+        replaceState: vi.fn(),
+      },
+    } as unknown as Window;
+    const secondWindow = {
+      env: {
+        PUBLIC_STREAMING_VIEWER_ACCESS_TOKEN: "viewer-b",
+      },
+      location: {
+        href: "https://example.com/stream",
+      },
+      history: {
+        state: null,
+        replaceState: vi.fn(),
+      },
+    } as unknown as Window;
+
+    expect(primeStreamingAccessTokenFromWindow(firstWindow)).toBe("viewer-a");
+    expect(primeStreamingAccessTokenFromWindow(secondWindow)).toBe("viewer-b");
   });
 
   it("resets the cached token for later calls", () => {
