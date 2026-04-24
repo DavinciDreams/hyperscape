@@ -73,6 +73,29 @@ export class CombatSpellsRegistry {
     return this._manifest;
   }
 
+  /**
+   * Non-throwing check for consumers that prefer the registry when a
+   * manifest has been loaded and fall back to a legacy in-tree
+   * constant otherwise. Mirrors `WorldAreasRegistry.isLoaded()` /
+   * `RunesRegistry.isLoaded()` / `NPCSizesRegistry.isLoaded()`.
+   */
+  isLoaded(): boolean {
+    return this._manifest !== null;
+  }
+
+  /**
+   * Test-only reset back to the unloaded state. Module-level
+   * singleton needs this to clear state between integration tests
+   * that exercise the registry-prefer-fallback branch in consumer
+   * services. Don't call from production code.
+   */
+  _unloadForTests(): void {
+    this._manifest = null;
+    this._byId.clear();
+    this._order.length = 0;
+    this._tierByGroupId.clear();
+  }
+
   has(id: string): boolean {
     return this._byId.has(id);
   }

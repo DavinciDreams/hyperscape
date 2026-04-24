@@ -15,11 +15,41 @@ import {
   SPELL_ORDER,
   type SpellData,
 } from "../../../data/combat-spells";
+import { combatSpellsRegistry } from "../../../combat-spells";
 
 /**
  * Spell definition — re-exported from data manifest for backwards compatibility
  */
 export type Spell = SpellData;
+
+/**
+ * Internal helpers — registry-prefer-fallback for the 5 SpellService
+ * read sites. Loaded registry wins (returns the manifest's authored
+ * spells); unloaded registry falls back to the in-tree COMBAT_SPELLS
+ * map populated by data/combat-spells.ts at module load. Loaded-but-
+ * missing returns undefined / [] (registry is the source of truth).
+ */
+function effectiveSpell(spellId: string): SpellData | undefined {
+  if (combatSpellsRegistry.isLoaded()) {
+    return combatSpellsRegistry.has(spellId)
+      ? (combatSpellsRegistry.get(spellId) as SpellData)
+      : undefined;
+  }
+  return COMBAT_SPELLS[spellId];
+}
+
+function effectiveAllSpells(): SpellData[] {
+  if (combatSpellsRegistry.isLoaded()) {
+    // byTier returns spells in manifest declaration order; concatenating
+    // strike-then-bolt matches the legacy SPELL_ORDER level-sorted output
+    // because authors order each tier by level inside the manifest.
+    return [
+      ...(combatSpellsRegistry.byTier("strike") as SpellData[]),
+      ...(combatSpellsRegistry.byTier("bolt") as SpellData[]),
+    ];
+  }
+  return SPELL_ORDER.map((id) => COMBAT_SPELLS[id]);
+}
 
 /**
  * Result of spell validation
@@ -41,7 +71,7 @@ export class SpellService {
    * @returns Spell data or undefined if not found
    */
   getSpell(spellId: string): Spell | undefined {
-    return COMBAT_SPELLS[spellId];
+    return effectiveSpell(spellId);
   }
 
   /**
@@ -51,9 +81,7 @@ export class SpellService {
    * @returns Array of available spells, sorted by level
    */
   getAvailableSpells(magicLevel: number): Spell[] {
-    return SPELL_ORDER.filter(
-      (id) => COMBAT_SPELLS[id].level <= magicLevel,
-    ).map((id) => COMBAT_SPELLS[id]);
+    return effectiveAllSpells().filter((s) => s.level <= magicLevel);
   }
 
   /**
@@ -62,7 +90,7 @@ export class SpellService {
    * @returns All combat spells sorted by level
    */
   getAllSpells(): Spell[] {
-    return SPELL_ORDER.map((id) => COMBAT_SPELLS[id]);
+    return effectiveAllSpells();
   }
 
   /**
@@ -84,7 +112,7 @@ export class SpellService {
       };
     }
 
-    const spell = COMBAT_SPELLS[spellId];
+    const spell = effectiveSpell(spellId);
 
     if (!spell) {
       return {
@@ -109,7 +137,7 @@ export class SpellService {
    * Check if a spell ID is valid
    */
   isValidSpell(spellId: string): boolean {
-    return spellId in COMBAT_SPELLS;
+    return effectiveSpell(spellId) !== undefined;
   }
 
   /**
@@ -124,16 +152,14 @@ export class SpellService {
    * Get spells by element
    */
   getSpellsByElement(element: string): Spell[] {
-    return SPELL_ORDER.filter(
-      (id) => COMBAT_SPELLS[id].element === element,
-    ).map((id) => COMBAT_SPELLS[id]);
+    return effectiveAllSpells().filter((s) => s.element === element);
   }
 
   /**
    * Get spell tier (strike, bolt)
    */
   getSpellTier(spellId: string): "strike" | "bolt" | null {
-    const spell = COMBAT_SPELLS[spellId];
+    const spell = effectiveSpell(spellId);
     if (!spell) return null;
 
     if (spellId.endsWith("_strike")) return "strike";

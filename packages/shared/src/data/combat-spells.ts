@@ -23,6 +23,8 @@ import {
   type CombatSpellsManifest,
 } from "@hyperforge/manifest-schema";
 
+import { combatSpellsRegistry } from "../combat-spells/index.js";
+
 import combatSpellsManifestJson from "./combat-spells.json" with { type: "json" };
 import type { RuneRequirement } from "../systems/shared/combat/RuneService";
 
@@ -66,6 +68,11 @@ function rebuildFromManifest(manifest: CombatSpellsManifest): void {
     };
     SPELL_ORDER.push(spell.id);
   }
+  // Mirror into the runtime combatSpellsRegistry so SpellService's
+  // registry-prefer branch fires in production — not just after a
+  // PIE edit. Single-source-of-truth: the data/ module owns boot-load,
+  // hot-reload-in-place, AND registry-mirror.
+  combatSpellsRegistry.load(manifest);
 }
 
 // Initial load — schema-validated at module load so bad JSON fails fast.
