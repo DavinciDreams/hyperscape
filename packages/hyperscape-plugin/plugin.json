@@ -1,0 +1,30 @@
+{
+  "id": "com.hyperforge.hyperscape",
+  "name": "Hyperia",
+  "version": "0.1.0",
+  "description": "Meta-plugin for the Hyperia game. Composes the constituent gameplay plugins into a single 'all of Hyperia' loadable. Hosts that want full Hyperia load this; hosts that want a subset load the constituent plugins directly.",
+  "entry": "./dist/index.js",
+  "author": {
+    "name": "Hyperforge"
+  },
+  "license": "GPL-3.0",
+  "hyperforgeApi": "0.1.0",
+  "dependencies": [
+    {
+      "id": "com.hyperforge.combat",
+      "versionRange": "^0.1.0"
+    }
+  ],
+  "loadAfter": ["com.hyperforge.combat"],
+  "enabledByDefault": false,
+  "contributions": {
+    "systems": [],
+    "entities": [],
+    "widgets": [],
+    "manifestSchemas": [],
+    "paletteCategories": [],
+    "toolbarTools": [],
+    "commands": []
+  },
+  "tags": ["meta", "hyperia", "game"]
+}
