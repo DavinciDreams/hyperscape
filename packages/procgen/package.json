@@ -54,6 +54,10 @@
     "./items/dock": {
       "types": "./dist/items/dock/index.d.ts",
       "import": "./dist/items/dock/index.js"
+    },
+    "./math": {
+      "types": "./dist/math/index.d.ts",
+      "import": "./dist/math/index.js"
     }
   },
   "files": [

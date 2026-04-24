@@ -28,6 +28,23 @@ export {
   GAME_WATER_LEVEL,
 } from "./constants";
 
+// Biome color palettes (shared with game terrain shader)
+export {
+  type MineBiomePalette,
+  MINE_BIOME_PALETTES,
+  ROAD_COLORS,
+} from "./biome-colors";
+
+// Terrain shader tuning + per-biome palettes (shared with game terrain shader)
+export {
+  type RGB,
+  TERRAIN_SHADER,
+  TUNDRA,
+  FOREST,
+  CANYON,
+  ACCENT,
+} from "./TerrainConstants";
+
 // Core generator
 export {
   TerrainGenerator,

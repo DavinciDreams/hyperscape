@@ -44,17 +44,15 @@ import {
   clamp,
 } from "three/tsl";
 import type Node from "three/src/nodes/core/Node.js";
+import { MINE_BIOME_PALETTES, ROAD_COLORS } from "./biome-colors";
 import {
-  MINE_BIOME_PALETTES,
-  ROAD_COLORS,
   TERRAIN_SHADER,
   TUNDRA,
   FOREST,
   CANYON,
   ACCENT,
-  createPermutation,
-  seamlessFbm,
-} from "@hyperforge/shared/world";
+} from "./TerrainConstants";
+import { createPermutation, seamlessFbm } from "../math/PerlinNoise";
 
 export const TERRAIN_CONSTANTS = {
   ...TERRAIN_SHADER,

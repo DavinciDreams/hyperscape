@@ -55,3 +55,10 @@ export {
   calcHelixPitch,
   calcHelixRadius,
 } from "./Helix.js";
+export {
+  createPermutation,
+  perlin2D,
+  seamlessPerlin2D,
+  seamlessFbm,
+  buildPerlinNoiseJS,
+} from "./PerlinNoise.js";
