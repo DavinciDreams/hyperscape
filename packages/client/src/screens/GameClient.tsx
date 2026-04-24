@@ -398,6 +398,17 @@ export function GameClient({
       // Ensure RPG systems are registered before initializing the world
       await world.systemsLoadedPromise;
 
+      // Boot the in-binary plugin set on the client. Mirrors the
+      // server's `bootServerPlugins(world)` call. Today this registers
+      // the meta-plugin's bilateral systems (mob-death, gravestone-loot,
+      // and the six OSRS skill processing systems) on the client world.
+      // Each system self-gates `init()` on `world.isServer`, so the
+      // bilateral registration is harmless on the client side.
+      const { bootClientPlugins } = await import("../startup/plugins");
+      const pluginSession = await bootClientPlugins(world);
+      (world as { pluginSession?: typeof pluginSession }).pluginSession =
+        pluginSession;
+
       try {
         await world.init(config);
         onInitErrorRef.current?.(null);
