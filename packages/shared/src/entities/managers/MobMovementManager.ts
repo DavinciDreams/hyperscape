@@ -25,7 +25,10 @@ import { CollisionMask } from "../../systems/shared/movement/CollisionFlags";
 import type { EntityID } from "../../types/core/identifiers";
 import { getNPCSize, getOccupiedTiles } from "../npc/LargeNPCSupport";
 import { isTerrainSystem } from "../../utils/typeGuards";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import {
+  getDefaultNpcLeashRange,
+  getMovementSlerpSpeed,
+} from "../../data/live/combat-live";
 import { EventType } from "../../types/events";
 
 /**
@@ -525,9 +528,7 @@ export class MobMovementManager {
       this._targetQuat.setFromAxisAngle(this._targetAxis, angle);
 
       // Smoothly rotate towards target direction (frame-rate independent exponential decay)
-      const rotationAlpha =
-        1 -
-        Math.exp(-deltaTime * COMBAT_CONSTANTS.ROTATION.MOVEMENT_SLERP_SPEED);
+      const rotationAlpha = 1 - Math.exp(-deltaTime * getMovementSlerpSpeed());
       this.ctx.node.quaternion.slerp(this._targetQuat, rotationAlpha);
 
       // Stuck detection: Only check when actively moving (RuneScape-style: give up if stuck)
@@ -650,8 +651,6 @@ export class MobMovementManager {
    * @see https://oldschool.runescape.wiki/w/Aggressiveness
    */
   getLeashRange(): number {
-    return (
-      this.ctx.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE
-    );
+    return this.ctx.config.leashRange ?? getDefaultNpcLeashRange();
   }
 }

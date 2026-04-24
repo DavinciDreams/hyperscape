@@ -87,6 +87,7 @@
     "@fastify/websocket": "^11.0.1",
     "@hyperforge/decimation": "workspace:*",
     "@hyperforge/impostor": "workspace:*",
+    "@hyperforge/manifest-schema": "workspace:*",
     "@hyperforge/physx-js-webidl": "workspace:*",
     "@pixiv/three-vrm": "3.5.1",
     "@privy-io/react-auth": "^3.13.1",
@@ -118,7 +119,8 @@
     "styled-components": "^6.1.19",
     "three": "0.183.2",
     "three-mesh-bvh": "^0.9.8",
-    "yoga-layout": "^3.2.1"
+    "yoga-layout": "^3.2.1",
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@babel/eslint-parser": "^7.23.10",

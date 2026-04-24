@@ -33,7 +33,20 @@ import THREE, {
   viewportCoordinate,
   dot,
 } from "../../extras/three/three";
-import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
+import {
+  getMobFadeStartDistance,
+  getMobFadeStartDistanceSq,
+  getMobRenderDistance,
+  getMobRenderDistanceSq,
+  getNpcFadeStartDistance,
+  getNpcFadeStartDistanceSq,
+  getNpcRenderDistance,
+  getNpcRenderDistanceSq,
+  getPlayerFadeStartDistance,
+  getPlayerFadeStartDistanceSq,
+  getPlayerRenderDistance,
+  getPlayerRenderDistanceSq,
+} from "../../data/live/distance-live";
 import { GPU_VEG_CONFIG } from "../../systems/shared/world/GPUMaterials";
 
 export interface DistanceFadeConfig {
@@ -46,26 +59,39 @@ export interface DistanceFadeConfig {
 }
 
 /** Pre-built configs for entity types */
+/**
+ * Per-entity fade config, live-read from the provider on each access.
+ * Property getters read through `distance-live` so PIE hot-reloaded
+ * `game.distance.render.*` values are honored immediately at every
+ * `ENTITY_FADE_CONFIGS.MOB.fadeStart` etc. — no module-level boot
+ * capture.
+ */
 export const ENTITY_FADE_CONFIGS = {
-  MOB: {
-    fadeStart: DISTANCE_CONSTANTS.RENDER.MOB_FADE_START,
-    fadeEnd: DISTANCE_CONSTANTS.RENDER.MOB,
-    fadeStartSq: DISTANCE_CONSTANTS.RENDER_SQ.MOB_FADE_START,
-    fadeEndSq: DISTANCE_CONSTANTS.RENDER_SQ.MOB,
+  get MOB(): DistanceFadeConfig {
+    return {
+      fadeStart: getMobFadeStartDistance(),
+      fadeEnd: getMobRenderDistance(),
+      fadeStartSq: getMobFadeStartDistanceSq(),
+      fadeEndSq: getMobRenderDistanceSq(),
+    };
   },
-  NPC: {
-    fadeStart: DISTANCE_CONSTANTS.RENDER.NPC_FADE_START,
-    fadeEnd: DISTANCE_CONSTANTS.RENDER.NPC,
-    fadeStartSq: DISTANCE_CONSTANTS.RENDER_SQ.NPC_FADE_START,
-    fadeEndSq: DISTANCE_CONSTANTS.RENDER_SQ.NPC,
+  get NPC(): DistanceFadeConfig {
+    return {
+      fadeStart: getNpcFadeStartDistance(),
+      fadeEnd: getNpcRenderDistance(),
+      fadeStartSq: getNpcFadeStartDistanceSq(),
+      fadeEndSq: getNpcRenderDistanceSq(),
+    };
   },
-  PLAYER: {
-    fadeStart: DISTANCE_CONSTANTS.RENDER.PLAYER_FADE_START,
-    fadeEnd: DISTANCE_CONSTANTS.RENDER.PLAYER,
-    fadeStartSq: DISTANCE_CONSTANTS.RENDER_SQ.PLAYER_FADE_START,
-    fadeEndSq: DISTANCE_CONSTANTS.RENDER_SQ.PLAYER,
+  get PLAYER(): DistanceFadeConfig {
+    return {
+      fadeStart: getPlayerFadeStartDistance(),
+      fadeEnd: getPlayerRenderDistance(),
+      fadeStartSq: getPlayerFadeStartDistanceSq(),
+      fadeEndSq: getPlayerRenderDistanceSq(),
+    };
   },
-} as const;
+};
 
 export const enum FadeState {
   VISIBLE = 0,

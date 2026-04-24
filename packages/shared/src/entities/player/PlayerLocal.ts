@@ -119,7 +119,7 @@ import { vector3ToPxVec3 } from "../../utils/physics/PhysicsUtils";
 import { getSystem } from "../../utils/SystemUtils";
 import type { World } from "../../core/World";
 import { Entity } from "../Entity";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import { getCombatTimeoutTicks } from "../../data/live/combat-live";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
 import {
   AnimationLOD,
@@ -993,7 +993,7 @@ export class PlayerLocal extends Entity implements HotReloadable {
           // In combat - show health bar and set/extend timeout
           this._healthBarHandle.show();
           this._healthBarVisibleUntil =
-            Date.now() + ticksToMs(COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS);
+            Date.now() + ticksToMs(getCombatTimeoutTicks());
         } else {
           // Combat ended - hide and clear timer
           this._healthBarHandle.hide();

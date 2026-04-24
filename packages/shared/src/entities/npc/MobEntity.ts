@@ -107,8 +107,11 @@ import type {
   HealthBars as HealthBarsSystem,
   HealthBarHandle,
 } from "../../systems/client/HealthBars";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
-import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
+import {
+  getCombatTimeoutTicks,
+  getDefaultNpcLeashRange,
+} from "../../data/live/combat-live";
+import { getMobRenderDistance } from "../../data/live/distance-live";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
 import { AggroManager } from "../managers/AggroManager";
 import {
@@ -165,7 +168,9 @@ const MELEE_STYLES = new Set([
 
 const MOB_IMPOSTOR_DISTANCES = {
   impostorDistance: 60,
-  cullDistance: DISTANCE_CONSTANTS.RENDER.MOB,
+  get cullDistance() {
+    return getMobRenderDistance();
+  },
   hysteresis: 5,
 } as const;
 
@@ -564,9 +569,6 @@ export class MobEntity extends CombatantEntity {
     }
 
     this._lastKnownHealth = this.config.currentHealth;
-
-    // TODO: Server-side validation disabled due to ProgressEvent polyfill issues
-    // Validation happens on client side instead (see clientUpdate)
   }
 
   /**
@@ -1474,8 +1476,7 @@ export class MobEntity extends CombatantEntity {
       getSpawnPoint: () => this._currentSpawnPoint,
       getDistanceFromSpawn: () => this.getSpawnDistanceTiles(), // OSRS Chebyshev tiles
       getWanderRadius: () => this.respawnManager.getSpawnAreaRadius(),
-      getLeashRange: () =>
-        this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
+      getLeashRange: () => this.config.leashRange ?? getDefaultNpcLeashRange(),
       getCombatRange: () => this.config.combatRange,
 
       // Wander
@@ -2361,7 +2362,7 @@ export class MobEntity extends CombatantEntity {
    * @see https://oldschool.runescape.wiki/w/Aggressiveness
    */
   getLeashRange(): number {
-    return this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
+    return this.config.leashRange ?? getDefaultNpcLeashRange();
   }
 
   takeDamage(damage: number, attackerId?: string): boolean {
@@ -2710,8 +2711,7 @@ export class MobEntity extends CombatantEntity {
     // Aggression range = max range (leash) + attack range (combat range)
     // Players must be within this distance of SPAWN to be attacked.
     // @see https://oldschool.runescape.wiki/w/Aggressiveness
-    const leashRange =
-      this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
+    const leashRange = this.config.leashRange ?? getDefaultNpcLeashRange();
     const attackRange = Math.max(1, this.config.combatRange);
     const aggressionRange = leashRange + attackRange;
 
@@ -3038,7 +3038,7 @@ export class MobEntity extends CombatantEntity {
         // In combat - show health bar and set/extend timeout
         this._healthBarHandle.show();
         this._healthBarVisibleUntil =
-          Date.now() + ticksToMs(COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS);
+          Date.now() + ticksToMs(getCombatTimeoutTicks());
       }
       // Note: Hiding is handled by clientUpdate() when timeout expires
     }

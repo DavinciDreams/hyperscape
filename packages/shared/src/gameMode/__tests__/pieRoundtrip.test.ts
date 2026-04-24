@@ -175,7 +175,7 @@ describe("PIE roundtrip — manifest drives pawn", () => {
   });
 
   it("click-to-walk manifest: viewport click + router-shim tick advances pawn", () => {
-    // Phase 2 wiring: PlayTestWorld registers `PIEInteractionRouterShim`
+    // Phase 2 wiring: PIEEditorSession registers `PIEInteractionRouterShim`
     // under the `"interaction-router"` system id. The controller itself
     // stays a facade — all the routing logic lives in the shim. Here
     // we build the same topology the PIE world does and assert that a
@@ -204,7 +204,7 @@ describe("PIE roundtrip — manifest drives pawn", () => {
     });
     systems.set("interaction-router", shim);
     // Override getSystem so the click-to-walk controller's diagnostic
-    // chain resolves to the shim (mirrors PlayTestWorld.getSystem).
+    // chain resolves to the shim (mirrors PIEEditorSession.getSystem).
     (world as unknown as { getSystem: (id: string) => unknown }).getSystem = (
       id: string,
     ) => systems.get(id) ?? null;

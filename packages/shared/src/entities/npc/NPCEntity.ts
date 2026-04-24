@@ -75,7 +75,7 @@ import type {
 import { modelCache } from "../../utils/rendering/ModelCache";
 import { EventType } from "../../types/events";
 import { Emotes } from "../../data/playerEmotes";
-import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
+import { getNpcRenderDistance } from "../../data/live/distance-live";
 import {
   AnimationLOD,
   getCameraPosition,
@@ -87,7 +87,9 @@ export type { NPCEntityConfig } from "../../types/entities";
 
 const NPC_IMPOSTOR_DISTANCES = {
   impostorDistance: 50,
-  cullDistance: DISTANCE_CONSTANTS.RENDER.NPC,
+  get cullDistance() {
+    return getNpcRenderDistance();
+  },
   hysteresis: 5,
 } as const;
 

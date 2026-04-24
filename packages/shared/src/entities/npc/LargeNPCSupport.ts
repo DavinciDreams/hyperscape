@@ -20,6 +20,7 @@ import {
   TILE_SIZE,
   worldToTile,
 } from "../../systems/shared/movement/TileSystem";
+import { npcSizesRegistry } from "../../npc-sizes";
 
 /**
  * NPC size in tiles
@@ -92,7 +93,21 @@ export const NPC_SIZES: Record<string, NPCSize> = {
  * @returns Size in tiles
  */
 export function getNPCSize(mobType: string): NPCSize {
-  return NPC_SIZES[mobType.toLowerCase()] ?? { width: 1, depth: 1 };
+  // Prefers the runtime npcSizesRegistry (manifest-loaded; honors PIE
+  // hot-reload + authored size overrides) and falls back to the local
+  // NPC_SIZES constant when the registry hasn't been loaded yet
+  // (server boot before DataManager.initialize, isolated unit tests).
+  // The local NPC_SIZES constant was previously a parallel duplicate
+  // of data/npc-sizes — its 13 unique entries (dagannoth_*, sarachnis,
+  // chaos_elemental, nightmare, zulrah, verzik_vitur, hill_giant,
+  // moss_giant, lesser_demon, greater_demon, dark_wizard, guard) were
+  // merged into npc-sizes.json on 2026-04-24 so the registry path no
+  // longer regresses collision footprints for those NPCs.
+  const id = mobType.toLowerCase();
+  if (npcSizesRegistry.isLoaded()) {
+    return npcSizesRegistry.getOrDefault(id);
+  }
+  return NPC_SIZES[id] ?? { width: 1, depth: 1 };
 }
 
 /**

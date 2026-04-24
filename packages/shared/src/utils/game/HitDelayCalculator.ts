@@ -31,7 +31,7 @@
  * projectile are purely visual and don't affect timing.
  */
 
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import { getHitDelayConfig } from "../../data/live/combat-live";
 import { AttackType } from "../../types/core/core";
 
 /**
@@ -92,7 +92,7 @@ export function calculateHitDelay(
   distance: number,
   currentTick: number,
 ): HitDelayResult {
-  const { HIT_DELAY } = COMBAT_CONSTANTS;
+  const HIT_DELAY = getHitDelayConfig();
 
   // Normalize attack type
   const normalizedType = normalizeAttackType(attackType);

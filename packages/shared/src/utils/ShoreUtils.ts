@@ -16,7 +16,12 @@
  * @see https://oldschool.runescape.wiki/w/Fishing - OSRS fishing spots appear at water edges
  */
 
-import { TERRAIN_CONSTANTS } from "../constants/GameConstants";
+import {
+  getMaxWalkableSlope,
+  getMinVisibleWaterDepth,
+  getSlopeCheckDistance,
+  getWaterThreshold,
+} from "../data/live/game-live";
 import { CollisionFlag } from "../systems/shared/movement/CollisionFlags";
 import type { ICollisionMatrix } from "../systems/shared/movement/CollisionMatrix";
 
@@ -206,7 +211,7 @@ function calculateLandSlopeAt(
   getHeightAt: (x: number, z: number) => number,
   waterThreshold: number,
 ): number {
-  const d = TERRAIN_CONSTANTS.SLOPE_CHECK_DISTANCE;
+  const d = getSlopeCheckDistance();
   const c = getHeightAt(x, z);
   const invD = 1 / d;
   const invDiag = 1 / (d * Math.SQRT2);
@@ -284,10 +289,10 @@ export function findShorePoints(
 ): ShorePoint[] {
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
-    waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD,
+    waterThreshold = getWaterThreshold(),
     shoreMaxHeight = 20.0,
     minSpacing = 6,
-    maxSlope = TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE,
+    maxSlope = getMaxWalkableSlope(),
   } = options;
 
   const results: ShorePoint[] = [];
@@ -376,10 +381,10 @@ export function findWaterEdgePoints(
 ): ShorePoint[] {
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
-    waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD,
+    waterThreshold = getWaterThreshold(),
     shoreMaxHeight = 20.0,
     minSpacing = 6,
-    maxSlope = TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE,
+    maxSlope = getMaxWalkableSlope(),
   } = options;
 
   const results: ShorePoint[] = [];
@@ -396,8 +401,7 @@ export function findWaterEdgePoints(
 
       // Must be visibly submerged (at least MIN_VISIBLE_WATER_DEPTH below surface).
       // Terrain barely below threshold looks like beach, not water.
-      if (height >= waterThreshold - TERRAIN_CONSTANTS.MIN_VISIBLE_WATER_DEPTH)
-        continue;
+      if (height >= waterThreshold - getMinVisibleWaterDepth()) continue;
 
       // Must not be too deep (within 2m of water surface for visibility)
       if (height < waterThreshold - 2) continue;

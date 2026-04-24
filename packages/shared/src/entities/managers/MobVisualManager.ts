@@ -22,7 +22,7 @@ import type {
 import { Emotes } from "../../data/playerEmotes";
 import { TICK_DURATION_MS } from "../../systems/shared/movement/TileSystem";
 import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import { getAnimationConfig } from "../../data/live/combat-live";
 import { getNPCById } from "../../data/npcs";
 import { GLTFLoader } from "../../libs/gltfloader/GLTFLoader";
 
@@ -1054,13 +1054,12 @@ export class MobVisualManager {
 
     // Switch animation if needed
     if (targetClip && this._currentAction?.getClip() !== targetClip) {
-      this._currentAction?.fadeOut(
-        COMBAT_CONSTANTS.ANIMATION.CROSSFADE_DURATION,
-      );
+      const ANIMATION = getAnimationConfig();
+      this._currentAction?.fadeOut(ANIMATION.CROSSFADE_DURATION);
       const newAction = this._mixer.clipAction(targetClip);
       newAction.reset();
       newAction.setLoop(THREE.LoopRepeat, Infinity); // Loop animation indefinitely
-      newAction.fadeIn(COMBAT_CONSTANTS.ANIMATION.CROSSFADE_DURATION).play();
+      newAction.fadeIn(ANIMATION.CROSSFADE_DURATION).play();
       this._currentAction = newAction;
     }
   }

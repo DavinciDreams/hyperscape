@@ -16,7 +16,7 @@ import type {
   HealthBars as HealthBarsSystem,
   HealthBarHandle,
 } from "../../systems/client/HealthBars";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import { getCombatTimeoutTicks } from "../../data/live/combat-live";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
 
 /**
@@ -159,7 +159,7 @@ export class MobHealthBarManager {
 
     this._healthBarHandle.show();
     this._healthBarVisibleUntil =
-      Date.now() + ticksToMs(COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS);
+      Date.now() + ticksToMs(getCombatTimeoutTicks());
   }
 
   // ─── Death / Respawn lifecycle ──────────────────────────────────

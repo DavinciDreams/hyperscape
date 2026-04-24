@@ -71,8 +71,8 @@ import type {
   HealthBars as HealthBarsSystem,
   HealthBarHandle,
 } from "../../systems/client/HealthBars";
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
-import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
+import { getCombatTimeoutTicks } from "../../data/live/combat-live";
+import { getPlayerRenderDistance } from "../../data/live/distance-live";
 import { ticksToMs } from "../../utils/game/CombatCalculations";
 import {
   AnimationLOD,
@@ -122,7 +122,9 @@ let capsuleGeometry: THREE.CapsuleGeometry;
 
 const PLAYER_IMPOSTOR_DISTANCES = {
   impostorDistance: 80,
-  cullDistance: DISTANCE_CONSTANTS.RENDER.PLAYER,
+  get cullDistance() {
+    return getPlayerRenderDistance();
+  },
   hysteresis: 5,
 } as const;
 
@@ -1422,7 +1424,7 @@ export class PlayerRemote extends Entity implements HotReloadable {
           // In combat - show health bar and set/extend timeout
           this._healthBarHandle.show();
           this._healthBarVisibleUntil =
-            Date.now() + ticksToMs(COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS);
+            Date.now() + ticksToMs(getCombatTimeoutTicks());
         } else {
           // Combat ended - hide and clear timer
           this._healthBarHandle.hide();

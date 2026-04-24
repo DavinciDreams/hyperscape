@@ -30,7 +30,7 @@ import {
   type InteractableConfig,
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
-import { PROCESSING_CONSTANTS } from "../../constants/ProcessingConstants";
+import { getFireInteractionRange } from "../../data/live/processing-live";
 import { stationDataProvider } from "../../data/StationDataProvider";
 import { modelCache } from "../../utils/rendering/ModelCache";
 import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
@@ -88,13 +88,13 @@ export class RangeEntity extends InteractableEntity {
       visible: true,
       interactable: true,
       interactionType: InteractionType.COOKING,
-      interactionDistance: PROCESSING_CONSTANTS.FIRE.interactionRange,
+      interactionDistance: getFireInteractionRange(),
       description: "A range for cooking food.",
       model: null,
       interaction: {
         prompt: "Cook",
         description: "Cook food on this range",
-        range: PROCESSING_CONSTANTS.FIRE.interactionRange,
+        range: getFireInteractionRange(),
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,

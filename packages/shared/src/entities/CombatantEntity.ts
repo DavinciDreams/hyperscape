@@ -81,7 +81,7 @@ import type {
 } from "../types/entities";
 import type { Quaternion } from "../types/core/base-types";
 import type { Position3D } from "../types/core/core";
-import { COMBAT_CONSTANTS } from "../constants/CombatConstants";
+import { getDefaultAttackSpeedTicks } from "../data/live/combat-live";
 import { ticksToMs } from "../utils/game/CombatCalculations";
 import { calculateDamage } from "../utils/game/CombatCalculations";
 import { AttackType } from "../types/core/core";
@@ -211,9 +211,7 @@ export abstract class CombatantEntity extends Entity {
     const timeSinceLastAttack = now - this.combatLastAttackTime;
 
     // Use consistent attack cooldown with CombatSystem (tick-based)
-    const attackCooldown = ticksToMs(
-      COMBAT_CONSTANTS.DEFAULT_ATTACK_SPEED_TICKS,
-    );
+    const attackCooldown = ticksToMs(getDefaultAttackSpeedTicks());
 
     // Check attack cooldown
     if (timeSinceLastAttack < attackCooldown) {

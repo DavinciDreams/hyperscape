@@ -36,7 +36,16 @@
  * ```
  */
 
-import { DISTANCE_CONSTANTS } from "../../constants/GameConstants";
+import {
+  getAnimationLodCulledDistance,
+  getAnimationLodFrozenDistance,
+  getAnimationLodFullDistance,
+  getAnimationLodHalfDistance,
+  getAnimationLodQuarterDistance,
+  getMobRenderDistance,
+  getNpcRenderDistance,
+  getPlayerRenderDistance,
+} from "../../data/live/distance-live";
 
 /**
  * LOD configuration for animation updates
@@ -91,11 +100,21 @@ export const LOD_LEVEL = {
  * The cull distance is entity-specific (use ANIMATION_LOD_PRESETS for defaults).
  */
 export const DEFAULT_ANIMATION_LOD_CONFIG: AnimationLODConfig = {
-  fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL, // 30m - Full 60fps animation
-  halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF, // 60m - 30fps animation
-  quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER, // 80m - 15fps animation
-  freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN, // 100m - Frozen in idle pose
-  cullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.CULLED, // 150m - Default cull distance
+  get fullDistance() {
+    return getAnimationLodFullDistance();
+  },
+  get halfDistance() {
+    return getAnimationLodHalfDistance();
+  },
+  get quarterDistance() {
+    return getAnimationLodQuarterDistance();
+  },
+  get freezeDistance() {
+    return getAnimationLodFrozenDistance();
+  },
+  get cullDistance() {
+    return getAnimationLodCulledDistance();
+  },
 };
 
 /**
@@ -104,32 +123,38 @@ export const DEFAULT_ANIMATION_LOD_CONFIG: AnimationLODConfig = {
  * This ensures entities fade out at the same distance they stop animating.
  */
 export const ANIMATION_LOD_PRESETS = {
-  /** Mob animation LOD - cull at 150m (matches MOB render distance) */
-  MOB: {
-    fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL,
-    halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF,
-    quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER,
-    freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN,
-    cullDistance: DISTANCE_CONSTANTS.RENDER.MOB,
-  } as AnimationLODConfig,
+  /** Mob animation LOD - cull at MOB render distance */
+  get MOB(): AnimationLODConfig {
+    return {
+      fullDistance: getAnimationLodFullDistance(),
+      halfDistance: getAnimationLodHalfDistance(),
+      quarterDistance: getAnimationLodQuarterDistance(),
+      freezeDistance: getAnimationLodFrozenDistance(),
+      cullDistance: getMobRenderDistance(),
+    };
+  },
 
-  /** NPC animation LOD - cull at 120m (matches NPC render distance) */
-  NPC: {
-    fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL,
-    halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF,
-    quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER,
-    freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN,
-    cullDistance: DISTANCE_CONSTANTS.RENDER.NPC,
-  } as AnimationLODConfig,
+  /** NPC animation LOD - cull at NPC render distance */
+  get NPC(): AnimationLODConfig {
+    return {
+      fullDistance: getAnimationLodFullDistance(),
+      halfDistance: getAnimationLodHalfDistance(),
+      quarterDistance: getAnimationLodQuarterDistance(),
+      freezeDistance: getAnimationLodFrozenDistance(),
+      cullDistance: getNpcRenderDistance(),
+    };
+  },
 
-  /** Player animation LOD - cull at 200m (matches PLAYER render distance) */
-  PLAYER: {
-    fullDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FULL,
-    halfDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.HALF,
-    quarterDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.QUARTER,
-    freezeDistance: DISTANCE_CONSTANTS.ANIMATION_LOD.FROZEN,
-    cullDistance: DISTANCE_CONSTANTS.RENDER.PLAYER,
-  } as AnimationLODConfig,
+  /** Player animation LOD - cull at PLAYER render distance */
+  get PLAYER(): AnimationLODConfig {
+    return {
+      fullDistance: getAnimationLodFullDistance(),
+      halfDistance: getAnimationLodHalfDistance(),
+      quarterDistance: getAnimationLodQuarterDistance(),
+      freezeDistance: getAnimationLodFrozenDistance(),
+      cullDistance: getPlayerRenderDistance(),
+    };
+  },
 } as const;
 
 /**

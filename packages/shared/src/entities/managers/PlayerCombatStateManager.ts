@@ -20,7 +20,11 @@
  * @see https://oldschool.runescape.wiki/w/Combat#Logout - Logout prevention timer
  */
 
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import {
+  getAfkDisableRetaliateTicks,
+  getCombatTimeoutTicks,
+  getLogoutPreventionTicks,
+} from "../../data/live/combat-live";
 import type { EntityID } from "../../types/core/identifiers";
 
 export interface PlayerCombatStateConfig {
@@ -42,15 +46,15 @@ export class PlayerCombatStateManager {
   private autoRetaliateEnabled = true;
 
   // AFK tracking for auto-retaliate disable
-  // @see COMBAT_CONSTANTS.AFK_DISABLE_RETALIATE_TICKS (20 minutes)
+  // @see getAfkDisableRetaliateTicks() (20 minutes)
   private lastActionTick = 0;
 
   // Logout prevention tracking
-  // @see COMBAT_CONSTANTS.LOGOUT_PREVENTION_TICKS (9.6 seconds)
+  // @see getLogoutPreventionTicks() (9.6 seconds)
   private lastDamageTakenTick = -Infinity;
 
   // Combat timeout tracking
-  // @see COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS (8 ticks / 4.8 seconds)
+  // @see getCombatTimeoutTicks() (8 ticks / 4.8 seconds)
   private combatStartTick = -Infinity;
   private lastCombatActivityTick = -Infinity;
 
@@ -194,7 +198,7 @@ export class PlayerCombatStateManager {
 
     // Check AFK timeout (20 minutes)
     const ticksSinceAction = currentTick - this.lastActionTick;
-    if (ticksSinceAction > COMBAT_CONSTANTS.AFK_DISABLE_RETALIATE_TICKS) {
+    if (ticksSinceAction > getAfkDisableRetaliateTicks()) {
       return false;
     }
 
@@ -235,7 +239,7 @@ export class PlayerCombatStateManager {
    */
   canLogout(currentTick: number): boolean {
     const ticksSinceDamage = currentTick - this.lastDamageTakenTick;
-    return ticksSinceDamage >= COMBAT_CONSTANTS.LOGOUT_PREVENTION_TICKS;
+    return ticksSinceDamage >= getLogoutPreventionTicks();
   }
 
   /**
@@ -247,7 +251,7 @@ export class PlayerCombatStateManager {
     }
 
     const ticksSinceActivity = currentTick - this.lastCombatActivityTick;
-    return ticksSinceActivity >= COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+    return ticksSinceActivity >= getCombatTimeoutTicks();
   }
 
   /**
@@ -389,10 +393,7 @@ export class PlayerCombatStateManager {
    */
   getLogoutPreventionTicks(currentTick: number): number {
     const ticksSinceDamage = currentTick - this.lastDamageTakenTick;
-    return Math.max(
-      0,
-      COMBAT_CONSTANTS.LOGOUT_PREVENTION_TICKS - ticksSinceDamage,
-    );
+    return Math.max(0, getLogoutPreventionTicks() - ticksSinceDamage);
   }
 
   /**
@@ -400,6 +401,6 @@ export class PlayerCombatStateManager {
    */
   isAFK(currentTick: number): boolean {
     const ticksSinceAction = currentTick - this.lastActionTick;
-    return ticksSinceAction > COMBAT_CONSTANTS.AFK_DISABLE_RETALIATE_TICKS;
+    return ticksSinceAction > getAfkDisableRetaliateTicks();
   }
 }

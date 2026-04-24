@@ -3,7 +3,14 @@
  * @see https://oldschool.runescape.wiki/w/Damage_per_second/Melee
  */
 
-import { COMBAT_CONSTANTS } from "../../constants/CombatConstants";
+import {
+  getDamageBaseConstant,
+  getDamageDivisor,
+  getDefaultRangedRange,
+  getEffectiveLevelConstant,
+  getMeleeRangeStandard,
+  getTickDurationMs,
+} from "../../data/live/combat-live";
 import { AttackType } from "../../types/core/core";
 import {
   calculateDistance as mathCalculateDistance,
@@ -122,10 +129,10 @@ function calculateAccuracy(
   );
   const effectiveAttack =
     boostedAttackLevel +
-    COMBAT_CONSTANTS.EFFECTIVE_LEVEL_CONSTANT +
+    getEffectiveLevelConstant() +
     attackerStyleBonus.attack;
   const attackRoll =
-    effectiveAttack * (attackerAttackBonus + COMBAT_CONSTANTS.BASE_CONSTANT);
+    effectiveAttack * (attackerAttackBonus + getDamageBaseConstant());
 
   // Apply defender's prayer defense multiplier
   const prayerDefenseMultiplier = defenderPrayerBonuses?.defenseMultiplier ?? 1;
@@ -134,7 +141,7 @@ function calculateAccuracy(
   );
   const effectiveDefence = boostedDefenseLevel + 9 + defenderStyleBonus.defense;
   const defenceRoll =
-    effectiveDefence * (targetDefenseBonus + COMBAT_CONSTANTS.BASE_CONSTANT);
+    effectiveDefence * (targetDefenseBonus + getDamageBaseConstant());
 
   const hitChance = calculateHitChance(attackRoll, defenceRoll);
   return random.random() < hitChance;
@@ -188,16 +195,15 @@ export function calculateDamage(
       );
       const effectiveStrength =
         boostedStrengthLevel +
-        COMBAT_CONSTANTS.EFFECTIVE_LEVEL_CONSTANT +
+        getEffectiveLevelConstant() +
         styleBonus.strength;
       const strengthBonus = equipmentStats?.strength || 0;
       attackBonus = equipmentStats?.attack || 0;
 
       maxHit = Math.floor(
         0.5 +
-          (effectiveStrength *
-            (strengthBonus + COMBAT_CONSTANTS.BASE_CONSTANT)) /
-            COMBAT_CONSTANTS.DAMAGE_DIVISOR,
+          (effectiveStrength * (strengthBonus + getDamageBaseConstant())) /
+            getDamageDivisor(),
       );
 
       if (maxHit < 1 && (attackPower >= 10 || strengthStat >= 10)) {
@@ -269,7 +275,7 @@ export function isInAttackRange(
   attackerPos: { x: number; y: number; z: number },
   targetPos: { x: number; y: number; z: number },
   attackType: AttackType,
-  meleeRange: number = COMBAT_CONSTANTS.MELEE_RANGE_STANDARD,
+  meleeRange: number = getMeleeRangeStandard(),
 ): boolean {
   const attackerTile = worldToTile(attackerPos.x, attackerPos.z);
   const targetTile = worldToTile(targetPos.x, targetPos.z);
@@ -278,7 +284,7 @@ export function isInAttackRange(
     return tilesWithinMeleeRange(attackerTile, targetTile, meleeRange);
   } else {
     const tileDistance = tileChebyshevDistance(attackerTile, targetTile);
-    return tileDistance <= COMBAT_CONSTANTS.RANGED_RANGE && tileDistance > 0;
+    return tileDistance <= getDefaultRangedRange() && tileDistance > 0;
   }
 }
 
@@ -299,15 +305,12 @@ export function calculateRetaliationDelay(attackSpeedTicks: number): number {
 
 /** Mob config stores attackSpeed in seconds (e.g., 2.4) */
 export function attackSpeedSecondsToTicks(seconds: number): number {
-  return Math.max(
-    1,
-    Math.round((seconds * 1000) / COMBAT_CONSTANTS.TICK_DURATION_MS),
-  );
+  return Math.max(1, Math.round((seconds * 1000) / getTickDurationMs()));
 }
 
 /** Weapon config stores attackSpeed in ms (e.g., 2400) */
 export function attackSpeedMsToTicks(ms: number): number {
-  return Math.max(1, Math.round(ms / COMBAT_CONSTANTS.TICK_DURATION_MS));
+  return Math.max(1, Math.round(ms / getTickDurationMs()));
 }
 
 export function shouldCombatTimeoutTicks(
@@ -318,9 +321,9 @@ export function shouldCombatTimeoutTicks(
 }
 
 export function msToTicks(ms: number, minTicks: number = 1): number {
-  return Math.max(minTicks, Math.round(ms / COMBAT_CONSTANTS.TICK_DURATION_MS));
+  return Math.max(minTicks, Math.round(ms / getTickDurationMs()));
 }
 
 export function ticksToMs(ticks: number): number {
-  return ticks * COMBAT_CONSTANTS.TICK_DURATION_MS;
+  return ticks * getTickDurationMs();
 }

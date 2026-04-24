@@ -33,7 +33,7 @@ import {
   type InteractableConfig,
 } from "../InteractableEntity";
 import { EventType } from "../../types/events";
-import { PROCESSING_CONSTANTS } from "../../constants/ProcessingConstants";
+import { getFireInteractionRange } from "../../data/live/processing-live";
 
 /**
  * Configuration for creating a FireEntity.
@@ -76,13 +76,13 @@ export class FireEntity extends InteractableEntity {
       visible: true,
       interactable: true,
       interactionType: InteractionType.COOKING,
-      interactionDistance: PROCESSING_CONSTANTS.FIRE.interactionRange,
+      interactionDistance: getFireInteractionRange(),
       description: "A fire for cooking food.",
       model: null,
       interaction: {
         prompt: "Cook",
         description: "Cook food on this fire",
-        range: PROCESSING_CONSTANTS.FIRE.interactionRange,
+        range: getFireInteractionRange(),
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,

@@ -167,6 +167,57 @@ export type { PrimaryActionType } from "./utils/item-helpers";
 // Context menu colors (OSRS-accurate styling)
 export { CONTEXT_MENU_COLORS } from "./constants/GameConstants";
 
+// Live getters — provider-first reads of boot-captured context-menu colors.
+// Prefer these over `CONTEXT_MENU_COLORS` so PIE manifest edits to
+// `game.contextMenuColors` apply without a client reload.
+export {
+  getContextMenuItemColor,
+  getContextMenuNpcColor,
+  getContextMenuObjectColor,
+  getContextMenuPlayerColor,
+  getDefaultHealth,
+  getDefaultMaxHealth,
+  getHealthRegenRate,
+  getHomeTeleportCooldownMs,
+  getHomeTeleportCastTimeMs,
+  getHomeTeleportCastTimeTicks,
+  getMaxInventorySlots,
+  getMaxBanditMobsWorld,
+  getBanditMobIdsForGlobalCap,
+  isBanditMobForGlobalCap,
+  getWorldChunkSize,
+  getWaterThreshold,
+  getWaterEdgeBuffer,
+  getMinVisibleWaterDepth,
+  getMaxWalkableSlope,
+  getSlopeCheckDistance,
+  getTileSize,
+  getTerrainTileSize,
+} from "./data/live/game-live";
+
+export { getPickupRange } from "./data/live/combat-live";
+export { getMaxTradeSlots } from "./data/live/trading-live";
+export {
+  getMaxBankSlots,
+  getBankSlotsPerTab,
+  getMaxBankTabs,
+  getDefaultBankTabs,
+  getDefaultBankSlots,
+} from "./data/live/banking-live";
+export {
+  getMaxItemIdLength,
+  getMaxStoreIdLength,
+  getMaxQuantity,
+  getMaxInventorySlotsInputLimit,
+  getMaxRequestAgeMs,
+  getMaxClockSkewMs,
+  getInteractionDistanceFor,
+  getTransactionRateLimitMs,
+  getSessionValidationIntervalTicks,
+  getSessionGracePeriodTicks,
+  getSessionMaxSessionTicks,
+} from "./data/live/interaction-live";
+
 // Home teleport constants (cooldown, cast time)
 export { HOME_TELEPORT_CONSTANTS } from "./constants/GameConstants";
 
@@ -804,3 +855,15 @@ export type {
   StairTile,
   FloorCollisionData,
 } from "./types/world/building-collision-types";
+
+// xp-curves runtime registry — shared module-level singleton.
+// Populated at boot by DataManager and live-mutated by PIEEditorSession.
+// Client HUD (xp-orb) resolves xp-to-level through this same instance
+// so editor saves take effect in the HUD without a restart.
+export {
+  xpCurveRegistry,
+  XPCurveRegistry,
+  UnknownXpCurveError,
+  InvalidXpLevelError,
+  type XpToNextResult,
+} from "./progression/index";

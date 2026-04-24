@@ -464,6 +464,132 @@ export type {
 
 // Export prayer data provider for UI panels
 export { prayerDataProvider } from "./data/PrayerDataProvider";
+
+// Export authored-manifest providers (server bootstrap + editor flows)
+export { combatTuningProvider } from "./data/CombatTuningProvider";
+export { dialogueConditionBindingsProvider } from "./data/DialogueConditionBindingsProvider";
+export { combatTuningAgentBindingsProvider } from "./data/CombatTuningAgentBindingsProvider";
+export { xpCurvesProvider } from "./data/XpCurvesProvider";
+export { achievementsProvider } from "./data/AchievementsProvider";
+export { timeWeatherProvider } from "./data/TimeWeatherProvider";
+export { accessibilityProvider } from "./data/AccessibilityProvider";
+export { analyticsEventsProvider } from "./data/AnalyticsEventsProvider";
+export { renderProfilesProvider } from "./data/RenderProfilesProvider";
+export { damageTypesProvider } from "./data/DamageTypesProvider";
+export { statusEffectsProvider } from "./data/StatusEffectsProvider";
+export { cameraProfilesProvider } from "./data/CameraProfilesProvider";
+export { audioBusMixProvider } from "./data/AudioBusMixProvider";
+export { postProcessVolumesProvider } from "./data/PostProcessVolumesProvider";
+export { npcScheduleProvider } from "./data/NpcScheduleProvider";
+export { chatChannelsProvider } from "./data/ChatChannelsProvider";
+export { interactionPromptsProvider } from "./data/InteractionPromptsProvider";
+export { musicStateMachineProvider } from "./data/MusicStateMachineProvider";
+export { saveDataProvider } from "./data/SaveDataProvider";
+export { factionsProvider } from "./data/FactionsProvider";
+export { mountsProvider } from "./data/MountsProvider";
+export { voiceChatProvider } from "./data/VoiceChatProvider";
+export { parentalControlsProvider } from "./data/ParentalControlsProvider";
+export { tutorialFlowsProvider } from "./data/TutorialFlowsProvider";
+export { hapticsProvider } from "./data/HapticsProvider";
+export { physicsConfigProvider } from "./data/PhysicsConfigProvider";
+export { featureFlagsProvider } from "./data/FeatureFlagsProvider";
+export { crashReporterProvider } from "./data/CrashReporterProvider";
+export { pushNotificationsProvider } from "./data/PushNotificationsProvider";
+export { licenseAgreementsProvider } from "./data/LicenseAgreementsProvider";
+export { newsFeedProvider } from "./data/NewsFeedProvider";
+export { moderationProvider } from "./data/ModerationProvider";
+export { fastTravelProvider } from "./data/FastTravelProvider";
+export { respawnProvider } from "./data/RespawnProvider";
+export { talentTreesProvider } from "./data/TalentTreesProvider";
+export { auctionHouseProvider } from "./data/AuctionHouseProvider";
+export { transmogProvider } from "./data/TransmogProvider";
+export { housingProvider } from "./data/HousingProvider";
+export { groupFinderProvider } from "./data/GroupFinderProvider";
+export { friendsSocialProvider } from "./data/FriendsSocialProvider";
+export { loadoutsProvider } from "./data/LoadoutsProvider";
+export { tradingProvider } from "./data/TradingProvider";
+export { itemSetsProvider } from "./data/ItemSetsProvider";
+export { leaderboardsProvider } from "./data/LeaderboardsProvider";
+export { titlesProvider } from "./data/TitlesProvider";
+export { worldEventsProvider } from "./data/WorldEventsProvider";
+export { seasonsProvider } from "./data/SeasonsProvider";
+export { petCompanionProvider } from "./data/PetCompanionProvider";
+export { enchantmentsProvider } from "./data/EnchantmentsProvider";
+export { mailProvider } from "./data/MailProvider";
+export { tooltipsProvider } from "./data/TooltipsProvider";
+export { keyPromptIconsProvider } from "./data/KeyPromptIconsProvider";
+export { screenshotProvider } from "./data/ScreenshotProvider";
+export { partyGuildProvider } from "./data/PartyGuildProvider";
+export { economyTuningProvider } from "./data/EconomyTuningProvider";
+export { loadingScreensProvider } from "./data/LoadingScreensProvider";
+export { skyboxAtmosphereProvider } from "./data/SkyboxAtmosphereProvider";
+export { particleGraphProvider } from "./data/ParticleGraphProvider";
+export { cinematicProvider } from "./data/CinematicProvider";
+export { editorSnapProvider } from "./data/EditorSnapProvider";
+export { deployTargetsProvider } from "./data/DeployTargetsProvider";
+export { inputActionsProvider } from "./data/InputActionsProvider";
+export { profilerOverlayProvider } from "./data/ProfilerOverlayProvider";
+export { replicationProvider } from "./data/ReplicationProvider";
+export { prefabProvider } from "./data/PrefabProvider";
+export { levelStreamingProvider } from "./data/LevelStreamingProvider";
+export { lightingBakeProvider } from "./data/LightingBakeProvider";
+export { projectSettingsProvider } from "./data/ProjectSettingsProvider";
+export { aiBehaviorProvider } from "./data/AIBehaviorProvider";
+export { animationsProvider } from "./data/AnimationsProvider";
+export { qualityPresetsProvider } from "./data/QualityPresetsProvider";
+export { navMeshProvider } from "./data/NavMeshProvider";
+export { lodSettingsProvider } from "./data/LODSettingsProvider";
+export { soundEffectsProvider } from "./data/SoundEffectsProvider";
+export { vfxProvider } from "./data/VfxProvider";
+export { vegetationProvider } from "./data/VegetationProvider";
+export { mainMenuProvider } from "./data/MainMenuProvider";
+export { creditsProvider } from "./data/CreditsProvider";
+export { musicProvider } from "./data/MusicProvider";
+export { duelProvider } from "./data/DuelProvider";
+export { duelArenasProvider } from "./data/DuelArenasProvider";
+export { biomesProvider } from "./data/BiomesProvider";
+export { storesProvider } from "./data/StoresProvider";
+export { ammunitionProvider } from "./data/AmmunitionProvider";
+export { arenaLayoutProvider } from "./data/ArenaLayoutProvider";
+export { avatarsProvider } from "./data/AvatarsProvider";
+export { bankingProvider } from "./data/BankingProvider";
+export { buildingsProvider } from "./data/BuildingsProvider";
+export { toolsProvider } from "./data/ToolsProvider";
+export { treesProvider } from "./data/TreesProvider";
+export { weaponStylesProvider } from "./data/WeaponStylesProvider";
+export { npcSizesProvider } from "./data/NPCSizesProvider";
+export { onboardingGoalsProvider } from "./data/OnboardingGoalsProvider";
+export { skillIconsProvider } from "./data/SkillIconsProvider";
+export { playerEmotesProvider } from "./data/PlayerEmotesProvider";
+export { skillUnlocksProvider } from "./data/SkillUnlocksProvider";
+export { matchmakingTuningProvider } from "./data/MatchmakingTuningProvider";
+export { spellVisualsProvider } from "./data/SpellVisualsProvider";
+export { profilerProvider } from "./data/ProfilerProvider";
+export { serverBrowserProvider } from "./data/ServerBrowserProvider";
+export { storeFrontProvider } from "./data/StoreFrontProvider";
+export { commerceProvider } from "./data/CommerceProvider";
+export { interactionProvider } from "./data/InteractionProvider";
+export { combatProvider } from "./data/CombatProvider";
+export { equipmentProvider } from "./data/EquipmentProvider";
+export { gameProvider } from "./data/GameProvider";
+export { smithingProvider } from "./data/SmithingProvider";
+export { worldStructureProvider } from "./data/WorldStructureProvider";
+export { gatheringProvider } from "./data/GatheringProvider";
+export { processingProvider } from "./data/ProcessingProvider";
+export { woodcuttingProvider } from "./data/WoodcuttingProvider";
+export { miningProvider } from "./data/MiningProvider";
+export { fishingProvider } from "./data/FishingProvider";
+export { combatSpellsProvider } from "./data/CombatSpellsProvider";
+export { npcsProvider } from "./data/NpcsProvider";
+export { questsProvider } from "./data/QuestsProvider";
+export { pluginRegistryProvider } from "./data/PluginRegistryProvider";
+export { worldAreasProvider } from "./data/WorldAreasProvider";
+export { worldConfigProvider } from "./data/WorldConfigProvider";
+export { lootTablesProvider } from "./data/LootTablesProvider";
+export { mobLootTableMappingsProvider } from "./data/MobLootTableMappingsProvider";
+export { dialogueProvider } from "./data/DialogueProvider";
+export { npcDialogueBindingsProvider } from "./data/NpcDialogueBindingsProvider";
+export { localizationProvider } from "./data/LocalizationProvider";
 export {
   attachEquipmentVisualToVRM,
   extractEquipmentAttachmentData,
@@ -539,6 +665,19 @@ export { StoreSystem } from "./systems/shared/economy/StoreSystem";
 export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
 export { QuestSystem } from "./systems/shared/progression/QuestSystem";
+
+// xp-curves runtime registry — shared module-level singleton.
+// Populated at boot by DataManager and live-mutated by PIEEditorSession.
+// Client HUD and server SkillsSystem both resolve xp-to-level through
+// this same instance so editor saves take effect everywhere without
+// restart.
+export {
+  xpCurveRegistry,
+  XPCurveRegistry,
+  UnknownXpCurveError,
+  InvalidXpLevelError,
+  type XpToNextResult,
+} from "./progression/index";
 export {
   FOOTPRINT_SIZES,
   resolveFootprint,
@@ -1212,6 +1351,64 @@ export { TERRAIN_CONSTANTS } from "./constants/GameConstants";
 // Inventory constants (slot counts, stack sizes)
 export { INVENTORY_CONSTANTS } from "./constants/GameConstants";
 
+// Live getters — provider-first reads of boot-captured GAME_CONSTANTS fields.
+// Prefer these over the frozen `*_CONSTANTS` re-exports above when a consumer
+// needs to see PIE-hotreloaded authored data.
+export {
+  getDefaultHealth,
+  getDefaultMaxHealth,
+  getHealthRegenRate,
+  getHomeTeleportCooldownMs,
+  getHomeTeleportCastTimeMs,
+  getHomeTeleportCastTimeTicks,
+  getMaxInventorySlots,
+  getMaxBanditMobsWorld,
+  getBanditMobIdsForGlobalCap,
+  isBanditMobForGlobalCap,
+  getWaterThreshold,
+  getWaterEdgeBuffer,
+  getMinVisibleWaterDepth,
+  getMaxWalkableSlope,
+  getSlopeCheckDistance,
+  getTileSize,
+  getTerrainTileSize,
+  getWorldChunkSize,
+  getContextMenuItemColor,
+  getContextMenuNpcColor,
+  getContextMenuObjectColor,
+  getContextMenuPlayerColor,
+} from "./data/live/game-live";
+
+// Live getters — provider-first reads of boot-captured COMBAT_CONSTANTS fields.
+export { getPickupRange } from "./data/live/combat-live";
+
+// Live getters — provider-first reads of boot-captured TRADE_CONSTANTS fields.
+export { getMaxTradeSlots } from "./data/live/trading-live";
+
+// Live getters — provider-first reads of boot-captured BANKING_CONSTANTS fields.
+export {
+  getMaxBankSlots,
+  getBankSlotsPerTab,
+  getMaxBankTabs,
+  getDefaultBankTabs,
+  getDefaultBankSlots,
+} from "./data/live/banking-live";
+
+// Live getters — provider-first reads of boot-captured INPUT_LIMITS fields.
+export {
+  getMaxItemIdLength,
+  getMaxStoreIdLength,
+  getMaxQuantity,
+  getMaxInventorySlotsInputLimit,
+  getMaxRequestAgeMs,
+  getMaxClockSkewMs,
+  getInteractionDistanceFor,
+  getTransactionRateLimitMs,
+  getSessionValidationIntervalTicks,
+  getSessionGracePeriodTicks,
+  getSessionMaxSessionTicks,
+} from "./data/live/interaction-live";
+
 // Player constants (health, stamina, speeds)
 export { PLAYER_CONSTANTS } from "./constants/GameConstants";
 
@@ -1530,3 +1727,19 @@ export {
   collectInitialSyncEntities,
   handleEnterWorld,
 } from "./systems/server/network/character-selection";
+
+export {
+  BehaviorTreeInterpreter,
+  type BehaviorContext,
+  type InterpreterOptions,
+  type NodeStatus,
+  CombatTuningRegistry,
+  UnknownCombatTuningProfileError,
+  profileToResolvedTuning,
+  type CombatPhase,
+  type ResolvedCombatTuning,
+  type CombatTuningManifest,
+  type CombatTuningProfile,
+  type CombatRole,
+  type EngagementRange,
+} from "./ai/index.js";

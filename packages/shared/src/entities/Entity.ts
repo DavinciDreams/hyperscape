@@ -103,6 +103,16 @@ import { getWorldNetwork } from "../utils/SystemUtils";
 import type { World } from "../core/World";
 import { EventType } from "../types/events";
 import { GAME_CONSTANTS } from "../constants/GameConstants";
+import {
+  getDefaultAttackSpeedTicks,
+  getMeleeRangeStandard,
+  getMinDamage,
+} from "../data/live/combat-live";
+import {
+  getDefaultHealth,
+  getDefaultMaxHealth,
+  getHealthRegenRate,
+} from "../data/live/game-live";
 import { ticksToMs } from "../utils/game/CombatCalculations";
 import type { MeshUserData } from "../types/core/core";
 import type { EntityInteractionData, EntityConfig } from "../types/entities";
@@ -500,7 +510,7 @@ export class Entity implements IEntity {
         this.health =
           Number.isFinite(entityHealth) && entityHealth > 0
             ? entityHealth
-            : GAME_CONSTANTS.PLAYER.DEFAULT_HEALTH;
+            : getDefaultHealth();
         this.maxHealth =
           Number.isFinite(entityMaxHealth) &&
           entityMaxHealth !== undefined &&
@@ -508,8 +518,8 @@ export class Entity implements IEntity {
             ? entityMaxHealth
             : this.health;
       } else {
-        this.health = GAME_CONSTANTS.PLAYER.DEFAULT_HEALTH;
-        this.maxHealth = GAME_CONSTANTS.PLAYER.DEFAULT_MAX_HEALTH;
+        this.health = getDefaultHealth();
+        this.maxHealth = getDefaultMaxHealth();
       }
     }
     this.level = (config?.properties?.level as number) || 1;
@@ -925,7 +935,7 @@ export class Entity implements IEntity {
     this.addComponent("health", {
       current: this.health,
       max: this.maxHealth,
-      regenerationRate: GAME_CONSTANTS.PLAYER.HEALTH_REGEN_RATE,
+      regenerationRate: getHealthRegenRate(),
       isDead: false,
     });
   }
@@ -938,11 +948,9 @@ export class Entity implements IEntity {
       isInCombat: false,
       target: null,
       lastAttackTime: 0,
-      attackCooldown: ticksToMs(
-        GAME_CONSTANTS.COMBAT.DEFAULT_ATTACK_SPEED_TICKS,
-      ),
-      damage: GAME_CONSTANTS.COMBAT.MIN_DAMAGE,
-      range: GAME_CONSTANTS.COMBAT.MELEE_RANGE_STANDARD,
+      attackCooldown: ticksToMs(getDefaultAttackSpeedTicks()),
+      damage: getMinDamage(),
+      range: getMeleeRangeStandard(),
     });
   }
 
