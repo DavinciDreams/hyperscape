@@ -1781,14 +1781,27 @@ describe("runCli — publish subcommand", () => {
     expect(out).not.toContain("secret-token-xyz");
   });
 
-  it("--registry with successful 200 response → POSTs + prints success", async () => {
+  it("--registry with successful 200 response → uploads content + POSTs bundle + prints success", async () => {
     await writePluginPackage({
       distFiles: { "index.js": "x" },
     });
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     const { io, stdout } = mkIO({
       fetch: async (input, init) => {
-        requests.push({ url: String(input), init });
+        const url = String(input);
+        requests.push({ url, init });
+        if (url.includes("/api/plugins/content")) {
+          // Content store accepts the upload (201).
+          return new Response(
+            '{"ok":true,"sha256":"x","size":1,"deduplicated":false}',
+            {
+              status: 201,
+              statusText: "Created",
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        // Bundle POST.
         return new Response('{"id":"published-id-1"}', {
           status: 200,
           statusText: "OK",
@@ -1808,10 +1821,14 @@ describe("runCli — publish subcommand", () => {
       io,
     );
     expect(code).toBe(0);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.url).toBe("https://registry.example.com/api/plugins");
-    expect(requests[0]!.init?.method).toBe("POST");
-    const headers = requests[0]!.init?.headers as Record<string, string>;
+    // Two requests: content upload (per file), then bundle POST.
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.url).toBe(
+      "https://registry.example.com/api/plugins/content",
+    );
+    expect(requests[1]!.url).toBe("https://registry.example.com/api/plugins");
+    expect(requests[1]!.init?.method).toBe("POST");
+    const headers = requests[1]!.init?.headers as Record<string, string>;
     expect(headers["content-type"]).toBe("application/json");
     expect(headers.authorization).toBe("Bearer tok-xyz");
     expect(stdout()).toContain(
@@ -1819,7 +1836,40 @@ describe("runCli — publish subcommand", () => {
     );
     expect(stdout()).toContain("manifestHash:");
     expect(stdout()).toContain("bundleHash:");
+    expect(stdout()).toContain("content store: 1 uploaded, 0 deduplicated");
     expect(stdout()).toContain('"id":"published-id-1"');
+  });
+
+  it("--registry: content-store rejection aborts before bundle POST", async () => {
+    await writePluginPackage({
+      distFiles: { "index.js": "x" },
+    });
+    const requests: Array<{ url: string }> = [];
+    const { io, stderr } = mkIO({
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push({ url });
+        if (url.includes("/api/plugins/content")) {
+          // Content store rejects with 400 (e.g. sha mismatch).
+          return new Response('{"ok":false,"error":"sha256 mismatch"}', {
+            status: 400,
+            statusText: "Bad Request",
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("should not be reached", { status: 200 });
+      },
+    });
+    const code = await runCli(
+      ["publish", tmpDir, "--registry", "https://registry.example.com"],
+      io,
+    );
+    expect(code).toBe(1);
+    // Bundle POST never happened — we aborted after content rejection.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toContain("/api/plugins/content");
+    expect(stderr()).toContain("content store rejected index.js");
+    expect(stderr()).toContain("400 Bad Request");
   });
 
   it("trailing slash on --registry is normalized", async () => {
@@ -1888,6 +1938,17 @@ describe("runCli — publish subcommand", () => {
 });
 
 describe("runCli — install subcommand", () => {
+  let indexJsBytes: Buffer;
+  let indexJsSha: string;
+
+  beforeEach(async () => {
+    const { createHash } = await import("node:crypto");
+    indexJsBytes = Buffer.from(
+      "// installed plugin entry\nexport default {};\n",
+    );
+    indexJsSha = createHash("sha256").update(indexJsBytes).digest("hex");
+  });
+
   function validBundle(id: string, version: string) {
     return {
       manifest: {
@@ -1913,8 +1974,14 @@ describe("runCli — install subcommand", () => {
         tags: [],
       },
       manifestHash: "a".repeat(64),
-      files: [{ path: "index.js", size: 10, sha256: "b".repeat(64) }],
-      totalSize: 10,
+      files: [
+        {
+          path: "index.js",
+          size: indexJsBytes.byteLength,
+          sha256: indexJsSha,
+        },
+      ],
+      totalSize: indexJsBytes.byteLength,
       bundleHash: "c".repeat(64),
     };
   }
@@ -1942,6 +2009,40 @@ describe("runCli — install subcommand", () => {
         headers: { "content-type": "application/json" },
       },
     );
+  }
+
+  /**
+   * Combined fetch stub: bundle GET returns the registry response;
+   * content GET serves the canonical indexJsBytes when the URL's
+   * sha matches indexJsSha (else 404).
+   */
+  function makeRegistryFetch(opts: {
+    id: string;
+    version: string;
+  }): CliIO["fetch"] {
+    return async (input) => {
+      const url = String(input);
+      if (url.includes("/api/plugins/content/")) {
+        const requestedSha = url.split("/").pop()!;
+        if (requestedSha === indexJsSha) {
+          return new Response(indexJsBytes, {
+            status: 200,
+            headers: {
+              "content-type": "application/octet-stream",
+              "content-length": String(indexJsBytes.byteLength),
+            },
+          });
+        }
+        return new Response(
+          JSON.stringify({ ok: false, error: "not in store" }),
+          {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      return registryResponse(opts);
+    };
   }
 
   it("install with no spec → exit 2", async () => {
@@ -2029,10 +2130,9 @@ describe("runCli — install subcommand", () => {
     expect(parsed.bundleHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("install with --out writes plugin.json + bundle.json to <out>/<id>-<version>/", async () => {
+  it("install with --out writes plugin.json + bundle.json + verified dist files to <out>/<id>-<version>/", async () => {
     const { io, stdout, writes, mkdirs } = mkIO({
-      fetch: async () =>
-        registryResponse({ id: "com.test.x", version: "1.0.0" }),
+      fetch: makeRegistryFetch({ id: "com.test.x", version: "1.0.0" }),
     });
     const code = await runCli(
       [
@@ -2049,8 +2149,12 @@ describe("runCli — install subcommand", () => {
     expect(stdout()).toContain("✓ Installed com.test.x@1.0.0");
     expect(stdout()).toContain("manifestHash:");
     expect(stdout()).toContain("bundleHash:");
-    expect(stdout()).toContain("File bytes NOT downloaded");
+    // Updated: install now downloads + verifies dist files via the
+    // content store. Output reports the count + total size.
+    expect(stdout()).toContain("dist files:   1 downloaded + sha256-verified");
+    // Metadata writes
     expect(mkdirs()).toContain("/installed/com.test.x-1.0.0");
+    expect(mkdirs()).toContain("/installed/com.test.x-1.0.0/dist");
     const pluginJsonContent = writes().get(
       "/installed/com.test.x-1.0.0/plugin.json",
     );
@@ -2061,6 +2165,69 @@ describe("runCli — install subcommand", () => {
       "/installed/com.test.x-1.0.0/bundle.json",
     );
     expect(bundleJsonContent).toBeDefined();
+    // Dist file content was downloaded + written
+    const indexJs = writes().get("/installed/com.test.x-1.0.0/dist/index.js");
+    expect(indexJs).toBeDefined();
+    // Captured value may be Buffer-as-string; coerce + compare bytes.
+    expect(indexJs?.toString()).toBe(indexJsBytes.toString());
+  });
+
+  it("install --out rejects content-store hash mismatch (integrity gate)", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/api/plugins/content/")) {
+          // Serve corrupted bytes (real bytes don't match the
+          // claimed sha in the bundle).
+          return new Response(Buffer.from("CORRUPTED PAYLOAD"), {
+            status: 200,
+            headers: { "content-type": "application/octet-stream" },
+          });
+        }
+        return registryResponse({ id: "com.test.x", version: "1.0.0" });
+      },
+    });
+    const code = await runCli(
+      [
+        "install",
+        "com.test.x@1.0.0",
+        "--registry",
+        "http://r",
+        "--out",
+        "/installed",
+      ],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("hash mismatch for index.js");
+  });
+
+  it("install --out fails fast when content-store returns 404", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/api/plugins/content/")) {
+          return new Response(
+            JSON.stringify({ ok: false, error: "not in store" }),
+            { status: 404, statusText: "Not Found" },
+          );
+        }
+        return registryResponse({ id: "com.test.x", version: "1.0.0" });
+      },
+    });
+    const code = await runCli(
+      [
+        "install",
+        "com.test.x@1.0.0",
+        "--registry",
+        "http://r",
+        "--out",
+        "/installed",
+      ],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("content store returned 404 for index.js");
   });
 
   it("install rejects registry returning the wrong record (id mismatch)", async () => {

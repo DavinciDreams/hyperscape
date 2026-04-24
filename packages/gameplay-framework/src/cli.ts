@@ -1680,6 +1680,23 @@ async function defaultWriteFileNonExclusive(
 }
 
 /**
+ * Buffer-accepting variant for the install subcommand's file
+ * downloads. The CliIO.writeFile seam declares a string-only
+ * signature for back-compat with init/pack tests; install needs
+ * to write raw bytes (octet-stream from the content store) so it
+ * routes through this helper. The cast is sound because Node's
+ * `fs.writeFile` accepts Buffer + string + Uint8Array; the type
+ * narrowing on CliIO.writeFile is just what the signature
+ * exposes for the existing string-only callers.
+ */
+async function defaultWriteFileBufferNonExclusive(
+  absolutePath: string,
+  contents: string | Buffer,
+): Promise<void> {
+  await fs.writeFile(absolutePath, contents);
+}
+
+/**
  * Handler for `publish <dir> [--registry <url>] [--token <token>]
  * [--dry-run] [--compact]`.
  *
@@ -1816,7 +1833,70 @@ async function runPublish(rest: readonly string[], io: CliIO): Promise<number> {
   // Real upload. Use the io.fetch seam if present (tests inject);
   // fall back to globalThis.fetch (Node 18+, Bun).
   const fetchImpl = io.fetch ?? globalThis.fetch.bind(globalThis);
-  const url = `${registryUrl.replace(/\/$/, "")}/api/plugins`;
+  const baseUrl = registryUrl.replace(/\/$/, "");
+
+  // Step A: upload each dist file's bytes to the content store
+  // BEFORE publishing the bundle metadata. Order matters — if the
+  // bundle is registered first and a content upload fails after,
+  // the registry has a dangling reference.
+  //
+  // Each upload is content-addressed (sha256). Re-uploads are
+  // idempotent (server returns deduplicated:true). Failed upload
+  // → publish aborts before the bundle POST so the registry never
+  // sees a partial set.
+  const distRoot = path.join(absDir, "dist");
+  let uploadedCount = 0;
+  let dedupedCount = 0;
+  for (const file of bundle.files) {
+    const filePath = path.join(distRoot, file.path);
+    let bytes: Buffer;
+    try {
+      bytes = await fs.readFile(filePath);
+    } catch (err) {
+      io.stderr(
+        `publish: failed to read ${filePath} for content upload: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 1;
+    }
+    const contentUrl = `${baseUrl}/api/plugins/content`;
+    let contentRes: Response;
+    try {
+      contentRes = await fetchImpl(contentUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sha256: file.sha256,
+          base64Bytes: bytes.toString("base64"),
+        }),
+      });
+    } catch (err) {
+      io.stderr(
+        `publish: network error uploading ${file.path} to content store: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 1;
+    }
+    if (!contentRes.ok) {
+      const text = await contentRes.text().catch(() => "(no body)");
+      io.stderr(
+        `publish: content store rejected ${file.path} (sha ${file.sha256.slice(0, 12)}…) — ${contentRes.status} ${contentRes.statusText}\n`,
+      );
+      if (text.length > 0) io.stderr(`  ${text}\n`);
+      return 1;
+    }
+    const contentBody = (await contentRes.json().catch(() => null)) as {
+      deduplicated?: boolean;
+    } | null;
+    if (contentBody?.deduplicated) {
+      dedupedCount++;
+    } else {
+      uploadedCount++;
+    }
+  }
+
+  // Step B: register the bundle metadata. By the time this POST
+  // reaches the registry, every file's bytes are content-addressed
+  // and retrievable via /api/plugins/content/<sha256>.
+  const url = `${baseUrl}/api/plugins`;
   let response: Response;
   try {
     response = await fetchImpl(url, {
@@ -1848,6 +1928,9 @@ async function runPublish(rest: readonly string[], io: CliIO): Promise<number> {
   io.stdout(`  bundleHash:   ${bundle.bundleHash}\n`);
   io.stdout(
     `  totalSize:    ${bundle.totalSize} bytes (${bundle.files.length} files)\n`,
+  );
+  io.stdout(
+    `  content store: ${uploadedCount} uploaded, ${dedupedCount} deduplicated\n`,
   );
   if (responseBody.length > 0) {
     io.stdout(`Response:\n${responseBody}\n`);
@@ -2058,8 +2141,24 @@ async function runInstall(rest: readonly string[], io: CliIO): Promise<number> {
       ? outDir
       : path.resolve(io.cwd(), outDir);
     const installDir = path.join(absOut, `${manifest.id}-${manifest.version}`);
+    const distDir = path.join(installDir, "dist");
     const mkdir = io.mkdir ?? defaultMkdir;
     const writeFile = io.writeFile ?? defaultWriteFileNonExclusive;
+    // CliIO.writeFile is typed string-only for back-compat with the
+    // init/pack seams. Install needs to write raw bytes from the
+    // content-store download. Cast to a Buffer-accepting signature
+    // — the runtime accepts both (Node's fs.writeFile + the test
+    // stub both stringify Buffer via toString() if needed). Tests
+    // that want byte-level inspection can read the captured value
+    // and Buffer.from() it back.
+    const writeFileBuffer = (io.writeFile ??
+      defaultWriteFileBufferNonExclusive) as (
+      absolutePath: string,
+      contents: string | Buffer,
+    ) => Promise<void>;
+    const fetchImplLocal = io.fetch ?? globalThis.fetch.bind(globalThis);
+
+    // Step 1: write plugin.json + bundle.json metadata.
     try {
       await mkdir(installDir);
       await writeFile(
@@ -2070,27 +2169,101 @@ async function runInstall(rest: readonly string[], io: CliIO): Promise<number> {
         path.join(installDir, "bundle.json"),
         formatSnapshotJson(bundle, { indent: compact ? 0 : 2 }) + "\n",
       );
-      io.stdout(
-        `✓ Installed ${manifest.id}@${manifest.version} to ${installDir}\n`,
-      );
-      io.stdout(
-        `  manifestHash: ${String((bundle as { manifestHash: unknown }).manifestHash)}\n`,
-      );
-      io.stdout(
-        `  bundleHash:   ${String((bundle as { bundleHash: unknown }).bundleHash)}\n`,
-      );
-      if (registryRecord.publishedAt !== undefined) {
-        io.stdout(`  publishedAt:  ${registryRecord.publishedAt}\n`);
-      }
-      io.stdout(
-        `  Note: ${(bundle as { files: ReadonlyArray<unknown> }).files.length} dist files claimed (${String((bundle as { totalSize: unknown }).totalSize)} bytes total). File bytes NOT downloaded — registry content store is a future cut.\n`,
-      );
     } catch (err) {
       io.stderr(
-        `install: failed to write to ${installDir}: ${err instanceof Error ? err.message : String(err)}\n`,
+        `install: failed to write metadata to ${installDir}: ${err instanceof Error ? err.message : String(err)}\n`,
       );
       return 1;
     }
+
+    // Step 2: download each file from the content store, verify
+    // sha256 client-side, write to dist/. Server is treated as
+    // untrusted (could be a mirror / CDN); the hash check is the
+    // integrity gate.
+    const bundleFiles = (
+      bundle as { files: Array<{ path: string; size: number; sha256: string }> }
+    ).files;
+    const { createHash } = await import("node:crypto");
+    let downloadedCount = 0;
+    if (bundleFiles.length > 0) {
+      try {
+        await mkdir(distDir);
+      } catch (err) {
+        io.stderr(
+          `install: failed to create dist dir ${distDir}: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+    for (const file of bundleFiles) {
+      const contentUrl = `${registryUrl.replace(/\/$/, "")}/api/plugins/content/${file.sha256}`;
+      let contentRes: Response;
+      try {
+        contentRes = await fetchImplLocal(contentUrl, {
+          method: "GET",
+          headers:
+            token !== undefined ? { authorization: `Bearer ${token}` } : {},
+        });
+      } catch (err) {
+        io.stderr(
+          `install: network error downloading ${file.path} (sha ${file.sha256.slice(0, 12)}…): ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+      if (!contentRes.ok) {
+        io.stderr(
+          `install: content store returned ${contentRes.status} for ${file.path} (sha ${file.sha256.slice(0, 12)}…)\n`,
+        );
+        return 1;
+      }
+      const arrayBuffer = await contentRes.arrayBuffer();
+      const fileBytes = Buffer.from(arrayBuffer);
+      const actualSha = createHash("sha256").update(fileBytes).digest("hex");
+      if (actualSha !== file.sha256) {
+        io.stderr(
+          `install: hash mismatch for ${file.path} — expected ${file.sha256}, got ${actualSha}\n`,
+        );
+        return 1;
+      }
+      const targetPath = path.join(distDir, file.path);
+      // Ensure parent directories for nested paths exist.
+      const parentDir = path.dirname(targetPath);
+      if (parentDir !== distDir) {
+        try {
+          await mkdir(parentDir);
+        } catch (err) {
+          io.stderr(
+            `install: failed to create ${parentDir}: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          return 1;
+        }
+      }
+      try {
+        await writeFileBuffer(targetPath, fileBytes);
+      } catch (err) {
+        io.stderr(
+          `install: failed to write ${targetPath}: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+      downloadedCount++;
+    }
+
+    io.stdout(
+      `✓ Installed ${manifest.id}@${manifest.version} to ${installDir}\n`,
+    );
+    io.stdout(
+      `  manifestHash: ${String((bundle as { manifestHash: unknown }).manifestHash)}\n`,
+    );
+    io.stdout(
+      `  bundleHash:   ${String((bundle as { bundleHash: unknown }).bundleHash)}\n`,
+    );
+    if (registryRecord.publishedAt !== undefined) {
+      io.stdout(`  publishedAt:  ${registryRecord.publishedAt}\n`);
+    }
+    io.stdout(
+      `  dist files:   ${downloadedCount} downloaded + sha256-verified (${String((bundle as { totalSize: unknown }).totalSize)} bytes total)\n`,
+    );
   } else {
     io.stdout(formatSnapshotJson(bundle, { indent: compact ? 0 : 2 }) + "\n");
   }

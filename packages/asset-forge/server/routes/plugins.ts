@@ -54,12 +54,29 @@ const registry = new Map<string, RegistryEntry>();
 let registryIdCounter = 0;
 
 /**
+ * Phase I5 content store — addresses the file-bytes gap in install.
+ *
+ * The bundle descriptor (cut #1: pack) carries sha256 hashes per
+ * file but not the bytes. The content store holds the bytes,
+ * keyed by sha256 — content-addressed storage. Publish uploads
+ * each dist file BEFORE publishing the bundle metadata; install
+ * downloads by sha256 + verifies hash + writes to disk.
+ *
+ * In-memory Map<sha256, Buffer> for the substrate cut. Production
+ * swaps for S3 / CDN / object storage with the same content-
+ * addressed semantics — clients verify integrity client-side, so
+ * the storage layer can be untrusted (mirror, CDN, etc.).
+ */
+const contentStore = new Map<string, Buffer>();
+
+/**
  * Test-only reset hook. Routes module exports it for the
  * forthcoming integration tests; production never calls it.
  */
 export function _resetPluginRegistryForTests(): void {
   registry.clear();
   registryIdCounter = 0;
+  contentStore.clear();
 }
 
 export const pluginRoutes = new Elysia({ prefix: "/api", name: "plugins" })
@@ -324,6 +341,143 @@ export const pluginRoutes = new Elysia({ prefix: "/api", name: "plugins" })
         summary: "Fetch a published plugin bundle",
         description:
           "Returns the full bundle descriptor for the specified id+version, or 404 if not in the registry. Future install command consumes this URL to download + verify a plugin.",
+      },
+    },
+  )
+  .post(
+    "/plugins/content",
+    async ({ body, set }) => {
+      // Phase I5 content store — accepts a single file upload as
+      // base64. The client claims a sha256; the server verifies the
+      // hash matches the decoded bytes BEFORE storing. Mismatch →
+      // 400 (the client is broken or someone is trying to poison
+      // the content store).
+      //
+      // Idempotent: re-uploading the same hash with the same bytes
+      // is a no-op and returns 200 (not 201). Useful for retries
+      // and parallel publishers uploading shared deps.
+      if (typeof body !== "object" || body === null) {
+        set.status = 400;
+        return { ok: false as const, error: "request body must be an object" };
+      }
+      const bodyObj = body as Record<string, unknown>;
+      const claimedSha = bodyObj.sha256;
+      const base64Bytes = bodyObj.base64Bytes;
+      if (
+        typeof claimedSha !== "string" ||
+        !/^[0-9a-f]{64}$/.test(claimedSha)
+      ) {
+        set.status = 400;
+        return {
+          ok: false as const,
+          error: "sha256 must be a 64-char lowercase hex string",
+        };
+      }
+      if (typeof base64Bytes !== "string" || base64Bytes.length === 0) {
+        set.status = 400;
+        return {
+          ok: false as const,
+          error: "base64Bytes must be a non-empty string",
+        };
+      }
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.from(base64Bytes, "base64");
+      } catch {
+        set.status = 400;
+        return { ok: false as const, error: "base64Bytes failed to decode" };
+      }
+      const { createHash } = await import("node:crypto");
+      const actualSha = createHash("sha256").update(bytes).digest("hex");
+      if (actualSha !== claimedSha) {
+        set.status = 400;
+        return {
+          ok: false as const,
+          error: `sha256 mismatch: client claimed ${claimedSha}, server computed ${actualSha}`,
+        };
+      }
+
+      const existing = contentStore.get(claimedSha);
+      if (existing !== undefined) {
+        // Idempotent re-upload — bytes match by content-addressed
+        // semantics (we just verified the hash on both sides).
+        set.status = 200;
+        return {
+          ok: true as const,
+          sha256: claimedSha,
+          size: bytes.byteLength,
+          deduplicated: true as const,
+        };
+      }
+      contentStore.set(claimedSha, bytes);
+      set.status = 201;
+      return {
+        ok: true as const,
+        sha256: claimedSha,
+        size: bytes.byteLength,
+        deduplicated: false as const,
+      };
+    },
+    {
+      body: t.Unknown(),
+      detail: {
+        tags: ["Plugins"],
+        summary: "Upload plugin file content",
+        description:
+          "Accepts a single file's bytes (base64-encoded) for content-addressed storage. Server verifies the claimed sha256 matches the decoded bytes before storing. Idempotent on re-upload (200 with deduplicated:true). Use BEFORE POST /api/plugins so the bundle's referenced files are resolvable.",
+      },
+    },
+  )
+  .get(
+    "/plugins/content/:sha256",
+    ({ params, set }) => {
+      // Content-addressed retrieval. Returns the raw bytes (octet-
+      // stream) so the client can hash + verify locally without
+      // base64 round-tripping. 404 if the hash isn't in the store.
+      if (!/^[0-9a-f]{64}$/.test(params.sha256)) {
+        set.status = 400;
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: "sha256 must be a 64-char lowercase hex string",
+          }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      const bytes = contentStore.get(params.sha256);
+      if (bytes === undefined) {
+        set.status = 404;
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: `content with sha256 ${params.sha256} not in store`,
+          }),
+          {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      // Return raw bytes. Caller verifies hash client-side.
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-length": String(bytes.byteLength),
+          "x-sha256": params.sha256,
+        },
+      });
+    },
+    {
+      params: t.Object({ sha256: t.String() }),
+      detail: {
+        tags: ["Plugins"],
+        summary: "Download plugin file content",
+        description:
+          "Returns the raw bytes for the file with the given sha256 (octet-stream). Caller MUST verify the hash client-side; the server is treated as untrusted (could be a mirror / CDN). Used by the install command to reconstruct dist/ from a bundle's per-file hashes.",
       },
     },
   );
