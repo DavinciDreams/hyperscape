@@ -1,0 +1,147 @@
+/**
+ * Plugin boot integration test — boots a REAL server world (not the
+ * stub the other tests use) and proves `bootServerPlugins()`
+ * cooperates with it.
+ *
+ * What this closes that the stub-based tests (plugins.test.ts) don't:
+ *   - Stubs record `.register` calls but never verify the registered
+ *     system is actually retrievable via `world.getSystem(name)` and
+ *     is a real instance.
+ *   - A real `createServerWorld()` exercises the SystemLoader pipeline
+ *     + every system's constructor, matching production.
+ *   - Both game-id paths are checked against the same real-world
+ *     infrastructure: under "hyperscape" the meta-plugin's migrated
+ *     systems are retrievable; under "shooter-demo" they are not.
+ *
+ * This test does NOT call `world.init()` — that requires a database,
+ * storage, and asset URLs, which this suite is not in the business
+ * of providing. Registration (what `bootServerPlugins` controls) and
+ * init (what `world.init` controls) are separable concerns; this
+ * test proves registration works against a real world.
+ */
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createServerWorld, type World } from "@hyperforge/shared";
+
+import {
+  _resetServerPluginServicesForTests,
+  bootServerPlugins,
+} from "../plugins.js";
+
+describe("bootServerPlugins — integration against real createServerWorld()", () => {
+  let world: World | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let session: any = null;
+
+  afterEach(async () => {
+    if (session) {
+      await session.stop();
+      session = null;
+    }
+    world = null;
+    _resetServerPluginServicesForTests();
+  });
+
+  it(
+    "hyperscape game id registers migrated systems on the real world",
+    { timeout: 30_000 },
+    async () => {
+      world = await createServerWorld();
+      session = await bootServerPlugins(world, "hyperscape");
+
+      expect(session.failedPackages).toEqual([]);
+      expect(session.unresolvable).toEqual([]);
+      expect(session.records).toHaveLength(3);
+
+      // The meta-plugin's onEnable ran world.register(name, Ctor) for
+      // each migrated system. Assert the RESULT — that each name
+      // resolves back to a real instance.
+      const migrated = [
+        "mob-death",
+        "gravestone-loot",
+        "tanning",
+        "smithing",
+        "smelting",
+        "crafting",
+        "fletching",
+        "runecrafting",
+      ];
+      for (const name of migrated) {
+        expect(
+          world.getSystem(name),
+          `expected world.getSystem("${name}") to return a system under hyperscape`,
+        ).toBeTruthy();
+      }
+    },
+  );
+
+  it(
+    "shooter-demo game id produces a real world WITHOUT hyperscape-meta systems",
+    { timeout: 30_000 },
+    async () => {
+      world = await createServerWorld();
+      session = await bootServerPlugins(world, "shooter-demo");
+
+      expect(session.failedPackages).toEqual([]);
+      expect(session.unresolvable).toEqual([]);
+      // Shooter-demo set is just combat + shooter-demo, no skills,
+      // no hyperscape meta-plugin.
+      expect(session.records).toHaveLength(2);
+
+      const startedIds = session.records
+        .map((r: { manifest: { id: string } }) => r.manifest.id)
+        .sort();
+      expect(startedIds).toEqual(
+        ["com.hyperforge.combat", "com.hyperforge.plugin-shooter-demo"].sort(),
+      );
+
+      // The systems the hyperscape meta-plugin would have registered
+      // via its onEnable are NOT on the world under shooter-demo.
+      // Direct proof: flipping the env var changes what the real
+      // world contains, not just what a stub records.
+      expect(world.getSystem("mob-death")).toBeFalsy();
+      expect(world.getSystem("gravestone-loot")).toBeFalsy();
+      expect(world.getSystem("tanning")).toBeFalsy();
+      expect(world.getSystem("smithing")).toBeFalsy();
+      expect(world.getSystem("runecrafting")).toBeFalsy();
+
+      // Note: other Hyperscape-specific systems still live in shared/
+      // and register via SystemLoader regardless of game id. Those
+      // will remain on the world until migration finishes. That's a
+      // known gap, not a bug — this test only asserts the behavior
+      // the plugin boot layer controls.
+    },
+  );
+
+  it(
+    "session.stop() runs to completion against a real world instance",
+    { timeout: 30_000 },
+    async () => {
+      world = await createServerWorld();
+      session = await bootServerPlugins(world, "hyperscape");
+
+      expect(world.getSystem("mob-death")).toBeTruthy();
+      expect(world.getSystem("tanning")).toBeTruthy();
+
+      // The meta-plugin's scope disposers call
+      // `world.unregister?.(name)` — but `World` doesn't currently
+      // expose an `unregister` method, so the optional-chain no-ops
+      // at runtime. That's a real gap we're documenting, not a test
+      // failure: the registration side works, the unregistration
+      // side is idempotent/lossy against the current World class.
+      //
+      // Adding World.unregister is its own slice (touches core ECS
+      // lifecycle + every system's destroy() contract). Once it
+      // lands, this test upgrades to assert `getSystem` returns null
+      // post-stop.
+      //
+      // For now: prove session.stop() doesn't throw against a real
+      // world. The combat/skills SERVICE-level unregister DOES work
+      // (abilities/skills get removed from their Maps) — that part
+      // is proven by the stub-based test in plugins.test.ts.
+      await expect(session.stop()).resolves.not.toThrow();
+      session = null;
+    },
+  );
+});
