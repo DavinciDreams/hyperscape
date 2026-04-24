@@ -34,6 +34,7 @@ import type {
 import type { World } from "@hyperforge/shared";
 
 import { CraftingSystem } from "./systems/CraftingSystem.js";
+import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
@@ -138,6 +139,14 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // client builds don't pay the registration cost.
       if (ctx.world.isServer) {
         register("health-regen", HealthRegenSystem);
+      }
+
+      // Client-only visual feedback systems. Original SystemLoader
+      // gated these on `if (world.isClient)`. Mirror that here so the
+      // server boot doesn't try to instantiate THREE.Sprite-based
+      // visual systems.
+      if (!ctx.world.isServer) {
+        register("damage-splat", DamageSplatSystem);
       }
     },
     onDisable(_ctx) {

@@ -60,7 +60,7 @@ import type { ClientCameraSystem } from "../systems/client/ClientCameraSystem";
 import type { ClientGraphics } from "../systems/client/ClientGraphics";
 import type { ClientNetwork } from "../systems/client/ClientNetwork";
 import type { ClientActions } from "../systems/client/ClientActions";
-import type { DamageSplatSystem } from "../systems/client";
+// DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { DuelCountdownSplatSystem } from "../systems/client";
 import type { ProjectileRenderer } from "../systems/client";
 import type { SocialSystem } from "../systems/client";
@@ -161,7 +161,7 @@ export interface SystemMap {
   "client-camera-system": ClientCameraSystem;
   interaction: InteractionRouter;
   "inventory-interaction": InventoryInteractionSystem;
-  "damage-splat": DamageSplatSystem;
+  // "damage-splat" registered by @hyperforge/hyperscape plugin onEnable
   "projectile-renderer": ProjectileRenderer;
   "duel-countdown-splat": DuelCountdownSplatSystem;
   social: SocialSystem;

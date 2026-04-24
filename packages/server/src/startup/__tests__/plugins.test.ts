@@ -130,8 +130,8 @@ describe("server plugin boot — in-binary set", () => {
     // - MobDeathSystem (combat/ → meta-plugin)
     // - HealthRegenSystem (character/ → meta-plugin, server-only)
     // - TanningSystem (interaction/ → meta-plugin)
-    // 9 systems migrated so far. Each registration has a matching
-    // disposer attached to the plugin's scope.
+    // 9 server-side systems registered (10 total migrated; the 10th
+    // is DamageSplatSystem which is client-only).
     const expected = [
       "mob-death",
       "gravestone-loot",
@@ -146,6 +146,8 @@ describe("server plugin boot — in-binary set", () => {
     for (const name of expected) {
       expect(world.registered).toContain(name);
     }
+    // DamageSplatSystem is client-only — must NOT appear on server.
+    expect(world.registered).not.toContain("damage-splat");
     expect(world.unregistered).toEqual([]);
 
     await session.stop();

@@ -141,7 +141,7 @@ import { ScriptingSystem } from "../scripting/ScriptingSystem";
 
 // Client-only visual systems
 // NOTE: Import directly from specific files to avoid circular dependency
-import { DamageSplatSystem } from "../../client/DamageSplatSystem";
+// DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { DuelCountdownSplatSystem } from "../../client/DuelCountdownSplatSystem";
 import { ProjectileRenderer } from "../../client/ProjectileRenderer";
 import { SocialSystem } from "../../client/SocialSystem";
@@ -412,7 +412,8 @@ export async function registerSystems(world: World): Promise<void> {
 
   // Client-only visual combat feedback systems
   if (world.isClient) {
-    world.register("damage-splat", DamageSplatSystem);
+    // DamageSplatSystem registered by @hyperforge/hyperscape plugin
+    // (client-side onEnable, gated on !world.isServer). Migrated 2026-04-24.
     world.register("duel-countdown-splat", DuelCountdownSplatSystem);
     world.register("projectile-renderer", ProjectileRenderer);
     world.register("inventory-interaction", InventoryInteractionSystem);

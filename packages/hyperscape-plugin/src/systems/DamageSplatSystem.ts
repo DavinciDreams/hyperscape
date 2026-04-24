@@ -19,11 +19,19 @@
  * @see https://oldschool.runescape.wiki/w/Hitsplat - OSRS hitsplat mechanics and colors
  */
 
-import * as THREE from "../../extras/three/three";
-import { System } from "../shared/infrastructure/System";
-import { EventType } from "../../types/events";
-import type { World } from "../../core/World";
-import type { WorldOptions } from "../../types/index";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` as the first CLIENT-ONLY plugin
+// migration. Visual hit-splats are OSRS-specific feedback. The
+// meta-plugin's onEnable registers this only when world.isServer
+// is false, preserving the original SystemLoader's `if (world.isClient)`
+// gate.
+import {
+  EventType,
+  SystemClass as System,
+  THREE,
+  type World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 interface DamageSplat {
   sprite: THREE.Sprite;

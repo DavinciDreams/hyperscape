@@ -58,6 +58,10 @@ describe("client plugin boot — bilateral system registration", () => {
       expect(world.registered).toContain(name);
     }
 
+    // Client-only visual systems — DamageSplatSystem registers
+    // when world.isServer === false.
+    expect(world.registered).toContain("damage-splat");
+
     // Server-only systems — should NOT register on the client.
     expect(world.registered).not.toContain("health-regen");
 
@@ -78,6 +82,9 @@ describe("client plugin boot — bilateral system registration", () => {
     const session = await bootClientPlugins(world as any);
 
     expect(world.registered).toContain("health-regen");
+    // DamageSplatSystem is the inverse of health-regen — should NOT
+    // register when world.isServer === true.
+    expect(world.registered).not.toContain("damage-splat");
 
     await session.stop();
   });

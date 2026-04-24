@@ -16,7 +16,7 @@ export { ClientRuntime } from "./ClientRuntime";
 export { NodeClient } from "./NodeClient";
 export { ControlPriorities } from "./ControlPriorities";
 export { EquipmentVisualSystem } from "./EquipmentVisualSystem";
-export { DamageSplatSystem } from "./DamageSplatSystem";
+// DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 export { DuelCountdownSplatSystem } from "./DuelCountdownSplatSystem";
 export { XPDropSystem } from "./XPDropSystem";
 export { ProjectileRenderer } from "./ProjectileRenderer";
