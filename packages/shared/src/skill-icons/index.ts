@@ -15,8 +15,16 @@ export {
  * `PIEEditorSession.updateManifests({ skillIcons })` can live-
  * dispatch authored icon/label edits to the HUD / skill panel on
  * the next `.get(key)` / `.fallbackIcon` lookup.
+ *
+ * Pre-populated at module load from the legacy manifest so
+ * `getEffectiveSkillIcon` (and any future consumers) hit the
+ * registry-prefer branch in production — not just after a PIE edit.
+ * The boot-load happens HERE (not in `data/skill-icons.ts`) to avoid
+ * a circular import: skill-icons/index.ts already imports from
+ * data/skill-icons.ts, and the reverse direction would cycle.
  */
 export const skillIconsRegistry = new SkillIconsRegistry();
+skillIconsRegistry.load(legacyManifest);
 
 /**
  * Resolve a skill's emoji icon with the canonical registry-prefer-
