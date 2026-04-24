@@ -1,0 +1,27 @@
+{
+  "id": "com.hyperforge.plugin-shooter-demo",
+  "name": "Shooter Demo",
+  "version": "0.1.0",
+  "description": "Minimal NON-Hyperscape game plugin. Proves the engine-layer infrastructure (gameplay-framework + combat plugin + server/client plugin boot) can compose a different game than Hyperscape without any @hyperforge/shared modifications. Depends on @hyperforge/combat and contributes one ranged ability ('shoot') — symmetric to how @hyperforge/hyperscape depends on combat and contributes its OSRS abilities.",
+  "entry": "./dist/index.js",
+  "author": {
+    "name": "Hyperforge"
+  },
+  "license": "GPL-3.0",
+  "hyperforgeApi": "0.1.0",
+  "dependencies": [
+    { "id": "com.hyperforge.combat", "versionRange": "^0.1.0" }
+  ],
+  "loadAfter": ["com.hyperforge.combat"],
+  "enabledByDefault": false,
+  "contributions": {
+    "systems": [],
+    "entities": [],
+    "widgets": [],
+    "manifestSchemas": [],
+    "paletteCategories": [],
+    "toolbarTools": [],
+    "commands": []
+  },
+  "tags": ["demo", "acceptance-test", "shooter"]
+}
