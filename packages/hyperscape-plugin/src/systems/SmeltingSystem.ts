@@ -12,15 +12,19 @@
  * @see ProcessingDataProvider for smelting recipes from manifest
  */
 
+// Migrated 2026-04-24 from
+// `packages/shared/src/systems/shared/interaction/` into
+// `@hyperforge/hyperscape` as part of the fourth migration batch
+// (with CraftingSystem + FletchingSystem). OSRS smelting at furnaces.
 import {
-  isLooseInventoryItem,
+  EventType,
   getItemQuantity,
   getSmithingLevelSafe,
-} from "../../../constants/SmithingConstants";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import { EventType } from "../../../types/events";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
+  isLooseInventoryItem,
+  processingDataProvider,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 /** Active smelting session for a player */
 interface SmeltingSession {

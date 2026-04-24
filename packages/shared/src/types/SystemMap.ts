@@ -39,10 +39,10 @@ import type { ProcessingSystem } from "../systems/shared";
 import type { QuestSystem } from "../systems/shared";
 import type { ResourceSystem } from "../systems/shared";
 import type { SkillsSystem } from "../systems/shared";
-import type { SmeltingSystem } from "../systems/shared";
+// SmeltingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import type { CraftingSystem } from "../systems/shared";
-import type { FletchingSystem } from "../systems/shared";
+// CraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
+// FletchingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { StationSpawnerSystem } from "../systems/shared";
 import type { StoreSystem } from "../systems/shared";
@@ -120,12 +120,10 @@ export interface SystemMap {
 
   // Processing / crafting
   processing: ProcessingSystem;
-  smelting: SmeltingSystem;
-  // "smithing" registered by @hyperforge/hyperscape plugin onEnable
-  crafting: CraftingSystem;
-  fletching: FletchingSystem;
-  // "tanning" registered by @hyperforge/hyperscape plugin onEnable
-  // "runecrafting" registered by @hyperforge/hyperscape plugin onEnable
+  // The five OSRS skill processing systems are all registered by
+  // the @hyperforge/hyperscape plugin onEnable (2026-04-24):
+  //   "smelting", "smithing", "crafting", "fletching",
+  //   "tanning", "runecrafting"
 
   // Death
   "player-death": PlayerDeathSystem;

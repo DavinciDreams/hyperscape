@@ -33,9 +33,12 @@ import type {
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
 
+import { CraftingSystem } from "./systems/CraftingSystem.js";
+import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
+import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
 
@@ -107,52 +110,33 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // `world.register(name, Ctor)` is mirrored by a scope disposer
       // so `session.stop()` cleanly tears the registration down.
       //
-      // First cut (2026-04-24): MobDeathSystem. Future migrations add
-      // more `world.register(...)` calls here, one per system moved
-      // out of `@hyperforge/shared/src/systems/`. The end-state has
-      // every Hyperscape-specific system registered through this
-      // hook — `@hyperforge/shared` then contains zero
+      // The end-state has EVERY Hyperscape-specific system registered
+      // through this hook — `@hyperforge/shared` then contains zero
       // Hyperscape-specific identifiers (master plan criterion #2).
-      ctx.world.register("mob-death", MobDeathSystem);
-      ctx.scope.register(() => {
-        const w = ctx.world as { unregister?: (name: string) => void };
-        w.unregister?.("mob-death");
-      });
+      const w = ctx.world as { unregister?: (name: string) => void };
+      const register = (name: string, Ctor: unknown) => {
+        ctx.world.register(name, Ctor as never);
+        ctx.scope.register(() => w.unregister?.(name));
+      };
 
-      // HealthRegenSystem is server-only (the original SystemLoader
-      // gated it on `isServerEnvironment`). Preserve that behavior:
-      // only register when world.isServer is true. On client builds
-      // the system never registers — same as before the migration.
+      // Cross-cutting systems that run on both server + client.
+      register("mob-death", MobDeathSystem);
+
+      // OSRS skill processing systems — all self-gate their init()
+      // on world.isServer. Safe to register on both sides.
+      register("tanning", TanningSystem);
+      register("smithing", SmithingSystem);
+      register("smelting", SmeltingSystem);
+      register("crafting", CraftingSystem);
+      register("fletching", FletchingSystem);
+      register("runecrafting", RunecraftingSystem);
+
+      // Server-only systems — original SystemLoader gated registration
+      // itself on `isServerEnvironment`. Preserve that behavior so
+      // client builds don't pay the registration cost.
       if (ctx.world.isServer) {
-        ctx.world.register("health-regen", HealthRegenSystem);
-        ctx.scope.register(() => {
-          const w = ctx.world as { unregister?: (name: string) => void };
-          w.unregister?.("health-regen");
-        });
+        register("health-regen", HealthRegenSystem);
       }
-
-      // TanningSystem: registers on both server + client (its init()
-      // self-gates on world.isServer). Same shape as MobDeathSystem.
-      ctx.world.register("tanning", TanningSystem);
-      ctx.scope.register(() => {
-        const w = ctx.world as { unregister?: (name: string) => void };
-        w.unregister?.("tanning");
-      });
-
-      // SmithingSystem + RunecraftingSystem: same shape as Tanning —
-      // OSRS-specific resource-processing systems that self-gate
-      // their init() on world.isServer.
-      ctx.world.register("smithing", SmithingSystem);
-      ctx.scope.register(() => {
-        const w = ctx.world as { unregister?: (name: string) => void };
-        w.unregister?.("smithing");
-      });
-
-      ctx.world.register("runecrafting", RunecraftingSystem);
-      ctx.scope.register(() => {
-        const w = ctx.world as { unregister?: (name: string) => void };
-        w.unregister?.("runecrafting");
-      });
     },
     onDisable(_ctx) {
       // Scope disposers (registered in onEnable) handle teardown.

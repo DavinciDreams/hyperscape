@@ -1,43 +1,46 @@
 /**
- * FletchingSystem - Handles Fletching Skill
+ * CraftingSystem - Handles Crafting Skills
  *
- * OSRS-accurate fletching implementation:
- * - Knife + logs → arrow shafts (multi-output) or unstrung bows
- * - Bowstring + unstrung bow → strung bow (item-on-item)
- * - Arrowtips + headless arrows → finished arrows (item-on-item, multi-output)
- * - Arrow shafts + feathers → headless arrows (item-on-item, multi-output)
+ * OSRS-accurate crafting implementation:
+ * - Leather/dragonhide: use needle + thread + hides
+ * - Jewelry: use mould + gold bar at furnace
+ * - Gem cutting: use chisel on uncut gems
+ * - Thread has 5 uses per item (consumed every 5 crafts)
  * - Always succeeds (no failure rate)
- * - Grants fletching XP per action
- * - Auto-fletching continues until out of materials
+ * - Grants crafting XP per item made
+ * - Auto-crafting continues until out of materials
  *
- * @see https://oldschool.runescape.wiki/w/Fletching
- * @see ProcessingDataProvider for fletching recipes from manifest
+ * @see https://oldschool.runescape.wiki/w/Crafting
+ * @see ProcessingDataProvider for crafting recipes from manifest
  */
 
+// Migrated 2026-04-24 from
+// `packages/shared/src/systems/shared/interaction/` into
+// `@hyperforge/hyperscape` as part of the fourth migration batch.
+// OSRS leather/jewelry/gem-cutting crafting.
 import {
-  isLooseInventoryItem,
+  type CraftingRecipeData,
+  EventType,
   getItemQuantity,
   hasSkills,
-} from "../../../constants/SmithingConstants";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import type { FletchingRecipeData } from "../../../data/ProcessingDataProvider";
-import { EventType } from "../../../types/events";
-import { Skill } from "../character/SkillsSystem";
-import { Logger } from "../../../utils/Logger";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
+  isLooseInventoryItem,
+  Logger,
+  processingDataProvider,
+  Skill,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
-/** Active fletching session for a player */
-interface FletchingSession {
+/** Active crafting session for a player */
+interface CraftingSession {
   playerId: string;
-  /** Unique recipe ID (output:primaryInput) */
-  recipeId: string;
-  /** Total actions to perform */
+  recipeId: string; // Output item ID (e.g., "leather_body")
   quantity: number;
-  /** Actions already completed */
   crafted: number;
-  /** Tick when current fletch action completes */
+  /** Tick when current craft action completes (tick-based timing) */
   completionTick: number;
+  /** Remaining uses for each consumable before it needs to be consumed from inventory */
+  consumableUses: Map<string, number>;
 }
 
 /** Pre-built inventory state to avoid redundant scans */
@@ -46,8 +49,8 @@ interface InventoryState {
   itemIds: Set<string>;
 }
 
-export class FletchingSystem extends SystemBase {
-  private readonly activeSessions = new Map<string, FletchingSession>();
+export class CraftingSystem extends SystemBase {
+  private readonly activeSessions = new Map<string, CraftingSession>();
   private readonly playerSkills = new Map<
     string,
     Record<string, { level: number; xp: number }>
@@ -56,15 +59,15 @@ export class FletchingSystem extends SystemBase {
   /** Track last processed tick to ensure once-per-tick processing */
   private lastProcessedTick = -1;
 
-  /** Monotonic counter for unique fletched item IDs (avoids Date.now collisions) */
-  private fletchCounter = 0;
+  /** Monotonic counter for unique crafted item IDs (avoids Date.now collisions) */
+  private craftCounter = 0;
 
   /** Reusable array for update loop to avoid allocating per tick */
   private readonly completedPlayerIds: string[] = [];
 
   constructor(world: World) {
     super(world, {
-      name: "fletching",
+      name: "crafting",
       dependencies: {
         required: [],
         optional: ["inventory", "skills"],
@@ -79,24 +82,24 @@ export class FletchingSystem extends SystemBase {
       return;
     }
 
-    // Listen for fletching interaction (player used knife on logs, or item-on-item)
+    // Listen for crafting interaction (player used needle/chisel/gold bar on furnace)
     this.subscribe(
-      EventType.FLETCHING_INTERACT,
+      EventType.CRAFTING_INTERACT,
       (data: {
         playerId: string;
         triggerType: string;
-        inputItemId: string;
-        secondaryItemId?: string;
+        stationId?: string;
+        inputItemId?: string;
       }) => {
-        this.handleFletchingInteract(data);
+        this.handleCraftingInteract(data);
       },
     );
 
-    // Listen for fletching request (player selected recipe and quantity)
+    // Listen for crafting request (player selected item to craft)
     this.subscribe(
-      EventType.PROCESSING_FLETCHING_REQUEST,
+      EventType.PROCESSING_CRAFTING_REQUEST,
       (data: { playerId: string; recipeId: string; quantity: number }) => {
-        this.startFletching(data);
+        this.startCrafting(data);
       },
     );
 
@@ -111,25 +114,25 @@ export class FletchingSystem extends SystemBase {
       },
     );
 
-    // Cancel fletching on movement (OSRS: any click cancels skilling)
+    // Cancel crafting on movement (OSRS: any click cancels skilling)
     this.subscribe<{
       playerId: string;
       targetPosition: { x: number; y: number; z: number };
     }>(EventType.MOVEMENT_CLICK_TO_MOVE, (data) => {
       if (this.activeSessions.has(data.playerId)) {
-        this.cancelFletching(data.playerId);
+        this.cancelCrafting(data.playerId);
       }
     });
 
-    // Cancel fletching on combat start
+    // Cancel crafting on combat start
     this.subscribe(
       EventType.COMBAT_STARTED,
       (data: { attackerId: string; targetId: string }) => {
         if (this.activeSessions.has(data.attackerId)) {
-          this.cancelFletching(data.attackerId);
+          this.cancelCrafting(data.attackerId);
         }
         if (this.activeSessions.has(data.targetId)) {
-          this.cancelFletching(data.targetId);
+          this.cancelCrafting(data.targetId);
         }
       },
     );
@@ -138,28 +141,28 @@ export class FletchingSystem extends SystemBase {
     this.subscribe(
       EventType.PLAYER_UNREGISTERED,
       (data: { playerId: string }) => {
-        this.cancelFletching(data.playerId);
-        this.playerSkills.delete(data.playerId);
+        this.cancelCrafting(data.playerId);
+        this.playerSkills.delete(data.playerId); // Memory cleanup
       },
     );
   }
 
   /**
-   * Handle fletching interaction - show available recipes to player
+   * Handle crafting interaction - show available items to craft
    */
-  private handleFletchingInteract(data: {
+  private handleCraftingInteract(data: {
     playerId: string;
     triggerType: string;
-    inputItemId: string;
-    secondaryItemId?: string;
+    stationId?: string;
+    inputItemId?: string;
   }): void {
-    const { playerId, inputItemId, secondaryItemId } = data;
+    const { playerId, triggerType, inputItemId } = data;
 
-    // Check if already fletching
+    // Check if already crafting
     if (this.activeSessions.has(playerId)) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: "You are already fletching.",
+        message: "You are already crafting.",
         type: "error",
       });
       return;
@@ -176,10 +179,13 @@ export class FletchingSystem extends SystemBase {
       return;
     }
 
-    // Get player fletching level
-    const fletchingLevel = this.getFletchingLevel(playerId);
+    // Get player crafting level
+    const craftingLevel = this.getCraftingLevel(playerId);
 
-    // Build inventory lookup
+    // Determine station type based on trigger
+    const station = triggerType === "furnace" ? "furnace" : "none";
+
+    // Build inventory lookup first (needed for recipe filtering and availability)
     const inventoryCounts = new Map<string, number>();
     for (const item of inventory) {
       if (!isLooseInventoryItem(item)) continue;
@@ -187,25 +193,28 @@ export class FletchingSystem extends SystemBase {
       inventoryCounts.set(item.itemId, count + getItemQuantity(item));
     }
 
-    // Get matching recipes based on input item(s)
-    let filteredRecipes: FletchingRecipeData[];
+    // Get crafting recipes filtered by station
+    let filteredRecipes =
+      processingDataProvider.getCraftingRecipesByStation(station);
 
-    if (secondaryItemId) {
-      // Item-on-item: find recipes that use BOTH items as inputs
-      filteredRecipes = processingDataProvider.getFletchingRecipesForInputPair(
-        inputItemId,
-        secondaryItemId,
+    // Filter by specific input item if provided (OSRS-accurate: only show relevant recipes)
+    if (inputItemId) {
+      filteredRecipes = filteredRecipes.filter((recipe) =>
+        recipe.inputs.some((inp) => inp.item === inputItemId),
       );
-    } else {
-      // Knife + item: find all recipes that use this input
-      filteredRecipes =
-        processingDataProvider.getFletchingRecipesForInput(inputItemId);
+    }
+
+    // For furnace (jewelry): only show recipes where player has required moulds
+    if (station === "furnace") {
+      filteredRecipes = filteredRecipes.filter((recipe) =>
+        recipe.tools.every((tool) => inventoryCounts.has(tool)),
+      );
     }
 
     if (filteredRecipes.length === 0) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: "You can't fletch anything with that.",
+        message: "There are no crafting recipes available.",
         type: "error",
       });
       return;
@@ -213,72 +222,73 @@ export class FletchingSystem extends SystemBase {
 
     // Check availability for each recipe
     const availableRecipes = filteredRecipes.map((recipe) => {
-      const meetsLevel = fletchingLevel >= recipe.level;
+      const meetsLevel = craftingLevel >= recipe.level;
       const hasInputs = recipe.inputs.every((input) => {
         const count = inventoryCounts.get(input.item) || 0;
         return count >= input.amount;
       });
       const hasTools = recipe.tools.every((tool) => inventoryCounts.has(tool));
+      const hasConsumables = recipe.consumables.every((c) =>
+        inventoryCounts.has(c.item),
+      );
 
       return {
-        recipeId: recipe.recipeId,
         output: recipe.output,
         name: recipe.name,
         category: recipe.category,
-        outputQuantity: recipe.outputQuantity,
         inputs: recipe.inputs,
         tools: recipe.tools,
         level: recipe.level,
         xp: recipe.xp,
         meetsLevel,
-        hasInputs: hasInputs && hasTools,
+        hasInputs: hasInputs && hasTools && hasConsumables,
       };
     });
 
     // Emit event with available recipes for UI to display
-    this.emitTypedEvent(EventType.FLETCHING_INTERFACE_OPEN, {
+    this.emitTypedEvent(EventType.CRAFTING_INTERFACE_OPEN, {
       playerId,
       availableRecipes,
+      station,
     });
   }
 
   /**
-   * Start fletching a specific recipe
+   * Start crafting a specific item
    */
-  private startFletching(data: {
+  private startCrafting(data: {
     playerId: string;
     recipeId: string;
     quantity: number;
   }): void {
     const { playerId, recipeId, quantity } = data;
-
-    // Check if already fletching
+    // Check if already crafting
     if (this.activeSessions.has(playerId)) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: "You are already fletching.",
+        message: "You are already crafting.",
         type: "error",
       });
       return;
     }
 
     // Validate recipe exists
-    const recipe = processingDataProvider.getFletchingRecipe(recipeId);
+    const recipe = processingDataProvider.getCraftingRecipe(recipeId);
     if (!recipe) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: "Invalid fletching recipe.",
+        message: "Invalid crafting recipe.",
         type: "error",
       });
       return;
     }
 
     // Check level requirement
-    const fletchingLevel = this.getFletchingLevel(playerId);
-    if (fletchingLevel < recipe.level) {
+    const craftingLevel = this.getCraftingLevel(playerId);
+    if (craftingLevel < recipe.level) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: `You need level ${recipe.level} Fletching to make that.`,
+        message: `You need level ${recipe.level} Crafting to make that.`,
         type: "error",
       });
       return;
@@ -300,7 +310,7 @@ export class FletchingSystem extends SystemBase {
       const toolNames = recipe.tools.join(", ").replace(/_/g, " ");
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
-        message: `You need a ${toolNames} to fletch that.`,
+        message: `You need a ${toolNames} to craft that.`,
         type: "error",
       });
       return;
@@ -316,16 +326,34 @@ export class FletchingSystem extends SystemBase {
       return;
     }
 
+    // Check consumables (e.g., thread)
+    if (!this.hasRequiredConsumables(invState, recipe)) {
+      this.emitTypedEvent(EventType.UI_MESSAGE, {
+        playerId,
+        message: "You need thread to craft that.",
+        type: "error",
+      });
+      return;
+    }
+
+    // Initialize consumable uses tracking
+    // Each consumable has N uses before being consumed (e.g., thread = 5 uses)
+    const consumableUses = new Map<string, number>();
+    for (const consumable of recipe.consumables) {
+      consumableUses.set(consumable.item, consumable.uses);
+    }
+
     // Get current tick for tick-based timing
     const currentTick = this.world.currentTick ?? 0;
 
     // Create session with tick-based completion
-    const session: FletchingSession = {
+    const session: CraftingSession = {
       playerId,
       recipeId,
       quantity: Math.max(1, quantity),
       crafted: 0,
       completionTick: currentTick + recipe.ticks,
+      consumableUses,
     };
 
     this.activeSessions.set(playerId, session);
@@ -334,52 +362,52 @@ export class FletchingSystem extends SystemBase {
     const itemName = recipe.name || recipe.output.replace(/_/g, " ");
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId,
-      message: `You begin fletching ${itemName}s.`,
+      message: `You begin crafting ${itemName}s.`,
       type: "info",
     });
 
     // Emit start event
-    this.emitTypedEvent(EventType.FLETCHING_START, {
+    this.emitTypedEvent(EventType.CRAFTING_START, {
       playerId,
       recipeId,
     });
   }
 
   /**
-   * Schedule the next fletch action for a session.
-   * Called after each successful fletch to queue the next one.
+   * Schedule the next craft action for a session.
+   * Called after each successful craft to queue the next one.
    */
-  private scheduleNextFletch(playerId: string): void {
+  private scheduleNextCraft(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
 
     // Check if we've reached the target quantity
     if (session.crafted >= session.quantity) {
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
       return;
     }
 
-    const recipe = processingDataProvider.getFletchingRecipe(session.recipeId);
+    const recipe = processingDataProvider.getCraftingRecipe(session.recipeId);
     if (!recipe) {
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
       return;
     }
 
     // Build inventory state once for all checks
     const invState = this.getInventoryState(playerId);
     if (!invState) {
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
       return;
     }
 
-    // Check materials for next fletch
+    // Check materials for next craft
     if (!this.hasRequiredInputs(invState, recipe)) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
         message: "You have run out of materials.",
         type: "info",
       });
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
       return;
     }
 
@@ -390,51 +418,53 @@ export class FletchingSystem extends SystemBase {
         message: "You no longer have the required tools.",
         type: "info",
       });
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
       return;
     }
 
-    // Set completion tick for next fletch action
+    // Check if consumable uses are depleted and need a new consumable
+    for (const consumable of recipe.consumables) {
+      const remaining = session.consumableUses.get(consumable.item) || 0;
+      if (remaining <= 0) {
+        // Need to consume a new thread/consumable from inventory
+        if (!this.hasRequiredConsumables(invState, recipe)) {
+          this.emitTypedEvent(EventType.UI_MESSAGE, {
+            playerId,
+            message: "You have run out of thread.",
+            type: "info",
+          });
+          this.completeCrafting(playerId);
+          return;
+        }
+        // Consume 1 from inventory and reset uses
+        this.emitTypedEvent(EventType.INVENTORY_ITEM_REMOVED, {
+          playerId,
+          itemId: consumable.item,
+          quantity: 1,
+        });
+        session.consumableUses.set(consumable.item, consumable.uses);
+      }
+    }
+
+    // Set completion tick for next craft action
     const currentTick = this.world.currentTick ?? 0;
     session.completionTick = currentTick + recipe.ticks;
   }
 
   /**
-   * Complete a single fletch action.
-   * Handles multi-output recipes (e.g., 15 arrow shafts per log).
+   * Complete a single craft action
    */
-  private completeFletch(playerId: string): void {
+  private completeCraft(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
 
-    const recipe = processingDataProvider.getFletchingRecipe(session.recipeId);
+    const recipe = processingDataProvider.getCraftingRecipe(session.recipeId);
     if (!recipe) {
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
       return;
     }
 
-    // Re-verify inventory before consuming (guard against external modifications)
-    const invState = this.getInventoryState(playerId);
-    if (!invState || !this.hasRequiredInputs(invState, recipe)) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: "You have run out of materials.",
-        type: "info",
-      });
-      this.completeFletching(playerId);
-      return;
-    }
-    if (!this.hasRequiredTools(invState, recipe)) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: "You no longer have the required tools.",
-        type: "info",
-      });
-      this.completeFletching(playerId);
-      return;
-    }
-
-    // Play fletching animation
+    // Play crafting animation (OSRS-style)
     this.emitTypedEvent(EventType.ANIMATION_PLAY, {
       entityId: playerId,
       animation: "crafting",
@@ -450,73 +480,72 @@ export class FletchingSystem extends SystemBase {
       });
     }
 
-    // Add fletched item(s) to inventory
-    // Multi-output: outputQuantity items per action (e.g., 15 arrow shafts)
+    // Decrement consumable uses
+    for (const consumable of recipe.consumables) {
+      const remaining = session.consumableUses.get(consumable.item) || 0;
+      session.consumableUses.set(consumable.item, Math.max(0, remaining - 1));
+    }
+
+    // Add crafted item to inventory
+    // Note: Input removal, output addition, and XP grant are processed synchronously
+    // in the same tick. A crash between events would require SIGKILL mid-function,
+    // which is acceptable loss for a single craft action.
     this.emitTypedEvent(EventType.INVENTORY_ITEM_ADDED, {
       playerId,
       item: {
-        id: `fletch_${playerId}_${++this.fletchCounter}_${Date.now()}`,
+        id: `craft_${playerId}_${++this.craftCounter}_${Date.now()}`,
         itemId: recipe.output,
-        quantity: recipe.outputQuantity,
+        quantity: 1,
         slot: -1,
         metadata: null,
       },
     });
 
-    // Grant XP (total for the action, not per item)
+    // Grant XP
     this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
       playerId,
-      skill: Skill.FLETCHING,
+      skill: Skill.CRAFTING,
       amount: recipe.xp,
     });
 
     session.crafted++;
 
     // Audit log for economic tracking
-    Logger.system("FletchingSystem", "fletch_complete", {
+    Logger.system("CraftingSystem", "craft_complete", {
       playerId,
       recipeId: session.recipeId,
       output: recipe.output,
-      outputQuantity: recipe.outputQuantity,
       inputsConsumed: recipe.inputs.map((i) => `${i.amount}x${i.item}`),
       xpAwarded: recipe.xp,
       crafted: session.crafted,
       batchTotal: session.quantity,
     });
 
-    // Success message
+    // Success message (OSRS style - shows item name)
     const itemName = recipe.name || recipe.output.replace(/_/g, " ");
-    if (recipe.outputQuantity > 1) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: `You fletch ${recipe.outputQuantity} ${itemName}s.`,
-        type: "success",
-      });
-    } else {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId,
-        message: `You fletch a ${itemName}.`,
-        type: "success",
-      });
-    }
+    this.emitTypedEvent(EventType.UI_MESSAGE, {
+      playerId,
+      message: `You craft a ${itemName}.`,
+      type: "success",
+    });
 
-    // Schedule next fletch action
-    this.scheduleNextFletch(playerId);
+    // Schedule next craft action
+    this.scheduleNextCraft(playerId);
   }
 
   /**
-   * Complete the fletching session
+   * Complete the crafting session
    */
-  private completeFletching(playerId: string): void {
+  private completeCrafting(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (!session) return;
 
     this.activeSessions.delete(playerId);
 
-    const recipe = processingDataProvider.getFletchingRecipe(session.recipeId);
+    const recipe = processingDataProvider.getCraftingRecipe(session.recipeId);
 
     // Emit completion event
-    this.emitTypedEvent(EventType.FLETCHING_COMPLETE, {
+    this.emitTypedEvent(EventType.CRAFTING_COMPLETE, {
       playerId,
       recipeId: session.recipeId,
       outputItemId: recipe?.output || session.recipeId,
@@ -526,12 +555,12 @@ export class FletchingSystem extends SystemBase {
   }
 
   /**
-   * Cancel fletching for a player
+   * Cancel crafting for a player
    */
-  private cancelFletching(playerId: string): void {
+  private cancelCrafting(playerId: string): void {
     const session = this.activeSessions.get(playerId);
     if (session) {
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
     }
   }
 
@@ -558,7 +587,7 @@ export class FletchingSystem extends SystemBase {
    */
   private hasRequiredTools(
     state: InventoryState,
-    recipe: FletchingRecipeData,
+    recipe: CraftingRecipeData,
   ): boolean {
     if (recipe.tools.length === 0) return true;
     return recipe.tools.every((tool) => state.itemIds.has(tool));
@@ -569,7 +598,7 @@ export class FletchingSystem extends SystemBase {
    */
   private hasRequiredInputs(
     state: InventoryState,
-    recipe: FletchingRecipeData,
+    recipe: CraftingRecipeData,
   ): boolean {
     return recipe.inputs.every((input) => {
       const count = state.counts.get(input.item) || 0;
@@ -578,32 +607,43 @@ export class FletchingSystem extends SystemBase {
   }
 
   /**
-   * Get player's fletching level using type-safe access
+   * Check if player has required consumables (e.g., thread)
    */
-  private getFletchingLevel(playerId: string): number {
+  private hasRequiredConsumables(
+    state: InventoryState,
+    recipe: CraftingRecipeData,
+  ): boolean {
+    if (recipe.consumables.length === 0) return true;
+    return recipe.consumables.every((c) => state.itemIds.has(c.item));
+  }
+
+  /**
+   * Get player's crafting level using type-safe access
+   */
+  private getCraftingLevel(playerId: string): number {
     // Check cached skills first
     const cachedSkills = this.playerSkills.get(playerId);
-    if (cachedSkills?.fletching?.level != null) {
-      return cachedSkills.fletching.level;
+    if (cachedSkills?.crafting?.level != null) {
+      return cachedSkills.crafting.level;
     }
 
     // Fall back to player entity using type-safe guard
     const player = this.world.getPlayer(playerId);
     if (!hasSkills(player)) return 1;
-    const fletchingSkill =
-      player.skills?.["fletching" as keyof typeof player.skills];
-    return fletchingSkill?.level ?? 1;
+    const craftingSkill =
+      player.skills?.["crafting" as keyof typeof player.skills];
+    return craftingSkill?.level ?? 1;
   }
 
   /**
-   * Check if player is currently fletching
+   * Check if player is currently crafting
    */
-  isPlayerFletching(playerId: string): boolean {
+  isPlayerCrafting(playerId: string): boolean {
     return this.activeSessions.has(playerId);
   }
 
   /**
-   * Update method - processes tick-based fletching sessions.
+   * Update method - processes tick-based crafting sessions.
    * Called each frame, but only processes once per game tick.
    */
   update(_dt: number): void {
@@ -626,16 +666,16 @@ export class FletchingSystem extends SystemBase {
       }
     }
     for (const playerId of this.completedPlayerIds) {
-      this.completeFletch(playerId);
+      this.completeCraft(playerId);
     }
   }
 
   destroy(): void {
     // Complete all active sessions
     for (const playerId of this.activeSessions.keys()) {
-      this.completeFletching(playerId);
+      this.completeCrafting(playerId);
     }
     this.activeSessions.clear();
-    this.playerSkills.clear();
+    this.playerSkills.clear(); // Memory cleanup
   }
 }

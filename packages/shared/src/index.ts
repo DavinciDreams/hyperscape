@@ -1394,6 +1394,22 @@ export {
 // @hyperforge/hyperscape.
 export { getHammerItemId } from "./data/live/smithing-live";
 
+// Logger singleton — used by gameplay plugins migrated out of
+// shared/ (CraftingSystem, FletchingSystem, etc.).
+export { Logger } from "./utils/Logger";
+
+// Skill enum — referenced by gameplay plugins to identify which
+// skill grants XP for a given action. Re-exported from SkillsSystem.
+export { Skill } from "./systems/shared/character/SkillsSystem";
+
+// Processing recipe data types — typed shapes returned by
+// processingDataProvider.get*Recipe() methods. Consumed by
+// CraftingSystem + FletchingSystem in @hyperforge/hyperscape.
+export type {
+  CraftingRecipeData,
+  FletchingRecipeData,
+} from "./data/ProcessingDataProvider";
+
 // Processing data provider — manifest-driven processing recipes
 // (smithing, smelting, tanning, fletching, runecrafting, cooking, ...).
 // Consumed by gameplay plugins migrated out of shared/.

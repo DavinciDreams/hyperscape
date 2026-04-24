@@ -153,10 +153,10 @@ import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
 import type { CameraSystem as CameraSystemInterface } from "../../../types/systems/physics";
 import { ActionRegistry } from "..";
 import { SkillsSystem } from "..";
-import { SmeltingSystem } from "..";
+// SmeltingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import { CraftingSystem } from "..";
-import { FletchingSystem } from "..";
+// CraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
+// FletchingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -371,22 +371,9 @@ export async function registerSystems(world: World): Promise<void> {
   // 18. Processing system - Crafting and item processing (depends on inventory system)
   world.register("processing", ProcessingSystem);
 
-  // 18a. Smelting system - Furnace smelting (depends on inventory, skills)
-  world.register("smelting", SmeltingSystem);
-
-  // (Slot 18b — SmithingSystem — registered by @hyperforge/hyperscape
-  //  plugin onEnable. Migrated 2026-04-24.)
-
-  // 18c. Crafting system - Leather, jewelry, gem cutting (depends on inventory, skills)
-  world.register("crafting", CraftingSystem);
-
-  // 18e. Fletching system - Knife + logs, stringing, arrow tipping (depends on inventory, skills)
-  world.register("fletching", FletchingSystem);
-
-  // (Slot 18d — TanningSystem — registered by @hyperforge/hyperscape
-  //  plugin onEnable. Migrated 2026-04-24.)
-
-  // (Slot 18f — RunecraftingSystem — registered by
+  // (Slots 18a–18f — the six OSRS skill processing systems —
+  //  Smelting / Smithing / Crafting / Fletching / Tanning /
+  //  Runecrafting — are all registered by the
   //  @hyperforge/hyperscape plugin onEnable. Migrated 2026-04-24.)
 
   // === GAMEPLAY SYSTEMS ===
