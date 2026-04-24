@@ -4,14 +4,14 @@
  * Singleton persistence layer for the authored XP-curves manifest.
  * Mirrors the `CombatTuningProvider` / `LootTablesProvider` pattern:
  * the provider owns a validated `XpCurvesManifest` and the consumer
- * (typically an `XpCurvesRegistry`) rebuilds its in-memory indices
- * from `getManifest()` whenever the authored data changes.
+ * (`xpCurveRegistry` in `../progression/`) rebuilds its in-memory
+ * indices from `getManifest()` whenever the authored data changes.
  *
- * Kept separate from `XpCurvesRegistry` so (a) the Zod schema
- * validation runs at the edge (JSON-in) rather than inside the
- * registry, (b) the provider stays dependency-free, and (c) the
- * registry can be instantiated per-scope (e.g., per-world) without
- * fighting the singleton.
+ * Kept separate from the registry so (a) Zod schema validation runs
+ * at the edge (JSON-in) rather than inside the registry, (b) the
+ * provider stays dependency-free, and (c) the registry can be
+ * instantiated per-scope (e.g., per-world) without fighting the
+ * singleton.
  */
 
 import {

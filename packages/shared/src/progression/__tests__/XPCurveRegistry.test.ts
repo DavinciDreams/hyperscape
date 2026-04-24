@@ -302,3 +302,81 @@ describe("XPCurveRegistry — xpToNextLevel", () => {
     expect(r.xpRemaining).toBe(83);
   });
 });
+
+describe("XPCurveRegistry — onReloaded() reload listeners", () => {
+  it("fires after every load() with the new curve ids", () => {
+    const reg = new XPCurveRegistry();
+    const calls: ReadonlyArray<string>[] = [];
+    reg.onReloaded((ids) => calls.push(ids));
+
+    reg.load(makeManifest());
+    expect(calls.length).toBe(1);
+    expect([...calls[0]!].sort()).toEqual(
+      [
+        "rs",
+        "linear-default",
+        "quadratic-default",
+        "exp-default",
+        "tiny-lookup",
+      ].sort(),
+    );
+
+    reg.load(
+      XpCurvesManifestSchema.parse([
+        {
+          id: "single",
+          name: "single",
+          kind: "formula",
+          formula: "linear",
+          maxLevel: 5,
+        },
+      ]),
+    );
+    expect(calls.length).toBe(2);
+    expect(calls[1]).toEqual(["single"]);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const reg = new XPCurveRegistry();
+    let count = 0;
+    const unsubscribe = reg.onReloaded(() => {
+      count += 1;
+    });
+
+    reg.load(makeManifest());
+    expect(count).toBe(1);
+
+    unsubscribe();
+    reg.load(makeManifest());
+    expect(count).toBe(1);
+  });
+
+  it("loadFromJson() also triggers the listener", () => {
+    const reg = new XPCurveRegistry();
+    let fired = false;
+    reg.onReloaded(() => {
+      fired = true;
+    });
+    reg.loadFromJson([
+      {
+        id: "via-json",
+        name: "via-json",
+        kind: "formula",
+        formula: "rs-classic",
+        maxLevel: 99,
+      },
+    ]);
+    expect(fired).toBe(true);
+  });
+
+  it("a throwing listener does not break sibling listeners", () => {
+    const reg = new XPCurveRegistry();
+    const seen: string[] = [];
+    reg.onReloaded(() => {
+      throw new Error("boom");
+    });
+    reg.onReloaded(() => seen.push("ok"));
+    reg.load(makeManifest());
+    expect(seen).toEqual(["ok"]);
+  });
+});

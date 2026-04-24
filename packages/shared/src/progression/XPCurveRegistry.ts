@@ -109,8 +109,12 @@ const FORMULA_EVALUATORS: Record<
   },
 };
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type XpCurveReloadListener = (curveIds: readonly string[]) => void;
+
 export class XPCurveRegistry {
   private curvesById = new Map<string, XpCurve>();
+  private reloadListeners = new Set<XpCurveReloadListener>();
 
   constructor(manifest?: XpCurvesManifest) {
     if (manifest !== undefined) this.load(manifest);
@@ -120,6 +124,38 @@ export class XPCurveRegistry {
     this.curvesById.clear();
     for (const curve of manifest) {
       this.curvesById.set(curve.id, curve);
+    }
+    this.emitReloaded();
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()` — both at server boot
+   * (DataManager) and on PIE hot-reload (`PIEEditorSession.updateManifests`).
+   * Returns an unsubscribe function.
+   *
+   * Listener throws are caught so one bad consumer can't break the
+   * reload pipeline for others.
+   */
+  onReloaded(cb: XpCurveReloadListener): () => void {
+    this.reloadListeners.add(cb);
+    return () => {
+      this.reloadListeners.delete(cb);
+    };
+  }
+
+  private emitReloaded(): void {
+    if (this.reloadListeners.size === 0) return;
+    const ids = this.curveIds;
+    for (const cb of this.reloadListeners) {
+      try {
+        cb(ids);
+      } catch (err) {
+        console.warn(
+          "[xpCurveRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 

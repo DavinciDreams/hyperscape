@@ -372,7 +372,7 @@ const MANIFEST_DEFINITIONS: ManifestInfo[] = [
     name: "xp-curves",
     filename: "xp-curves.json",
     description:
-      "Level↔XP curves per skill (formula or lookup). Consumed by XpCurvesRegistry.",
+      "Level↔XP curves per skill (formula or lookup). Consumed by xpCurveRegistry.",
     category: "progression",
     editable: true,
     schema: "xp-curves",
