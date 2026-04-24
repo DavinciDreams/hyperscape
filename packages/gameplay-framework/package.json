@@ -1,0 +1,43 @@
+{
+  "name": "@hyperforge/gameplay-framework",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stable public-API facade for Hyperforge plugin authors. Re-exports manifest schemas and plugin lifecycle types so plugins can be written without depending on @hyperforge/shared internals. Higher layers (semver-range resolution, dynamic module loading, sandboxing, telemetry) will land here incrementally.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "hyperforge-plugin": "./bin/hyperforge-plugin.mjs"
+  },
+  "files": [
+    "dist/",
+    "bin/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hyperforge/manifest-schema": "*",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}
