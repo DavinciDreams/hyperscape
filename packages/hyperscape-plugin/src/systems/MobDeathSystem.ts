@@ -1,6 +1,26 @@
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
+/**
+ * MobDeathSystem — handles mob death: despawn via ENTITY_DEATH event.
+ *
+ * Migrated 2026-04-24 from `packages/shared/src/systems/shared/combat/`
+ * into `@hyperforge/hyperscape` as the first slice of the
+ * Hyperscape→meta-plugin extraction. This system is gameplay-specific
+ * (the despawn behavior is a game decision, not an engine primitive)
+ * so it belongs in the Hyperscape plugin rather than `@hyperforge/shared`.
+ *
+ * Registration happens via the meta-plugin's `onEnable` hook, which
+ * receives a `HyperscapeContext.world` and calls
+ * `world.register("mob-death", MobDeathSystem)`. The plugin's scope
+ * disposer runs `world.unregister?.("mob-death")` (or no-op if the
+ * world doesn't expose unregister) so a clean session.stop()
+ * tears down the registration.
+ *
+ * No behavior change vs. the pre-migration version — same imports,
+ * same event subscription, same despawn logic. The only semantic
+ * change is *who registers it*.
+ */
+
+import type { World } from "@hyperforge/shared";
+import { EventType, SystemBase } from "@hyperforge/shared";
 
 /** Handles mob death: despawn via ENTITY_DEATH event */
 export class MobDeathSystem extends SystemBase {

@@ -146,7 +146,7 @@ export async function initializeWorld(
   // Session is stashed on the world so a graceful shutdown can call
   // `pluginSession.stop()` for clean disposer teardown.
   const { bootServerPlugins } = await import("./plugins.js");
-  const pluginSession = await bootServerPlugins();
+  const pluginSession = await bootServerPlugins(world);
   (world as { pluginSession?: typeof pluginSession }).pluginSession =
     pluginSession;
 

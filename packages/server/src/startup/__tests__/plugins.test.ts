@@ -22,6 +22,27 @@ import {
   getServerPluginModules,
 } from "../plugins.js";
 
+/**
+ * Stub world that records every `register`/`unregister` call so we
+ * can assert the hyperscape meta-plugin's `onEnable` actually
+ * attached its migrated systems. Mirrors the noop stub
+ * `bootServerPlugins()` builds when no world is supplied.
+ */
+function createRecordingWorld() {
+  const registered: string[] = [];
+  const unregistered: string[] = [];
+  return {
+    registered,
+    unregistered,
+    register(name: string, _ctor: unknown) {
+      registered.push(name);
+    },
+    unregister(name: string) {
+      unregistered.push(name);
+    },
+  };
+}
+
 beforeEach(() => {
   _resetServerPluginServicesForTests();
 });
@@ -97,5 +118,23 @@ describe("server plugin boot — in-binary set", () => {
     const session = await bootServerPlugins();
     await session.stop();
     await session.stop();
+  });
+
+  it("hyperscape meta-plugin onEnable registers MobDeathSystem on the host world", async () => {
+    const world = createRecordingWorld();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = await bootServerPlugins(world as any);
+
+    // First migrated system: MobDeathSystem (out of
+    // packages/shared/src/systems/shared/combat/ → into
+    // @hyperforge/hyperscape on 2026-04-24).
+    expect(world.registered).toContain("mob-death");
+    expect(world.unregistered).toEqual([]);
+
+    // session.stop() runs scope disposers in LIFO order — the
+    // disposer registered alongside the world.register call should
+    // call world.unregister.
+    await session.stop();
+    expect(world.unregistered).toContain("mob-death");
   });
 });

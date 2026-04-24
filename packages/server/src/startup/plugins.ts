@@ -28,6 +28,7 @@ import {
   type PluginSession,
   startPluginSessionFromModules,
 } from "@hyperforge/gameplay-framework";
+import type { World } from "@hyperforge/shared";
 
 import {
   combatPluginFactory,
@@ -45,7 +46,9 @@ import {
   type SkillsContext,
   type SkillsService,
 } from "@hyperforge/skills";
-import hyperscapeFactory from "@hyperforge/hyperscape";
+import hyperscapeFactory, {
+  type HyperscapeContext,
+} from "@hyperforge/hyperscape";
 import { manifest as hyperscapeManifest } from "@hyperforge/hyperscape";
 
 /**
@@ -84,6 +87,47 @@ export function _peekSkillsService(): SkillsService | null {
 }
 
 /**
+ * Test fallback when `bootServerPlugins()` is called without a real
+ * world (the smoke test does this). Records every `register`/
+ * `unregister` call so tests can assert the plugin actually attempted
+ * to attach the system, without depending on the full world ECS.
+ */
+interface WorldStub {
+  readonly registered: string[];
+  readonly unregistered: string[];
+}
+function createNoopWorldStub(): World {
+  const registered: string[] = [];
+  const unregistered: string[] = [];
+  const stub = {
+    registered,
+    unregistered,
+    register(name: string, _ctor: unknown) {
+      registered.push(name);
+    },
+    unregister(name: string) {
+      unregistered.push(name);
+    },
+  };
+  // World is a large interface — only the bits the plugin's onEnable
+  // touches matter. Cast through unknown to keep the stub minimal.
+  return stub as unknown as World;
+}
+
+/** Test-only accessor for the noop world stub created on stub-mode boot. */
+export function _peekStubWorld(world: unknown): WorldStub | null {
+  if (
+    world &&
+    typeof world === "object" &&
+    "registered" in world &&
+    "unregistered" in world
+  ) {
+    return world as WorldStub;
+  }
+  return null;
+}
+
+/**
  * Build the in-binary plugin set. Exported separately so tests can
  * boot the same set through `startPluginSessionFromModules` without
  * needing the rest of the server bootstrap.
@@ -118,15 +162,16 @@ export function getServerPluginModules(): ReadonlyArray<
  * (world reference, system registry, etc.) get layered on when the
  * first plugin actually needs them.
  */
-export async function bootServerPlugins(): Promise<
-  PluginSession<PluginContextBase>
-> {
+export async function bootServerPlugins(
+  world?: World,
+): Promise<PluginSession<PluginContextBase>> {
   const modules = getServerPluginModules();
   const session = await startPluginSessionFromModules(modules, {
     // Context factory dispatches by manifest id. Each plugin receives
-    // its declared context shape (CombatContext / SkillsContext / …)
-    // wired to a real per-server service. Disposers attached to the
-    // scope inside the factory's helper methods unregister on stop.
+    // its declared context shape (CombatContext / SkillsContext /
+    // HyperscapeContext) wired to a real per-server service or to the
+    // host's world. Disposers attached to the scope inside the
+    // factory's helper methods unregister on stop.
     contextFactory: ({ pluginId, scope }) => {
       switch (pluginId) {
         case combatManifest.id: {
@@ -153,9 +198,20 @@ export async function bootServerPlugins(): Promise<
           };
           return ctx as PluginContextBase;
         }
+        case hyperscapeManifest.id: {
+          // Meta-plugin's onEnable calls `ctx.world.register(...)` to
+          // attach migrated systems (first cut: MobDeathSystem).
+          // Tests that don't supply a world fall back to a tiny stub
+          // — `register` is a no-op there so the plugin's registration
+          // call doesn't blow up.
+          const ctx: HyperscapeContext = {
+            pluginId,
+            scope,
+            world: world ?? createNoopWorldStub(),
+          };
+          return ctx as PluginContextBase;
+        }
         default:
-          // hyperscape meta-plugin + any future plugin with no extra
-          // surface beyond PluginContextBase falls through here.
           return { pluginId, scope };
       }
     },

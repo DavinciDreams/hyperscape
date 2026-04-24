@@ -18,8 +18,8 @@
  * **Combat Systems:**
  * - CombatSystem: Melee, ranged, and magic combat mechanics
  * - PlayerDeathSystem: Handles player death and respawning
- * - MobDeathSystem: Handles mob death and despawning
  * - AggroSystem: Enemy threat and aggression management
+ * - (MobDeathSystem moved to @hyperforge/hyperscape plugin 2026-04-24)
  *
  * **World Systems:**
  * - MobNPCSystem: Mob NPC (mob, boss, quest) lifecycle and behavior
@@ -96,7 +96,7 @@ import { BankingSystem } from "..";
 import { CoinPouchSystem } from "..";
 import { CombatSystem } from "..";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-import { PlayerDeathSystem, MobDeathSystem } from "..";
+import { PlayerDeathSystem } from "..";
 import { EntityManager } from "..";
 import { EquipmentSystem } from "..";
 import { InventoryInteractionSystem } from "..";
@@ -188,7 +188,7 @@ export interface Systems {
   processing?: ProcessingSystem;
   entityManager?: EntityManager;
   playerDeath?: PlayerDeathSystem;
-  mobDeath?: MobDeathSystem;
+  // mobDeath: registered by @hyperforge/hyperscape plugin (2026-04-24)
   inventoryInteraction?: InventoryInteractionSystem;
   groundItems?: GroundItemSystem;
   loot?: LootSystem;
@@ -399,8 +399,9 @@ export async function registerSystems(world: World): Promise<void> {
   // 19b. Gravestone loot system - Handles loot processing from gravestones (ECS-style)
   world.register("gravestone-loot", GravestoneLootSystem);
 
-  // 20. Mob death system - Mob death handling (depends on mob system)
-  world.register("mob-death", MobDeathSystem);
+  // (Slot 20 — MobDeathSystem — registered by @hyperforge/hyperscape
+  //  plugin onEnable. Migrated 2026-04-24, first slice of the
+  //  Hyperscape→meta-plugin extraction.)
 
   // 21. Aggro system - AI aggression management (depends on mob & combat systems)
   world.register("aggro", AggroSystem);
@@ -493,7 +494,8 @@ export async function registerSystems(world: World): Promise<void> {
   systems.processing = getSystem(world, "processing") as ProcessingSystem;
   systems.healthRegen = getSystem(world, "health-regen") as HealthRegenSystem;
   systems.playerDeath = getSystem(world, "player-death") as PlayerDeathSystem;
-  systems.mobDeath = getSystem(world, "mob-death") as MobDeathSystem;
+  // mobDeath registration moved to @hyperforge/hyperscape plugin —
+  // no SystemReferences slot needed (no consumer reads it today).
 
   // Client-only systems
   if (world.isClient) {

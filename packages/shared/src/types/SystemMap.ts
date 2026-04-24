@@ -24,7 +24,9 @@ import type { InventoryInteractionSystem } from "../systems/shared";
 import type { InventorySystem } from "../systems/shared";
 import type { ItemSpawnerSystem } from "../systems/shared";
 import type { LootSystem } from "../systems/shared";
-import type { MobDeathSystem } from "../systems/shared";
+// MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24).
+// "mob-death" SystemMap entry removed — its only consumer was a
+// dead `systems.mobDeath = ...` lookup in SystemLoader (no reads).
 import type { MobNPCSpawnerSystem } from "../systems/shared";
 import type { MobNPCSystem } from "../systems/shared";
 import type { NPCSystem } from "../systems/shared";
@@ -126,7 +128,7 @@ export interface SystemMap {
   // Death
   "player-death": PlayerDeathSystem;
   "gravestone-loot": GravestoneLootSystem;
-  "mob-death": MobDeathSystem;
+  // "mob-death" registered by @hyperforge/hyperscape plugin onEnable
 
   // World content
   npc: NPCSystem;

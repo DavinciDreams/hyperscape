@@ -6,7 +6,8 @@
 export * from "./CombatSystem";
 export * from "./AggroSystem";
 export * from "./PlayerDeathSystem";
-export * from "./MobDeathSystem";
+// MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24)
+// — first slice of the Hyperscape→meta-plugin extraction.
 
 export * from "./CombatStateService";
 export * from "./CombatEntityResolver";

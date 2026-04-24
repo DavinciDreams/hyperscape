@@ -33,6 +33,7 @@
     "@hyperforge/combat": "*",
     "@hyperforge/gameplay-framework": "*",
     "@hyperforge/manifest-schema": "*",
+    "@hyperforge/shared": "workspace:*",
     "@hyperforge/skills": "*"
   },
   "devDependencies": {

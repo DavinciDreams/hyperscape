@@ -31,6 +31,9 @@ import type {
   PluginContextBase,
   PluginFactory,
 } from "@hyperforge/gameplay-framework";
+import type { World } from "@hyperforge/shared";
+
+import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 
 // Re-export combat surface so callers have one import path.
 export {
@@ -64,7 +67,13 @@ export { manifest } from "./manifest.js";
  * the lifecycle-typing contract consistent.
  */
 export interface HyperscapeContext extends PluginContextBase {
-  /** Reserved for future composition handles (cross-plugin registries). */
+  /**
+   * The host's world instance. Required so the plugin's `onEnable`
+   * can `world.register(...)` the gameplay systems migrated out of
+   * `@hyperforge/shared` (first cut: MobDeathSystem). Hosts that
+   * don't have a world (e.g. some unit tests) can pass a stub.
+   */
+  readonly world: World;
 }
 
 /**
@@ -89,11 +98,25 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
     onLoad(_ctx) {
       // No-op. Composition is via dependency graph, not lifecycle.
     },
-    onEnable(_ctx) {
-      // No-op. Constituent plugins handle their own onEnable.
+    onEnable(ctx) {
+      // Register migrated gameplay systems on the host world. Each
+      // `world.register(name, Ctor)` is mirrored by a scope disposer
+      // so `session.stop()` cleanly tears the registration down.
+      //
+      // First cut (2026-04-24): MobDeathSystem. Future migrations add
+      // more `world.register(...)` calls here, one per system moved
+      // out of `@hyperforge/shared/src/systems/`. The end-state has
+      // every Hyperscape-specific system registered through this
+      // hook — `@hyperforge/shared` then contains zero
+      // Hyperscape-specific identifiers (master plan criterion #2).
+      ctx.world.register("mob-death", MobDeathSystem);
+      ctx.scope.register(() => {
+        const w = ctx.world as { unregister?: (name: string) => void };
+        w.unregister?.("mob-death");
+      });
     },
     onDisable(_ctx) {
-      // No-op. Constituent plugins handle their own onDisable.
+      // Scope disposers (registered in onEnable) handle teardown.
     },
   };
   return plugin;

@@ -1,19 +1,16 @@
 /**
  * MobDeathSystem Unit Tests
  *
- * Tests the mob death handling system.
+ * Migrated 2026-04-24 alongside the system itself from
+ * `packages/shared/src/systems/shared/combat/__tests__/`. Imports
+ * updated to match the new home in `@hyperforge/hyperscape`.
  *
- * Key behaviors tested:
- * - Only handles mob deaths (not player deaths)
- * - Calls despawnMob for mob deaths
- * - Removes mob entity from world
- * - Clears respawn timers on destroy
+ * Behavior unchanged from the pre-migration version.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobDeathSystem } from "../MobDeathSystem";
 
-// Mock World
 function createMockWorld() {
   const entitiesMap = new Map<string, Record<string, unknown>>();
   const emitFn = vi.fn();
@@ -41,7 +38,7 @@ function createMockWorld() {
   };
 }
 
-describe("MobDeathSystem", () => {
+describe("MobDeathSystem (migrated to @hyperforge/hyperscape)", () => {
   let world: ReturnType<typeof createMockWorld>;
   let system: MobDeathSystem;
 
@@ -67,7 +64,6 @@ describe("MobDeathSystem", () => {
 
       const despawnSpy = vi.spyOn(privateSystem, "despawnMob");
 
-      // Player death - should be ignored
       privateSystem.handleMobDeath({
         entityId: "player1",
         killedBy: "mob1",
@@ -76,7 +72,6 @@ describe("MobDeathSystem", () => {
 
       expect(despawnSpy).not.toHaveBeenCalled();
 
-      // Mob death - should be processed
       world.addEntity("mob1", { type: "mob" });
       privateSystem.handleMobDeath({
         entityId: "mob1",
@@ -129,10 +124,7 @@ describe("MobDeathSystem", () => {
         despawnMob: (mobId: string) => void;
       };
 
-      // Mob doesn't exist in world
       expect(() => privateSystem.despawnMob("nonexistent")).not.toThrow();
-
-      // Should not call remove for non-existent mob
       expect(world._remove).not.toHaveBeenCalled();
     });
   });
@@ -143,13 +135,6 @@ describe("MobDeathSystem", () => {
         system.destroy();
         system.destroy();
       }).not.toThrow();
-    });
-  });
-
-  describe("system configuration", () => {
-    it("has correct system name", () => {
-      // The system name is set in constructor
-      expect(system).toBeDefined();
     });
   });
 });
