@@ -18,7 +18,7 @@ import type { CombatSystem } from "../systems/shared";
 import type { DialogueSystem } from "../systems/shared";
 import type { EntityManager } from "../systems/shared";
 import type { EquipmentSystem } from "../systems/shared";
-import type { GravestoneLootSystem } from "../systems/shared";
+// GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // SystemMap entry removed — its only consumer was a dead
 // `systems.healthRegen = ...` lookup in SystemLoader.
@@ -127,7 +127,7 @@ export interface SystemMap {
 
   // Death
   "player-death": PlayerDeathSystem;
-  "gravestone-loot": GravestoneLootSystem;
+  // "gravestone-loot" registered by @hyperforge/hyperscape plugin onEnable
   // "mob-death" registered by @hyperforge/hyperscape plugin onEnable
 
   // World content

@@ -130,10 +130,11 @@ describe("server plugin boot — in-binary set", () => {
     // - MobDeathSystem (combat/ → meta-plugin)
     // - HealthRegenSystem (character/ → meta-plugin, server-only)
     // - TanningSystem (interaction/ → meta-plugin)
-    // 8 systems migrated so far. Each registration has a matching
+    // 9 systems migrated so far. Each registration has a matching
     // disposer attached to the plugin's scope.
     const expected = [
       "mob-death",
+      "gravestone-loot",
       "health-regen",
       "tanning",
       "smithing",

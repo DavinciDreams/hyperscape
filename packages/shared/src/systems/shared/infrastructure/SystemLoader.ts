@@ -117,7 +117,7 @@ import { StoreSystem } from "..";
 // which extends Entity, causing a circular dependency during module initialization
 import { InteractionRouter } from "../../client/interaction";
 import { LootSystem } from "..";
-import { GravestoneLootSystem } from "..";
+// GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { GroundItemSystem } from "../economy/GroundItemSystem";
 import { createDropConditionDispatcher } from "../economy/DropConditionDispatcher";
 import { installWorldDropConditions } from "../economy/WorldDropConditionEvaluators";
@@ -382,8 +382,8 @@ export async function registerSystems(world: World): Promise<void> {
   // 19. Player death system - Player death and respawn mechanics (depends on player system)
   world.register("player-death", PlayerDeathSystem);
 
-  // 19b. Gravestone loot system - Handles loot processing from gravestones (ECS-style)
-  world.register("gravestone-loot", GravestoneLootSystem);
+  // (Slot 19b — GravestoneLootSystem — registered by
+  //  @hyperforge/hyperscape plugin onEnable. Migrated 2026-04-24.)
 
   // (Slot 20 — MobDeathSystem — registered by @hyperforge/hyperscape
   //  plugin onEnable. Migrated 2026-04-24, first slice of the

@@ -35,6 +35,7 @@ import type { World } from "@hyperforge/shared";
 
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
+import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
@@ -121,6 +122,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
 
       // Cross-cutting systems that run on both server + client.
       register("mob-death", MobDeathSystem);
+      register("gravestone-loot", GravestoneLootSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

@@ -14,15 +14,21 @@
  * - Audit logging
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
-import type { InventoryItem } from "../../../types/core/core";
-import type { LootFailureReason } from "../../../types/death";
-import { generateTransactionId } from "../../../utils/IdGenerator";
-import { DeathState } from "../../../types/entities";
-import { getItem } from "../../../data/items";
-import { getMaxInventorySlots } from "../../../data/live/game-live";
+// Migrated 2026-04-24 from
+// `packages/shared/src/systems/shared/loot/` into
+// `@hyperforge/hyperscape` as the 9th Hyperscape→meta-plugin
+// extraction. Headstone-corpse loot is OSRS-specific gameplay.
+import {
+  DeathState,
+  EventType,
+  generateTransactionId,
+  getItem,
+  getMaxInventorySlots,
+  type InventoryItem,
+  type LootFailureReason,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 /** Interface for entities that can be looted (HeadstoneEntity) */
 type LootableEntity = {
