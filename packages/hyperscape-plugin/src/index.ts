@@ -43,6 +43,17 @@ export {
   DEFAULT_COMBAT_ABILITIES,
 } from "@hyperforge/combat";
 
+// Re-export skills surface so callers have one import path.
+export {
+  type SkillCategory,
+  type SkillDefinition,
+  type SkillsContext,
+  type SkillsService,
+  createSkillsService,
+  DEFAULT_SKILLS,
+  skillsPluginFactory,
+} from "@hyperforge/skills";
+
 export { manifest } from "./manifest.js";
 
 /**

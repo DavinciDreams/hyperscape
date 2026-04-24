@@ -14,8 +14,11 @@ import { describe, expect, it } from "vitest";
 import {
   combatPluginFactory,
   createCombatAbilityService,
+  createSkillsService,
   DEFAULT_COMBAT_ABILITIES,
+  DEFAULT_SKILLS,
   manifest,
+  skillsPluginFactory,
 } from "../index.js";
 
 describe("@hyperforge/hyperscape", () => {
@@ -30,18 +33,26 @@ describe("@hyperforge/hyperscape", () => {
     expect(manifest.tags).toContain("hyperia");
   });
 
-  it("declares @hyperforge/combat as a manifest dependency", () => {
+  it("declares @hyperforge/combat AND @hyperforge/skills as manifest dependencies", () => {
     expect(manifest.dependencies).toEqual([
       {
         id: "com.hyperforge.combat",
         versionRange: "^0.1.0",
         optional: false,
       },
+      {
+        id: "com.hyperforge.skills",
+        versionRange: "^0.1.0",
+        optional: false,
+      },
     ]);
   });
 
-  it("declares loadAfter combat so the host runs combat first", () => {
-    expect(manifest.loadAfter).toEqual(["com.hyperforge.combat"]);
+  it("declares loadAfter both deps so the host runs them first", () => {
+    expect(manifest.loadAfter).toEqual([
+      "com.hyperforge.combat",
+      "com.hyperforge.skills",
+    ]);
   });
 
   it("starts with empty contribution buckets (composition is via deps, not contributions)", () => {
@@ -73,6 +84,26 @@ describe("@hyperforge/hyperscape", () => {
     expect(DEFAULT_COMBAT_ABILITIES).toHaveLength(3);
     expect(DEFAULT_COMBAT_ABILITIES.map((a) => a.id)).toContain(
       "com.hyperforge.combat.slash",
+    );
+  });
+
+  it("re-exports skillsPluginFactory + createSkillsService for one-import callers", () => {
+    expect(typeof skillsPluginFactory).toBe("function");
+    expect(typeof createSkillsService).toBe("function");
+    const factory = skillsPluginFactory(DEFAULT_SKILLS);
+    const plugin = factory();
+    expect(typeof plugin.onLoad).toBe("function");
+    expect(typeof plugin.onEnable).toBe("function");
+    expect(typeof plugin.onDisable).toBe("function");
+  });
+
+  it("re-exports DEFAULT_SKILLS (the 6-skill OSRS starter pack)", () => {
+    expect(DEFAULT_SKILLS).toHaveLength(6);
+    expect(DEFAULT_SKILLS.map((s) => s.id)).toContain(
+      "com.hyperforge.skills.attack",
+    );
+    expect(DEFAULT_SKILLS.map((s) => s.id)).toContain(
+      "com.hyperforge.skills.hitpoints",
     );
   });
 });

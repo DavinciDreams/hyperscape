@@ -13,9 +13,13 @@
     {
       "id": "com.hyperforge.combat",
       "versionRange": "^0.1.0"
+    },
+    {
+      "id": "com.hyperforge.skills",
+      "versionRange": "^0.1.0"
     }
   ],
-  "loadAfter": ["com.hyperforge.combat"],
+  "loadAfter": ["com.hyperforge.combat", "com.hyperforge.skills"],
   "enabledByDefault": false,
   "contributions": {
     "systems": [],

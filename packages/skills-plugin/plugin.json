@@ -1,0 +1,25 @@
+{
+  "id": "com.hyperforge.skills",
+  "name": "Skills",
+  "version": "0.1.0",
+  "description": "Reference skills plugin. Registers a starter pack of OSRS-style skills (attack, strength, hitpoints, woodcutting, fishing, cooking) on a caller-supplied SkillsService. Ships alongside @hyperforge/combat as the second concrete reference plugin.",
+  "entry": "./dist/index.js",
+  "author": {
+    "name": "Hyperforge"
+  },
+  "license": "GPL-3.0",
+  "hyperforgeApi": "0.1.0",
+  "dependencies": [],
+  "loadAfter": [],
+  "enabledByDefault": false,
+  "contributions": {
+    "systems": ["com.hyperforge.skills.xp-system"],
+    "entities": [],
+    "widgets": ["com.hyperforge.skills.skill-panel"],
+    "manifestSchemas": ["com.hyperforge.skills.definitions"],
+    "paletteCategories": [],
+    "toolbarTools": [],
+    "commands": ["com.hyperforge.skills.commands.add-xp"]
+  },
+  "tags": ["reference", "skills", "progression"]
+}

@@ -1,9 +1,9 @@
 {
-  "name": "@hyperforge/hyperscape",
+  "name": "@hyperforge/skills",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Meta-plugin for the Hyperia game. Composes the constituent gameplay plugins (combat, skills, gathering, prayer, banking, …) into a single 'all of Hyperia' surface that hosts can load with one entry. The engine core has zero Hyperia-specific imports — everything game-specific is contributed through this package.",
+  "description": "Reference skills plugin built on @hyperforge/gameplay-framework. Ships a small starter pack of OSRS-style skills (attack, strength, hitpoints, woodcutting, fishing, cooking) on a caller-supplied SkillsService. Demonstrates the full author surface — onLoad validation, onEnable registration, scope-tracked teardown — without depending on @hyperforge/shared internals.",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -30,10 +30,8 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@hyperforge/combat": "*",
     "@hyperforge/gameplay-framework": "*",
-    "@hyperforge/manifest-schema": "*",
-    "@hyperforge/skills": "*"
+    "@hyperforge/manifest-schema": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
