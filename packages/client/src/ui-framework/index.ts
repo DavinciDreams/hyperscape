@@ -22,7 +22,13 @@ export {
   TooltipWidget,
 } from "@hyperforge/ui-widgets";
 
-export { DEFAULT_UI_LAYOUT, DEFAULT_UI_LAYOUT_ID } from "./defaultLayout";
+export {
+  DEFAULT_UI_LAYOUT,
+  DEFAULT_UI_LAYOUT_ID,
+  SHOOTER_DEMO_UI_LAYOUT,
+  SHOOTER_DEMO_UI_LAYOUT_ID,
+  getDefaultUILayoutForGame,
+} from "./defaultLayout";
 
 export { buildPlayerDataContext } from "./dataContext";
 export type { PlayerDataSnapshot } from "./dataContext";

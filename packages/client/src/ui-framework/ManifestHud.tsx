@@ -24,7 +24,8 @@ import {
   bindAllWidgets,
 } from "./bindings";
 import { buildPlayerDataContext } from "./dataContext";
-import { DEFAULT_UI_LAYOUT } from "./defaultLayout";
+import { getDefaultUILayoutForGame } from "./defaultLayout";
+import { resolveGamePluginSetIdFromEnv } from "../startup/plugins";
 import { ManifestRenderer } from "./ManifestRenderer";
 import { isManifestHudEnabled } from "./featureFlag";
 import { resolveThemeById } from "./themeRegistry";
@@ -65,11 +66,17 @@ export const ManifestHud = memo(function ManifestHud() {
   );
 
   // Fetch the team's active layout when the studio has provided a
-  // team/game context. Falls back to the hand-coded `DEFAULT_UI_LAYOUT`
-  // while loading, on error, or when no studio context is configured —
-  // so the HUD always has *something* to render.
+  // team/game context. Falls back to the per-game built-in default
+  // (Hyperscape's or shooter-demo's minimal crosshair layout) while
+  // loading, on error, or when no studio context is configured — so
+  // the HUD always has *something* to render. The game-id resolver
+  // reads `VITE_HYPERSCAPE_GAME_PLUGIN` + the editor's localStorage
+  // preference, matching what `bootClientPlugins` uses to decide
+  // which plugin set to load.
   const { layout: activeLayout } = useActiveUILayout();
-  const authoredLayout = activeLayout ?? DEFAULT_UI_LAYOUT;
+  const activeGameId = resolveGamePluginSetIdFromEnv();
+  const authoredLayout =
+    activeLayout ?? getDefaultUILayoutForGame(activeGameId);
 
   // U9: pick the matching author-time variant for this viewport, if
   // any. `applyLayoutVariant` is a no-op when `viewport` is null or
