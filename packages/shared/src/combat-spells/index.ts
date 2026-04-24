@@ -2,6 +2,7 @@ import { CombatSpellsRegistry } from "./CombatSpellsRegistry.js";
 
 export {
   type CombatSpellTier,
+  type CombatSpellsReloadListener,
   CombatSpellsNotLoadedError,
   CombatSpellsRegistry,
   UnknownCombatSpellError,

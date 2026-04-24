@@ -691,6 +691,18 @@ export {
   SkillIconsNotLoadedError,
   UnknownSkillDefinitionError,
 } from "./skill-icons/index";
+
+// combat-spells runtime registry — same shape as xpCurveRegistry.
+// SpellService reads through this registry; React spellbook panel
+// subscribes to `onReloaded` to invalidate memoized spell lists.
+export {
+  combatSpellsRegistry,
+  CombatSpellsRegistry,
+  CombatSpellsNotLoadedError,
+  UnknownCombatSpellError,
+  type CombatSpellTier,
+  type CombatSpellsReloadListener,
+} from "./combat-spells/index";
 export {
   FOOTPRINT_SIZES,
   resolveFootprint,

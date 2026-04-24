@@ -41,7 +41,12 @@ import {
   PANEL_SLOT_RADIUS,
 } from "../../constants/panelLayout";
 import type { PlayerStats, ClientWorld } from "../../types";
-import { spellService, EventType, type Spell } from "@hyperforge/shared";
+import {
+  spellService,
+  combatSpellsRegistry,
+  EventType,
+  type Spell,
+} from "@hyperforge/shared";
 
 // Spell panel layout constants — use shared sizing tokens from panelLayout.ts
 // to ensure consistency across Prayer, Spells, Skills, and Inventory panels.
@@ -293,8 +298,24 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
     y: 0,
     spell: null,
   });
+  // Bumped whenever `combatSpellsRegistry` reloads (PIE hot-reload of
+  // combat-spells.json). Perturbs the `spells` useMemo dep so the
+  // grid recomputes on authored edits without a Stop/Play.
+  const [spellsRevision, setSpellsRevision] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Re-render spell grid on PIE hot-reload of `combat-spells.json`.
+  // SpellService reads through `combatSpellsRegistry`, so the data
+  // is always fresh — but the `spells` useMemo below holds a stale
+  // closure until something invalidates it. Bumping `spellsRevision`
+  // is the cheapest way to force the recompute.
+  useEffect(() => {
+    const unsubscribe = combatSpellsRegistry.onReloaded(() => {
+      setSpellsRevision((r) => r + 1);
+    });
+    return unsubscribe;
+  }, []);
 
   const playerMagicLevel = stats?.skills?.magic?.level ?? 1;
 
@@ -353,7 +374,7 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
       isSelected: selectedSpellId === spell.id,
       canCast: playerMagicLevel >= spell.level,
     }));
-  }, [selectedSpellId, playerMagicLevel]);
+  }, [selectedSpellId, playerMagicLevel, spellsRevision]);
 
   // Select/deselect spell (set autocast)
   const selectSpell = useCallback(
