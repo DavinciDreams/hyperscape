@@ -28,7 +28,39 @@ import {
   snapshotCatalogResolution,
   type AggregatedContributions,
 } from "@hyperforge/gameplay-framework";
+import { PluginManifestSchema } from "@hyperforge/manifest-schema";
 import path from "path";
+
+/**
+ * Phase I5 community plugin registry — in-memory storage for the
+ * substrate cut. Production will swap this for the deployment's
+ * persistent store (postgres / s3 / cdn) without changing the
+ * route surface or the publish payload shape.
+ *
+ * Keyed by `${manifest.id}@${manifest.version}` so the same plugin
+ * id can have multiple versions; same id+version is treated as a
+ * conflict (409). Stored entries carry the bundle descriptor +
+ * server-assigned timestamp + monotonic registryId.
+ */
+interface RegistryEntry {
+  readonly registryId: string;
+  readonly id: string;
+  readonly version: string;
+  readonly publishedAt: string;
+  readonly bundle: unknown;
+}
+
+const registry = new Map<string, RegistryEntry>();
+let registryIdCounter = 0;
+
+/**
+ * Test-only reset hook. Routes module exports it for the
+ * forthcoming integration tests; production never calls it.
+ */
+export function _resetPluginRegistryForTests(): void {
+  registry.clear();
+  registryIdCounter = 0;
+}
 
 export const pluginRoutes = new Elysia({ prefix: "/api", name: "plugins" })
   .get(
@@ -139,6 +171,159 @@ export const pluginRoutes = new Elysia({ prefix: "/api", name: "plugins" })
         summary: "Plugin session snapshot",
         description:
           "Walks the plugin catalog at `dir`, resolves load order + dependencies, and returns the JSON-friendly SessionSnapshot — same wire shape produced by `hyperforge-plugin snapshot --json`. Editor uses this for the Plugin Browser status grid.",
+      },
+    },
+  )
+  .post(
+    "/plugins",
+    async ({ body, set }) => {
+      // Phase I5 community registry endpoint — accepts the bundle
+      // descriptor produced by `hyperforge-plugin publish`. The
+      // descriptor IS the publish payload (no separate tarball
+      // upload yet — that's a future cut).
+      //
+      // Validation:
+      //   1. body must be an object with a `manifest` key
+      //   2. manifest must parse through PluginManifestSchema
+      //   3. id+version pair must not already exist (409 conflict)
+      //
+      // On success: returns 201 + the stored entry's registryId,
+      // publishedAt timestamp, and registry-relative URL the client
+      // can fetch the bundle from later.
+      if (typeof body !== "object" || body === null) {
+        set.status = 400;
+        return { ok: false as const, error: "request body must be an object" };
+      }
+      const bodyObj = body as Record<string, unknown>;
+      if (
+        bodyObj.manifest === undefined ||
+        typeof bodyObj.manifest !== "object"
+      ) {
+        set.status = 400;
+        return {
+          ok: false as const,
+          error: "request body missing required `manifest` field",
+        };
+      }
+
+      const manifestParse = PluginManifestSchema.safeParse(bodyObj.manifest);
+      if (!manifestParse.success) {
+        set.status = 400;
+        return {
+          ok: false as const,
+          error: "manifest failed schema validation",
+          issues: manifestParse.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        };
+      }
+      const manifest = manifestParse.data;
+
+      const key = `${manifest.id}@${manifest.version}`;
+      if (registry.has(key)) {
+        set.status = 409;
+        return {
+          ok: false as const,
+          error: `plugin ${manifest.id}@${manifest.version} already published — bump version to publish again`,
+        };
+      }
+
+      const registryId = `reg_${(++registryIdCounter).toString(36)}`;
+      const publishedAt = new Date().toISOString();
+      const entry: RegistryEntry = {
+        registryId,
+        id: manifest.id,
+        version: manifest.version,
+        publishedAt,
+        bundle: bodyObj,
+      };
+      registry.set(key, entry);
+
+      set.status = 201;
+      return {
+        ok: true as const,
+        registryId,
+        id: manifest.id,
+        version: manifest.version,
+        publishedAt,
+        url: `/api/plugins/registry/${manifest.id}/${manifest.version}`,
+      };
+    },
+    {
+      // Body shape varies (the bundle descriptor schema isn't
+      // pinned here — we validate it manually above so we can
+      // return rich error payloads). Accept arbitrary JSON.
+      body: t.Unknown(),
+      detail: {
+        tags: ["Plugins"],
+        summary: "Publish a plugin bundle",
+        description:
+          "Accepts the bundle descriptor produced by `hyperforge-plugin publish`. Validates the manifest against PluginManifestSchema, checks for id+version uniqueness, and stores the entry. Returns 201 + registryId on success, 400 on bad payload, 409 on duplicate id+version.",
+      },
+    },
+  )
+  .get(
+    "/plugins/registry",
+    () => {
+      // List all published bundles. Ordered by publishedAt desc
+      // (newest first) so the editor's Plugin Browser can render
+      // a "recently published" feed without further sort.
+      const entries = Array.from(registry.values()).sort((a, b) =>
+        b.publishedAt.localeCompare(a.publishedAt),
+      );
+      return {
+        ok: true as const,
+        count: entries.length,
+        entries: entries.map((e) => ({
+          registryId: e.registryId,
+          id: e.id,
+          version: e.version,
+          publishedAt: e.publishedAt,
+          url: `/api/plugins/registry/${e.id}/${e.version}`,
+        })),
+      };
+    },
+    {
+      detail: {
+        tags: ["Plugins"],
+        summary: "List published plugins",
+        description:
+          "Returns every entry in the in-memory plugin registry, ordered newest-first. Each entry carries id, version, publishedAt, registryId, and the URL to fetch the full bundle. Editor's Plugin Browser fetches this for the catalog view.",
+      },
+    },
+  )
+  .get(
+    "/plugins/registry/:id/:version",
+    ({ params, set }) => {
+      const key = `${params.id}@${params.version}`;
+      const entry = registry.get(key);
+      if (!entry) {
+        set.status = 404;
+        return {
+          ok: false as const,
+          error: `plugin ${params.id}@${params.version} not found in registry`,
+        };
+      }
+      return {
+        ok: true as const,
+        registryId: entry.registryId,
+        id: entry.id,
+        version: entry.version,
+        publishedAt: entry.publishedAt,
+        bundle: entry.bundle,
+      };
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+        version: t.String(),
+      }),
+      detail: {
+        tags: ["Plugins"],
+        summary: "Fetch a published plugin bundle",
+        description:
+          "Returns the full bundle descriptor for the specified id+version, or 404 if not in the registry. Future install command consumes this URL to download + verify a plugin.",
       },
     },
   );
