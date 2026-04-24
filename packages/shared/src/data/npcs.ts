@@ -23,6 +23,7 @@
 import {
   NpcsManifestSchema,
   type NpcsManifest,
+  type NpcDefinitionsManifest,
 } from "@hyperforge/manifest-schema";
 
 import type { NPCData, NPCCategory } from "../types/core/core";
@@ -269,4 +270,10 @@ export function hotReloadNPCs(npcs: readonly NPCData[]): void {
   for (const npc of npcs) {
     ALL_NPCS.set(npc.id, npc);
   }
+  // Sync npcDefinitionsRegistry so the registry-prefer branch in
+  // getNPCById picks up the new catalog. Cast at the boundary —
+  // NPCData is structurally compatible with NpcDefinition (NPCData
+  // narrows sub-objects further but consumers reading the wider
+  // shape don't notice).
+  npcDefinitionsRegistry.load(npcs as unknown as NpcDefinitionsManifest);
 }
