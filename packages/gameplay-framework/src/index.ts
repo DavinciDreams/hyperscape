@@ -57,10 +57,43 @@ export {
  * The `scope` is a caller-controlled disposer registry — authors attach
  * cleanup callbacks during `onLoad`/`onEnable` and the host drains them
  * LIFO on disable.
+ *
+ * `widgets` is optional — present only when the host supports UI
+ * widget contributions (today: the asset-forge editor + the live
+ * browser client via `bootClientPlugins`). Plugins that want to ship
+ * React/Solid/... components check `if (ctx.widgets) ...` and call
+ * `register(...)`. Hosts without a UI renderer (the dedicated server)
+ * leave this undefined.
  */
 export interface PluginContextBase {
   readonly pluginId: string;
   readonly scope: PluginContextScopeHandle;
+  readonly widgets?: WidgetContributionRegistry;
+}
+
+/**
+ * Opaque widget contribution a plugin hands to the host. The
+ * `widget` field is the widget definition (schema + manifest);
+ * `Component` is the concrete renderer (React / Solid / custom).
+ * Both typed as `unknown` so `@hyperforge/gameplay-framework` stays
+ * UI-framework-agnostic — the host's adapter casts to the shape its
+ * renderer registry expects (today: `@hyperforge/ui-framework`'s
+ * `WidgetRegistration<P, ReactComponent>`).
+ */
+export interface WidgetContribution {
+  readonly widget: unknown;
+  readonly Component: unknown;
+}
+
+/**
+ * Host-supplied registry for plugin widget contributions. Adapters
+ * forward each `register` call into the process-wide renderer
+ * registry (e.g. the asset-forge editor's `uiRegistry` or the live
+ * client's equivalent). Unregistration is handled by the plugin's
+ * scope disposer — the host's adapter wires that up.
+ */
+export interface WidgetContributionRegistry {
+  register(contribution: WidgetContribution): void;
 }
 
 /**

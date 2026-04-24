@@ -32,9 +32,16 @@
   "dependencies": {
     "@hyperforge/combat": "*",
     "@hyperforge/gameplay-framework": "*",
-    "@hyperforge/manifest-schema": "*"
+    "@hyperforge/manifest-schema": "*",
+    "@hyperforge/ui-framework": "*",
+    "zod": "^4.1.11"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.6"
   },

@@ -26,9 +26,13 @@ import {
   type LoadedPluginModule,
   type PluginContextBase,
   type PluginSession,
+  type WidgetContribution,
+  type WidgetContributionRegistry,
   startPluginSessionFromModules,
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
+import type { WidgetRegistration } from "@hyperforge/ui-framework";
+import type { UIWidgetComponent } from "@hyperforge/ui-widgets";
 
 import {
   combatPluginFactory,
@@ -164,9 +168,22 @@ function getClientPluginModules(
  * Returns the session so callers can `session.stop()` on unmount
  * for clean disposer teardown.
  */
+/**
+ * Minimal shape `bootClientPlugins` needs from the host's UI widget
+ * registry. `GameClient` passes the concrete `@hyperforge/ui-widgets`
+ * `uiRegistry` here; tests + the server pass `undefined` and the
+ * plugin's widget-contribution code no-ops.
+ */
+export interface UIWidgetRegistryLike {
+  register(
+    reg: WidgetRegistration<Record<string, unknown>, UIWidgetComponent>,
+  ): void;
+}
+
 export async function bootClientPlugins(
   world: World,
   gameId: GamePluginSetId = resolveGamePluginSetIdFromEnv(),
+  uiWidgetRegistry?: UIWidgetRegistryLike,
 ): Promise<PluginSession<PluginContextBase>> {
   const modules = getClientPluginModules(gameId);
   console.log(
@@ -208,13 +225,37 @@ export async function bootClientPlugins(
           return ctx as PluginContextBase;
         }
         case shooterDemoManifest.id: {
-          // Shooter demo contributes combat abilities through the
-          // same CombatContext shape combat itself uses. See the
-          // parallel comment in packages/server/src/startup/plugins.ts.
+          // Shooter demo contributes combat abilities AND (if the
+          // host supplied a UI widget registry) a crosshair widget.
+          // Server-side callers pass `undefined` for the registry —
+          // the plugin's onEnable optional-chain on `ctx.widgets`
+          // turns the widget call into a no-op. Browser callers via
+          // GameClient pass the real `uiRegistry`.
           const service = getCombatService();
-          const ctx: CombatContext = {
+          const widgets: WidgetContributionRegistry | undefined =
+            uiWidgetRegistry
+              ? {
+                  register(contribution: WidgetContribution) {
+                    const reg = contribution as unknown as WidgetRegistration<
+                      Record<string, unknown>,
+                      UIWidgetComponent
+                    >;
+                    uiWidgetRegistry.register(reg);
+                    scope.register(() => {
+                      // ui-framework's WidgetRegistry does not yet
+                      // expose unregister — this disposer is a
+                      // placeholder so the plugin-lifecycle contract
+                      // is honored. When the registry grows an
+                      // unregister method we drop the no-op.
+                      void reg;
+                    });
+                  },
+                }
+              : undefined;
+          const ctx: CombatContext & PluginContextBase = {
             pluginId,
             scope,
+            widgets,
             registerAbility(ability) {
               service.registerAbility(ability);
               scope.register(() => service.unregisterAbility(ability.id));

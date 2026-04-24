@@ -42,6 +42,8 @@ import {
 } from "@hyperforge/combat";
 
 import {
+  crosshairRegistration,
+  crosshairWidget,
   manifest as shooterManifest,
   SHOOT_ABILITY,
   shooterDemoPluginFactory,
@@ -73,6 +75,101 @@ describe("@hyperforge/plugin-shooter-demo — unit", () => {
   it("default ability set contains 'demo-shoot'", () => {
     expect(SHOOT_ABILITY.id).toBe("demo-shoot");
     expect(SHOOT_ABILITY.kind).toBe("ranged");
+  });
+
+  it("ships a crosshair widget definition + React component", () => {
+    expect(crosshairWidget.manifest.id).toBe(
+      "com.hyperforge.shooter-demo.crosshair",
+    );
+    expect(crosshairWidget.manifest.category).toBe("hud");
+    expect(crosshairRegistration.widget).toBe(crosshairWidget);
+    expect(typeof crosshairRegistration.Component).toBe("function");
+  });
+});
+
+describe("@hyperforge/plugin-shooter-demo — widget contribution", () => {
+  it("onEnable calls ctx.widgets.register when the host provides a registry", async () => {
+    const registered: unknown[] = [];
+    const service = createCombatAbilityService();
+
+    const modules: ReadonlyArray<LoadedPluginModule<PluginContextBase>> = [
+      {
+        manifest: combatManifest,
+        factory: combatPluginFactory([]),
+      },
+      {
+        manifest: shooterManifest,
+        factory: shooterDemoPluginFactory(),
+      },
+    ];
+
+    const session = await startPluginSessionFromModules(modules, {
+      contextFactory: ({ pluginId, scope }) => {
+        const ctx: CombatContext & PluginContextBase = {
+          pluginId,
+          scope,
+          registerAbility(ability) {
+            service.registerAbility(ability);
+            scope.register(() => service.unregisterAbility(ability.id));
+          },
+          widgets: {
+            register(contribution) {
+              registered.push(contribution);
+            },
+          },
+        };
+        return ctx as PluginContextBase;
+      },
+    });
+
+    // Ability side: the "demo-shoot" ability landed in the service.
+    expect(service.getAbility("demo-shoot")).toBeDefined();
+
+    // Widget side: the crosshair registration landed in the host's
+    // widget tracker. The contribution object is exactly what
+    // shooter-demo exports.
+    expect(registered).toHaveLength(1);
+    expect(registered[0]).toBe(crosshairRegistration);
+
+    await session.stop();
+  });
+
+  it("onEnable skips widget registration when the host does NOT provide a registry", async () => {
+    // Mirrors the dedicated-server case: no widget renderer, no
+    // `ctx.widgets` field on the context. Plugin's optional-chain
+    // guard means onEnable runs clean.
+    const service = createCombatAbilityService();
+
+    const modules: ReadonlyArray<LoadedPluginModule<PluginContextBase>> = [
+      {
+        manifest: combatManifest,
+        factory: combatPluginFactory([]),
+      },
+      {
+        manifest: shooterManifest,
+        factory: shooterDemoPluginFactory(),
+      },
+    ];
+
+    const session = await startPluginSessionFromModules(modules, {
+      contextFactory: ({ pluginId, scope }) => {
+        const ctx: CombatContext = {
+          pluginId,
+          scope,
+          registerAbility(ability) {
+            service.registerAbility(ability);
+            scope.register(() => service.unregisterAbility(ability.id));
+          },
+          // No `widgets` field — server-style host.
+        };
+        return ctx as PluginContextBase;
+      },
+    });
+
+    expect(session.failedPackages).toEqual([]);
+    expect(service.getAbility("demo-shoot")).toBeDefined();
+
+    await session.stop();
   });
 });
 

@@ -42,6 +42,8 @@ import type {
 } from "@hyperforge/gameplay-framework";
 import { type CombatAbility, type CombatContext } from "@hyperforge/combat";
 
+import { crosshairRegistration } from "./widgets/CrosshairWidget.js";
+
 /**
  * The minimal ability this demo plugin contributes. Chosen
  * specifically to have NO overlap with the Hyperscape starter pack
@@ -83,6 +85,14 @@ export function shooterDemoPluginFactory(
         for (const ability of abilities) {
           ctx.registerAbility(ability);
         }
+
+        // Widget contribution — optional; hosts without a UI
+        // renderer (dedicated server) leave `ctx.widgets` undefined
+        // and this block no-ops. Browser client + asset-forge editor
+        // provide the adapter and the crosshair appears on screen.
+        if (ctx.widgets) {
+          ctx.widgets.register(crosshairRegistration);
+        }
       },
 
       onDisable(_ctx) {
@@ -95,6 +105,16 @@ export function shooterDemoPluginFactory(
 }
 
 export { manifest } from "./manifest.js";
+
+// Widget surface — re-exported so hosts that pre-register widgets
+// out-of-band (editor palette, offline validators) can grab the
+// registration without calling through the plugin lifecycle.
+export {
+  Crosshair,
+  crosshairPropsSchema,
+  crosshairRegistration,
+  crosshairWidget,
+} from "./widgets/CrosshairWidget.js";
 
 /**
  * Default factory — the shape a host loader expects when it calls

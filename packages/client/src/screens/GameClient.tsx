@@ -405,7 +405,12 @@ export function GameClient({
       // Each system self-gates `init()` on `world.isServer`, so the
       // bilateral registration is harmless on the client side.
       const { bootClientPlugins } = await import("../startup/plugins");
-      const pluginSession = await bootClientPlugins(world);
+      const { uiRegistry } = await import("../ui-framework/bindings");
+      const pluginSession = await bootClientPlugins(
+        world,
+        undefined,
+        uiRegistry,
+      );
       (world as { pluginSession?: typeof pluginSession }).pluginSession =
         pluginSession;
 
