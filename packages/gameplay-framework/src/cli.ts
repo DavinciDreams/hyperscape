@@ -35,7 +35,13 @@ import {
   formatSnapshotHuman,
   formatUnresolvableReason,
 } from "./diagnostics.js";
-import { snapshotCatalogResolution, type SessionSnapshot } from "./snapshot.js";
+import {
+  diffSessionSnapshots,
+  formatSnapshotJson,
+  snapshotCatalogResolution,
+  type SessionSnapshot,
+  type SessionSnapshotDiff,
+} from "./snapshot.js";
 
 /** Hard-coded so the CLI has no JSON-import dep. Keep in sync with package.json. */
 const CLI_VERSION = "0.1.0";
@@ -128,6 +134,10 @@ export async function runCli(
 
   if (sub === "snapshot") {
     return runSnapshot(rest, io);
+  }
+
+  if (sub === "diff") {
+    return runDiff(rest, io);
   }
 
   io.stderr(`Unknown subcommand: ${sub}\n`);
@@ -1016,6 +1026,171 @@ async function runSnapshot(
   return 0;
 }
 
+/**
+ * Handler for `diff <baseline.json> <current.json> [--human] [--compact]`.
+ *
+ * Reads two snapshot JSON files (typically produced by
+ * `hyperforge-plugin snapshot <dir> > snap.json`) and prints a
+ * structural diff via {@link diffSessionSnapshots} +
+ * {@link formatSnapshotJson}.
+ *
+ * Output modes:
+ *   - default: pretty-printed deterministic JSON (indent=2, sorted keys)
+ *   - `--compact`: single-line JSON (indent=0)
+ *   - `--human`: short ASCII summary (counts + reclassified ids)
+ *
+ * Exit codes:
+ *   - 0 if the diff was emitted successfully
+ *   - 1 on file-read or JSON-parse error
+ *   - 2 on usage error
+ *
+ * Use cases:
+ *   - CI regression gate: snapshot at a known-good commit, then diff
+ *     against the current branch to flag missing/changed/added plugins
+ *   - Editor "what changed?" preview after a hot-reload
+ *   - Bug-report bundles where you want the reader to see deltas
+ *     instead of two raw snapshots
+ */
+async function runDiff(rest: readonly string[], io: CliIO): Promise<number> {
+  let baselinePath: string | undefined;
+  let currentPath: string | undefined;
+  let human = false;
+  let compact = false;
+
+  for (let i = 0; i < rest.length; i++) {
+    const token = rest[i]!;
+    if (token === "--human") {
+      human = true;
+      continue;
+    }
+    if (token === "--compact") {
+      compact = true;
+      continue;
+    }
+    if (token.startsWith("--")) {
+      io.stderr(`Unknown flag: ${token}\n`);
+      return 2;
+    }
+    if (baselinePath === undefined) {
+      baselinePath = token;
+      continue;
+    }
+    if (currentPath === undefined) {
+      currentPath = token;
+      continue;
+    }
+    io.stderr(`Unexpected argument: ${token}\n`);
+    return 2;
+  }
+
+  if (baselinePath === undefined || currentPath === undefined) {
+    io.stderr("diff: missing required path arguments\n");
+    io.stderr(
+      "Usage: hyperforge-plugin diff <baseline.json> <current.json> [--human] [--compact]\n",
+    );
+    return 2;
+  }
+
+  const baselineAbs = path.isAbsolute(baselinePath)
+    ? baselinePath
+    : path.resolve(io.cwd(), baselinePath);
+  const currentAbs = path.isAbsolute(currentPath)
+    ? currentPath
+    : path.resolve(io.cwd(), currentPath);
+
+  let baseline: SessionSnapshot;
+  let current: SessionSnapshot;
+  try {
+    baseline = JSON.parse(
+      await fs.readFile(baselineAbs, "utf8"),
+    ) as SessionSnapshot;
+    current = JSON.parse(
+      await fs.readFile(currentAbs, "utf8"),
+    ) as SessionSnapshot;
+  } catch (err) {
+    io.stderr(`diff: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+
+  const diff: SessionSnapshotDiff = diffSessionSnapshots(baseline, current);
+
+  if (human) {
+    io.stdout(formatDiffHuman(diff));
+  } else {
+    io.stdout(formatSnapshotJson(diff, { indent: compact ? 0 : 2 }) + "\n");
+  }
+  return 0;
+}
+
+/**
+ * Compact human-readable summary of a {@link SessionSnapshotDiff}.
+ * Intentionally short — for the full structured payload, omit
+ * `--human` and read the JSON.
+ */
+function formatDiffHuman(diff: SessionSnapshotDiff): string {
+  const lines: string[] = [];
+  lines.push(
+    `Plugin session diff: running ${signed(diff.summary.runningDelta)}, unresolvable ${signed(diff.summary.unresolvableDelta)}, failed ${signed(diff.summary.failedDelta)}`,
+  );
+  if (diff.running.added.length > 0) {
+    lines.push(
+      `  + Running added (${diff.running.added.length}): ${diff.running.added.map((r) => r.manifest.id).join(", ")}`,
+    );
+  }
+  if (diff.running.removed.length > 0) {
+    lines.push(
+      `  - Running removed (${diff.running.removed.length}): ${diff.running.removed.map((r) => r.manifest.id).join(", ")}`,
+    );
+  }
+  if (diff.running.changed.length > 0) {
+    lines.push(
+      `  ~ Running changed (${diff.running.changed.length}): ${diff.running.changed.map((c) => c.next.manifest.id).join(", ")}`,
+    );
+  }
+  if (diff.unresolvable.added.length > 0) {
+    lines.push(
+      `  + Unresolvable added (${diff.unresolvable.added.length}): ${diff.unresolvable.added.map((r) => r.manifest.id).join(", ")}`,
+    );
+  }
+  if (diff.unresolvable.removed.length > 0) {
+    lines.push(
+      `  - Unresolvable removed (${diff.unresolvable.removed.length}): ${diff.unresolvable.removed.map((r) => r.manifest.id).join(", ")}`,
+    );
+  }
+  if (diff.failedPackages.added.length > 0) {
+    lines.push(
+      `  + Failed packages added (${diff.failedPackages.added.length}): ${diff.failedPackages.added.map((f) => f.baseDir).join(", ")}`,
+    );
+  }
+  if (diff.failedPackages.removed.length > 0) {
+    lines.push(
+      `  - Failed packages removed (${diff.failedPackages.removed.length}): ${diff.failedPackages.removed.map((f) => f.baseDir).join(", ")}`,
+    );
+  }
+  if (diff.reclassified.length > 0) {
+    lines.push(
+      `  ↔ Reclassified (${diff.reclassified.length}): ${diff.reclassified.map((r) => `${r.id} (${r.prev} → ${r.next})`).join(", ")}`,
+    );
+  }
+  if (
+    diff.running.added.length === 0 &&
+    diff.running.removed.length === 0 &&
+    diff.running.changed.length === 0 &&
+    diff.unresolvable.added.length === 0 &&
+    diff.unresolvable.removed.length === 0 &&
+    diff.failedPackages.added.length === 0 &&
+    diff.failedPackages.removed.length === 0 &&
+    diff.reclassified.length === 0
+  ) {
+    lines.push("  (no changes)");
+  }
+  return lines.join("\n") + "\n";
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : String(n);
+}
+
 /** Template for the generated `src/index.ts`. */
 const SRC_INDEX_TEMPLATE = `import type {
   HyperforgePlugin,
@@ -1063,6 +1238,7 @@ Usage:
   hyperforge-plugin show <dir> [--manifest-filename <name>] [--json]
   hyperforge-plugin graph <dir> [--host-api <range>] [--format ascii|dot|json]
   hyperforge-plugin snapshot <dir> [--host-api <range>] [--human]
+  hyperforge-plugin diff <baseline.json> <current.json> [--human] [--compact]
   hyperforge-plugin --help
   hyperforge-plugin --version
 
@@ -1099,4 +1275,14 @@ Subcommands:
                     multiline report. Exit 0 on successful catalog
                     read; per-package failures do NOT change the
                     exit code (use \`lint\` for pass/fail).
+  diff <a> <b>      Compute a structural diff between two snapshot
+                    JSON files (typically produced by \`snapshot >\`).
+                    Default output is deterministic pretty JSON
+                    (sorted keys, indent 2); pass \`--compact\` for
+                    single-line JSON or \`--human\` for an ASCII
+                    summary. CI regression gates: snapshot at a
+                    known-good commit, then \`diff\` against the
+                    current branch to flag missing/changed/added
+                    plugins. Exit 0 on success, 1 on read/parse
+                    error.
 `;

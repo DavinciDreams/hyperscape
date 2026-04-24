@@ -20,7 +20,7 @@
  *   - `validate <dir>` with extra positional → error on stderr, exit 2
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliIO } from "../cli.js";
 
@@ -976,5 +976,193 @@ describe("runCli — snapshot subcommand", () => {
     const code = await runCli(["snapshot", "/abs/plugins"], io);
     expect(code).toBe(1);
     expect(stderr()).toContain("snapshot: ENOENT /abs/plugins");
+  });
+});
+
+describe("runCli — diff subcommand", () => {
+  // Diff reads files via fs directly (no IO injection seam yet — CI
+  // gate use-case calls for the CLI to read real on-disk JSON). Tests
+  // write to a tmp dir + clean up after each case.
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    const os = await import("node:os");
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    tmpDir = await fs.mkdtemp(
+      pathMod.join(os.tmpdir(), "hyperforge-diff-test-"),
+    );
+  });
+
+  afterEach(async () => {
+    const fs = await import("node:fs/promises");
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function emptySnap() {
+    return {
+      running: [],
+      unresolvable: [],
+      failedPackages: [],
+      summary: {
+        runningCount: 0,
+        unresolvableCount: 0,
+        failedCount: 0,
+      },
+    };
+  }
+
+  function snapWithRunning(...ids: string[]) {
+    const running = ids.map((id) => ({
+      manifest: {
+        id,
+        name: id,
+        version: "1.0.0",
+        description: "",
+        hyperforgeApi: "0.1.0",
+        enabledByDefault: true,
+        tags: [],
+      },
+      dependencies: [],
+      loadAfter: [],
+      contributions: {
+        systems: 0,
+        entities: 0,
+        widgets: 0,
+        manifestSchemas: 0,
+        paletteCategories: 0,
+        toolbarTools: 0,
+        commands: 0,
+      },
+    }));
+    return {
+      running,
+      unresolvable: [],
+      failedPackages: [],
+      summary: {
+        runningCount: running.length,
+        unresolvableCount: 0,
+        failedCount: 0,
+      },
+    };
+  }
+
+  async function writeSnap(name: string, value: unknown): Promise<string> {
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    const p = pathMod.join(tmpDir, name);
+    await fs.writeFile(p, JSON.stringify(value, null, 2));
+    return p;
+  }
+
+  it("diff with no args → exit 2 + usage on stderr", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["diff"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("missing required path arguments");
+  });
+
+  it("diff with one path arg → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["diff", "/some/file.json"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("missing required path arguments");
+  });
+
+  it("diff with unknown flag → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["diff", "--gibberish"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("Unknown flag: --gibberish");
+  });
+
+  it("identical snapshots → empty diff JSON, exit 0", async () => {
+    const a = await writeSnap("a.json", emptySnap());
+    const b = await writeSnap("b.json", emptySnap());
+    const { io, stdout } = mkIO();
+    const code = await runCli(["diff", a, b], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as ReturnType<typeof emptySnap> & {
+      reclassified: unknown[];
+      summary: { runningDelta: number };
+    };
+    expect(parsed.running).toEqual({ added: [], removed: [], changed: [] });
+    expect(parsed.reclassified).toEqual([]);
+    expect(parsed.summary.runningDelta).toBe(0);
+  });
+
+  it("snapshots with diff → emits added/removed in JSON output", async () => {
+    const a = await writeSnap("a.json", snapWithRunning("com.test.a"));
+    const b = await writeSnap("b.json", snapWithRunning("com.test.b"));
+    const { io, stdout } = mkIO();
+    const code = await runCli(["diff", a, b], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      running: {
+        added: { manifest: { id: string } }[];
+        removed: { manifest: { id: string } }[];
+      };
+    };
+    expect(parsed.running.added).toHaveLength(1);
+    expect(parsed.running.added[0]!.manifest.id).toBe("com.test.b");
+    expect(parsed.running.removed).toHaveLength(1);
+    expect(parsed.running.removed[0]!.manifest.id).toBe("com.test.a");
+  });
+
+  it("--compact emits single-line JSON", async () => {
+    const a = await writeSnap("a.json", snapWithRunning("com.test.a"));
+    const b = await writeSnap(
+      "b.json",
+      snapWithRunning("com.test.a", "com.test.b"),
+    );
+    const { io, stdout } = mkIO();
+    const code = await runCli(["diff", a, b, "--compact"], io);
+    expect(code).toBe(0);
+    // Compact JSON has no leading whitespace + a single line of content
+    // before the trailing newline.
+    const out = stdout().trim();
+    expect(out.includes("\n")).toBe(false);
+    expect(out.startsWith("{")).toBe(true);
+    expect(out.endsWith("}")).toBe(true);
+  });
+
+  it("--human emits ASCII summary including added id", async () => {
+    const a = await writeSnap("a.json", emptySnap());
+    const b = await writeSnap("b.json", snapWithRunning("com.test.added"));
+    const { io, stdout } = mkIO();
+    const code = await runCli(["diff", a, b, "--human"], io);
+    expect(code).toBe(0);
+    expect(stdout()).toContain("Plugin session diff:");
+    expect(stdout()).toContain("Running added (1)");
+    expect(stdout()).toContain("com.test.added");
+  });
+
+  it("--human with no changes prints '(no changes)'", async () => {
+    const a = await writeSnap("a.json", emptySnap());
+    const b = await writeSnap("b.json", emptySnap());
+    const { io, stdout } = mkIO();
+    const code = await runCli(["diff", a, b, "--human"], io);
+    expect(code).toBe(0);
+    expect(stdout()).toContain("(no changes)");
+  });
+
+  it("missing baseline file → exit 1 with stderr message", async () => {
+    const b = await writeSnap("b.json", emptySnap());
+    const { io, stderr } = mkIO();
+    const code = await runCli(["diff", "/nonexistent/baseline.json", b], io);
+    expect(code).toBe(1);
+    expect(stderr()).toContain("diff:");
+  });
+
+  it("malformed JSON → exit 1 with stderr message", async () => {
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    const a = pathMod.join(tmpDir, "bad.json");
+    await fs.writeFile(a, "{not valid json");
+    const b = await writeSnap("b.json", emptySnap());
+    const { io, stderr } = mkIO();
+    const code = await runCli(["diff", a, b], io);
+    expect(code).toBe(1);
+    expect(stderr()).toContain("diff:");
   });
 });
