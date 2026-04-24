@@ -11,7 +11,7 @@
 
 import React, { useMemo } from "react";
 import { useThemeStore } from "@/ui";
-import { SKILL_ICONS } from "@hyperforge/shared";
+import { getEffectiveSkillIcon } from "@hyperforge/shared";
 import type { GroupedXPDrop } from "./useXPOrbState";
 import { HUD_FRAME, HUD_LAYERS } from "../layout";
 
@@ -97,7 +97,8 @@ export function FloatingXPDrops({ drops }: FloatingXPDropsProps) {
         <div key={drop.id} style={styles.floatingXP}>
           <span style={styles.floatingXPIcons}>
             {drop.skills.map((s, i) => {
-              const dropIcon = SKILL_ICONS[s.skill.toLowerCase()] || "\u2B50";
+              const dropIcon =
+                getEffectiveSkillIcon(s.skill.toLowerCase()) || "\u2B50";
               return <span key={`${drop.id}-${s.skill}-${i}`}>{dropIcon}</span>;
             })}
           </span>

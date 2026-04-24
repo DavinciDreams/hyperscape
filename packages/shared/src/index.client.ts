@@ -867,3 +867,16 @@ export {
   InvalidXpLevelError,
   type XpToNextResult,
 } from "./progression/index";
+
+// skill-icons runtime registry — same shape as xpCurveRegistry.
+// `getEffectiveSkillIcon(key)` is the registry-prefer-fallback helper
+// HUD / level-up-popup consumers should use in preference to reading
+// `SKILL_ICONS` directly, so PIE hot-reload of skill-icons.json
+// propagates without a restart.
+export {
+  skillIconsRegistry,
+  getEffectiveSkillIcon,
+  SkillIconsRegistry,
+  SkillIconsNotLoadedError,
+  UnknownSkillDefinitionError,
+} from "./skill-icons/index";

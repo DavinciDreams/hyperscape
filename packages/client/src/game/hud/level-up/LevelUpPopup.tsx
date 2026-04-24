@@ -10,7 +10,7 @@
  * - Non-blocking (player can continue actions)
  */
 
-import { SKILL_ICONS } from "@hyperforge/shared";
+import { getEffectiveSkillIcon } from "@hyperforge/shared";
 import { AchievementPopup } from "@/ui";
 import type { LevelUpEvent } from "./useLevelUpState";
 import { capitalizeSkill } from "./utils";
@@ -27,7 +27,7 @@ interface LevelUpPopupProps {
 export function LevelUpPopup({ event, onDismiss }: LevelUpPopupProps) {
   const { skill, newLevel } = event;
   const skillKey = skill.toLowerCase();
-  const skillIcon = SKILL_ICONS[skillKey] || "\u2B50";
+  const skillIcon = getEffectiveSkillIcon(skillKey) || "\u2B50";
 
   return (
     <AchievementPopup

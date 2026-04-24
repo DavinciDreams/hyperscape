@@ -12,7 +12,12 @@
  */
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { EventType, SKILL_ICONS, xpCurveRegistry } from "@hyperforge/shared";
+import {
+  EventType,
+  getEffectiveSkillIcon,
+  skillIconsRegistry,
+  xpCurveRegistry,
+} from "@hyperforge/shared";
 
 /**
  * Curve id resolved through the shared `xpCurveRegistry`. Populated at
@@ -233,12 +238,17 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
     [curveRevision],
   );
 
-  // Re-render derived progress on PIE hot-reload of `xp-curves.json`.
+  // Re-render derived progress on PIE hot-reload of `xp-curves.json`
+  // OR `skill-icons.json`. Both live-mutate module-level registries
+  // and bump the same revision counter.
   useEffect(() => {
-    const unsubscribe = xpCurveRegistry.onReloaded(() => {
-      setCurveRevision((r) => r + 1);
-    });
-    return unsubscribe;
+    const bump = () => setCurveRevision((r) => r + 1);
+    const unsubscribeCurves = xpCurveRegistry.onReloaded(bump);
+    const unsubscribeIcons = skillIconsRegistry.onReloaded(bump);
+    return () => {
+      unsubscribeCurves();
+      unsubscribeIcons();
+    };
   }, []);
 
   // Memoize derived skill data to avoid recalculating on every render
@@ -249,14 +259,14 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
         ...skill,
         skillKey,
         icon:
-          SKILL_ICONS[skillKey] ||
-          SKILL_ICONS[skill.skill.toLowerCase()] ||
+          getEffectiveSkillIcon(skillKey) ||
+          getEffectiveSkillIcon(skill.skill.toLowerCase()) ||
           "\u2B50",
         progress: calculateProgress(skill.xp, skill.level),
         xpToLevel: getXPToNextLevel(skill.xp, skill.level),
       };
     });
-  }, [activeSkills, calculateProgress, getXPToNextLevel]);
+  }, [activeSkills, calculateProgress, getXPToNextLevel, curveRevision]);
 
   useEffect(() => {
     const clearActiveSkillsTimeout = () => {
