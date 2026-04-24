@@ -14,6 +14,7 @@ export default defineConfig({
     include: [
       "tests/**/*.test.{ts,tsx}",
       "src/**/__tests__/**/*.test.{ts,tsx}",
+      "server/**/__tests__/**/*.test.{ts,tsx}",
     ],
     exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
     coverage: {
