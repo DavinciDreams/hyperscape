@@ -87,6 +87,7 @@ export * from "./music.js";
 export * from "./music-state-machine.js";
 export * from "./nav-mesh.js";
 export * from "./news-feed.js";
+export * from "./npc-definitions.js";
 export * from "./npc-schedule.js";
 export * from "./npc-sizes.js";
 export * from "./npcs.js";

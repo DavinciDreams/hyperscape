@@ -26,6 +26,7 @@ import {
 } from "@hyperforge/manifest-schema";
 
 import type { NPCData, NPCCategory } from "../types/core/core";
+import { npcDefinitionsRegistry } from "../npc-definitions";
 import {
   calculateCombatLevel,
   normalizeCombatSkills,
@@ -46,7 +47,31 @@ export const ALL_NPCS: Map<string, NPCData> = new Map();
  */
 
 // Get NPC by ID
+//
+// Prefers the runtime npcDefinitionsRegistry (manifest-loaded;
+// honors PIE hot-reload + authored NPC catalog edits) and falls
+// back to the in-tree ALL_WPCS map when the registry hasn't been
+// loaded yet (server boot before DataManager.initialize, isolated
+// unit tests). Schema-derived NpcDefinition is cast to in-tree
+// NPCData at the boundary — they're structurally compatible
+// (NPCData has more required-narrowed fields, but consumers
+// reading combat/stats/drops won't notice).
+//
+// This single wiring change unblocks ~10 downstream consumers
+// (CombatSystem, CombatAnimationManager, MagicAttackHandler,
+// AttackContext, RangedAttackHandler, MobNPCSpawnerSystem,
+// LootTableService, DialogueSystem, …) without touching any
+// of them — they all read through this function.
 export function getNPCById(npcId: string): NPCData | null {
+  if (npcDefinitionsRegistry.isLoaded()) {
+    const fromRegistry = npcDefinitionsRegistry.find(npcId);
+    if (fromRegistry) return fromRegistry as unknown as NPCData;
+    // Loaded-but-missing: registry is the source of truth;
+    // do NOT silently consult the legacy map for an authored
+    // deletion (matches the contract documented in
+    // project_consumer_wiring_pattern.md).
+    return null;
+  }
   return ALL_NPCS.get(npcId) || null;
 }
 
