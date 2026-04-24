@@ -151,6 +151,10 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../procgen/dist/terrain/index.js",
         ),
+        "@hyperforge/procgen/math": path.resolve(
+          __dirname,
+          "../procgen/dist/math/index.js",
+        ),
         "@hyperforge/procgen/vegetation": path.resolve(
           __dirname,
           "../procgen/dist/vegetation/index.js",

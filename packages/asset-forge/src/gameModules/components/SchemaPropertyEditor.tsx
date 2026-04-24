@@ -7,7 +7,12 @@
 
 import { Workflow } from "lucide-react";
 import React, { useCallback } from "react";
-import type { EntityTypeSchema, FieldSchema } from "../GameModule";
+import type {
+  EntityTypeSchema,
+  FieldSchema,
+  CustomSectionSchema,
+} from "../GameModule";
+import { getCustomSection } from "./customSectionRegistry";
 import {
   PropertySection,
   TextInput,
@@ -17,6 +22,20 @@ import {
   PositionEditor,
   Toggle,
   InfoRow,
+  ColorInput,
+  TagsInput,
+  JsonInput,
+  Vector3Input,
+  MultiSelectInput,
+  ManifestRefInput,
+  QuaternionInput,
+  KeybindingInput,
+  CurveInput,
+  ColorRampInput,
+  AssetRefInput,
+  type CurvePoint,
+  type ColorRampStop,
+  type AssetKind,
 } from "../../components/WorldStudio/panels/properties/PropertyControls";
 import { useWorldStudio } from "../../components/WorldStudio/WorldStudioContext";
 import { useOpenScriptEditor } from "../../components/WorldStudio/ScriptEditorContext";
@@ -82,6 +101,22 @@ export function SchemaPropertyEditor({
     }
   }
 
+  // Filter customSections by visibility
+  const customSections: CustomSectionSchema[] = (
+    schema.customSections ?? []
+  ).filter((cs) => {
+    if (!cs.visibleWhen) return true;
+    const gate = entityData[cs.visibleWhen.field];
+    if (cs.visibleWhen.equals !== undefined && gate !== cs.visibleWhen.equals)
+      return false;
+    if (
+      cs.visibleWhen.notEquals !== undefined &&
+      gate === cs.visibleWhen.notEquals
+    )
+      return false;
+    return true;
+  });
+
   return (
     <>
       {Array.from(sections.entries()).map(([sectionName, fields]) => (
@@ -109,6 +144,28 @@ export function SchemaPropertyEditor({
           ))}
         </PropertySection>
       ))}
+      {customSections.map((cs) => {
+        const Widget = getCustomSection(cs.widgetId);
+        if (!Widget) {
+          return (
+            <PropertySection key={cs.widgetId} title={cs.title}>
+              <InfoRow
+                label="Missing widget"
+                value={`"${cs.widgetId}" not registered`}
+              />
+            </PropertySection>
+          );
+        }
+        return (
+          <PropertySection
+            key={cs.widgetId}
+            title={cs.title}
+            defaultOpen={cs.defaultOpen}
+          >
+            <Widget entityId={entityId} entityData={entityData} />
+          </PropertySection>
+        );
+      })}
     </>
   );
 }
@@ -195,6 +252,7 @@ function SchemaField({
           max={field.config?.max ?? 100}
           step={field.config?.step ?? 1}
           unit={field.config?.unit}
+          hint={field.description}
         />
       );
 
@@ -243,15 +301,171 @@ function SchemaField({
           onChange={(d: number) => onChange((d * Math.PI) / 180)}
           min={0}
           max={360}
-          step={15}
-          unit="deg"
+          step={field.config?.step ?? 15}
+          unit={field.config?.unit ?? "deg"}
+        />
+      );
+    }
+
+    case "vector3": {
+      const v = (value as { x: number; y: number; z: number } | undefined) ?? {
+        x: 0,
+        y: 0,
+        z: 0,
+      };
+      return (
+        <Vector3Input
+          label={field.label}
+          value={v}
+          onChange={
+            onChange as (v: { x: number; y: number; z: number }) => void
+          }
+          step={field.config?.step}
+          unit={field.config?.unit}
         />
       );
     }
 
     case "color":
+      return (
+        <ColorInput
+          label={field.label}
+          value={typeof value === "string" ? value : "#000000"}
+          onChange={onChange as (v: string) => void}
+        />
+      );
+
     case "tags":
+      return (
+        <TagsInput
+          label={field.label}
+          value={Array.isArray(value) ? (value as string[]) : []}
+          onChange={onChange as (v: string[]) => void}
+          sorted={field.config?.sorted}
+        />
+      );
+
     case "json":
+      return (
+        <JsonInput label={field.label} value={value} onChange={onChange} />
+      );
+
+    case "multi-select":
+      return (
+        <MultiSelectInput
+          label={field.label}
+          value={Array.isArray(value) ? (value as string[]) : []}
+          onChange={onChange as (v: string[]) => void}
+          options={field.config?.options ?? []}
+          sorted={field.config?.sorted}
+        />
+      );
+
+    case "manifest-ref": {
+      const kind = field.config?.manifestRef;
+      if (!kind) {
+        return (
+          <InfoRow
+            label={field.label}
+            value={`${String(value ?? "")} (config.manifestRef missing)`}
+          />
+        );
+      }
+      return (
+        <ManifestRefInput
+          label={field.label}
+          value={String(value ?? "")}
+          onChange={onChange as (v: string) => void}
+          manifestKind={kind}
+          description={field.description}
+        />
+      );
+    }
+
+    // Widget types declared in FieldType but not yet implemented render as a
+    // read-only InfoRow so the panel still shows the raw value. Implement
+    // dedicated widgets as they're needed by migrated panels.
+    case "quaternion": {
+      const q = (value as
+        | { x: number; y: number; z: number; w: number }
+        | undefined) ?? { x: 0, y: 0, z: 0, w: 1 };
+      return (
+        <QuaternionInput
+          label={field.label}
+          value={q}
+          onChange={
+            onChange as (v: {
+              x: number;
+              y: number;
+              z: number;
+              w: number;
+            }) => void
+          }
+          step={field.config?.step}
+        />
+      );
+    }
+
+    case "keybinding":
+      return (
+        <KeybindingInput
+          label={field.label}
+          value={typeof value === "string" ? value : ""}
+          onChange={onChange as (v: string) => void}
+          description={field.description}
+        />
+      );
+
+    case "curve":
+      return (
+        <CurveInput
+          label={field.label}
+          value={Array.isArray(value) ? (value as CurvePoint[]) : []}
+          onChange={onChange as (v: CurvePoint[]) => void}
+          xRange={
+            field.config?.min !== undefined && field.config?.max !== undefined
+              ? [field.config.min, field.config.max]
+              : undefined
+          }
+          description={field.description}
+        />
+      );
+
+    case "color-ramp":
+      return (
+        <ColorRampInput
+          label={field.label}
+          value={Array.isArray(value) ? (value as ColorRampStop[]) : []}
+          onChange={onChange as (v: ColorRampStop[]) => void}
+          description={field.description}
+        />
+      );
+
+    case "asset-ref": {
+      const rawKind = field.config?.assetType;
+      const allowedKinds: AssetKind[] = [
+        "model",
+        "texture",
+        "audio",
+        "hdri",
+        "animation",
+        "other",
+      ];
+      const assetKind: AssetKind | undefined =
+        rawKind && (allowedKinds as string[]).includes(rawKind)
+          ? (rawKind as AssetKind)
+          : undefined;
+      return (
+        <AssetRefInput
+          label={field.label}
+          value={typeof value === "string" ? value : ""}
+          onChange={onChange as (v: string) => void}
+          assetKind={assetKind}
+          description={field.description}
+        />
+      );
+    }
+
     default:
       return <InfoRow label={field.label} value={String(value ?? "")} />;
   }

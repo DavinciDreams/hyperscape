@@ -11,8 +11,10 @@
 
 import {
   AlertTriangle,
+  Book,
   Terminal,
   History,
+  LayoutPanelTop,
   ChevronDown,
   ChevronUp,
   Move,
@@ -40,6 +42,8 @@ import {
   useManifestValidation,
   type ManifestValidationIssue,
 } from "../hooks/useManifestValidation";
+import { ContentBrowser } from "./ContentBrowser";
+import { UILayoutLibraryTab } from "./UILayoutLibraryTab";
 
 // ============== CONSTANTS ==============
 
@@ -47,12 +51,16 @@ const STORAGE_KEY_EXPANDED = "worldstudio-bottom-panel-expanded";
 const STORAGE_KEY_HEIGHT = "worldstudio-bottom-panel-height";
 const STORAGE_KEY_TAB = "worldstudio-bottom-panel-tab";
 
+// Content Browser needs substantially more vertical room than the
+// log-style tabs — bump the default height when Content is the active
+// tab (see `computeDefaultHeight`).
 const DEFAULT_HEIGHT = 200;
+const CONTENT_DEFAULT_HEIGHT = 340;
 const MIN_HEIGHT = 100;
-const MAX_HEIGHT = 500;
+const MAX_HEIGHT = 720;
 const TAB_BAR_HEIGHT = 24;
 
-type TabId = "validation" | "console" | "history";
+type TabId = "content" | "uiLayouts" | "validation" | "console" | "history";
 
 interface TabDef {
   id: TabId;
@@ -60,7 +68,11 @@ interface TabDef {
   icon: typeof AlertTriangle;
 }
 
+// UE5 convention: Content Browser sits leftmost in the bottom dock and is
+// the primary tool users reach for. UI Layouts is its UMG-library sibling.
 const TABS: TabDef[] = [
+  { id: "content", label: "Content", icon: Book },
+  { id: "uiLayouts", label: "UI Layouts", icon: LayoutPanelTop },
   { id: "validation", label: "Validation", icon: AlertTriangle },
   { id: "console", label: "Console", icon: Terminal },
   { id: "history", label: "History", icon: History },
@@ -497,14 +509,19 @@ function HistoryTab() {
 // ============== BOTTOM PANEL ==============
 
 export const BottomPanel = React.memo(function BottomPanel() {
+  // Default expanded now that Content is the primary tab — users expect
+  // to see the browser on first load. Anyone who previously collapsed it
+  // still gets their saved state.
   const [expanded, setExpanded] = useState(() =>
-    loadBoolean(STORAGE_KEY_EXPANDED, false),
+    loadBoolean(STORAGE_KEY_EXPANDED, true),
   );
   const [height, setHeight] = useState(() =>
-    loadNumber(STORAGE_KEY_HEIGHT, DEFAULT_HEIGHT),
+    loadNumber(STORAGE_KEY_HEIGHT, CONTENT_DEFAULT_HEIGHT),
   );
   const [activeTab, setActiveTab] = useState<TabId>(() =>
-    loadString(STORAGE_KEY_TAB, "validation", [
+    loadString(STORAGE_KEY_TAB, "content", [
+      "content",
+      "uiLayouts",
       "validation",
       "console",
       "history",
@@ -684,6 +701,8 @@ export const BottomPanel = React.memo(function BottomPanel() {
           className="flex flex-col overflow-hidden"
           style={{ height: height - 1 /* subtract drag handle pixel */ }}
         >
+          {activeTab === "content" && <ContentBrowser />}
+          {activeTab === "uiLayouts" && <UILayoutLibraryTab />}
           {activeTab === "validation" && <ValidationTab />}
           {activeTab === "console" && <ConsoleTab />}
           {activeTab === "history" && <HistoryTab />}

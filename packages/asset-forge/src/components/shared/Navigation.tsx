@@ -24,6 +24,7 @@ import {
   Anchor,
   BrickWall,
   Landmark,
+  LayoutPanelTop,
   Map,
   LogOut,
   User,
@@ -66,6 +67,7 @@ const NAV_ITEMS = [
   { route: ROUTES.WORLD_BUILDER, label: "World Builder", icon: Globe },
   { route: ROUTES.WORLD_EDITOR, label: "World Editor", icon: Gamepad2 },
   { route: ROUTES.WORLD_STUDIO, label: "World Studio", icon: Map },
+  { route: ROUTES.UI_LAYOUT_EDITOR, label: "UI Layouts", icon: LayoutPanelTop },
   { route: ROUTES.MANIFESTS, label: "Manifests", icon: FileJson },
   { route: ROUTES.ARMOR_PIPELINE, label: "Armor v2", icon: Gem },
 ] as const;

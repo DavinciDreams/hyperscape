@@ -21,6 +21,7 @@ import type {
   ManifestCombatSpell,
   ManifestPrayer,
   ManifestRune,
+  ManifestElementalStaff,
   ManifestAmmunition,
   ManifestRecipe,
   ManifestSkillUnlock,
@@ -257,6 +258,7 @@ function mapMiningRocks(raw: RawMiningRock[]): ManifestMiningRock[] {
     modelPath: r.modelPath,
     levelRequired: r.levelRequired,
     examine: r.examine,
+    _raw: r as unknown as Record<string, unknown>,
   }));
 }
 
@@ -268,6 +270,7 @@ function mapTrees(raw: RawTree[]): ManifestTree[] {
     modelVariants: t.modelVariants,
     levelRequired: t.levelRequired,
     examine: t.examine,
+    _raw: t as unknown as Record<string, unknown>,
   }));
 }
 
@@ -279,6 +282,7 @@ function mapFishingSpots(raw: RawFishingSpot[]): ManifestFishingSpot[] {
     toolRequired: f.toolRequired,
     levelRequired: f.levelRequired,
     examine: f.examine,
+    _raw: f as unknown as Record<string, unknown>,
   }));
 }
 
@@ -402,16 +406,34 @@ function mapRunes(raw: {
   }));
 }
 
+function mapElementalStaves(raw: {
+  elementalStaves?: Array<{ staffId: string; providesInfinite: string[] }>;
+}): ManifestElementalStaff[] {
+  return (raw.elementalStaves ?? []).map((s) => ({
+    staffId: s.staffId,
+    providesInfinite: [...s.providesInfinite],
+  }));
+}
+
+interface RawArrow {
+  id: string;
+  name: string;
+  rangedStrength: number;
+  requiredRangedLevel: number;
+  requiredBowTier?: number;
+}
+
 function mapAmmunition(raw: {
-  arrows?: Array<{
-    id: string;
-    name: string;
-    rangedStrength: number;
-    requiredRangedLevel: number;
-    requiredBowTier?: number;
-  }>;
+  arrows?: RawArrow[] | Record<string, RawArrow>;
 }): ManifestAmmunition[] {
-  return (raw.arrows ?? []).map((a) => ({
+  // ammunition.json stores arrows as an object keyed by id, but older
+  // shapes (and tests) may pass an array — support both.
+  const arrows: RawArrow[] = Array.isArray(raw.arrows)
+    ? raw.arrows
+    : raw.arrows
+      ? Object.values(raw.arrows)
+      : [];
+  return arrows.map((a) => ({
     id: a.id,
     name: a.name,
     rangedStrength: a.rangedStrength,
@@ -671,12 +693,17 @@ export function useManifestLoader() {
           // Combat
           safeFetch<Record<string, unknown>>("combat-spells", {}, signal),
           safeFetch<{ prayers?: RawPrayer[] }>("prayers", {}, signal),
-          safeFetch<{ runes?: ManifestRune[] }>("runes", {}, signal),
-          safeFetch<{ arrows?: ManifestAmmunition[] }>(
-            "ammunition",
-            {},
-            signal,
-          ),
+          safeFetch<{
+            runes?: ManifestRune[];
+            elementalStaves?: Array<{
+              staffId: string;
+              providesInfinite: string[];
+            }>;
+          }>("runes", {}, signal),
+          safeFetch<{
+            arrows?: ManifestAmmunition[];
+            bowTiers?: Record<string, number>;
+          }>("ammunition", {}, signal),
           // Recipes (8 files)
           safeFetch<{ recipes?: RawRecipeEntry[] }>(
             "recipes/smithing",
@@ -783,7 +810,9 @@ export function useManifestLoader() {
           combatSpells: mapCombatSpells(combatSpellsRaw),
           prayers: mapPrayers(prayersRaw),
           runes: mapRunes(runesRaw),
+          elementalStaves: mapElementalStaves(runesRaw),
           ammunition: mapAmmunition(ammunitionRaw),
+          ammunitionBowTiers: ammunitionRaw.bowTiers ?? {},
           recipes: allRecipes,
           skillUnlocks: mapSkillUnlocks(skillUnlocksRaw),
           tierRequirements: mapTierRequirements(tierReqsRaw),

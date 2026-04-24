@@ -175,6 +175,123 @@ describe("loadGameModule", () => {
     expect(mod.terrain?.enabled).toBe(true);
     expect(mod.terrain?.tileSize).toBe(8);
   });
+
+  it("accepts quaternion field type", () => {
+    const raw = makeMinimalModule();
+    raw.entityTypes[0].fields.push({
+      key: "orientation",
+      label: "Orientation",
+      type: "quaternion",
+      section: "Transform",
+      default: { x: 0, y: 0, z: 0, w: 1 },
+    } as never);
+    const mod = loadGameModule(raw);
+    const field = mod.entityTypes[0].fields.find(
+      (f) => f.key === "orientation",
+    );
+    expect(field?.type).toBe("quaternion");
+  });
+
+  it("accepts keybinding field type", () => {
+    const raw = makeMinimalModule();
+    raw.entityTypes[0].fields.push({
+      key: "hotkey",
+      label: "Hotkey",
+      type: "keybinding",
+      section: "Input",
+      default: "Ctrl+K",
+    } as never);
+    const mod = loadGameModule(raw);
+    const field = mod.entityTypes[0].fields.find((f) => f.key === "hotkey");
+    expect(field?.type).toBe("keybinding");
+  });
+
+  it("accepts curve field type", () => {
+    const raw = makeMinimalModule();
+    raw.entityTypes[0].fields.push({
+      key: "xpCurve",
+      label: "XP Curve",
+      type: "curve",
+      section: "Progression",
+      default: [
+        { x: 0, y: 0 },
+        { x: 50, y: 1000 },
+        { x: 99, y: 13034431 },
+      ],
+    } as never);
+    const mod = loadGameModule(raw);
+    const field = mod.entityTypes[0].fields.find((f) => f.key === "xpCurve");
+    expect(field?.type).toBe("curve");
+  });
+
+  it("accepts asset-ref field type with assetType config", () => {
+    const raw = makeMinimalModule();
+    raw.entityTypes[0].fields.push({
+      key: "modelUrl",
+      label: "Model",
+      type: "asset-ref",
+      section: "Appearance",
+      default: "",
+      config: { assetType: "model" },
+    } as never);
+    const mod = loadGameModule(raw);
+    const field = mod.entityTypes[0].fields.find((f) => f.key === "modelUrl");
+    expect(field?.type).toBe("asset-ref");
+    expect(field?.config?.assetType).toBe("model");
+  });
+
+  it("accepts color-ramp field type", () => {
+    const raw = makeMinimalModule();
+    raw.entityTypes[0].fields.push({
+      key: "difficultyRamp",
+      label: "Difficulty Ramp",
+      type: "color-ramp",
+      section: "Appearance",
+      default: [
+        { stop: 0, color: "#2ecc71" },
+        { stop: 0.5, color: "#f1c40f" },
+        { stop: 1, color: "#e74c3c" },
+      ],
+    } as never);
+    const mod = loadGameModule(raw);
+    const field = mod.entityTypes[0].fields.find(
+      (f) => f.key === "difficultyRamp",
+    );
+    expect(field?.type).toBe("color-ramp");
+  });
+
+  it("accepts scalar storage with customSections", () => {
+    const raw = makeMinimalModule();
+    raw.entityTypes[0].storage = {
+      stateKey: "coinSettings",
+      type: "scalar",
+    } as never;
+    (raw.entityTypes[0] as Record<string, unknown>).customSections = [
+      { title: "Coin Settings", widgetId: "CoinSettingsWidget" },
+    ];
+    const mod = loadGameModule(raw);
+    expect(mod.entityTypes[0].storage.type).toBe("scalar");
+    expect(mod.entityTypes[0].customSections).toBeDefined();
+    expect(mod.entityTypes[0].customSections?.[0].widgetId).toBe(
+      "CoinSettingsWidget",
+    );
+  });
+
+  it("rejects customSection with missing widgetId", () => {
+    const raw = makeMinimalModule();
+    (raw.entityTypes[0] as Record<string, unknown>).customSections = [
+      { title: "Missing WidgetId" },
+    ];
+    expect(() => loadGameModule(raw)).toThrow(/widgetId/);
+  });
+
+  it("rejects customSection with missing title", () => {
+    const raw = makeMinimalModule();
+    (raw.entityTypes[0] as Record<string, unknown>).customSections = [
+      { widgetId: "SomeWidget" },
+    ];
+    expect(() => loadGameModule(raw)).toThrow(/title/);
+  });
 });
 
 // ============== EntityTypeRegistry tests ==============

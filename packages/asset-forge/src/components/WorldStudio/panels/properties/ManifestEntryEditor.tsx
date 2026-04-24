@@ -13,6 +13,14 @@ import {
   BookOpen,
   Flame,
   Shield,
+  Scroll,
+  Trees,
+  Fish,
+  Pickaxe,
+  Hammer,
+  Crosshair,
+  TrendingUp,
+  Lock,
 } from "lucide-react";
 import React, { useCallback } from "react";
 
@@ -24,6 +32,15 @@ import type {
   ManifestRune,
   ManifestItem,
   ManifestNPC,
+  ManifestQuest,
+  ManifestStore,
+  ManifestTree,
+  ManifestFishingSpot,
+  ManifestMiningRock,
+  ManifestStation,
+  ManifestDuelArena,
+  ManifestSkillUnlock,
+  ManifestTierRequirement,
 } from "../../types";
 import { useWorldStudio } from "../../WorldStudioContext";
 import {
@@ -32,6 +49,8 @@ import {
   SelectInput,
   Toggle,
 } from "./PropertyControls";
+import { QuestStageBuilder } from "./QuestStageBuilder";
+import { StoreEditor } from "./StoreEditor";
 
 // ============== COMBAT SPELL EDITOR ==============
 
@@ -69,7 +88,7 @@ function CombatSpellEditor({ spell }: { spell: ManifestCombatSpell }) {
   }, [spell.runes, update]);
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
         <Swords size={10} />
         <span className="uppercase font-medium">Edit Spell</span>
@@ -193,7 +212,7 @@ function PrayerEditor({ prayer }: { prayer: ManifestPrayer }) {
   );
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
         <Shield size={10} />
         <span className="uppercase font-medium">Edit Prayer</span>
@@ -301,7 +320,7 @@ function RecipeEditor({ recipe }: { recipe: ManifestRecipe }) {
   }, [recipe.inputs, update]);
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
         <Flame size={10} />
         <span className="uppercase font-medium">Edit Recipe</span>
@@ -407,7 +426,7 @@ function AmmunitionEditor({ ammo }: { ammo: ManifestAmmunition }) {
   );
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
         <Sparkles size={10} />
         <span className="uppercase font-medium">Edit Ammunition</span>
@@ -460,7 +479,7 @@ function RuneEditor({ rune }: { rune: ManifestRune }) {
   );
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
         <BookOpen size={10} />
         <span className="uppercase font-medium">Edit Rune</span>
@@ -509,7 +528,7 @@ function ItemEditor({ item }: { item: ManifestItem }) {
   );
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <TextInput
         label="Name"
         value={item.name}
@@ -597,7 +616,7 @@ function NPCManifestEditor({ npc }: { npc: ManifestNPC }) {
   );
 
   return (
-    <div className="px-3 py-2 bg-bg-tertiary/20 border-y border-border-primary/30 space-y-1.5">
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
       <TextInput
         label="Name"
         value={npc.name}
@@ -659,6 +678,567 @@ function NPCManifestEditor({ npc }: { npc: ManifestNPC }) {
   );
 }
 
+// ============== QUEST EDITOR ==============
+
+function QuestManifestEditor({ quest }: { quest: ManifestQuest }) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestQuest>) => {
+      const updated = state.manifests.quests.map((q) =>
+        q.id === quest.id ? { ...q, ...updates } : q,
+      );
+      actions.updateManifestQuests(updated);
+    },
+    [state.manifests.quests, quest.id, actions],
+  );
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Scroll size={10} />
+        <span className="uppercase font-medium">Edit Quest</span>
+      </div>
+      <TextInput
+        label="Name"
+        value={quest.name}
+        onChange={(name) => update({ name })}
+      />
+      <TextInput
+        label="Description"
+        value={quest.description}
+        onChange={(description) => update({ description })}
+      />
+      <SelectInput
+        label="Difficulty"
+        value={quest.difficulty}
+        onChange={(difficulty) => update({ difficulty })}
+        options={[
+          { value: "novice", label: "Novice" },
+          { value: "intermediate", label: "Intermediate" },
+          { value: "experienced", label: "Experienced" },
+          { value: "master", label: "Master" },
+          { value: "grandmaster", label: "Grandmaster" },
+        ]}
+      />
+      <NumberInput
+        label="Quest Points"
+        value={quest.questPoints}
+        onChange={(questPoints) => update({ questPoints })}
+        min={0}
+        max={10}
+      />
+      <TextInput
+        label="Start NPC"
+        value={quest.startNpc ?? ""}
+        onChange={(startNpc) => update({ startNpc: startNpc || undefined })}
+      />
+      <Toggle
+        label="Replayable"
+        value={quest.replayable ?? false}
+        onChange={(replayable) => update({ replayable })}
+      />
+
+      {/* Stage editor — reuses the existing builder. */}
+      <div className="pt-1">
+        <QuestStageBuilder quest={quest} />
+      </div>
+    </div>
+  );
+}
+
+// ============== STORE EDITOR WRAPPER ==============
+
+/**
+ * Thin adapter so the manifest router can route `stores` to the existing
+ * `StoreEditor` component (which was built for the NPC properties panel).
+ */
+function StoreManifestEditorWrapper({ store }: { store: ManifestStore }) {
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <BookOpen size={10} />
+        <span className="uppercase font-medium">Edit Store</span>
+      </div>
+      <StoreEditor store={store} />
+    </div>
+  );
+}
+
+// ============== TREE EDITOR ==============
+
+function TreeEditor({ tree }: { tree: ManifestTree }) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestTree>) => {
+      const updated = state.manifests.trees.map((t) =>
+        t.id === tree.id ? { ...t, ...updates } : t,
+      );
+      actions.updateManifestTrees(updated);
+    },
+    [state.manifests.trees, tree.id, actions],
+  );
+
+  const updateModelVariant = useCallback(
+    (idx: number, value: string) => {
+      const next = [...tree.modelVariants];
+      next[idx] = value;
+      update({ modelVariants: next });
+    },
+    [tree.modelVariants, update],
+  );
+
+  const removeModelVariant = useCallback(
+    (idx: number) => {
+      update({ modelVariants: tree.modelVariants.filter((_, i) => i !== idx) });
+    },
+    [tree.modelVariants, update],
+  );
+
+  const addModelVariant = useCallback(() => {
+    update({ modelVariants: [...tree.modelVariants, ""] });
+  }, [tree.modelVariants, update]);
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Trees size={10} />
+        <span className="uppercase font-medium">Edit Tree</span>
+      </div>
+      <TextInput
+        label="Name"
+        value={tree.name}
+        onChange={(name) => update({ name })}
+      />
+      <TextInput
+        label="Type"
+        value={tree.type}
+        onChange={(type) => update({ type })}
+      />
+      <NumberInput
+        label="Level Required"
+        value={tree.levelRequired}
+        onChange={(levelRequired) => update({ levelRequired })}
+        min={1}
+        max={99}
+      />
+      <TextInput
+        label="Examine"
+        value={tree.examine}
+        onChange={(examine) => update({ examine })}
+      />
+
+      {/* Model variants */}
+      <div className="mt-1">
+        <div className="flex items-center justify-between mb-0.5">
+          <span className="text-[9px] text-text-tertiary uppercase">
+            Model Variants
+          </span>
+          <button
+            onClick={addModelVariant}
+            className="p-0.5 text-text-tertiary hover:text-text-primary"
+            title="Add variant"
+          >
+            <Plus size={10} />
+          </button>
+        </div>
+        {tree.modelVariants.map((variant, idx) => (
+          <div key={idx} className="flex items-center gap-1 mb-0.5">
+            <input
+              type="text"
+              value={variant}
+              onChange={(e) => updateModelVariant(idx, e.target.value)}
+              placeholder="path/to/model.glb"
+              className="flex-1 px-1 py-0.5 text-[10px] bg-bg-tertiary border border-border-primary rounded text-text-primary"
+            />
+            <button
+              onClick={() => removeModelVariant(idx)}
+              className="p-0.5 text-text-tertiary hover:text-red-400"
+            >
+              <X size={10} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============== FISHING SPOT EDITOR ==============
+
+function FishingSpotEditor({ spot }: { spot: ManifestFishingSpot }) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestFishingSpot>) => {
+      const updated = state.manifests.fishingSpots.map((f) =>
+        f.id === spot.id ? { ...f, ...updates } : f,
+      );
+      actions.updateManifestFishingSpots(updated);
+    },
+    [state.manifests.fishingSpots, spot.id, actions],
+  );
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Fish size={10} />
+        <span className="uppercase font-medium">Edit Fishing Spot</span>
+      </div>
+      <TextInput
+        label="Name"
+        value={spot.name}
+        onChange={(name) => update({ name })}
+      />
+      <TextInput
+        label="Type"
+        value={spot.type}
+        onChange={(type) => update({ type })}
+      />
+      <TextInput
+        label="Tool Required"
+        value={spot.toolRequired}
+        onChange={(toolRequired) => update({ toolRequired })}
+      />
+      <NumberInput
+        label="Level Required"
+        value={spot.levelRequired}
+        onChange={(levelRequired) => update({ levelRequired })}
+        min={1}
+        max={99}
+      />
+      <TextInput
+        label="Examine"
+        value={spot.examine}
+        onChange={(examine) => update({ examine })}
+      />
+    </div>
+  );
+}
+
+// ============== MINING ROCK EDITOR ==============
+
+function MiningRockEditor({ rock }: { rock: ManifestMiningRock }) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestMiningRock>) => {
+      const updated = state.manifests.miningRocks.map((r) =>
+        r.id === rock.id ? { ...r, ...updates } : r,
+      );
+      actions.updateManifestMiningRocks(updated);
+    },
+    [state.manifests.miningRocks, rock.id, actions],
+  );
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Pickaxe size={10} />
+        <span className="uppercase font-medium">Edit Mining Rock</span>
+      </div>
+      <TextInput
+        label="Name"
+        value={rock.name}
+        onChange={(name) => update({ name })}
+      />
+      <TextInput
+        label="Type"
+        value={rock.type}
+        onChange={(type) => update({ type })}
+      />
+      <TextInput
+        label="Model Path"
+        value={rock.modelPath}
+        onChange={(modelPath) => update({ modelPath })}
+      />
+      <NumberInput
+        label="Level Required"
+        value={rock.levelRequired}
+        onChange={(levelRequired) => update({ levelRequired })}
+        min={1}
+        max={99}
+      />
+      <TextInput
+        label="Examine"
+        value={rock.examine}
+        onChange={(examine) => update({ examine })}
+      />
+    </div>
+  );
+}
+
+// ============== STATION EDITOR ==============
+
+function StationEditor({ station }: { station: ManifestStation }) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestStation>) => {
+      const updated = state.manifests.stations.map((s) =>
+        s.type === station.type ? { ...s, ...updates } : s,
+      );
+      actions.updateManifestStations(updated);
+    },
+    [state.manifests.stations, station.type, actions],
+  );
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Hammer size={10} />
+        <span className="uppercase font-medium">Edit Station</span>
+      </div>
+      <TextInput
+        label="Name"
+        value={station.name}
+        onChange={(name) => update({ name })}
+      />
+      <TextInput
+        label="Type"
+        value={station.type}
+        onChange={(type) => update({ type })}
+      />
+      <TextInput
+        label="Model"
+        value={station.model}
+        onChange={(model) => update({ model })}
+      />
+      <TextInput
+        label="Examine"
+        value={station.examine}
+        onChange={(examine) => update({ examine })}
+      />
+    </div>
+  );
+}
+
+// ============== DUEL ARENA EDITOR ==============
+
+function DuelArenaEditor({ arena }: { arena: ManifestDuelArena }) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestDuelArena>) => {
+      const updated = state.manifests.duelArenas.map((a) =>
+        a.arenaId === arena.arenaId ? { ...a, ...updates } : a,
+      );
+      actions.updateManifestDuelArenas(updated);
+    },
+    [state.manifests.duelArenas, arena.arenaId, actions],
+  );
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Crosshair size={10} />
+        <span className="uppercase font-medium">Edit Duel Arena</span>
+      </div>
+      <NumberInput
+        label="Arena ID"
+        value={arena.arenaId}
+        onChange={(arenaId) => update({ arenaId })}
+        min={0}
+      />
+      <div className="grid grid-cols-2 gap-1">
+        <NumberInput
+          label="Center X"
+          value={arena.center.x}
+          onChange={(x) => update({ center: { ...arena.center, x } })}
+        />
+        <NumberInput
+          label="Center Z"
+          value={arena.center.z}
+          onChange={(z) => update({ center: { ...arena.center, z } })}
+        />
+      </div>
+      <NumberInput
+        label="Size"
+        value={arena.size}
+        onChange={(size) => update({ size })}
+        min={1}
+      />
+      <div className="text-[10px] text-text-tertiary pt-1">
+        {arena.spawnPoints.length} spawn point
+        {arena.spawnPoints.length === 1 ? "" : "s"},{" "}
+        {arena.trapdoorPositions?.length ?? 0} trapdoor
+        {(arena.trapdoorPositions?.length ?? 0) === 1 ? "" : "s"}
+      </div>
+    </div>
+  );
+}
+
+// ============== SKILL UNLOCK EDITOR ==============
+
+function SkillUnlockEditor({
+  unlock,
+  index,
+}: {
+  unlock: ManifestSkillUnlock;
+  index: number;
+}) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestSkillUnlock>) => {
+      const updated = state.manifests.skillUnlocks.map((u, i) =>
+        i === index ? { ...u, ...updates } : u,
+      );
+      actions.updateManifestSkillUnlocks(updated);
+    },
+    [state.manifests.skillUnlocks, index, actions],
+  );
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <Lock size={10} />
+        <span className="uppercase font-medium">Edit Skill Unlock</span>
+      </div>
+      <TextInput
+        label="Skill"
+        value={unlock.skill}
+        onChange={(skill) => update({ skill })}
+      />
+      <NumberInput
+        label="Level"
+        value={unlock.level}
+        onChange={(level) => update({ level })}
+        min={1}
+        max={99}
+      />
+      <TextInput
+        label="Description"
+        value={unlock.description}
+        onChange={(description) => update({ description })}
+      />
+      <TextInput
+        label="Type"
+        value={unlock.type ?? ""}
+        onChange={(type) => update({ type: type || undefined })}
+      />
+    </div>
+  );
+}
+
+// ============== TIER REQUIREMENT EDITOR ==============
+
+function TierRequirementEditor({
+  req,
+  index,
+}: {
+  req: ManifestTierRequirement;
+  index: number;
+}) {
+  const { state, actions } = useWorldStudio();
+
+  const update = useCallback(
+    (updates: Partial<ManifestTierRequirement>) => {
+      const updated = state.manifests.tierRequirements.map((r, i) =>
+        i === index ? { ...r, ...updates } : r,
+      );
+      actions.updateManifestTierRequirements(updated);
+    },
+    [state.manifests.tierRequirements, index, actions],
+  );
+
+  const setRequirement = useCallback(
+    (skill: string, value: number) => {
+      const next = { ...req.requirements };
+      if (value <= 0) {
+        delete next[skill];
+      } else {
+        next[skill] = value;
+      }
+      update({ requirements: next });
+    },
+    [req.requirements, update],
+  );
+
+  const renameRequirement = useCallback(
+    (oldSkill: string, newSkill: string) => {
+      if (newSkill === oldSkill) return;
+      const next: Record<string, number> = {};
+      for (const [k, v] of Object.entries(req.requirements)) {
+        next[k === oldSkill ? newSkill : k] = v;
+      }
+      update({ requirements: next });
+    },
+    [req.requirements, update],
+  );
+
+  const addRequirement = useCallback(() => {
+    const base = "skill";
+    let name = base;
+    let i = 1;
+    while (name in req.requirements) {
+      name = `${base}${i++}`;
+    }
+    update({ requirements: { ...req.requirements, [name]: 1 } });
+  }, [req.requirements, update]);
+
+  return (
+    <div className="px-3 py-2 bg-bg-tertiary/20 border-t border-white/5 space-y-1.5">
+      <div className="flex items-center gap-1 text-[10px] text-text-tertiary mb-1">
+        <TrendingUp size={10} />
+        <span className="uppercase font-medium">Edit Tier Requirement</span>
+      </div>
+      <TextInput
+        label="Tier"
+        value={req.tier}
+        onChange={(tier) => update({ tier })}
+      />
+      <TextInput
+        label="Category"
+        value={req.category}
+        onChange={(category) => update({ category })}
+      />
+      <div className="pt-1">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] text-text-tertiary uppercase">
+            Requirements
+          </span>
+          <button
+            type="button"
+            onClick={addRequirement}
+            className="flex items-center gap-1 text-[10px] text-text-secondary hover:text-text-primary"
+          >
+            <Plus size={10} /> add
+          </button>
+        </div>
+        {Object.entries(req.requirements).map(([skill, value]) => (
+          <div key={skill} className="flex items-center gap-1 mb-1">
+            <input
+              type="text"
+              value={skill}
+              onChange={(e) => renameRequirement(skill, e.target.value)}
+              className="flex-1 h-5 px-1 text-[11px] bg-bg-primary border border-border-primary rounded text-text-primary"
+            />
+            <input
+              type="number"
+              value={value}
+              min={1}
+              max={99}
+              onChange={(e) =>
+                setRequirement(skill, Number.parseInt(e.target.value, 10) || 0)
+              }
+              className="w-12 h-5 px-1 text-[11px] bg-bg-primary border border-border-primary rounded text-text-primary"
+            />
+            <button
+              type="button"
+              onClick={() => setRequirement(skill, 0)}
+              className="text-text-tertiary hover:text-text-primary"
+            >
+              <X size={10} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ============== ENTRY EDITOR ROUTER ==============
 
 /**
@@ -695,6 +1275,60 @@ export function ManifestFormEditor({
     case "ammunition": {
       const ammo = manifests.ammunition.find((a) => a.id === entryId);
       return ammo ? <AmmunitionEditor ammo={ammo} /> : null;
+    }
+    case "quests": {
+      const quest = manifests.quests.find((q) => q.id === entryId);
+      return quest ? <QuestManifestEditor quest={quest} /> : null;
+    }
+    case "stores": {
+      const store = manifests.stores.find((s) => s.id === entryId);
+      return store ? <StoreManifestEditorWrapper store={store} /> : null;
+    }
+    case "trees": {
+      const tree = manifests.trees.find((t) => t.id === entryId);
+      return tree ? <TreeEditor tree={tree} /> : null;
+    }
+    case "fishing-spots": {
+      const spot = manifests.fishingSpots.find((s) => s.id === entryId);
+      return spot ? <FishingSpotEditor spot={spot} /> : null;
+    }
+    case "mining-rocks": {
+      const rock = manifests.miningRocks.find((r) => r.id === entryId);
+      return rock ? <MiningRockEditor rock={rock} /> : null;
+    }
+    case "stations": {
+      const station = manifests.stations.find((s) => s.type === entryId);
+      return station ? <StationEditor station={station} /> : null;
+    }
+    case "duel-arenas": {
+      // Content Browser entries use "arena_<n>" as entityId; parse the number.
+      const idNum = Number.parseInt(entryId.replace(/^arena_/, ""), 10);
+      if (!Number.isFinite(idNum)) return null;
+      const arena = manifests.duelArenas.find((a) => a.arenaId === idNum);
+      return arena ? <DuelArenaEditor arena={arena} /> : null;
+    }
+    case "skill-unlocks": {
+      // Content Browser entityId is "${skill}_${level}".
+      const idx = manifests.skillUnlocks.findIndex(
+        (u) => `${u.skill}_${u.level}` === entryId,
+      );
+      if (idx < 0) return null;
+      return (
+        <SkillUnlockEditor unlock={manifests.skillUnlocks[idx]} index={idx} />
+      );
+    }
+    case "tier-requirements": {
+      // Content Browser entityId is "${tier}_${category}".
+      const idx = manifests.tierRequirements.findIndex(
+        (r) => `${r.tier}_${r.category}` === entryId,
+      );
+      if (idx < 0) return null;
+      return (
+        <TierRequirementEditor
+          req={manifests.tierRequirements[idx]}
+          index={idx}
+        />
+      );
     }
     default: {
       // Items

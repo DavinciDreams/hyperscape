@@ -40,6 +40,11 @@ export interface GameResponse {
   gameMode: GameModeManifestResponse;
   stagingServerUrl: string | null;
   productionServerUrl: string | null;
+  /**
+   * Currently-active UI layout id, or `null` when the game falls back
+   * to the built-in default layout. Set via `setGameActiveUILayout`.
+   */
+  activeUiLayoutId: string | null;
   createdAt: string;
 }
 
@@ -111,6 +116,31 @@ export async function updateGame(
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(`Failed to update game: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+/**
+ * Set (or clear, by passing `null`) the game's active UI layout.
+ * Requires at least "editor" team-role. Server verifies that the
+ * layout is actually accessible to this team.
+ */
+export async function setGameActiveUILayout(
+  teamId: string,
+  gameId: string,
+  activeUiLayoutId: string | null,
+): Promise<GameResponse> {
+  const res = await apiFetch(
+    `/api/teams/${encodeURIComponent(teamId)}/games/${encodeURIComponent(gameId)}/active-ui-layout`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeUiLayoutId }),
+    },
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Failed to set active UI layout: ${res.status} ${msg}`);
   }
   return res.json();
 }

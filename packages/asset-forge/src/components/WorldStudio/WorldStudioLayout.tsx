@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   GripVertical,
   Settings,
-  Book,
   Rocket,
   Wand2,
 } from "lucide-react";
@@ -31,8 +30,6 @@ import { OutlinerPanel } from "./panels/OutlinerPanel";
 import { PathToolPanel } from "./panels/PathToolPanel";
 import { ProcgenPanel } from "./panels/ProcgenPanel";
 import { ZonePaintPanel } from "./panels/ZonePaintPanel";
-import { ManifestBrowserPanel } from "./panels/ManifestBrowserPanel";
-import { ContentBrowser } from "./panels/ContentBrowser";
 import { DeploymentPanel } from "./panels/DeploymentPanel";
 import { AutomationPanel } from "./panels/AutomationPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
@@ -169,8 +166,9 @@ const RIGHT_TABS: {
   label: string;
   icon: typeof Settings;
 }[] = [
+  // Content Browser lives in the bottom dock (UE5 convention) — not in
+  // the right sidebar tabs. Details/Deploy/AI remain here.
   { id: "properties", label: "Details", icon: Settings },
-  { id: "manifests", label: "Content", icon: Book },
   { id: "deployment", label: "Deploy", icon: Rocket },
   { id: "automation", label: "AI", icon: Wand2 },
 ];
@@ -446,8 +444,6 @@ export function WorldStudioLayout({ projectId }: WorldStudioLayoutProps) {
   // Resolve right panel content
   const renderRightContent = () => {
     switch (layout.rightTab) {
-      case "manifests":
-        return <ContentBrowser />;
       case "deployment":
         return <DeploymentPanel />;
       case "automation":

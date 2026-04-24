@@ -85,6 +85,19 @@ export const UpdateGameBody = t.Object({
   stagingAdminCode: t.Optional(t.String()),
   productionAdminCode: t.Optional(t.String()),
   gameMode: t.Optional(GameModeManifestBody),
+  /**
+   * Currently-active UI layout id. Pass `null` to unset (the client
+   * will fall back to the hand-coded default layout). See
+   * `PATCH /api/teams/:teamId/games/:gameId/active-ui-layout` for the
+   * dedicated endpoint used by the UI Layout Editor.
+   */
+  activeUiLayoutId: t.Optional(t.Nullable(t.String())),
+});
+
+/** Body for PATCH /api/teams/:teamId/games/:gameId/active-ui-layout */
+export const SetActiveUILayoutBody = t.Object({
+  /** Layout id to activate, or `null` to clear the active layout. */
+  activeUiLayoutId: t.Nullable(t.String()),
 });
 
 export const GameResponse = t.Object({
@@ -97,6 +110,12 @@ export const GameResponse = t.Object({
   gameMode: GameModeManifestBody,
   stagingServerUrl: t.Nullable(t.String()),
   productionServerUrl: t.Nullable(t.String()),
+  /**
+   * Currently-active UI layout. `null` when no layout is set or the
+   * active layout id has been orphaned (deleted). Clients should fall
+   * back to their hand-coded default in either case.
+   */
+  activeUiLayoutId: t.Nullable(t.String()),
   createdAt: t.String(),
 });
 
@@ -282,6 +301,54 @@ export const ScriptDetailResponse = t.Composite([
   }),
 ]);
 
+// ==================== UI Layout Models ====================
+
+export const CreateUILayoutBody = t.Object({
+  name: t.String({ minLength: 1, maxLength: 100 }),
+  description: t.Optional(t.String({ maxLength: 500 })),
+  version: t.Optional(t.String({ maxLength: 20 })),
+  gameId: t.Optional(t.String()),
+  manifestData: t.Unknown(), // UILayoutManifest JSON, validated by UILayoutManifestSchema
+  isTemplate: t.Optional(t.Boolean()),
+  isPublic: t.Optional(t.Boolean()),
+});
+
+export const UpdateUILayoutBody = t.Object({
+  name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+  description: t.Optional(t.String({ maxLength: 500 })),
+  version: t.Optional(t.String({ maxLength: 20 })),
+  manifestData: t.Optional(t.Unknown()),
+  isTemplate: t.Optional(t.Boolean()),
+  isPublic: t.Optional(t.Boolean()),
+});
+
+export const UILayoutResponse = t.Object({
+  id: t.String(),
+  teamId: t.String(),
+  gameId: t.Nullable(t.String()),
+  name: t.String(),
+  slug: t.String(),
+  description: t.Nullable(t.String()),
+  version: t.String(),
+  isTemplate: t.Boolean(),
+  isPublic: t.Boolean(),
+  createdBy: t.Nullable(t.String()),
+  createdAt: t.String(),
+  updatedAt: t.String(),
+});
+
+export const UILayoutDetailResponse = t.Composite([
+  UILayoutResponse,
+  t.Object({
+    manifestData: t.Unknown(),
+  }),
+]);
+
+export const CloneUILayoutBody = t.Object({
+  name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+  gameId: t.Optional(t.String()),
+});
+
 // ==================== Auth Models ====================
 
 export const AuthMeResponse = t.Object({
@@ -327,6 +394,7 @@ export type CreateTeamBodyType = Static<typeof CreateTeamBody>;
 export type UpdateTeamBodyType = Static<typeof UpdateTeamBody>;
 export type CreateGameBodyType = Static<typeof CreateGameBody>;
 export type UpdateGameBodyType = Static<typeof UpdateGameBody>;
+export type SetActiveUILayoutBodyType = Static<typeof SetActiveUILayoutBody>;
 export type GameModeManifestBodyType = Static<typeof GameModeManifestBody>;
 export type TeamInviteBodyType = Static<typeof TeamInviteBody>;
 export type CreateWorldProjectBodyType = Static<typeof CreateWorldProjectBody>;

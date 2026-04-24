@@ -42,6 +42,10 @@ import { BridgeGenPage } from "./pages/BridgeGenPage";
 import { LandmarkGenPage } from "./pages/LandmarkGenPage";
 import { WorldStudioPage } from "./pages/WorldStudioPage";
 import { ArmorPipelinePage } from "./pages/ArmorPipelinePage";
+import {
+  UILayoutEditorPage,
+  UILayoutLibraryPanel,
+} from "./components/UILayoutEditor";
 
 /** Redirects to /sign-in if the user is not authenticated */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -142,6 +146,14 @@ function AppLayout() {
             <Route
               path={ROUTES.ARMOR_PIPELINE}
               element={<ArmorPipelinePage />}
+            />
+            <Route
+              path={ROUTES.UI_LAYOUT_EDITOR}
+              element={<UILayoutLibraryPanel />}
+            />
+            <Route
+              path={ROUTES.UI_LAYOUT_ASSET}
+              element={<UILayoutEditorPage />}
             />
 
             {/* Procedural Generators */}

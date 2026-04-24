@@ -624,6 +624,48 @@ function studioReducer(
         },
         manifests: { ...state.manifests, duelArenas: action.duelArenas },
       };
+    case "MANIFEST_UPDATE_STATIONS":
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
+        manifests: { ...state.manifests, stations: action.stations },
+      };
+    case "MANIFEST_UPDATE_TREES":
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
+        manifests: { ...state.manifests, trees: action.trees },
+      };
+    case "MANIFEST_UPDATE_FISHING_SPOTS":
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
+        manifests: {
+          ...state.manifests,
+          fishingSpots: action.fishingSpots,
+        },
+      };
+    case "MANIFEST_UPDATE_MINING_ROCKS":
+      return {
+        ...state,
+        builder: {
+          ...state.builder,
+          editing: { ...state.builder.editing, hasUnsavedChanges: true },
+        },
+        manifests: {
+          ...state.manifests,
+          miningRocks: action.miningRocks,
+        },
+      };
 
     // Phase 7: Audio zone CRUD — all set hasUnsavedChanges for save indicator
     case "ADD_MUSIC_ZONE":

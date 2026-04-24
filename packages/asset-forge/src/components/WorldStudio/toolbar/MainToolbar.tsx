@@ -19,7 +19,6 @@ import {
   PanelLeft,
   PanelRight,
   Loader2,
-  Book,
   Rocket,
   Wand2,
   Sparkles,
@@ -156,11 +155,7 @@ function DropdownItem({
 // Props
 // ---------------------------------------------------------------------------
 
-export type RightPanelTab =
-  | "properties"
-  | "manifests"
-  | "deployment"
-  | "automation";
+export type RightPanelTab = "properties" | "deployment" | "automation";
 
 interface MainToolbarProps {
   leftPanelOpen: boolean;
@@ -532,18 +527,6 @@ export function MainToolbar({
         <Divider />
 
         {/* Right panel tabs — clicking opens the panel to that tab */}
-        <ToolButton
-          icon={Book}
-          label="Manifest Browser"
-          active={rightPanelOpen && activeRightTab === "manifests"}
-          onClick={() => {
-            if (rightPanelOpen && activeRightTab === "manifests") {
-              onToggleRight();
-            } else {
-              onSetRightTab("manifests");
-            }
-          }}
-        />
         <ToolButton
           icon={Wand2}
           label="Automation Tools"

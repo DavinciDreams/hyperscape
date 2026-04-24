@@ -11,11 +11,12 @@
 
 import {
   AlertCircle,
+  ArrowLeft,
   ChefHat,
   ChevronRight,
   Crosshair,
-  ExternalLink,
   Grid3x3,
+  Inbox,
   List,
   Loader2,
   MapPin,
@@ -23,7 +24,6 @@ import {
   Package,
   Pickaxe,
   Search,
-  Settings,
   Sparkles,
   Swords,
   TrendingUp,
@@ -59,6 +59,49 @@ import type {
   ManifestData,
 } from "../types";
 import { useWorldStudio } from "../WorldStudioContext";
+import { ManifestFormEditor } from "./properties/ManifestEntryEditor";
+
+// ============== CATEGORY → MANIFEST MAPPING ==============
+
+/**
+ * Maps a Content Browser categoryKey to the manifestName expected by
+ * `ManifestFormEditor`. Returns `null` when no editor route is registered
+ * yet (ContentDetailPreview shows only the summary / action buttons).
+ */
+function categoryKeyToManifestName(categoryKey: string): string | null {
+  // Entities
+  if (categoryKey === "entities/npcs") return "npcs";
+  if (categoryKey === "entities/mob-spawns") return "npcs";
+  if (categoryKey === "entities/stores") return "stores";
+  if (categoryKey === "entities/stations") return "stations";
+
+  // Items — categoryKey is like "items/weapons", manifest router uses the
+  // same prefix convention.
+  if (categoryKey.startsWith("items/")) return categoryKey;
+
+  // Combat
+  if (categoryKey === "combat/spells") return "combat-spells";
+  if (categoryKey === "combat/prayers") return "prayers";
+  if (categoryKey === "combat/runes") return "runes";
+  if (categoryKey === "combat/ammo") return "ammunition";
+  if (categoryKey === "combat/duel-arenas") return "duel-arenas";
+
+  // Recipes — categoryKey is like "recipes/cooking", manifest router uses
+  // the same prefix convention.
+  if (categoryKey.startsWith("recipes/")) return categoryKey;
+
+  // Progression
+  if (categoryKey === "progression/quests") return "quests";
+  if (categoryKey === "progression/skill-unlocks") return "skill-unlocks";
+  if (categoryKey === "progression/tier-reqs") return "tier-requirements";
+
+  // Gathering
+  if (categoryKey === "gathering/woodcutting") return "trees";
+  if (categoryKey === "gathering/fishing") return "fishing-spots";
+  if (categoryKey === "gathering/mining") return "mining-rocks";
+
+  return null;
+}
 
 // ============== CONTENT ENTRY ==============
 
@@ -99,6 +142,7 @@ const CATEGORY_TREE: CategoryNode[] = [
     children: [
       { key: "entities/npcs", label: "NPCs", leaf: true },
       { key: "entities/stations", label: "Stations", leaf: true },
+      { key: "entities/stores", label: "Stores", leaf: true },
       { key: "entities/mob-spawns", label: "Mob Spawns", leaf: true },
     ],
   },
@@ -251,6 +295,19 @@ const DOT_COLORS: Record<string, string> = {
   "custom-asset": "bg-teal-400",
   prefab: "bg-pink-400",
 };
+
+/** Category keys that support "place in world" — shared by list row
+ *  hover action and detail pane Place button. */
+const PLACEABLE_CATEGORY_KEYS = new Set([
+  "entities/npcs",
+  "entities/stations",
+  "entities/mob-spawns",
+  "gathering/mining",
+  "gathering/woodcutting",
+  "gathering/fishing",
+  "custom/placed",
+  "custom/prefabs",
+]);
 
 // ============== BUILD ALL ENTRIES ==============
 
@@ -497,12 +554,12 @@ function buildAllEntries(manifests: ManifestData): ContentEntry[] {
     });
   });
 
-  // Stores (shown under entities/stations umbrella as a related type)
+  // Stores
   manifests.stores.forEach((s: ManifestStore) => {
     entries.push({
       id: `store:${s.id}`,
       name: s.name,
-      categoryKey: "entities/stations",
+      categoryKey: "entities/stores",
       typeLabel: "store",
       dotColor: DOT_COLORS.store,
       info: `${s.items.length} items`,
@@ -531,6 +588,35 @@ function getNodeCount(node: CategoryNode, counts: Map<string, number>): number {
     (sum, child) => sum + getNodeCount(child, counts),
     0,
   );
+}
+
+// Walk the tree to find a node + its parent chain. Used by the header
+// breadcrumb so the user knows which category the visible rows belong to.
+function findNodePath(
+  tree: CategoryNode[],
+  key: string,
+  ancestors: CategoryNode[] = [],
+): CategoryNode[] | null {
+  for (const node of tree) {
+    if (node.key === key) return [...ancestors, node];
+    if (node.children) {
+      const found = findNodePath(node.children, key, [...ancestors, node]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function categoryTotalEntries(
+  tree: CategoryNode[],
+  key: string,
+  counts: Map<string, number>,
+): number {
+  const path = findNodePath(tree, key);
+  if (!path) return 0;
+  // Total for a leaf is its own count; for a parent it's the recursive
+  // sum already exposed by getNodeCount.
+  return getNodeCount(path[path.length - 1], counts);
 }
 
 // ============== FILTER CHIP PARSING ==============
@@ -602,7 +688,13 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
   const [expandedParents, setExpandedParents] = useState<Set<string>>(
     () => new Set(["entities", "items"]),
   );
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  // Default to list view. Grid is too dense for a narrow sidebar — 3-col
+  // cards truncate names to 3 chars and waste vertical space on a single
+  // letter placeholder.
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [sortBy, setSortBy] = useState<"default" | "name" | "type" | "level">(
+    "default",
+  );
   const [selectedEntry, setSelectedEntry] = useState<ContentEntry | null>(null);
 
   const customAssets = state.extendedLayers.customAssets;
@@ -678,17 +770,34 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
       );
     }
 
+    // Sort. Copy before sorting so memo inputs stay referentially stable.
+    if (sortBy !== "default") {
+      result = [...result].sort((a, b) => {
+        if (sortBy === "name") return a.name.localeCompare(b.name);
+        if (sortBy === "type") {
+          return (
+            a.typeLabel.localeCompare(b.typeLabel) ||
+            a.name.localeCompare(b.name)
+          );
+        }
+        // level — undefined levels sort last
+        const al = a.level ?? Number.POSITIVE_INFINITY;
+        const bl = b.level ?? Number.POSITIVE_INFINITY;
+        return al - bl || a.name.localeCompare(b.name);
+      });
+    }
+
     return result;
-  }, [allEntries, selectedCategory, parsed]);
+  }, [allEntries, selectedCategory, parsed, sortBy]);
 
   // Virtualizer for large content lists
   const contentScrollRef = useRef<HTMLDivElement>(null);
-  const GRID_COLS = 2;
+  const GRID_COLS = 3;
   const gridRowCount = Math.ceil(filteredEntries.length / GRID_COLS);
   const gridVirtualizer = useVirtualizer({
     count: viewMode === "grid" ? gridRowCount : filteredEntries.length,
     getScrollElement: () => contentScrollRef.current,
-    estimateSize: () => (viewMode === "grid" ? 72 : 32),
+    estimateSize: () => (viewMode === "grid" ? 56 : 26),
     overscan: 8,
   });
 
@@ -711,21 +820,6 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
   // Clear search
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
-  }, []);
-
-  // Add type filter chip
-  const addFilterChip = useCallback((ft: FilterType) => {
-    setSearchQuery((prev) => {
-      if (prev.toLowerCase().includes(`type:${ft}`)) return prev;
-      return `${prev} type:${ft}`.trim();
-    });
-  }, []);
-
-  // Remove a specific type filter chip
-  const removeFilterChip = useCallback((ft: FilterType) => {
-    setSearchQuery((prev) =>
-      prev.replace(new RegExp(`type:${ft}`, "gi"), "").trim(),
-    );
   }, []);
 
   // Drag start handler
@@ -776,14 +870,46 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
     [actions],
   );
 
+  // Header context: when a leaf category is active, the header shows
+  // "Parent ›" as a breadcrumb and the leaf name as the title, plus
+  // `X / Y` (filtered-of-total) so the user knows how many rows were
+  // hidden by the search/type-chip filters.
+  const selectedPath = useMemo(
+    () =>
+      selectedCategory ? findNodePath(CATEGORY_TREE, selectedCategory) : null,
+    [selectedCategory],
+  );
+  const browseTitle = selectedPath
+    ? selectedPath[selectedPath.length - 1].label
+    : "Content";
+  const browseBreadcrumb =
+    selectedPath && selectedPath.length > 1
+      ? selectedPath
+          .slice(0, -1)
+          .map((n) => n.label)
+          .join(" › ")
+      : null;
+  const browseTotal = selectedCategory
+    ? categoryTotalEntries(CATEGORY_TREE, selectedCategory, categoryCounts)
+    : allEntries.length;
+
   // Loading state
   if (!manifests.loaded) {
     return (
       <div className="flex flex-col h-full">
         <BrowserHeader
+          title="Content"
+          subtitle={null}
+          breadcrumb={null}
+          onBack={null}
+          resultCount={0}
+          totalCount={null}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          resultCount={0}
+          showViewToggle={false}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          showSort={false}
         />
         <div className="flex-1 flex items-center justify-center">
           {manifests.loading ? (
@@ -804,81 +930,124 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
     );
   }
 
+  // Master-detail mode: when an entry is selected, the content pane
+  // swaps to a dedicated detail view so the inline manifest editor gets
+  // the whole panel's height instead of being squeezed under a
+  // simultaneously-rendered grid.
+  if (selectedEntry) {
+    return (
+      <div className="flex flex-col h-full">
+        <BrowserHeader
+          title={selectedEntry.name}
+          subtitle={`${selectedEntry.typeLabel} · ${selectedEntry.info}`}
+          breadcrumb={null}
+          onBack={() => setSelectedEntry(null)}
+          resultCount={null}
+          totalCount={null}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          showViewToggle={false}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          showSort={false}
+        />
+        <ContentDetailPane
+          entry={selectedEntry}
+          onPlaceInWorld={() => handlePlaceInWorld(selectedEntry)}
+        />
+      </div>
+    );
+  }
+
+  const hasBreadcrumb = Boolean(browseBreadcrumb);
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header with view toggle */}
-      <BrowserHeader
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        resultCount={filteredEntries.length}
-      />
-
-      {/* Unified search bar */}
-      <div className="px-2 py-1.5 border-b border-border-primary">
-        <div className="relative">
+      {/* Unified compact toolbar — search pill spans width, count/sort/view
+          inline at right. No more "Content" title row (the tab label
+          already says "Content"). */}
+      <div className="flex items-center gap-2 px-2 py-1 border-b border-white/5">
+        <div className="relative flex-1 min-w-0">
           <Search
             size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary"
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none"
           />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search all content... (type:npc, type:item)"
-            className="w-full pl-7 pr-7 py-1 text-xs bg-bg-tertiary border border-border-primary rounded text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary/50"
+            placeholder={
+              hasBreadcrumb
+                ? `Search in ${browseTitle}`
+                : "Search by name, id, or description"
+            }
+            className="w-full pl-7 pr-7 py-1 text-xs bg-black/20 border border-transparent rounded-md text-text-primary placeholder:text-text-tertiary hover:bg-black/25 focus:outline-none focus:bg-black/30 focus:border-primary/40"
           />
           {searchQuery && (
             <button
               onClick={handleClearSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-text-tertiary hover:text-text-primary rounded"
+              title="Clear search"
             >
               <X size={12} />
             </button>
           )}
         </div>
-
-        {/* Active filter chips */}
-        {parsed.typeFilters.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {parsed.typeFilters.map((ft) => (
-              <span
-                key={ft}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-primary/15 text-primary rounded"
-              >
-                {FILTER_TYPE_LABELS[ft]}
-                <button
-                  onClick={() => removeFilterChip(ft)}
-                  className="hover:text-red-400"
-                >
-                  <X size={8} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Quick filter chip bar */}
-        {!searchQuery && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {(["npc", "item", "spell", "quest", "recipe"] as FilterType[]).map(
-              (ft) => (
-                <button
-                  key={ft}
-                  onClick={() => addFilterChip(ft)}
-                  className="px-1.5 py-0.5 text-[10px] text-text-tertiary bg-bg-tertiary border border-border-primary rounded hover:border-primary/50 hover:text-text-secondary transition-colors"
-                >
-                  {FILTER_TYPE_LABELS[ft]}
-                </button>
-              ),
-            )}
-          </div>
-        )}
+        <span
+          className="text-[10px] text-text-tertiary tabular-nums"
+          title={
+            browseTotal !== filteredEntries.length
+              ? `${filteredEntries.length} shown of ${browseTotal}`
+              : `${filteredEntries.length} entries`
+          }
+        >
+          {browseTotal !== filteredEntries.length
+            ? `${filteredEntries.length} / ${browseTotal}`
+            : filteredEntries.length}
+        </span>
+        <select
+          value={sortBy}
+          onChange={(e) =>
+            setSortBy(e.target.value as "default" | "name" | "type" | "level")
+          }
+          className="text-[10px] bg-black/20 border border-transparent rounded px-1 py-0.5 text-text-secondary hover:text-text-primary hover:bg-black/30 focus:outline-none focus:border-primary/40"
+          title="Sort entries"
+        >
+          <option value="default">Sort</option>
+          <option value="name">Name</option>
+          <option value="type">Type</option>
+          <option value="level">Level</option>
+        </select>
+        <div className="flex items-center gap-0.5">
+          <button
+            className={`p-1 rounded transition-colors ${
+              viewMode === "list"
+                ? "text-primary bg-primary/10"
+                : "text-text-tertiary hover:text-text-primary"
+            }`}
+            onClick={() => setViewMode("list")}
+            title="List view"
+          >
+            <List size={12} />
+          </button>
+          <button
+            className={`p-1 rounded transition-colors ${
+              viewMode === "grid"
+                ? "text-primary bg-primary/10"
+                : "text-text-tertiary hover:text-text-primary"
+            }`}
+            onClick={() => setViewMode("grid")}
+            title="Grid view"
+          >
+            <Grid3x3 size={12} />
+          </button>
+        </div>
       </div>
 
-      {/* Main body: tree + content */}
+      {/* Main body: tree + content grid/list */}
       <div className="flex-1 flex min-h-0">
         {/* Left category tree */}
-        <div className="w-[140px] flex-shrink-0 border-r border-border-primary overflow-y-auto scrollbar-thin">
+        <div className="w-[170px] flex-shrink-0 bg-black/10 overflow-y-auto scrollbar-thin py-1">
           {CATEGORY_TREE.map((node) => (
             <CategoryTreeNode
               key={node.key}
@@ -895,22 +1064,12 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
 
         {/* Right content area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Content grid/list (virtualized) */}
           <div
             ref={contentScrollRef}
             className="flex-1 overflow-y-auto scrollbar-thin"
           >
             {filteredEntries.length === 0 ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center text-text-tertiary px-4">
-                  <Search size={20} className="mx-auto mb-2 opacity-40" />
-                  <p className="text-xs">
-                    {searchQuery || selectedCategory
-                      ? "No matching content"
-                      : "Select a category or search"}
-                  </p>
-                </div>
-              </div>
+              <EmptyState hasQuery={Boolean(searchQuery || selectedCategory)} />
             ) : (
               <div
                 style={{
@@ -918,7 +1077,7 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
                   width: "100%",
                   position: "relative",
                 }}
-                className="p-1.5"
+                className={viewMode === "grid" ? "p-2" : ""}
               >
                 {gridVirtualizer.getVirtualItems().map((virtualRow) => {
                   if (viewMode === "grid") {
@@ -930,12 +1089,12 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
                     return (
                       <div
                         key={virtualRow.key}
-                        className="grid grid-cols-2 gap-1"
+                        className="grid grid-cols-3 gap-1.5"
                         style={{
                           position: "absolute",
                           top: 0,
-                          left: 0,
-                          right: 0,
+                          left: 8,
+                          right: 8,
                           height: `${virtualRow.size}px`,
                           transform: `translateY(${virtualRow.start}px)`,
                         }}
@@ -944,7 +1103,6 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
                           <ContentGridCard
                             key={entry.id}
                             entry={entry}
-                            isSelected={selectedEntry?.id === entry.id}
                             onClick={() => setSelectedEntry(entry)}
                             onDragStart={(e) => handleDragStart(e, entry)}
                           />
@@ -967,9 +1125,14 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
                       >
                         <ContentListRow
                           entry={entry}
-                          isSelected={selectedEntry?.id === entry.id}
+                          index={virtualRow.index}
                           onClick={() => setSelectedEntry(entry)}
                           onDragStart={(e) => handleDragStart(e, entry)}
+                          onPlace={
+                            PLACEABLE_CATEGORY_KEYS.has(entry.categoryKey)
+                              ? () => handlePlaceInWorld(entry)
+                              : null
+                          }
                         />
                       </div>
                     );
@@ -978,65 +1141,147 @@ export const ContentBrowser = React.memo(function ContentBrowser() {
               </div>
             )}
           </div>
-
-          {/* Bottom detail preview */}
-          {selectedEntry && (
-            <ContentDetailPreview
-              entry={selectedEntry}
-              onClose={() => setSelectedEntry(null)}
-              onPlaceInWorld={() => handlePlaceInWorld(selectedEntry)}
-            />
-          )}
         </div>
       </div>
     </div>
   );
 });
 
+// ============== EMPTY STATE ==============
+
+function EmptyState({ hasQuery }: { hasQuery: boolean }) {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center text-text-tertiary px-6 max-w-[240px]">
+        <Inbox size={28} className="mx-auto mb-3 opacity-30" />
+        <p className="text-xs font-medium text-text-secondary mb-1">
+          {hasQuery ? "No matches" : "Browse content"}
+        </p>
+        <p className="text-[11px] leading-relaxed opacity-80">
+          {hasQuery
+            ? "Try a different search or filter, or pick a different category."
+            : "Pick a category on the left, or search for an item, NPC, spell, or quest."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ============== HEADER ==============
 
 function BrowserHeader({
+  title,
+  subtitle,
+  breadcrumb,
+  onBack,
+  resultCount,
+  totalCount,
   viewMode,
   onViewModeChange,
-  resultCount,
+  showViewToggle,
+  sortBy,
+  onSortChange,
+  showSort,
 }: {
+  title: string;
+  subtitle: string | null;
+  /** "Items › Misc" — shown in place of title when present (browse mode) */
+  breadcrumb: string | null;
+  onBack: (() => void) | null;
+  /** Filtered (visible) row count; null to hide */
+  resultCount: number | null;
+  /** Total rows in the selected category (ignoring filters); null to hide */
+  totalCount: number | null;
   viewMode: "grid" | "list";
   onViewModeChange: (mode: "grid" | "list") => void;
-  resultCount: number;
+  showViewToggle: boolean;
+  sortBy: "default" | "name" | "type" | "level";
+  onSortChange: (sort: "default" | "name" | "type" | "level") => void;
+  showSort: boolean;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border-primary">
-      <Settings size={12} className="text-primary" />
-      <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex-1">
-        Content
-      </span>
-      <span className="text-[10px] text-text-tertiary tabular-nums mr-1">
-        {resultCount}
-      </span>
-      <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
+      {onBack ? (
         <button
-          className={`p-1 rounded transition-colors ${
-            viewMode === "list"
-              ? "text-primary bg-primary/10"
-              : "text-text-tertiary hover:text-text-primary"
-          }`}
-          onClick={() => onViewModeChange("list")}
-          title="List view"
+          onClick={onBack}
+          className="p-0.5 -ml-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-white/5 transition-colors"
+          title="Back to browse"
         >
-          <List size={12} />
+          <ArrowLeft size={14} />
         </button>
-        <button
-          className={`p-1 rounded transition-colors ${
-            viewMode === "grid"
-              ? "text-primary bg-primary/10"
-              : "text-text-tertiary hover:text-text-primary"
-          }`}
-          onClick={() => onViewModeChange("grid")}
-          title="Grid view"
-        >
-          <Grid3x3 size={12} />
-        </button>
+      ) : null}
+      <div className="flex-1 min-w-0">
+        {breadcrumb ? (
+          <div className="text-[10px] text-text-tertiary truncate">
+            {breadcrumb}
+          </div>
+        ) : null}
+        <div className="text-xs font-semibold text-text-primary truncate">
+          {title}
+        </div>
+        {subtitle ? (
+          <div className="text-[10px] text-text-tertiary truncate">
+            {subtitle}
+          </div>
+        ) : null}
       </div>
+      {resultCount !== null ? (
+        <span
+          className="text-[10px] text-text-tertiary tabular-nums mr-1"
+          title={
+            totalCount !== null && totalCount !== resultCount
+              ? `${resultCount} shown of ${totalCount} total`
+              : `${resultCount} entries`
+          }
+        >
+          {totalCount !== null && totalCount !== resultCount
+            ? `${resultCount} / ${totalCount}`
+            : resultCount}
+        </span>
+      ) : null}
+      {showSort ? (
+        <select
+          value={sortBy}
+          onChange={(e) =>
+            onSortChange(
+              e.target.value as "default" | "name" | "type" | "level",
+            )
+          }
+          className="text-[10px] bg-black/20 border border-transparent rounded px-1 py-0.5 text-text-secondary hover:text-text-primary hover:bg-black/30 focus:outline-none focus:border-primary/40"
+          title="Sort entries"
+        >
+          <option value="default">Sort</option>
+          <option value="name">Name</option>
+          <option value="type">Type</option>
+          <option value="level">Level</option>
+        </select>
+      ) : null}
+      {showViewToggle ? (
+        <div className="flex items-center gap-0.5">
+          <button
+            className={`p-1 rounded transition-colors ${
+              viewMode === "list"
+                ? "text-primary bg-primary/10"
+                : "text-text-tertiary hover:text-text-primary"
+            }`}
+            onClick={() => onViewModeChange("list")}
+            title="List view"
+          >
+            <List size={12} />
+          </button>
+          <button
+            className={`p-1 rounded transition-colors ${
+              viewMode === "grid"
+                ? "text-primary bg-primary/10"
+                : "text-text-tertiary hover:text-text-primary"
+            }`}
+            onClick={() => onViewModeChange("grid")}
+            title="Grid view"
+          >
+            <Grid3x3 size={12} />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1071,7 +1316,7 @@ function CategoryTreeNode({
         className={`w-full flex items-center gap-1 py-1 pr-2 text-left transition-colors ${
           isSelected
             ? "bg-primary/15 text-primary"
-            : "text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+            : "text-text-secondary hover:bg-white/5 hover:text-text-primary"
         }`}
         style={{ paddingLeft: `${depth * 10 + 6}px` }}
         onClick={() => {
@@ -1125,41 +1370,30 @@ function CategoryTreeNode({
 
 function ContentGridCard({
   entry,
-  isSelected,
   onClick,
   onDragStart,
 }: {
   entry: ContentEntry;
-  isSelected: boolean;
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
 }) {
   return (
     <div
-      className={`flex flex-col p-1.5 rounded border cursor-pointer transition-colors ${
-        isSelected
-          ? "border-primary bg-primary/10"
-          : "border-border-primary hover:border-border-secondary hover:bg-bg-tertiary/50"
-      }`}
+      className="group flex flex-col justify-center gap-0.5 px-2 py-1.5 rounded-md bg-black/10 border border-transparent cursor-pointer transition-colors hover:bg-white/5 hover:border-primary/30"
       onClick={onClick}
       draggable
       onDragStart={onDragStart}
       title={`${entry.name}\n${entry.info}`}
     >
-      {/* Icon placeholder */}
-      <div className="w-full aspect-square rounded bg-bg-tertiary flex items-center justify-center mb-1 relative">
-        <span className="text-sm text-text-tertiary/40 font-medium">
-          {(entry.name || "?").charAt(0).toUpperCase()}
-        </span>
-        {/* Type indicator dot */}
+      <div className="flex items-center gap-1.5 min-w-0">
         <span
-          className={`absolute top-1 right-1 w-2 h-2 rounded-full ${entry.dotColor}`}
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${entry.dotColor}`}
         />
+        <span className="text-[11px] text-text-primary truncate leading-tight flex-1 min-w-0">
+          {entry.name}
+        </span>
       </div>
-      <span className="text-[10px] text-text-primary truncate leading-tight">
-        {entry.name}
-      </span>
-      <span className="text-[9px] text-text-tertiary truncate leading-tight">
+      <span className="text-[9px] text-text-tertiary truncate leading-tight pl-3.5">
         {entry.info}
       </span>
     </div>
@@ -1170,22 +1404,23 @@ function ContentGridCard({
 
 function ContentListRow({
   entry,
-  isSelected,
+  index,
   onClick,
   onDragStart,
+  onPlace,
 }: {
   entry: ContentEntry;
-  isSelected: boolean;
+  index: number;
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  /** Non-null for placeable entries — reveals a Place button on hover. */
+  onPlace: (() => void) | null;
 }) {
+  // UE5-style alternating row shading (no hard dividers).
+  const bandClass = index % 2 === 1 ? "bg-white/[0.015]" : "";
   return (
     <div
-      className={`flex items-center gap-2 px-2 py-1 cursor-pointer transition-colors border-b border-border-primary/30 ${
-        isSelected
-          ? "bg-primary/10 border-l-2 border-l-primary"
-          : "hover:bg-bg-tertiary/50 border-l-2 border-l-transparent"
-      }`}
+      className={`group flex items-center gap-2 px-3 h-[26px] cursor-pointer transition-colors hover:bg-white/5 ${bandClass}`}
       onClick={onClick}
       draggable
       onDragStart={onDragStart}
@@ -1194,25 +1429,33 @@ function ContentListRow({
       <span
         className={`w-2 h-2 rounded-full flex-shrink-0 ${entry.dotColor}`}
       />
-      {/* Icon placeholder */}
-      <div className="w-5 h-5 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0">
-        <span className="text-[9px] text-text-tertiary/50 font-medium">
-          {(entry.name || "?").charAt(0).toUpperCase()}
-        </span>
-      </div>
-      {/* Name + info */}
+      {/* Name */}
       <div className="flex-1 min-w-0">
         <div className="text-[11px] text-text-primary truncate">
           {entry.name}
         </div>
       </div>
+      {/* Hover action: Place in World (placeable types only) */}
+      {onPlace ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlace();
+          }}
+          className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] rounded bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 flex-shrink-0"
+          title="Place in world"
+        >
+          <Crosshair size={9} />
+        </button>
+      ) : null}
       {/* Type label */}
       <span className="text-[9px] text-text-tertiary flex-shrink-0">
         {entry.typeLabel}
       </span>
       {/* Level/info */}
       {entry.level != null && (
-        <span className="text-[9px] text-text-tertiary tabular-nums flex-shrink-0">
+        <span className="text-[9px] text-text-tertiary tabular-nums flex-shrink-0 w-8 text-right">
           Lv{entry.level}
         </span>
       )}
@@ -1220,77 +1463,40 @@ function ContentListRow({
   );
 }
 
-// ============== DETAIL PREVIEW ==============
+// ============== DETAIL PANE ==============
 
-function ContentDetailPreview({
+// Full-pane detail view rendered when an entry is selected. The
+// BrowserHeader sits above (and owns the title + back button), so this
+// pane only shows the entry's type chip, action buttons, and the inline
+// manifest form editor — which now gets the entire content area height
+// instead of being capped at 45% of the panel.
+function ContentDetailPane({
   entry,
-  onClose,
   onPlaceInWorld,
 }: {
   entry: ContentEntry;
-  onClose: () => void;
   onPlaceInWorld: () => void;
 }) {
-  // Determine if this entry type is placeable
-  const isPlaceable = [
-    "entities/npcs",
-    "entities/stations",
-    "entities/mob-spawns",
-    "gathering/mining",
-    "gathering/woodcutting",
-    "gathering/fishing",
-    "custom/placed",
-    "custom/prefabs",
-  ].includes(entry.categoryKey);
+  const isPlaceable = PLACEABLE_CATEGORY_KEYS.has(entry.categoryKey);
+
+  const manifestName = categoryKeyToManifestName(entry.categoryKey);
 
   return (
-    <div className="border-t border-border-primary bg-bg-secondary px-2 py-2">
-      <div className="flex items-start gap-2">
-        {/* Type dot + icon */}
-        <div className="w-8 h-8 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0 relative">
-          <span className="text-xs text-text-tertiary/50 font-medium">
-            {(entry.name || "?").charAt(0).toUpperCase()}
-          </span>
-          <span
-            className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-bg-secondary ${entry.dotColor}`}
-          />
-        </div>
-
-        {/* Details */}
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin bg-bg-secondary">
+      {/* Compact summary strip */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-black/10">
+        <span
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${entry.dotColor}`}
+        />
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium text-text-primary truncate">
-            {entry.name}
-          </div>
-          <div className="text-[10px] text-text-tertiary mt-0.5">
-            {entry.typeLabel} · {entry.info}
-          </div>
-          <div className="text-[10px] text-text-tertiary truncate opacity-60">
+          <div className="text-[10px] text-text-tertiary truncate opacity-70">
             ID: {entry.entityId}
           </div>
         </div>
-
-        {/* Close */}
-        <button
-          onClick={onClose}
-          className="p-0.5 text-text-tertiary hover:text-text-primary"
-        >
-          <X size={10} />
-        </button>
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex gap-1.5 mt-2">
-        <button
-          className="flex items-center gap-1 px-2 py-1 text-[10px] bg-bg-tertiary border border-border-primary rounded text-text-secondary hover:text-text-primary hover:border-border-secondary transition-colors"
-          title="Open in Manifest Browser"
-        >
-          <ExternalLink size={10} />
-          Edit in Manifest
-        </button>
         {isPlaceable && (
           <button
             onClick={onPlaceInWorld}
-            className="flex items-center gap-1 px-2 py-1 text-[10px] bg-primary/15 border border-primary/30 rounded text-primary hover:bg-primary/25 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 text-[10px] bg-primary/15 border border-primary/30 rounded text-primary hover:bg-primary/25 transition-colors flex-shrink-0"
             title="Start placement in viewport"
           >
             <Crosshair size={10} />
@@ -1298,6 +1504,26 @@ function ContentDetailPreview({
           </button>
         )}
       </div>
+
+      {/* Inline form editor. Renders when this entry's category has a
+          registered ManifestFormEditor route. Edits commit straight into
+          WorldStudio state (same store the deployment panel diffs against). */}
+      {manifestName ? (
+        <ManifestFormEditor
+          manifestName={manifestName}
+          entryId={entry.entityId}
+        />
+      ) : (
+        <div className="px-3 py-6 text-center text-text-tertiary">
+          <p className="text-[11px]">
+            No inline editor for this content type yet.
+          </p>
+          <p className="text-[10px] opacity-70 mt-1">
+            Drag it to the viewport to place an instance, or edit the manifest
+            directly.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

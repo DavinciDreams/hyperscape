@@ -26,7 +26,8 @@ export type NavigationView =
   | "bridgeGen"
   | "landmarkGen"
   | "worldStudio"
-  | "armorPipeline";
+  | "armorPipeline"
+  | "uiLayoutEditor";
 
 export interface NavigationState {
   currentView: NavigationView;

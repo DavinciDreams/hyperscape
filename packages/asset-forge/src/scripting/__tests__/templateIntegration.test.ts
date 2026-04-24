@@ -16,7 +16,7 @@ import { SCRIPT_TEMPLATES } from "../templates";
 import { validateGraph } from "../validation";
 import type { ScriptGraph } from "../types";
 import {
-  createPlayTestWorld,
+  PIEEditorSession,
   type PIEDebugEntry,
   type RuntimeScriptGraph,
 } from "@hyperforge/shared/runtime";
@@ -87,12 +87,12 @@ describe("Phase 8.3 — template integration pipeline", () => {
 
     for (const template of readyTemplates) {
       const entries: PIEDebugEntry[] = [];
-      const world = createPlayTestWorld();
+      const world = new PIEEditorSession();
 
       try {
         const runtimeGraph = toRuntimeGraph(template.create());
 
-        world.start({
+        await world.start({
           playerSpawn: { x: 0, y: 0, z: 0 },
           npcs: [
             {
@@ -110,15 +110,22 @@ describe("Phase 8.3 — template integration pipeline", () => {
         await Promise.resolve();
         await Promise.resolve();
 
+        // PIEEditorSession surfaces every scripting trigger through a
+        // single `scripting/trigger` source entry — unlike the old
+        // PIEScriptRunner which used `trigger/<type>` as the source.
+        // The payload's `triggerType` preserves the specific trigger id.
         const triggerFired = entries.some(
-          (e) => e.source === "trigger/onReady",
+          (e) =>
+            e.source === "scripting/trigger" &&
+            (e.data as { triggerType?: string } | undefined)?.triggerType ===
+              "trigger/onReady",
         );
         expect(
           triggerFired,
           `${template.id} did not fire trigger/onReady`,
         ).toBe(true);
       } finally {
-        world.stop();
+        await world.stop();
       }
     }
   });

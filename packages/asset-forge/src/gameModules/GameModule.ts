@@ -67,6 +67,29 @@ export interface EntityTypeSchema {
   templates?: EntityTemplate[];
   /** Override: use a bespoke component instead of SchemaPropertyEditor */
   customEditor?: string;
+  /**
+   * Escape hatch: extra sections rendered after the auto-generated field
+   * sections. Each section references a widget by string ID that must be
+   * registered in `customSectionRegistry` at runtime. Preserves JSON
+   * round-tripping for schema validation.
+   */
+  customSections?: CustomSectionSchema[];
+}
+
+/**
+ * Declares a non-field section whose body is rendered by a registered
+ * React component. Use for computed read-only readouts, rich manifest
+ * displays, or any layout that doesn't map cleanly to a field list.
+ */
+export interface CustomSectionSchema {
+  /** Section title shown in the property editor */
+  title: string;
+  /** Lookup ID into `customSectionRegistry` */
+  widgetId: string;
+  /** Whether the section is open by default */
+  defaultOpen?: boolean;
+  /** Optional visibility gate, same shape as FieldSchema.visibleWhen */
+  visibleWhen?: { field: string; equals?: unknown; notEquals?: unknown };
 }
 
 // ============== FIELD SCHEMA ==============
@@ -102,15 +125,23 @@ export type FieldType =
   | "slider"
   | "boolean"
   | "select"
+  | "multi-select"
   | "position"
   | "rotation"
+  | "vector3"
+  | "quaternion"
   | "color"
   | "tags"
   | "json"
   | "entityId"
+  | "manifest-ref"
+  | "asset-ref"
+  | "keybinding"
   | "polygon"
   | "waypoints"
-  | "scriptGraph";
+  | "scriptGraph"
+  | "curve"
+  | "color-ramp";
 
 /** Type-specific configuration for field widgets. */
 export interface FieldConfig {
@@ -122,10 +153,16 @@ export interface FieldConfig {
   step?: number;
   /** Unit suffix for display (e.g. "m", "deg") */
   unit?: string;
-  /** Options for select fields */
+  /** Options for select / multi-select fields */
   options?: Array<{ value: string; label: string }>;
   /** Entity type filter for entityId fields */
   referenceType?: string;
+  /** Manifest kind to resolve for manifest-ref fields (e.g. "items", "npcs") */
+  manifestRef?: string;
+  /** Asset category filter for asset-ref fields (e.g. "model", "texture", "audio") */
+  assetType?: string;
+  /** Sort a tags / multi-select value array on input (default false — preserve author order) */
+  sorted?: boolean;
 }
 
 // ============== MARKER CONFIG ==============

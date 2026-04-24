@@ -51,9 +51,14 @@ import type {
   ManifestRecipe,
   ManifestAmmunition,
   ManifestRune,
+  ManifestElementalStaff,
   ManifestSkillUnlock,
   ManifestTierRequirement,
   ManifestDuelArena,
+  ManifestStation,
+  ManifestTree,
+  ManifestFishingSpot,
+  ManifestMiningRock,
   PlacedSpawnPoint,
   PlacedTeleport,
   PlacedMobSpawn,
@@ -468,6 +473,16 @@ export type StudioSpecificAction =
       tierRequirements: ManifestTierRequirement[];
     }
   | { type: "MANIFEST_UPDATE_DUEL_ARENAS"; duelArenas: ManifestDuelArena[] }
+  | { type: "MANIFEST_UPDATE_STATIONS"; stations: ManifestStation[] }
+  | { type: "MANIFEST_UPDATE_TREES"; trees: ManifestTree[] }
+  | {
+      type: "MANIFEST_UPDATE_FISHING_SPOTS";
+      fishingSpots: ManifestFishingSpot[];
+    }
+  | {
+      type: "MANIFEST_UPDATE_MINING_ROCKS";
+      miningRocks: ManifestMiningRock[];
+    }
 
   // Phase 7: Audio zone actions
   | { type: "ADD_MUSIC_ZONE"; zone: MusicZone }
@@ -878,9 +893,14 @@ export type {
   ManifestRecipe,
   ManifestAmmunition,
   ManifestRune,
+  ManifestElementalStaff,
   ManifestSkillUnlock,
   ManifestTierRequirement,
   ManifestDuelArena,
+  ManifestStation,
+  ManifestTree,
+  ManifestFishingSpot,
+  ManifestMiningRock,
   GameEntityData,
   VegetationConfig,
 };

@@ -18,6 +18,7 @@ import type {
   FieldType,
   PaletteCategorySchema,
   OutlinerLayerSchema,
+  CustomSectionSchema,
 } from "./GameModule";
 
 // ============== VALIDATION ==============
@@ -28,14 +29,23 @@ const VALID_FIELD_TYPES = new Set<FieldType>([
   "slider",
   "boolean",
   "select",
+  "multi-select",
   "position",
   "rotation",
+  "vector3",
+  "quaternion",
   "color",
   "tags",
   "json",
   "entityId",
+  "manifest-ref",
+  "asset-ref",
+  "keybinding",
   "polygon",
   "waypoints",
+  "scriptGraph",
+  "curve",
+  "color-ramp",
 ]);
 
 const VALID_MARKER_SHAPES = new Set([
@@ -100,6 +110,39 @@ function validateField(raw: unknown, path: string): FieldSchema {
   return f as unknown as FieldSchema;
 }
 
+function validateVisibleWhen(
+  raw: unknown,
+  path: string,
+): { field: string; equals?: unknown; notEquals?: unknown } {
+  assertObject(raw, path);
+  const vw = raw as Record<string, unknown>;
+  assertString(vw.field, `${path}.field`);
+  return vw as { field: string; equals?: unknown; notEquals?: unknown };
+}
+
+function validateCustomSection(
+  raw: unknown,
+  path: string,
+): CustomSectionSchema {
+  assertObject(raw, path);
+  const cs = raw as Record<string, unknown>;
+  assertString(cs.title, `${path}.title`);
+  assertString(cs.widgetId, `${path}.widgetId`);
+  if (cs.defaultOpen !== undefined && typeof cs.defaultOpen !== "boolean") {
+    throw new ModuleValidationError(`${path}.defaultOpen`, "expected boolean");
+  }
+  const visibleWhen =
+    cs.visibleWhen !== undefined
+      ? validateVisibleWhen(cs.visibleWhen, `${path}.visibleWhen`)
+      : undefined;
+  return {
+    title: cs.title as string,
+    widgetId: cs.widgetId as string,
+    defaultOpen: cs.defaultOpen as boolean | undefined,
+    visibleWhen,
+  };
+}
+
 function validateEntityType(raw: unknown, path: string): EntityTypeSchema {
   assertObject(raw, path);
   const et = raw as Record<string, unknown>;
@@ -157,7 +200,20 @@ function validateEntityType(raw: unknown, path: string): EntityTypeSchema {
     throw new ModuleValidationError(`${path}.spatial`, "expected boolean");
   }
 
-  return { ...et, fields } as unknown as EntityTypeSchema;
+  // Custom sections (optional)
+  let customSections: CustomSectionSchema[] | undefined;
+  if (et.customSections !== undefined) {
+    assertArray(et.customSections, `${path}.customSections`);
+    customSections = (et.customSections as unknown[]).map((cs, i) =>
+      validateCustomSection(cs, `${path}.customSections[${i}]`),
+    );
+  }
+
+  return {
+    ...et,
+    fields,
+    ...(customSections !== undefined ? { customSections } : {}),
+  } as unknown as EntityTypeSchema;
 }
 
 function validatePaletteCategory(

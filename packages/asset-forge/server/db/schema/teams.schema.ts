@@ -96,6 +96,16 @@ export const games = pgTable(
     stagingAdminCode: text("staging_admin_code"),
     productionAdminCode: text("production_admin_code"),
 
+    /**
+     * Currently-active UI layout for this game. When the game client
+     * boots with studio context set, the manifest HUD fetches this
+     * layout id and renders it instead of the hand-coded default. No
+     * foreign key: we don't want an active-layout reference to block
+     * deleting the layout itself, and the client is already defensive
+     * about missing/invalid ids.
+     */
+    activeUiLayoutId: text("active_ui_layout_id"),
+
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

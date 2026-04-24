@@ -61,6 +61,7 @@ import { AuditLogService } from "./services/AuditLogService";
 import { WorldProjectService } from "./services/WorldProjectService";
 import { GameModuleService } from "./services/GameModuleService";
 import { ScriptService } from "./services/ScriptService";
+import { UILayoutService } from "./services/UILayoutService";
 
 // World data routes
 import { worldTreeRoutes } from "./routes/world-trees";
@@ -74,6 +75,7 @@ import { createWorldProjectRoutes } from "./routes/world-projects";
 import { createDeploymentRoutes } from "./routes/deployments";
 import { createModuleRoutes } from "./routes/modules";
 import { createScriptRoutes } from "./routes/scripts";
+import { createUILayoutRoutes } from "./routes/ui-layouts";
 
 // Database initialization (auto-Docker when USE_LOCAL_POSTGRES=true)
 import { initializeDatabase } from "./db/db";
@@ -137,6 +139,7 @@ const auditLogService = new AuditLogService();
 const worldProjectService = new WorldProjectService();
 const gameModuleService = new GameModuleService();
 const scriptService = new ScriptService();
+const uiLayoutService = new UILayoutService();
 
 // Armor Pipeline services
 const shellTextureService = new ShellTextureService({
@@ -451,7 +454,7 @@ const app = new Elysia()
   .use(createAuthRoutes(teamService))
   .use(createTeamRoutes(teamService, auditLogService))
   .use(createInviteAcceptRoute(teamService))
-  .use(createGameRoutes(teamService, auditLogService))
+  .use(createGameRoutes(teamService, auditLogService, uiLayoutService))
   .use(
     createWorldProjectRoutes(teamService, worldProjectService, auditLogService),
   )
@@ -460,6 +463,7 @@ const app = new Elysia()
   )
   .use(createModuleRoutes(teamService, gameModuleService, auditLogService))
   .use(createScriptRoutes(teamService, scriptService, auditLogService))
+  .use(createUILayoutRoutes(teamService, uiLayoutService, auditLogService))
   // Armor pipeline (POC-2: shell texturing)
   .use(createArmorPipelineRoutes(shellTextureService))
   // Tripo pipeline (Tripo 3D AI)

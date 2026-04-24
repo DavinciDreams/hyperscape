@@ -54,6 +54,8 @@
     "@hyperforge/impostor": "workspace:*",
     "@hyperforge/procgen": "workspace:*",
     "@hyperforge/shared": "workspace:*",
+    "@hyperforge/ui-framework": "workspace:*",
+    "@hyperforge/ui-widgets": "workspace:*",
     "@mediapipe/hands": "^0.4.1675469240",
     "@pixiv/three-vrm": "^3.5.1",
     "@privy-io/react-auth": "^3.18.0",

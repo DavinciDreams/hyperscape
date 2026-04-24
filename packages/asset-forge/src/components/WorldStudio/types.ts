@@ -978,6 +978,8 @@ export interface ManifestMiningRock {
   modelPath: string;
   levelRequired: number;
   examine: string;
+  /** Full raw manifest row — preserved so the editor can round-trip into the gathering hot-reload path without re-synthesizing lossy fields (harvestYield, toolRequired, cycle ticks, etc.). */
+  _raw?: Record<string, unknown>;
 }
 
 /** Woodcutting resource manifest entry */
@@ -988,6 +990,8 @@ export interface ManifestTree {
   modelVariants: string[];
   levelRequired: number;
   examine: string;
+  /** Full raw manifest row — see `ManifestMiningRock._raw`. */
+  _raw?: Record<string, unknown>;
 }
 
 /** Fishing spot manifest entry */
@@ -998,6 +1002,8 @@ export interface ManifestFishingSpot {
   toolRequired: string;
   levelRequired: number;
   examine: string;
+  /** Full raw manifest row — see `ManifestMiningRock._raw`. */
+  _raw?: Record<string, unknown>;
 }
 
 // ============== ITEM MANIFEST TYPES ==============
@@ -1125,6 +1131,17 @@ export interface ManifestRune {
   name: string;
   element: string | null;
   stackable: boolean;
+}
+
+/**
+ * Elemental staff → infinite-rune mapping entry. Parallel list to
+ * `ManifestRune[]`; sourced from `runes.json`'s `elementalStaves` array
+ * and needed by `hotReloadRunes` to rebuild the full `RunesManifest`
+ * (Phase B3.1e).
+ */
+export interface ManifestElementalStaff {
+  staffId: string;
+  providesInfinite: string[];
 }
 
 /** Ammunition entry */
@@ -1588,7 +1605,15 @@ export interface ManifestData {
   combatSpells: ManifestCombatSpell[];
   prayers: ManifestPrayer[];
   runes: ManifestRune[];
+  elementalStaves: ManifestElementalStaff[];
   ammunition: ManifestAmmunition[];
+  /**
+   * Bow tier requirements keyed by bow id. Not currently edited
+   * through the UI but preserved at load time so the ammunition
+   * hot-reload path can round-trip without losing the top-level
+   * `bowTiers` block that the runtime schema requires.
+   */
+  ammunitionBowTiers: Record<string, number>;
   recipes: ManifestRecipe[];
   skillUnlocks: ManifestSkillUnlock[];
   tierRequirements: ManifestTierRequirement[];
@@ -1718,7 +1743,9 @@ export const EMPTY_MANIFEST_DATA: ManifestData = {
   combatSpells: [],
   prayers: [],
   runes: [],
+  elementalStaves: [],
   ammunition: [],
+  ammunitionBowTiers: {},
   recipes: [],
   skillUnlocks: [],
   tierRequirements: [],

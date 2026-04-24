@@ -43,6 +43,13 @@
       "when": 1776413000000,
       "tag": "0005_hyperscape_to_hyperia_rename",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1808784000000,
+      "tag": "0006_games_active_ui_layout",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,7 @@ export const NAVIGATION_VIEWS = {
   LANDMARK_GEN: "landmarkGen",
   WORLD_STUDIO: "worldStudio",
   ARMOR_PIPELINE: "armorPipeline",
+  UI_LAYOUT_EDITOR: "uiLayoutEditor",
 } as const satisfies Record<string, NavigationView>;
 
 // Route paths for URL navigation
@@ -62,7 +63,22 @@ export const ROUTES = {
   WORLD_EDITOR: "/world-editor", // New: Uses real game systems
   MANIFESTS: "/manifests",
   ARMOR_PIPELINE: "/armor-pipeline",
+  UI_LAYOUT_EDITOR: "/ui-layout",
+  /**
+   * Asset-scoped UI layout editor route. The concrete URL is built by
+   * `buildUILayoutEditorPath(teamId, layoutId)`; ROUTES.UI_LAYOUT_ASSET
+   * is the React Router pattern (with `:teamId` / `:layoutId` placeholders).
+   */
+  UI_LAYOUT_ASSET: "/ui-layout/:teamId/:layoutId",
 } as const;
+
+/** Build a concrete URL to edit a persisted UI layout asset. */
+export function buildUILayoutEditorPath(
+  teamId: string,
+  layoutId: string,
+): string {
+  return `/ui-layout/${encodeURIComponent(teamId)}/${encodeURIComponent(layoutId)}`;
+}
 
 // Map routes to navigation views
 export const ROUTE_TO_VIEW: Record<string, NavigationView> = {
@@ -92,6 +108,7 @@ export const ROUTE_TO_VIEW: Record<string, NavigationView> = {
   [ROUTES.WORLD_EDITOR]: NAVIGATION_VIEWS.WORLD_EDITOR,
   [ROUTES.MANIFESTS]: NAVIGATION_VIEWS.MANIFESTS,
   [ROUTES.ARMOR_PIPELINE]: NAVIGATION_VIEWS.ARMOR_PIPELINE,
+  [ROUTES.UI_LAYOUT_EDITOR]: NAVIGATION_VIEWS.UI_LAYOUT_EDITOR,
 };
 
 // Map navigation views to routes
@@ -122,6 +139,7 @@ export const VIEW_TO_ROUTE: Record<NavigationView, string> = {
   [NAVIGATION_VIEWS.WORLD_EDITOR]: ROUTES.WORLD_EDITOR,
   [NAVIGATION_VIEWS.MANIFESTS]: ROUTES.MANIFESTS,
   [NAVIGATION_VIEWS.ARMOR_PIPELINE]: ROUTES.ARMOR_PIPELINE,
+  [NAVIGATION_VIEWS.UI_LAYOUT_EDITOR]: ROUTES.UI_LAYOUT_EDITOR,
 };
 
 // Grid background styles for the app

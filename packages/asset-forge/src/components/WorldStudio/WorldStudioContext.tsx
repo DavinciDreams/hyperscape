@@ -67,6 +67,10 @@ import type {
   ManifestSkillUnlock,
   ManifestTierRequirement,
   ManifestDuelArena,
+  ManifestStation,
+  ManifestTree,
+  ManifestFishingSpot,
+  ManifestMiningRock,
   PlacedSpawnPoint,
   PlacedTeleport,
   PlacedMobSpawn,
@@ -477,6 +481,10 @@ interface WorldStudioContextValue {
       tierRequirements: ManifestTierRequirement[],
     ) => void;
     updateManifestDuelArenas: (duelArenas: ManifestDuelArena[]) => void;
+    updateManifestStations: (stations: ManifestStation[]) => void;
+    updateManifestTrees: (trees: ManifestTree[]) => void;
+    updateManifestFishingSpots: (fishingSpots: ManifestFishingSpot[]) => void;
+    updateManifestMiningRocks: (miningRocks: ManifestMiningRock[]) => void;
 
     // Phase 7: Audio zones
     addMusicZone: (zone: MusicZone) => void;
@@ -1043,6 +1051,14 @@ export function WorldStudioProvider({
         }),
       updateManifestDuelArenas: (duelArenas: ManifestDuelArena[]) =>
         dispatch({ type: "MANIFEST_UPDATE_DUEL_ARENAS", duelArenas }),
+      updateManifestStations: (stations: ManifestStation[]) =>
+        dispatch({ type: "MANIFEST_UPDATE_STATIONS", stations }),
+      updateManifestTrees: (trees: ManifestTree[]) =>
+        dispatch({ type: "MANIFEST_UPDATE_TREES", trees }),
+      updateManifestFishingSpots: (fishingSpots: ManifestFishingSpot[]) =>
+        dispatch({ type: "MANIFEST_UPDATE_FISHING_SPOTS", fishingSpots }),
+      updateManifestMiningRocks: (miningRocks: ManifestMiningRock[]) =>
+        dispatch({ type: "MANIFEST_UPDATE_MINING_ROCKS", miningRocks }),
 
       // Phase 7: Audio zones
       addMusicZone: (zone: MusicZone) =>
@@ -2348,9 +2364,19 @@ export function useStudioSelection(): Selection | null {
   return useWorldStudioSelector((s) => s.builder.editing.selection);
 }
 
-/** Get the project state */
+/**
+ * Get the project state.
+ *
+ * Unlike most selectors, this is designed to be callable *outside* a
+ * `WorldStudioProvider` — `UILayoutEditorPage` (and future standalone
+ * asset editors) can be routed to directly without the studio shell,
+ * in which case every `currentXxxId` field is simply `null` and
+ * studio-dependent UI (e.g. the "Set as Active" button) hides itself.
+ * Throwing here instead would crash the whole route.
+ */
 export function useStudioProject(): StudioProjectState {
-  return useWorldStudioSelector((s) => s.project);
+  const context = useContext(WorldStudioContext);
+  return context ? context.state.project : worldStudioInitialState.project;
 }
 
 /** Get the persistence state */

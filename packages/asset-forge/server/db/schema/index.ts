@@ -23,6 +23,9 @@ export * from "./game-modules.schema";
 // World Studio — Scripts (standalone visual scripting graphs)
 export * from "./scripts.schema";
 
+// World Studio — UI Layouts (standalone layout manifests)
+export * from "./ui-layouts.schema";
+
 // Re-export everything for drizzle
 import * as assetsSchema from "./assets.schema";
 import * as forgeUsersSchema from "./forge-users.schema";
@@ -32,6 +35,7 @@ import * as worldProjectsSchema from "./world-projects.schema";
 import * as auditLogSchema from "./audit-log.schema";
 import * as gameModulesSchema from "./game-modules.schema";
 import * as scriptsSchema from "./scripts.schema";
+import * as uiLayoutsSchema from "./ui-layouts.schema";
 
 export const schema = {
   ...assetsSchema,
@@ -42,4 +46,5 @@ export const schema = {
   ...auditLogSchema,
   ...gameModulesSchema,
   ...scriptsSchema,
+  ...uiLayoutsSchema,
 };

@@ -5,12 +5,6 @@
  * - terrain/chunk → TerrainProperties
  * - biome → BiomeProperties
  * - town → TownProperties
- * - npc → NPCProperties
- * - spawnPoint → SpawnPointProperties
- * - teleport → TeleportProperties
- * - mobSpawn → MobSpawnProperties
- * - resource → ResourceProperties
- * - station → StationProperties
  */
 
 import { Info, Settings, Search } from "lucide-react";
@@ -18,33 +12,22 @@ import React, { useState, useMemo, createContext, useContext } from "react";
 
 import { useWorldStudio, useEntityTypeRegistry } from "../WorldStudioContext";
 import { SchemaPropertyEditor } from "../../../gameModules/components/SchemaPropertyEditor";
+import { registerBuiltinCustomSections } from "../../../gameModules/components/registerBuiltinCustomSections";
+
+// Ensure built-in custom-section widgets are registered before first render.
+registerBuiltinCustomSections();
 import { ErrorBoundary } from "../../common/ErrorBoundary";
 import { InfoRow, PropertySection } from "./properties/PropertyControls";
 import { TransformSection } from "./properties/TransformSection";
 import { TerrainProperties } from "./properties/TerrainProperties";
 import { BiomeProperties } from "./properties/BiomeProperties";
 import { TownProperties } from "./properties/TownProperties";
-import { NPCProperties } from "./properties/NPCProperties";
 import { QuestProperties } from "./properties/QuestProperties";
-import { SpawnPointProperties } from "./properties/SpawnPointProperties";
-import { TeleportProperties } from "./properties/TeleportProperties";
-import { MobSpawnProperties } from "./properties/MobSpawnProperties";
-import { ResourceProperties } from "./properties/ResourceProperties";
-import { StationProperties } from "./properties/StationProperties";
 import { RoadProperties } from "./properties/RoadProperties";
-import { POIProperties } from "./properties/POIProperties";
-import { WaterBodyProperties } from "./properties/WaterBodyProperties";
-import { MusicZoneProperties } from "./properties/MusicZoneProperties";
-import { AmbientZoneProperties } from "./properties/AmbientZoneProperties";
-import { SFXTriggerProperties } from "./properties/SFXTriggerProperties";
-import { CustomAssetProperties } from "./properties/CustomAssetProperties";
 import { GameNPCProperties } from "./properties/GameNPCProperties";
 import { GameStationProperties } from "./properties/GameStationProperties";
 import { GameResourceProperties } from "./properties/GameResourceProperties";
 import { GameMobSpawnProperties } from "./properties/GameMobSpawnProperties";
-import { RegionProperties } from "./properties/RegionProperties";
-import { DangerSourceProperties } from "./properties/DangerSourceProperties";
-import { WildernessBoundaryProperties } from "./properties/WildernessBoundaryProperties";
 
 /** Context for property search filtering */
 const PropertySearchContext = createContext<string>("");
@@ -187,19 +170,6 @@ export function PropertiesPanel() {
         }
         break;
 
-      case "npc": {
-        // Check editor-placed NPCs (extendedLayers) first, then world.layers
-        const extNpc = state.extendedLayers.npcs.find(
-          (n) => n.id === selection.id,
-        );
-        if (extNpc) return <NPCProperties npc={extNpc} />;
-        if (world) {
-          const npc = world.layers.npcs.find((n) => n.id === selection.id);
-          if (npc) return <NPCProperties npc={npc} />;
-        }
-        break;
-      }
-
       case "quest": {
         if (world) {
           const quest = world.layers.quests.find((q) => q.id === selection.id);
@@ -223,86 +193,10 @@ export function PropertiesPanel() {
         break;
       }
 
-      case "spawnPoint": {
-        const sp = extendedLayers.spawnPoints.find(
-          (s) => s.id === selection.id,
-        );
-        if (sp) return <SpawnPointProperties spawnPoint={sp} />;
-        break;
-      }
-
-      case "teleport": {
-        const tp = extendedLayers.teleports.find((t) => t.id === selection.id);
-        if (tp) return <TeleportProperties teleport={tp} />;
-        break;
-      }
-
-      case "mobSpawn": {
-        const ms = extendedLayers.mobSpawns.find((m) => m.id === selection.id);
-        if (ms) return <MobSpawnProperties mobSpawn={ms} />;
-        break;
-      }
-
-      case "resource": {
-        const r = extendedLayers.resources.find(
-          (res) => res.id === selection.id,
-        );
-        if (r) return <ResourceProperties resource={r} />;
-        break;
-      }
-
-      case "station": {
-        const s = extendedLayers.stations.find((st) => st.id === selection.id);
-        if (s) return <StationProperties station={s} />;
-        break;
-      }
-
       case "road":
       case "customRoad": {
         if (world)
           return <RoadProperties roadId={selection.id} world={world} />;
-        break;
-      }
-
-      case "poi": {
-        const poi = extendedLayers.pois.find((p) => p.id === selection.id);
-        if (poi) return <POIProperties poi={poi} />;
-        break;
-      }
-
-      case "waterBody": {
-        const wb = extendedLayers.waterBodies.find(
-          (w) => w.id === selection.id,
-        );
-        if (wb) return <WaterBodyProperties waterBody={wb} />;
-        break;
-      }
-
-      // Phase 7 audio entities
-      case "musicZone": {
-        const mz = audioLayers.musicZones.find((m) => m.id === selection.id);
-        if (mz) return <MusicZoneProperties musicZone={mz} />;
-        break;
-      }
-
-      case "ambientZone": {
-        const az = audioLayers.ambientZones.find((a) => a.id === selection.id);
-        if (az) return <AmbientZoneProperties ambientZone={az} />;
-        break;
-      }
-
-      case "sfxTrigger": {
-        const sfx = audioLayers.sfxTriggers.find((s) => s.id === selection.id);
-        if (sfx) return <SFXTriggerProperties sfxTrigger={sfx} />;
-        break;
-      }
-
-      // Phase 9.1: Custom assets
-      case "customAsset": {
-        const ca = extendedLayers.customAssets.find(
-          (a) => a.id === selection.id,
-        );
-        if (ca) return <CustomAssetProperties asset={ca} />;
         break;
       }
 
@@ -354,26 +248,6 @@ export function PropertiesPanel() {
           <GameMobSpawnProperties entityData={selection.entityData} />
         ) : null;
 
-      case "region": {
-        const reg = extendedLayers.regions.find((r) => r.id === selection.id);
-        if (reg) return <RegionProperties region={reg} />;
-        break;
-      }
-
-      case "dangerSource": {
-        const ds = extendedLayers.dangerSources.find(
-          (d) => d.id === selection.id,
-        );
-        if (ds) return <DangerSourceProperties dangerSource={ds} />;
-        break;
-      }
-
-      case "wilderness": {
-        const wb = extendedLayers.wildernessBoundary;
-        if (wb) return <WildernessBoundaryProperties boundary={wb} />;
-        break;
-      }
-
       default: {
         // Schema-driven fallback: look up the selection type in the game module registry
         const schema = registry.getBySelectionType(selection.type);
@@ -383,6 +257,25 @@ export function PropertiesPanel() {
               ? state.audioLayers
               : state.extendedLayers;
           const entities = root[schema.storage.stateKey as keyof typeof root];
+          if (schema.storage.type === "scalar") {
+            // Scalar storage (e.g. wildernessBoundary) — the stateKey value
+            // IS the entity. The custom section widget is responsible for
+            // reading state itself; we pass an empty entityData so field
+            // `visibleWhen` checks have a stable object to read from.
+            const scalarData =
+              entities &&
+              typeof entities === "object" &&
+              !Array.isArray(entities)
+                ? (entities as Record<string, unknown>)
+                : {};
+            return (
+              <SchemaPropertyEditor
+                schema={schema}
+                entityId={selection.id}
+                entityData={scalarData}
+              />
+            );
+          }
           if (Array.isArray(entities)) {
             const entity = (entities as Array<{ id: string }>).find(
               (e) => e.id === selection.id,

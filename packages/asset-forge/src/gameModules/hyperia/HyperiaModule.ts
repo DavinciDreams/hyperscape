@@ -124,7 +124,7 @@ export const HyperiaModule: GameModule = {
       id: "zones",
       label: "Zones",
       icon: "Map",
-      entityTypes: ["dangerSource", "region"],
+      entityTypes: ["dangerSource", "region", "wilderness"],
     },
     {
       id: "water",
@@ -191,17 +191,19 @@ export const HyperiaModule: GameModule = {
         {
           key: "npcTypeId",
           label: "NPC Type",
-          type: "string",
+          type: "manifest-ref",
           section: "General",
           required: true,
           description: "NPC template ID from npcs.json",
+          config: { manifestRef: "npcs" },
         },
         {
           key: "storeId",
           label: "Store ID",
-          type: "string",
+          type: "manifest-ref",
           section: "Merchant",
           description: "Store ID for merchant NPCs",
+          config: { manifestRef: "stores" },
         },
         {
           key: "dialogId",
@@ -224,6 +226,13 @@ export const HyperiaModule: GameModule = {
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
         },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description: "Optional node graph that drives custom NPC behavior.",
+        },
       ],
       defaults: {
         name: "NPC",
@@ -234,7 +243,28 @@ export const HyperiaModule: GameModule = {
         properties: {},
       },
       marker: { shape: "capsule", scale: 1, yOffset: 0.5 },
-      customEditor: "NPCProperties",
+      customSections: [
+        { title: "Identity", widgetId: "NPCIdentity", defaultOpen: true },
+        { title: "Stats", widgetId: "NPCStats", defaultOpen: false },
+        { title: "Combat", widgetId: "NPCCombat", defaultOpen: false },
+        { title: "Drops", widgetId: "NPCDrops", defaultOpen: false },
+        { title: "Dialogue", widgetId: "NPCDialogue", defaultOpen: false },
+        {
+          title: "Linked Store",
+          widgetId: "NPCLinkedStore",
+          defaultOpen: false,
+        },
+        {
+          title: "AI Generation",
+          widgetId: "NPCAIGeneration",
+          defaultOpen: false,
+        },
+        {
+          title: "Manifest",
+          widgetId: "NPCManifestMissing",
+          defaultOpen: true,
+        },
+      ],
     },
 
     // ───────── Spawn Point ─────────
@@ -254,7 +284,7 @@ export const HyperiaModule: GameModule = {
           key: "name",
           label: "Name",
           type: "string",
-          section: "General",
+          section: "Spawn Point",
           required: true,
           default: "Spawn Point",
         },
@@ -262,7 +292,7 @@ export const HyperiaModule: GameModule = {
           key: "spawnType",
           label: "Spawn Type",
           type: "select",
-          section: "General",
+          section: "Spawn Point",
           required: true,
           default: "initial",
           config: {
@@ -277,17 +307,9 @@ export const HyperiaModule: GameModule = {
           key: "capacity",
           label: "Capacity",
           type: "number",
-          section: "General",
+          section: "Spawn Point",
           default: 1,
-          description: "Max players that can spawn here simultaneously",
-          config: { min: 1, max: 100, step: 1 },
-        },
-        {
-          key: "rotation",
-          label: "Facing Direction",
-          type: "rotation",
-          section: "Transform",
-          default: 0,
+          config: { min: 1, max: 50, step: 1 },
         },
         {
           key: "position",
@@ -297,11 +319,20 @@ export const HyperiaModule: GameModule = {
           default: { x: 0, y: 0, z: 0 },
         },
         {
+          key: "rotation",
+          label: "Rotation",
+          type: "rotation",
+          section: "Transform",
+          default: 0,
+          config: { step: 15, unit: "°" },
+        },
+        {
           key: "linkedAreaId",
           label: "Linked Area ID",
           type: "string",
           section: "Links",
           description: "Linked town or region ID",
+          visibleWhen: { field: "linkedAreaId", notEquals: "" },
         },
       ],
       defaults: {
@@ -334,7 +365,6 @@ export const HyperiaModule: GameModule = {
           defaults: { spawnType: "teleport-arrival", capacity: 3 },
         },
       ],
-      customEditor: "SpawnPointProperties",
     },
 
     // ───────── Teleport ─────────
@@ -374,6 +404,14 @@ export const HyperiaModule: GameModule = {
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
         },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description:
+            "Optional node graph that drives custom teleport behavior.",
+        },
       ],
       defaults: {
         name: "Teleport",
@@ -398,7 +436,18 @@ export const HyperiaModule: GameModule = {
           defaults: { cost: 100 },
         },
       ],
-      customEditor: "TeleportProperties",
+      customSections: [
+        {
+          title: "Requirements",
+          widgetId: "TeleportRequirements",
+          defaultOpen: true,
+        },
+        {
+          title: "Connections",
+          widgetId: "TeleportConnections",
+          defaultOpen: true,
+        },
+      ],
     },
 
     // ───────── Mob Spawn ─────────
@@ -426,10 +475,11 @@ export const HyperiaModule: GameModule = {
         {
           key: "mobId",
           label: "Mob ID",
-          type: "string",
+          type: "manifest-ref",
           section: "General",
           required: true,
           description: "Mob template ID from npcs.json",
+          config: { manifestRef: "npcs" },
         },
         {
           key: "maxCount",
@@ -443,11 +493,11 @@ export const HyperiaModule: GameModule = {
         {
           key: "spawnRadius",
           label: "Spawn Radius",
-          type: "number",
+          type: "slider",
           section: "Spawning",
           default: 5,
-          description: "Spawn radius from center (m)",
-          config: { min: 1, max: 100, step: 1, unit: "m" },
+          description: "Radius from center where mobs can spawn",
+          config: { min: 1, max: 30, step: 1, unit: "m" },
         },
         {
           key: "respawnTicks",
@@ -456,7 +506,7 @@ export const HyperiaModule: GameModule = {
           section: "Spawning",
           default: 100,
           description: "Respawn delay in game ticks",
-          config: { min: 1, max: 10000, step: 1 },
+          config: { min: 10, max: 1000, step: 10 },
         },
         {
           key: "position",
@@ -464,6 +514,13 @@ export const HyperiaModule: GameModule = {
           type: "position",
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
+        },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description: "Visual event graph for spawn behavior triggers.",
         },
       ],
       defaults: {
@@ -482,7 +539,21 @@ export const HyperiaModule: GameModule = {
         showRadius: true,
         radiusField: "spawnRadius",
       },
-      customEditor: "MobSpawnProperties",
+      customSections: [
+        {
+          title: "Identity",
+          widgetId: "MobSpawnIdentity",
+          defaultOpen: true,
+        },
+        { title: "Mob Stats", widgetId: "MobSpawnStats", defaultOpen: false },
+        { title: "Combat", widgetId: "MobSpawnCombat", defaultOpen: false },
+        { title: "Drops", widgetId: "MobSpawnDrops", defaultOpen: false },
+        {
+          title: "Manifest",
+          widgetId: "MobSpawnManifestMissing",
+          defaultOpen: true,
+        },
+      ],
     },
 
     // ───────── Resource ─────────
@@ -553,6 +624,14 @@ export const HyperiaModule: GameModule = {
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
         },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description:
+            "Optional node graph that drives custom resource behavior.",
+        },
       ],
       defaults: {
         name: "Resource",
@@ -564,7 +643,13 @@ export const HyperiaModule: GameModule = {
         properties: {},
       },
       marker: { shape: "cube", scale: 0.6, yOffset: 0.3 },
-      customEditor: "ResourceProperties",
+      customSections: [
+        {
+          title: "Manifest Data",
+          widgetId: "ResourceManifestInfo",
+          defaultOpen: false,
+        },
+      ],
     },
 
     // ───────── Station ─────────
@@ -592,10 +677,11 @@ export const HyperiaModule: GameModule = {
         {
           key: "stationType",
           label: "Station Type",
-          type: "string",
+          type: "manifest-ref",
           section: "General",
           required: true,
           description: "Type from stations.json",
+          config: { manifestRef: "stations" },
         },
         {
           key: "bankId",
@@ -625,6 +711,14 @@ export const HyperiaModule: GameModule = {
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
         },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description:
+            "Optional node graph that drives custom station behavior.",
+        },
       ],
       defaults: {
         name: "Station",
@@ -634,7 +728,18 @@ export const HyperiaModule: GameModule = {
         properties: {},
       },
       marker: { shape: "cube", scale: 1, yOffset: 0.5 },
-      customEditor: "StationProperties",
+      customSections: [
+        {
+          title: "Manifest Data",
+          widgetId: "StationManifestInfo",
+          defaultOpen: false,
+        },
+        {
+          title: "Recipes",
+          widgetId: "StationRecipes",
+          defaultOpen: false,
+        },
+      ],
     },
 
     // ───────── POI ─────────
@@ -654,7 +759,7 @@ export const HyperiaModule: GameModule = {
           key: "name",
           label: "Name",
           type: "string",
-          section: "General",
+          section: "Point of Interest",
           required: true,
           default: "POI",
         },
@@ -662,7 +767,7 @@ export const HyperiaModule: GameModule = {
           key: "category",
           label: "Category",
           type: "select",
-          section: "General",
+          section: "Point of Interest",
           required: true,
           default: "landmark",
           config: {
@@ -683,26 +788,33 @@ export const HyperiaModule: GameModule = {
           key: "importance",
           label: "Importance",
           type: "slider",
-          section: "General",
+          section: "Point of Interest",
           default: 0.5,
-          description: "Weight for road connectivity (0-1)",
+          description: "Higher importance = more road connectivity",
           config: { min: 0, max: 1, step: 0.05 },
         },
         {
           key: "radius",
           label: "Radius",
           type: "number",
-          section: "Area",
+          section: "Point of Interest",
           default: 20,
           description: "POI area radius (m)",
-          config: { min: 1, max: 200, step: 1, unit: "m" },
+          config: { min: 5, max: 100, step: 5, unit: "m" },
         },
         {
           key: "position",
           label: "Position",
           type: "position",
-          section: "Transform",
+          section: "Position",
           default: { x: 0, y: 0, z: 0 },
+        },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description: "Visual event graph for entity behavior triggers",
         },
       ],
       defaults: {
@@ -721,7 +833,6 @@ export const HyperiaModule: GameModule = {
         showRadius: true,
         radiusField: "radius",
       },
-      customEditor: "POIProperties",
     },
 
     // ───────── Water Body ─────────
@@ -789,7 +900,13 @@ export const HyperiaModule: GameModule = {
       ],
       defaults: { name: "Water Body", bodyType: "lake", properties: {} },
       marker: { shape: "cylinder", scale: 1, yOffset: 0 },
-      customEditor: "WaterBodyProperties",
+      customSections: [
+        {
+          title: "Geometry",
+          widgetId: "WaterBodyGeometry",
+          defaultOpen: true,
+        },
+      ],
     },
 
     // ───────── Region ─────────
@@ -804,53 +921,16 @@ export const HyperiaModule: GameModule = {
       selectionType: "region",
       storage: { stateKey: "regions", type: "array" },
       spatial: false, // regions are defined by tile keys, not a single position
-      fields: [
-        {
-          key: "name",
-          label: "Name",
-          type: "string",
-          section: "General",
-          required: true,
-          default: "Region",
-        },
-        {
-          key: "description",
-          label: "Description",
-          type: "string",
-          section: "General",
-        },
-        {
-          key: "tags",
-          label: "Tags",
-          type: "tags",
-          section: "General",
-          description: "Filtering tags (e.g., starter, forest, mining-hub)",
-        },
-        {
-          key: "biomeOverride",
-          label: "Biome Override",
-          type: "string",
-          section: "Terrain",
-          description: "Override biome within this region",
-        },
-        {
-          key: "musicTrack",
-          label: "Music Track",
-          type: "string",
-          section: "Audio",
-          description: "Music track ID for this region",
-        },
-        {
-          key: "ambientSound",
-          label: "Ambient Sound",
-          type: "string",
-          section: "Audio",
-          description: "Ambient sound for this region",
-        },
-      ],
+      fields: [],
       defaults: { name: "Region", description: "", tileKeys: [], tags: [] },
       marker: { shape: "billboard", scale: 1, yOffset: 2 },
-      customEditor: "RegionProperties",
+      customSections: [
+        {
+          title: "Region",
+          widgetId: "RegionFullEditor",
+          defaultOpen: true,
+        },
+      ],
     },
 
     // ───────── Danger Source ─────────
@@ -870,7 +950,7 @@ export const HyperiaModule: GameModule = {
           key: "name",
           label: "Name",
           type: "string",
-          section: "General",
+          section: "Danger Source",
           required: true,
           default: "Danger Source",
         },
@@ -878,35 +958,35 @@ export const HyperiaModule: GameModule = {
           key: "description",
           label: "Description",
           type: "string",
-          section: "General",
+          section: "Danger Source",
           description: "Optional description for tooltips",
+        },
+        {
+          key: "radius",
+          label: "Radius",
+          type: "slider",
+          section: "Influence",
+          default: 50,
+          description: "How far the danger influence extends",
+          config: { min: 10, max: 500, step: 5, unit: "m" },
         },
         {
           key: "intensity",
           label: "Intensity",
           type: "slider",
-          section: "Danger",
+          section: "Influence",
           default: 1,
-          description: "Adds to biome difficulty scalar (0-3)",
-          config: { min: 0, max: 3, step: 0.1 },
-        },
-        {
-          key: "radius",
-          label: "Radius",
-          type: "number",
-          section: "Danger",
-          default: 50,
-          description: "Radius of influence (m)",
-          config: { min: 1, max: 500, step: 1, unit: "m" },
+          description: "Adds to biome difficulty (0-3)",
+          config: { min: 0.1, max: 3, step: 0.1 },
         },
         {
           key: "falloffCurve",
           label: "Falloff Curve",
           type: "slider",
-          section: "Danger",
+          section: "Influence",
           default: 2,
-          description: "How quickly intensity falls off with distance",
-          config: { min: 0.1, max: 10, step: 0.1 },
+          description: "Higher = sharper drop-off at edges",
+          config: { min: 0.5, max: 4, step: 0.1 },
         },
         {
           key: "position",
@@ -914,6 +994,13 @@ export const HyperiaModule: GameModule = {
           type: "position",
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
+        },
+        {
+          key: "behaviorGraph",
+          label: "Behavior Script",
+          type: "scriptGraph",
+          section: "Behavior Script",
+          description: "Visual event graph for entity behavior triggers",
         },
       ],
       defaults: {
@@ -950,7 +1037,6 @@ export const HyperiaModule: GameModule = {
           defaults: { intensity: 3, radius: 80, falloffCurve: 1 },
         },
       ],
-      customEditor: "DangerSourceProperties",
     },
 
     // ───────── Mine ─────────
@@ -1046,7 +1132,7 @@ export const HyperiaModule: GameModule = {
           key: "name",
           label: "Name",
           type: "string",
-          section: "General",
+          section: "Custom Asset",
           required: true,
           default: "Custom Asset",
         },
@@ -1054,38 +1140,17 @@ export const HyperiaModule: GameModule = {
           key: "assetId",
           label: "Asset ID",
           type: "string",
-          section: "Asset",
-          required: true,
+          section: "Custom Asset",
+          readOnly: true,
           description: "Asset Forge asset ID",
         },
         {
-          key: "assetName",
-          label: "Asset Name",
-          type: "string",
-          section: "Asset",
-          readOnly: true,
-        },
-        {
           key: "modelPath",
-          label: "Model Path",
+          label: "Model",
           type: "string",
-          section: "Asset",
-          description: "Model file path override",
-        },
-        {
-          key: "scale",
-          label: "Scale",
-          type: "number",
-          section: "Transform",
-          default: 1,
-          config: { min: 0.01, max: 100, step: 0.1 },
-        },
-        {
-          key: "rotation",
-          label: "Rotation",
-          type: "rotation",
-          section: "Transform",
-          default: 0,
+          section: "Custom Asset",
+          readOnly: true,
+          description: "Model file path",
         },
         {
           key: "position",
@@ -1093,6 +1158,22 @@ export const HyperiaModule: GameModule = {
           type: "position",
           section: "Transform",
           default: { x: 0, y: 0, z: 0 },
+        },
+        {
+          key: "rotation",
+          label: "Rotation",
+          type: "rotation",
+          section: "Transform",
+          default: 0,
+          config: { step: 5, unit: "°" },
+        },
+        {
+          key: "scale",
+          label: "Scale",
+          type: "slider",
+          section: "Transform",
+          default: 1,
+          config: { min: 0.1, max: 10, step: 0.1 },
         },
       ],
       defaults: {
@@ -1105,7 +1186,6 @@ export const HyperiaModule: GameModule = {
         properties: {},
       },
       marker: { shape: "model", scale: 1, yOffset: 0 },
-      customEditor: "CustomAssetProperties",
     },
 
     // ───────── Music Zone ─────────
@@ -1129,7 +1209,7 @@ export const HyperiaModule: GameModule = {
           key: "name",
           label: "Name",
           type: "string",
-          section: "General",
+          section: "Music Zone",
           required: true,
           default: "Music Zone",
         },
@@ -1137,7 +1217,7 @@ export const HyperiaModule: GameModule = {
           key: "trackId",
           label: "Track ID",
           type: "string",
-          section: "Music",
+          section: "Music Zone",
           required: true,
           description: "Track ID from music.json",
         },
@@ -1145,26 +1225,25 @@ export const HyperiaModule: GameModule = {
           key: "combatTrackId",
           label: "Combat Track",
           type: "string",
-          section: "Music",
+          section: "Music Zone",
           description: "Override track during combat",
         },
         {
           key: "priority",
           label: "Priority",
           type: "number",
-          section: "Playback",
+          section: "Zone Settings",
           default: 0,
-          description: "Higher = takes precedence when overlapping",
           config: { min: 0, max: 100, step: 1 },
         },
         {
           key: "blendDistance",
           label: "Blend Distance",
-          type: "number",
-          section: "Playback",
+          type: "slider",
+          section: "Zone Settings",
           default: 10,
-          description: "Transition blend (m)",
-          config: { min: 0, max: 100, step: 1, unit: "m" },
+          description: "Transition distance at zone edges",
+          config: { min: 1, max: 50, step: 1, unit: "m" },
         },
       ],
       defaults: {
@@ -1175,7 +1254,6 @@ export const HyperiaModule: GameModule = {
         polygon: [],
       },
       marker: { shape: "billboard", scale: 1, yOffset: 2 },
-      customEditor: "MusicZoneProperties",
     },
 
     // ───────── Ambient Zone ─────────
@@ -1199,15 +1277,15 @@ export const HyperiaModule: GameModule = {
           key: "name",
           label: "Name",
           type: "string",
-          section: "General",
+          section: "Ambient Zone",
           required: true,
           default: "Ambient Zone",
         },
         {
           key: "ambientType",
-          label: "Ambient Type",
+          label: "Type",
           type: "select",
-          section: "General",
+          section: "Ambient Zone",
           required: true,
           default: "forest",
           config: {
@@ -1227,18 +1305,27 @@ export const HyperiaModule: GameModule = {
           key: "volume",
           label: "Volume",
           type: "slider",
-          section: "Playback",
+          section: "Sound Settings",
           default: 0.8,
+          description: "Playback volume (0 = silent, 1 = full)",
           config: { min: 0, max: 1, step: 0.05 },
         },
         {
           key: "falloffDistance",
           label: "Falloff Distance",
-          type: "number",
-          section: "Playback",
+          type: "slider",
+          section: "Sound Settings",
           default: 10,
-          description: "Edge falloff (m)",
-          config: { min: 0, max: 100, step: 1, unit: "m" },
+          description: "Edge fade distance",
+          config: { min: 1, max: 50, step: 1, unit: "m" },
+        },
+        {
+          key: "tracks",
+          label: "Tracks",
+          type: "tags",
+          section: "Tracks",
+          default: [],
+          description: "Sound asset paths (layered)",
         },
       ],
       defaults: {
@@ -1250,7 +1337,6 @@ export const HyperiaModule: GameModule = {
         falloffDistance: 10,
       },
       marker: { shape: "billboard", scale: 1, yOffset: 2 },
-      customEditor: "AmbientZoneProperties",
     },
 
     // ───────── SFX Trigger ─────────
@@ -1294,15 +1380,6 @@ export const HyperiaModule: GameModule = {
           description: "Description for AI generation",
         },
         {
-          key: "radius",
-          label: "Radius",
-          type: "number",
-          section: "Playback",
-          default: 10,
-          description: "Audible radius (m)",
-          config: { min: 1, max: 200, step: 1, unit: "m" },
-        },
-        {
           key: "volume",
           label: "Volume",
           type: "slider",
@@ -1311,8 +1388,17 @@ export const HyperiaModule: GameModule = {
           config: { min: 0, max: 1, step: 0.05 },
         },
         {
+          key: "radius",
+          label: "Radius",
+          type: "slider",
+          section: "Playback",
+          default: 10,
+          description: "Audible distance from position",
+          config: { min: 1, max: 100, step: 1, unit: "m" },
+        },
+        {
           key: "looping",
-          label: "Loop",
+          label: "Looping",
           type: "boolean",
           section: "Playback",
           default: false,
@@ -1340,7 +1426,36 @@ export const HyperiaModule: GameModule = {
         showRadius: true,
         radiusField: "radius",
       },
-      customEditor: "SFXTriggerProperties",
+    },
+
+    // ───────── Wilderness Boundary (singleton, scalar storage) ─────────
+    // World-scoped PvP boundary polyline. Not placeable from the palette —
+    // drawn via the wilderness tool. Schema exists so PropertiesPanel
+    // routes selection.type="wilderness" through SchemaPropertyEditor.
+    {
+      id: "wilderness",
+      name: "Wilderness Boundary",
+      icon: "AlertTriangle",
+      color: "#d45b5b",
+      paletteCategory: "zones",
+      outlinerLayer: "zones",
+      selectionType: "wilderness",
+      storage: { stateKey: "wildernessBoundary", type: "scalar" },
+      spatial: false,
+      fields: [],
+      defaults: {
+        points: [],
+        levelScale: 10,
+        maxLevel: 56,
+      },
+      marker: { shape: "capsule", scale: 1, yOffset: 0 },
+      customSections: [
+        {
+          title: "Wilderness Boundary",
+          widgetId: "WildernessBoundaryEditor",
+          defaultOpen: true,
+        },
+      ],
     },
   ],
 };
