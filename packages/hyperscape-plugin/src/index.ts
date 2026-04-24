@@ -33,6 +33,7 @@ import type {
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
 
+import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
@@ -44,6 +45,7 @@ import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
 import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
+import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 
 // Re-export combat surface so callers have one import path.
 export {
@@ -149,6 +151,9 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       if (!ctx.world.isServer) {
         register("damage-splat", DamageSplatSystem);
         register("duel-countdown-splat", DuelCountdownSplatSystem);
+        // Debug overlays — toggled via F5 panel keys (B / W).
+        register("bfsPathDebug", BFSPathDebugSystem);
+        register("walkableDebug", WalkableTileDebugSystem);
       }
     },
     onDisable(_ctx) {

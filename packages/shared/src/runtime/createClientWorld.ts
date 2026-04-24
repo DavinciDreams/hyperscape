@@ -53,8 +53,8 @@ import { ClientAudio } from "../systems/client/ClientAudio";
 import { ClientCameraSystem } from "../systems/client/ClientCameraSystem";
 import { DevStats } from "../systems/client/DevStats";
 import { PathfindingDebugSystem } from "../systems/client/PathfindingDebugSystem";
-import { BFSPathDebugSystem } from "../systems/client/BFSPathDebugSystem";
-import { WalkableTileDebugSystem } from "../systems/client/WalkableTileDebugSystem";
+// BFSPathDebugSystem + WalkableTileDebugSystem migrated to
+// @hyperforge/hyperscape (2026-04-24).
 import { Environment } from "../systems/shared";
 import { ClientGraphics } from "../systems/client/ClientGraphics";
 import { ClientInput } from "../systems/client/ClientInput";
@@ -256,8 +256,8 @@ export function createClientWorld() {
   // Dev tools (only active in dev mode)
   world.register("devStats", DevStats); // FPS counter and performance telemetry
   world.register("pathfindingDebug", PathfindingDebugSystem); // Press 'P' to toggle
-  world.register("bfsPathDebug", BFSPathDebugSystem); // Press 'B' (with F5 open) to toggle
-  world.register("walkableDebug", WalkableTileDebugSystem); // Press 'W' (with F5 open) to toggle
+  // bfsPathDebug + walkableDebug registered by @hyperforge/hyperscape
+  // plugin onEnable (client-only branch). Migrated 2026-04-24.
 
   // Audio systems
   world.register("audio", ClientAudio); // 3D spatial audio

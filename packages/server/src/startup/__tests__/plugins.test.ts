@@ -149,6 +149,8 @@ describe("server plugin boot — in-binary set", () => {
     // Client-only systems must NOT appear on server.
     expect(world.registered).not.toContain("damage-splat");
     expect(world.registered).not.toContain("duel-countdown-splat");
+    expect(world.registered).not.toContain("bfsPathDebug");
+    expect(world.registered).not.toContain("walkableDebug");
     expect(world.unregistered).toEqual([]);
 
     await session.stop();

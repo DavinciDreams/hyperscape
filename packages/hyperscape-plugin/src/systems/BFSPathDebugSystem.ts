@@ -11,13 +11,19 @@
  * @client-only
  */
 
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (third client-only migration). Debug
+// overlay — gameplay-specific (Hyperscape's BFS path display).
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { System } from "../shared/infrastructure/System";
-import type { World } from "../../core/World";
-import { tileToWorld, type TileCoord } from "../shared/movement/TileSystem";
-import type { TerrainSystem } from "../shared/world/TerrainSystem";
-import type { BridgeSystem } from "../shared/world/BridgeSystem";
+import {
+  type BridgeSystem,
+  SystemClass as System,
+  type TerrainSystem,
+  type TileCoord,
+  tileToWorld,
+  type World,
+} from "@hyperforge/shared";
 
 // Path marker colors
 const PATH_COLOR = 0x00ccff; // Cyan — current remaining path

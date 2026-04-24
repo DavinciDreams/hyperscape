@@ -18,16 +18,20 @@
  * @client-only
  */
 
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (fourth client-only migration).
+// Debug overlay — gameplay-specific (Hyperscape's collision-mask
+// walkability visualization).
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { System } from "../shared/infrastructure/System";
-import type { World } from "../../core/World";
 import {
+  type BridgeSystem,
   CollisionFlag,
   CollisionMask,
-} from "../shared/movement/CollisionFlags";
-import type { TerrainSystem } from "../shared/world/TerrainSystem";
-import type { BridgeSystem } from "../shared/world/BridgeSystem";
+  SystemClass as System,
+  type TerrainSystem,
+  type World,
+} from "@hyperforge/shared";
 
 // ── Category colors ──
 const COLOR_WALKABLE = 0x22cc44; // Green

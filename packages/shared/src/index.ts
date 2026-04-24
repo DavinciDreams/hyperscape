@@ -1242,6 +1242,7 @@ export { CircularSpawnArea } from "./utils/physics/CircularSpawnArea";
 
 // Export terrain system
 export { TerrainSystem } from "./systems/shared";
+export { BridgeSystem } from "./systems/shared/world/BridgeSystem";
 
 // Export town, POI, and road systems
 export { TownSystem } from "./systems/shared";
