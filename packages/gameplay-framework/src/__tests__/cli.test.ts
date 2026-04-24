@@ -1376,3 +1376,230 @@ describe("runCli — contributions subcommand", () => {
     expect(stderr()).toContain("contributions: ENOENT /abs/plugins");
   });
 });
+
+describe("runCli — pack subcommand", () => {
+  // Pack reads the plugin.json + walks dist/ from a real on-disk
+  // directory. Tests build a tmp plugin package per case and clean up.
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    const os = await import("node:os");
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    tmpDir = await fs.mkdtemp(
+      pathMod.join(os.tmpdir(), "hyperforge-pack-test-"),
+    );
+  });
+
+  afterEach(async () => {
+    const fs = await import("node:fs/promises");
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function validPluginJson(id: string) {
+    return JSON.stringify(
+      {
+        id,
+        name: id,
+        version: "0.1.0",
+        description: "test plugin",
+        entry: "./dist/index.js",
+        author: { name: "test" },
+        hyperforgeApi: "0.1.0",
+        dependencies: [],
+        loadAfter: [],
+        enabledByDefault: false,
+        contributions: {
+          systems: [],
+          entities: [],
+          widgets: [],
+          manifestSchemas: [],
+          paletteCategories: [],
+          toolbarTools: [],
+          commands: [],
+        },
+        tags: [],
+      },
+      null,
+      2,
+    );
+  }
+
+  async function writePluginPackage(opts: {
+    id?: string;
+    distFiles?: Record<string, string>;
+    pluginJson?: string;
+  }): Promise<string> {
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    const id = opts.id ?? "com.test.example";
+    await fs.writeFile(
+      pathMod.join(tmpDir, "plugin.json"),
+      opts.pluginJson ?? validPluginJson(id),
+    );
+    if (opts.distFiles !== undefined) {
+      const distDir = pathMod.join(tmpDir, "dist");
+      await fs.mkdir(distDir, { recursive: true });
+      for (const [name, contents] of Object.entries(opts.distFiles)) {
+        const filePath = pathMod.join(distDir, name);
+        await fs.mkdir(pathMod.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents);
+      }
+    }
+    return tmpDir;
+  }
+
+  it("pack with no dir → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["pack"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("missing <dir> argument");
+  });
+
+  it("pack with unknown flag → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["pack", "/abs", "--gibberish"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("Unknown flag: --gibberish");
+  });
+
+  it("pack with invalid manifest → exit 1 with issues on stderr", async () => {
+    await writePluginPackage({
+      pluginJson: '{ "id": "bad", "version": "x" }', // not schema-valid
+    });
+    const { io, stderr } = mkIO();
+    const code = await runCli(["pack", tmpDir], io);
+    expect(code).toBe(1);
+    expect(stderr()).toContain("pack:");
+  });
+
+  it("pack with valid manifest + no dist → bundle with empty files + warning", async () => {
+    await writePluginPackage({});
+    const { io, stdout, stderr } = mkIO();
+    const code = await runCli(["pack", tmpDir], io);
+    expect(code).toBe(0);
+    expect(stderr()).toContain("warning");
+    expect(stderr()).toContain("does not exist");
+    const parsed = JSON.parse(stdout()) as {
+      manifest: { id: string };
+      manifestHash: string;
+      files: Array<unknown>;
+      totalSize: number;
+      bundleHash: string;
+    };
+    expect(parsed.manifest.id).toBe("com.test.example");
+    expect(parsed.files).toEqual([]);
+    expect(parsed.totalSize).toBe(0);
+    expect(parsed.manifestHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(parsed.bundleHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("pack with dist files → bundle includes per-file path/size/sha256", async () => {
+    await writePluginPackage({
+      distFiles: {
+        "index.js": "console.log('hi');\n",
+        "manifest.js": "export const manifest = {};\n",
+      },
+    });
+    const { io, stdout } = mkIO();
+    const code = await runCli(["pack", tmpDir], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      files: Array<{ path: string; size: number; sha256: string }>;
+      totalSize: number;
+    };
+    expect(parsed.files).toHaveLength(2);
+    expect(parsed.files.map((f) => f.path).sort()).toEqual([
+      "index.js",
+      "manifest.js",
+    ]);
+    for (const f of parsed.files) {
+      expect(f.size).toBeGreaterThan(0);
+      expect(f.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(parsed.totalSize).toBe(
+      "console.log('hi');\n".length + "export const manifest = {};\n".length,
+    );
+  });
+
+  it("pack walks nested dist/ subdirectories", async () => {
+    await writePluginPackage({
+      distFiles: {
+        "index.js": "x",
+        "sub/nested.js": "y",
+        "sub/deeper/leaf.js": "z",
+      },
+    });
+    const { io, stdout } = mkIO();
+    const code = await runCli(["pack", tmpDir], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      files: Array<{ path: string }>;
+    };
+    const paths = parsed.files.map((f) => f.path).sort();
+    expect(paths).toEqual(["index.js", "sub/deeper/leaf.js", "sub/nested.js"]);
+  });
+
+  it("bundleHash is deterministic — identical input → identical bundle", async () => {
+    await writePluginPackage({
+      distFiles: { "index.js": "stable\n" },
+    });
+    const { io: io1, stdout: stdout1 } = mkIO();
+    const { io: io2, stdout: stdout2 } = mkIO();
+    await runCli(["pack", tmpDir], io1);
+    await runCli(["pack", tmpDir], io2);
+    expect(stdout1()).toBe(stdout2());
+  });
+
+  it("bundleHash changes when dist content changes", async () => {
+    await writePluginPackage({
+      distFiles: { "index.js": "version 1\n" },
+    });
+    const { io: io1, stdout: stdout1 } = mkIO();
+    await runCli(["pack", tmpDir], io1);
+    const v1 = JSON.parse(stdout1()) as { bundleHash: string };
+
+    // Update content + repack
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    await fs.writeFile(pathMod.join(tmpDir, "dist", "index.js"), "version 2\n");
+    const { io: io2, stdout: stdout2 } = mkIO();
+    await runCli(["pack", tmpDir], io2);
+    const v2 = JSON.parse(stdout2()) as { bundleHash: string };
+
+    expect(v1.bundleHash).not.toBe(v2.bundleHash);
+  });
+
+  it("--out writes via the IO seam + prints summary to stdout", async () => {
+    await writePluginPackage({
+      distFiles: { "index.js": "x" },
+    });
+    const pathMod = await import("node:path");
+    const outPath = pathMod.join(tmpDir, "bundle.json");
+    const { io, stdout, writes } = mkIO();
+    const code = await runCli(["pack", tmpDir, "--out", outPath], io);
+    expect(code).toBe(0);
+    expect(stdout()).toContain("✓ Wrote bundle descriptor to");
+    expect(stdout()).toContain("manifestHash:");
+    expect(stdout()).toContain("bundleHash:");
+    // Bundle was written through the injected writeFile seam (mkIO
+    // captures writes in-memory rather than touching real disk).
+    const captured = writes().get(outPath);
+    expect(captured).toBeDefined();
+    const parsed = JSON.parse(captured!) as { manifest: { id: string } };
+    expect(parsed.manifest.id).toBe("com.test.example");
+  });
+
+  it("--compact emits single-line JSON", async () => {
+    await writePluginPackage({});
+    const { io, stdout, stderr: _stderr } = mkIO();
+    const code = await runCli(["pack", tmpDir, "--compact"], io);
+    expect(code).toBe(0);
+    // Compact output is one JSON line + the empty-dist warning on stderr
+    // (which doesn't affect stdout). Stdout is exactly one trimmed line.
+    const out = stdout().trim();
+    expect(out.includes("\n")).toBe(false);
+    expect(out.startsWith("{")).toBe(true);
+    expect(out.endsWith("}")).toBe(true);
+  });
+});

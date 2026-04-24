@@ -148,6 +148,10 @@ export async function runCli(
     return runContributions(rest, io);
   }
 
+  if (sub === "pack") {
+    return runPack(rest, io);
+  }
+
   io.stderr(`Unknown subcommand: ${sub}\n`);
   io.stderr(USAGE);
   return 2;
@@ -1397,6 +1401,220 @@ function mapOriginsToPlainObject(
   return result;
 }
 
+/**
+ * Handler for `pack <dir> [--out <path>] [--compact]`.
+ *
+ * I5 substrate (publish flow). Builds a registry-ready bundle
+ * descriptor for a plugin package — the metadata a future
+ * `publish` command would upload to a community plugin registry,
+ * and an `install` command would consume to verify the download.
+ *
+ * The bundle descriptor (NOT a tarball — that's a separate cut)
+ * carries:
+ *   - manifest: full PluginManifest from <dir>/plugin.json
+ *   - manifestHash: sha256 of the canonical plugin.json content
+ *   - files: per-file path + size + sha256 for every file under
+ *     <dir>/dist/ (the only directory marked for distribution per
+ *     the convention `files: ["dist/", "plugin.json"]` in
+ *     package.json — non-dist files are author-side only)
+ *   - totalSize: sum of file sizes in bytes
+ *   - bundleHash: sha256 of "{manifestHash}:{file1Hash}:..." in
+ *     file-path order; the content-addressed identity for a
+ *     specific plugin version's payload
+ *
+ * Exit codes:
+ *   - 0 on success
+ *   - 1 on validation failure or filesystem error
+ *   - 2 on usage error
+ *
+ * Use cases:
+ *   - CI: pack on every PR, diff bundleHash to detect content
+ *     changes that should bump version
+ *   - Author audit: see what would actually ship
+ *   - Foundation: future publish command pipes this descriptor +
+ *     a real tarball to a registry endpoint
+ */
+async function runPack(rest: readonly string[], io: CliIO): Promise<number> {
+  let dir: string | undefined;
+  let outPath: string | undefined;
+  let compact = false;
+
+  for (let i = 0; i < rest.length; i++) {
+    const token = rest[i]!;
+    if (token === "--out") {
+      outPath = rest[++i];
+      if (outPath === undefined) {
+        io.stderr("--out requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (token === "--compact") {
+      compact = true;
+      continue;
+    }
+    if (token.startsWith("--")) {
+      io.stderr(`Unknown flag: ${token}\n`);
+      return 2;
+    }
+    if (dir === undefined) {
+      dir = token;
+      continue;
+    }
+    io.stderr(`Unexpected argument: ${token}\n`);
+    return 2;
+  }
+
+  if (dir === undefined) {
+    io.stderr("pack: missing <dir> argument\n");
+    io.stderr(
+      "Usage: hyperforge-plugin pack <dir> [--out <path>] [--compact]\n",
+    );
+    return 2;
+  }
+
+  const absDir = path.isAbsolute(dir) ? dir : path.resolve(io.cwd(), dir);
+
+  // Step 1: validate the manifest. If validation fails, refuse to pack
+  // (parity with `npm pack` which also runs lifecycle gates).
+  const validation = await validatePluginDirectory(absDir);
+  if (!validation.ok) {
+    io.stderr(`pack: ${validation.manifestPath}\n`);
+    for (const issue of validation.issues) {
+      io.stderr(`  • ${issue}\n`);
+    }
+    return 1;
+  }
+
+  // Step 2: read plugin.json content for the manifest hash. Hash the
+  // raw bytes, not the parsed manifest, so two byte-identical files
+  // produce identical hashes regardless of JSON key ordering. (The
+  // hash IS the content fingerprint, not a structural comparison.)
+  const manifestPath = path.join(absDir, "plugin.json");
+  let manifestBytes: Buffer;
+  try {
+    manifestBytes = await fs.readFile(manifestPath);
+  } catch (err) {
+    io.stderr(
+      `pack: failed to read plugin.json: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
+  const { createHash } = await import("node:crypto");
+  const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
+
+  // Step 3: walk dist/ to enumerate files. dist/ is the conventional
+  // distribution root per package.json `"files": ["dist/", "plugin.json"]`.
+  // Missing dist/ is a warning, not an error — author may be packing
+  // a source-only plugin or hasn't built yet. Empty file list is
+  // allowed; bundleHash still computes (just over the manifest).
+  const distRoot = path.join(absDir, "dist");
+  const files: Array<{
+    path: string;
+    size: number;
+    sha256: string;
+  }> = [];
+  try {
+    await walkDistFiles(distRoot, distRoot, files);
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") {
+      // dist/ missing — log a warning to stderr but continue with []
+      io.stderr(
+        `pack: warning — ${distRoot} does not exist; bundle will contain only the manifest\n`,
+      );
+    } else {
+      io.stderr(
+        `pack: failed to walk dist/: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 1;
+    }
+  }
+
+  // Step 4: compute totalSize + bundleHash. Sort files by path for
+  // determinism; the bundleHash is a stable content-addressed
+  // identity for THIS version of THIS plugin's payload.
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  const bundleSeed = [manifestHash, ...files.map((f) => f.sha256)].join(":");
+  const bundleHash = createHash("sha256").update(bundleSeed).digest("hex");
+
+  const bundle = {
+    manifest: validation.manifest,
+    manifestHash,
+    files,
+    totalSize,
+    bundleHash,
+  };
+
+  const text = formatSnapshotJson(bundle, { indent: compact ? 0 : 2 }) + "\n";
+  if (outPath !== undefined) {
+    const absOut = path.isAbsolute(outPath)
+      ? outPath
+      : path.resolve(io.cwd(), outPath);
+    const writeFile = io.writeFile ?? defaultWriteFileNonExclusive;
+    try {
+      await writeFile(absOut, text);
+      io.stdout(`✓ Wrote bundle descriptor to ${absOut}\n`);
+      io.stdout(`  manifestHash: ${manifestHash}\n`);
+      io.stdout(`  bundleHash:   ${bundleHash}\n`);
+      io.stdout(`  totalSize:    ${totalSize} bytes (${files.length} files)\n`);
+    } catch (err) {
+      io.stderr(
+        `pack: failed to write ${absOut}: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 1;
+    }
+  } else {
+    io.stdout(text);
+  }
+  return 0;
+}
+
+/**
+ * Recursively walk `current` (originally `root`) and append each
+ * regular file to `out` with its repo-relative path, byte size, and
+ * sha256. Symlinks are NOT followed (publish flows should fail-loud
+ * on symlink leaks; this MVP just skips them silently — tighten when
+ * a publish CLI lands).
+ */
+async function walkDistFiles(
+  root: string,
+  current: string,
+  out: Array<{ path: string; size: number; sha256: string }>,
+): Promise<void> {
+  const { createHash } = await import("node:crypto");
+  const entries = await fs.readdir(current, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const full = path.join(current, entry.name);
+    if (entry.isDirectory()) {
+      await walkDistFiles(root, full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const buf = await fs.readFile(full);
+    const sha256 = createHash("sha256").update(buf).digest("hex");
+    out.push({
+      path: path.relative(root, full),
+      size: buf.byteLength,
+      sha256,
+    });
+  }
+}
+
+/**
+ * Default non-exclusive file writer for `pack --out`. Unlike `init`
+ * which refuses to overwrite (protect in-progress work), `pack`
+ * deliberately overwrites: the use-case is regenerating the bundle
+ * descriptor on every CI build.
+ */
+async function defaultWriteFileNonExclusive(
+  absolutePath: string,
+  contents: string,
+): Promise<void> {
+  await fs.writeFile(absolutePath, contents);
+}
+
 /** Template for the generated `src/index.ts`. */
 const SRC_INDEX_TEMPLATE = `import type {
   HyperforgePlugin,
@@ -1446,6 +1664,7 @@ Usage:
   hyperforge-plugin snapshot <dir> [--host-api <range>] [--human]
   hyperforge-plugin diff <baseline.json> <current.json> [--human] [--compact]
   hyperforge-plugin contributions <dir> [--host-api <range>] [--human] [--compact] [--with-origins]
+  hyperforge-plugin pack <dir> [--out <path>] [--compact]
   hyperforge-plugin --help
   hyperforge-plugin --version
 
@@ -1502,4 +1721,15 @@ Subcommands:
                     "declared by" map — useful for conflict diagnostics
                     when multiple plugins claim the same widget/system
                     id. Exit 0 on successful catalog read.
+  pack <dir>        Build a registry-ready bundle DESCRIPTOR for the
+                    plugin package at \`<dir>\` — full manifest +
+                    manifestHash + per-file path/size/sha256 in dist/ +
+                    bundleHash (content-addressed identity for THIS
+                    version's payload). Default output is deterministic
+                    JSON to stdout; pass \`--out <path>\` to write to
+                    a file (overwrites existing). \`--compact\` for
+                    single-line JSON. Validates plugin.json first;
+                    refuses to pack an invalid manifest. Foundation for
+                    the future publish flow. Exit 0 on success, 1 on
+                    validation failure or filesystem error.
 `;
