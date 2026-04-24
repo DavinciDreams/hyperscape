@@ -3,11 +3,21 @@
  *
  * Provides OSRS-accurate tier-based level requirements for equipment and tools.
  * Single source of truth - loaded from tier-requirements.json manifest.
+ * Validated via `TierRequirementsManifestSchema` on load.
  *
  * Usage:
  * - TierDataProvider.getInstance().getRequirements(tier, itemType, equipSlot)
  * - Returns skill requirements object or null
  */
+
+import {
+  TierRequirementsManifestSchema,
+  type TierRequirementsManifest as SchemaTierRequirementsManifest,
+  type MeleeTierData as SchemaMeleeTierData,
+  type ToolTierData as SchemaToolTierData,
+  type RangedTierData as SchemaRangedTierData,
+  type MagicTierData as SchemaMagicTierData,
+} from "@hyperforge/manifest-schema";
 
 // Types for tier requirements data
 export interface TierRequirements {
@@ -20,33 +30,11 @@ export interface TierRequirements {
   fishing?: number;
 }
 
-export interface MeleeTierData {
-  attack: number;
-  defence: number;
-}
-
-export interface ToolTierData {
-  attack: number;
-  woodcutting: number;
-  mining: number;
-}
-
-export interface RangedTierData {
-  ranged: number;
-  defence: number;
-}
-
-export interface MagicTierData {
-  magic: number;
-  defence?: number;
-}
-
-export interface TierRequirementsManifest {
-  melee: Record<string, MeleeTierData>;
-  tools: Record<string, ToolTierData>;
-  ranged: Record<string, RangedTierData>;
-  magic: Record<string, MagicTierData>;
-}
+export type MeleeTierData = SchemaMeleeTierData;
+export type ToolTierData = SchemaToolTierData;
+export type RangedTierData = SchemaRangedTierData;
+export type MagicTierData = SchemaMagicTierData;
+export type TierRequirementsManifest = SchemaTierRequirementsManifest;
 
 // Item type for tier derivation
 export interface TierableItem {
@@ -84,11 +72,27 @@ class TierDataProviderImpl {
   }
 
   /**
-   * Load tier requirements from manifest data
+   * Load tier requirements from manifest data.
+   * Validates against `TierRequirementsManifestSchema` — invalid
+   * manifests are rejected with a thrown ZodError so callers can
+   * surface the issue immediately.
    */
   load(manifest: TierRequirementsManifest): void {
-    this.tiers = manifest;
+    this.tiers = TierRequirementsManifestSchema.parse(manifest);
     this.loaded = true;
+  }
+
+  /**
+   * Hot-reload the tier manifest from the editor's PIE session. Validates,
+   * swaps state in one shot. No derived indexes to rebuild — each
+   * `getRequirements()` call reads straight off `this.tiers`, so systems
+   * observe the new values on their next lookup.
+   *
+   * Throws if the manifest fails schema validation; prior state is
+   * retained in that case.
+   */
+  hotReload(manifest: TierRequirementsManifest): void {
+    this.load(manifest);
   }
 
   /**

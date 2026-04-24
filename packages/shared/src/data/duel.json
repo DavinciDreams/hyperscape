@@ -1,0 +1,82 @@
+{
+  "$schema": "hyperforge.duel.v1",
+  "challengeTimeoutMs": 30000,
+  "rules": {
+    "noRanged": {
+      "label": "No Ranged",
+      "description": "Cannot use ranged attacks",
+      "incompatibleWith": []
+    },
+    "noMelee": {
+      "label": "No Melee",
+      "description": "Cannot use melee attacks",
+      "incompatibleWith": []
+    },
+    "noMagic": {
+      "label": "No Magic",
+      "description": "Cannot use magic attacks",
+      "incompatibleWith": []
+    },
+    "noSpecialAttack": {
+      "label": "No Special Attack",
+      "description": "Cannot use special attacks",
+      "incompatibleWith": []
+    },
+    "noPrayer": {
+      "label": "No Prayer",
+      "description": "Prayer points drained",
+      "incompatibleWith": []
+    },
+    "noPotions": {
+      "label": "No Potions",
+      "description": "Cannot drink potions",
+      "incompatibleWith": []
+    },
+    "noFood": {
+      "label": "No Food",
+      "description": "Cannot eat food",
+      "incompatibleWith": []
+    },
+    "noForfeit": {
+      "label": "No Forfeit",
+      "description": "Fight to the death",
+      "incompatibleWith": ["funWeapons", "noMovement"]
+    },
+    "noMovement": {
+      "label": "No Movement",
+      "description": "Frozen in place",
+      "incompatibleWith": ["noForfeit"]
+    },
+    "funWeapons": {
+      "label": "Fun Weapons",
+      "description": "Boxing gloves only",
+      "incompatibleWith": ["noForfeit"]
+    }
+  },
+  "equipmentSlots": {
+    "head":   { "label": "Head",   "order": 0 },
+    "cape":   { "label": "Cape",   "order": 1 },
+    "amulet": { "label": "Amulet", "order": 2 },
+    "weapon": { "label": "Weapon", "order": 3 },
+    "body":   { "label": "Body",   "order": 4 },
+    "shield": { "label": "Shield", "order": 5 },
+    "legs":   { "label": "Legs",   "order": 6 },
+    "gloves": { "label": "Gloves", "order": 7 },
+    "boots":  { "label": "Boots",  "order": 8 },
+    "ring":   { "label": "Ring",   "order": 9 },
+    "ammo":   { "label": "Ammo",   "order": 10 }
+  },
+  "duelSlotToEquipmentSlot": {
+    "head": "helmet",
+    "cape": "cape",
+    "amulet": "amulet",
+    "weapon": "weapon",
+    "body": "body",
+    "shield": "shield",
+    "legs": "legs",
+    "gloves": "gloves",
+    "boots": "boots",
+    "ring": "ring",
+    "ammo": "arrows"
+  }
+}

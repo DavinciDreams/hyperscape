@@ -15,7 +15,12 @@
  * DO NOT add bank/store data here - keep it in JSON!
  */
 
+import { CommerceManifestSchema } from "@hyperforge/manifest-schema";
+
+import commerceManifestJson from "./commerce.json" with { type: "json" };
 import type { BankEntityData, StoreData } from "../types/core/core";
+
+const commerceManifest = CommerceManifestSchema.parse(commerceManifestJson);
 
 /**
  * Banking System - Populated from JSON manifests
@@ -32,6 +37,36 @@ export const GENERAL_STORES: Record<string, StoreData> = {};
 /**
  * Helper Functions
  */
+/**
+ * Swap in a fresh set of stores at runtime — used by
+ * `PIEEditorSession.updateManifests` for editor hot-reload.
+ *
+ * Clears every key in `GENERAL_STORES` in-place (preserving the
+ * top-level reference so callers that imported the binding once keep
+ * reading through to the new data) and re-populates it from the
+ * supplied list. Shape validation is the caller's responsibility —
+ * the editor's converter is the boundary for round-trip correctness.
+ */
+export function hotReloadStores(stores: StoreData[]): void {
+  for (const key of Object.keys(GENERAL_STORES)) delete GENERAL_STORES[key];
+  for (const store of stores) {
+    GENERAL_STORES[store.id] = store;
+  }
+}
+
+/**
+ * Swap in a fresh set of banks at runtime — mirror of
+ * `hotReloadStores`. Provided for symmetry even though the editor
+ * doesn't currently expose bank authoring; tooling that drives banks
+ * via scripting can still use it.
+ */
+export function hotReloadBanks(banks: BankEntityData[]): void {
+  for (const key of Object.keys(BANKS)) delete BANKS[key];
+  for (const bank of banks) {
+    BANKS[bank.id] = bank;
+  }
+}
+
 export function getBankById(bankId: string): BankEntityData | null {
   return BANKS[bankId] || null;
 }
@@ -95,14 +130,17 @@ export function calculateBuybackPrice(
 }
 
 /**
- * Store and Bank Constants per GDD
+ * Store and Bank Constants per GDD.
+ *
+ * Loaded from `commerce.json` and validated against
+ * `CommerceManifestSchema` at module load.
  */
-export const COMMERCE_CONSTANTS = {
-  DEFAULT_BUYBACK_RATE: 0.5, // 50% of item value
-  BANK_STORAGE_UNLIMITED: -1,
-  STORE_UNLIMITED_STOCK: -1,
-  INTERACTION_RANGE: 3, // meters to interact with bank/store
-} as const;
+export const COMMERCE_CONSTANTS = Object.freeze({
+  DEFAULT_BUYBACK_RATE: commerceManifest.defaultBuybackRate,
+  BANK_STORAGE_UNLIMITED: commerceManifest.bankStorageUnlimited,
+  STORE_UNLIMITED_STOCK: commerceManifest.storeUnlimitedStock,
+  INTERACTION_RANGE: commerceManifest.interactionRange,
+});
 
 /**
  * Banking and Store Locations for Quick Reference

@@ -10,6 +10,8 @@
  * 3. Restart the server to reload manifests
  */
 
+import { CommerceManifestSchema } from "@hyperforge/manifest-schema";
+
 import type { Item } from "../types";
 import {
   AttackType,
@@ -17,6 +19,10 @@ import {
   ItemType,
   WeaponType,
 } from "../types/core/core";
+
+import commerceManifestJson from "./commerce.json" with { type: "json" };
+
+const commerceManifest = CommerceManifestSchema.parse(commerceManifestJson);
 
 // Re-export NoteGenerator utilities for convenience
 export {
@@ -97,14 +103,12 @@ export function getItemsByLevel(level: number): Item[] {
 }
 
 /**
- * Shop Items - Available for purchase at general stores
+ * Shop Items - Available for purchase at starter general stores.
+ * Sourced from `commerce.json` via `CommerceManifestSchema`.
  */
-export const SHOP_ITEMS = [
-  "bronze_hatchet",
-  "fishing_rod",
-  "tinderbox",
-  "arrows",
-];
+export const SHOP_ITEMS: readonly string[] = Object.freeze([
+  ...commerceManifest.starterStoreItemIds,
+]);
 
 /**
  * Item Object for compatibility

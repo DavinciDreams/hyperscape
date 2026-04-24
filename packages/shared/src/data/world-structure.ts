@@ -15,8 +15,16 @@
  * DO NOT add biome/zone data here - keep it in JSON!
  */
 
+import { WorldStructureManifestSchema } from "@hyperforge/manifest-schema";
+
 import type { BiomeData, ZoneData } from "../types/core/core";
 import { calculateDistance2D } from "../utils/game/EntityUtils";
+
+import worldStructureManifestJson from "./world-structure.json" with { type: "json" };
+
+const worldStructureManifest = WorldStructureManifestSchema.parse(
+  worldStructureManifestJson,
+);
 
 // Re-export types for external use
 export type { DeathLocationData, ZoneData } from "../types/core/core";
@@ -134,14 +142,17 @@ export function getTerrainHeight(_x: number, _z: number): number {
  * World Structure Constants (grid, terrain, zones)
  * Note: Different from WORLD_GENERATION_CONSTANTS in world-areas.ts
  */
-export const WORLD_STRUCTURE_CONSTANTS = {
-  GRID_SIZE: 4, // Block size for grid-based movement
-  DEFAULT_SPAWN_HEIGHT: 2,
-  WATER_LEVEL: 16, // Must match TERRAIN_CONSTANTS.WATER_THRESHOLD
-  MAX_BUILD_HEIGHT: 100,
-  SAFE_ZONE_RADIUS: 15, // Radius around starter towns with no hostile mobs
+export const WORLD_STRUCTURE_CONSTANTS = Object.freeze({
+  /** Block size for grid-based movement. */
+  GRID_SIZE: worldStructureManifest.constants.gridSize,
+  DEFAULT_SPAWN_HEIGHT: worldStructureManifest.constants.defaultSpawnHeight,
+  /** Must match TERRAIN_CONSTANTS.WATER_THRESHOLD. */
+  WATER_LEVEL: worldStructureManifest.constants.waterLevel,
+  MAX_BUILD_HEIGHT: worldStructureManifest.constants.maxBuildHeight,
+  /** Radius around starter towns with no hostile mobs. */
+  SAFE_ZONE_RADIUS: worldStructureManifest.constants.safeZoneRadius,
   // Note: Death/respawn timing constants are in COMBAT_CONSTANTS (tick-based)
-} as const;
+});
 
 // ============================================================================
 // WORLD.JSON — Entity placements from World Studio

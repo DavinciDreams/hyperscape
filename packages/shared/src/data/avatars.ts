@@ -1,21 +1,24 @@
 /**
- * Avatar Definitions
+ * Avatar Definitions — manifest façade.
  *
- * Defines available VRM avatar models for character creation.
- * These models are loaded from the asset server at runtime.
+ * Runtime data (avatars and LOD distances) is loaded from
+ * `avatars.json`, validated by `AvatarsManifestSchema` from
+ * `@hyperforge/manifest-schema` at module load time. The exported
+ * shape (AvatarOption interface, AvatarLOD enum, AVATAR_LOD_DISTANCES,
+ * AVATAR_OPTIONS, helpers) is preserved unchanged for consumers.
+ *
+ * Extracted as part of Phase A11 of
+ * `PLAN_WORLD_STUDIO_AAA_COMPLETION.md`.
  *
  * ## LOD System
- * Avatars use a 3-tier LOD system for performance:
  * - LOD0 (url): 30K triangles - close range gameplay
  * - LOD1 (lod1Url): 10K triangles - medium distance
  * - LOD2 (lod2Url): 2K triangles - far distance / impostor base
- *
- * ## Texture Optimization
- * All avatar textures are optimized:
- * - Color/Diffuse: 2048px max
- * - Normal maps: 1024px max
- * - No metallic/roughness/AO textures (simplified PBR)
  */
+
+import { AvatarsManifestSchema } from "@hyperforge/manifest-schema";
+
+import avatarsManifestJson from "./avatars.json" with { type: "json" };
 
 export interface AvatarOption {
   id: string;
@@ -41,69 +44,36 @@ export enum AvatarLOD {
   LOD2 = 2,
 }
 
+const manifest = AvatarsManifestSchema.parse(avatarsManifestJson);
+
 /** Distance thresholds for LOD switching (in meters) */
-export const AVATAR_LOD_DISTANCES = {
+export const AVATAR_LOD_DISTANCES = Object.freeze({
   /** Distance at which to switch from LOD0 to LOD1 */
-  LOD0_TO_LOD1: 30,
+  LOD0_TO_LOD1: manifest.lodDistances.lod0ToLod1,
   /** Distance at which to switch from LOD1 to LOD2 */
-  LOD1_TO_LOD2: 60,
-} as const;
+  LOD1_TO_LOD2: manifest.lodDistances.lod1ToLod2,
+} as const);
 
 /**
- * Available avatar models
+ * Available avatar models — derived from manifest.
  *
  * - `url`: LOD0 (30K triangles) - Uses asset:// protocol resolved by ClientLoader
  * - `lod1Url`: LOD1 (10K triangles) - Medium distance
  * - `lod2Url`: LOD2 (2K triangles) - Far distance
  * - `previewPath`: Path portion for CharacterPreview component (CDN URL prepended at runtime)
- *
- * Triangle counts (optimized):
- * - LOD0: ~30K triangles (main gameplay)
- * - LOD1: ~10K triangles (medium distance)
- * - LOD2: ~2K triangles (far distance / impostor)
  */
-export const AVATAR_OPTIONS: AvatarOption[] = [
-  {
-    id: "male-01",
-    name: "Male Avatar 01",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
-    url: "asset://avatars/avatar-male-01.vrm",
-    lod1Url: "asset://avatars/avatar-male-01_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-male-01_lod2.vrm",
-    previewPath: "/avatars/avatar-male-01.vrm",
-    description: "Standard male humanoid avatar",
-  },
-  {
-    id: "male-02",
-    name: "Male Avatar 02",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
-    url: "asset://avatars/avatar-male-02.vrm",
-    lod1Url: "asset://avatars/avatar-male-02_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-male-02_lod2.vrm",
-    previewPath: "/avatars/avatar-male-02.vrm",
-    description: "Standard male humanoid avatar",
-  },
-  {
-    id: "female-01",
-    name: "Female Avatar 01",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
-    url: "asset://avatars/avatar-female-01.vrm",
-    lod1Url: "asset://avatars/avatar-female-01_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-female-01_lod2.vrm",
-    previewPath: "/avatars/avatar-female-01.vrm",
-    description: "Standard female humanoid avatar",
-  },
-  {
-    id: "female-02",
-    name: "Female Avatar 02",
-    // TEMP: Use non-optimized VRM to test humanoid.update issue
-    url: "asset://avatars/avatar-female-02.vrm",
-    lod1Url: "asset://avatars/avatar-female-02_lod1.vrm",
-    lod2Url: "asset://avatars/avatar-female-02_lod2.vrm",
-    previewPath: "/avatars/avatar-female-02.vrm",
-    description: "Standard female humanoid avatar",
-  },
-];
+export const AVATAR_OPTIONS: AvatarOption[] = manifest.avatars.map((entry) => {
+  const option: AvatarOption = {
+    id: entry.id,
+    name: entry.name,
+    url: entry.url,
+    previewPath: entry.previewPath,
+  };
+  if (entry.lod1Url !== undefined) option.lod1Url = entry.lod1Url;
+  if (entry.lod2Url !== undefined) option.lod2Url = entry.lod2Url;
+  if (entry.description !== undefined) option.description = entry.description;
+  return Object.freeze(option);
+});
 
 /**
  * Get avatar by ID

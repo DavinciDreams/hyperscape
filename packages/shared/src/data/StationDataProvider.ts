@@ -31,6 +31,11 @@
  * @see packages/server/world/assets/manifests/model-bounds.json
  */
 
+import {
+  ModelBoundsManifestSchema,
+  StationsManifestSchema,
+} from "@hyperforge/manifest-schema";
+
 import type { FootprintSpec } from "../types/game/resource-processing-types";
 
 // ============================================================================
@@ -214,7 +219,8 @@ export class StationDataProvider {
    * Called by DataManager after loading manifests/stations.json.
    */
   public loadStations(manifest: StationsManifest): void {
-    this.stationEntries = manifest.stations;
+    const parsed = StationsManifestSchema.parse(manifest);
+    this.stationEntries = parsed.stations as StationManifestEntry[];
     this.rebuildStations();
   }
 
@@ -224,9 +230,10 @@ export class StationDataProvider {
    * This enables automatic footprint calculation from actual model geometry.
    */
   public loadModelBounds(manifest: ModelBoundsManifest): void {
+    const parsed = ModelBoundsManifestSchema.parse(manifest);
     this.modelBoundsByPath.clear();
 
-    for (const entry of manifest.models) {
+    for (const entry of parsed.models) {
       this.modelBoundsByPath.set(entry.assetPath, entry);
     }
 

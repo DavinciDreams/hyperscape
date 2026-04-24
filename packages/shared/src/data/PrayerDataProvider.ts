@@ -17,6 +17,8 @@
  * @see packages/shared/src/types/game/prayer-types.ts for type definitions
  */
 
+import { PrayersManifestSchema } from "@hyperforge/manifest-schema";
+
 import {
   type PrayerDefinition,
   type PrayerBonuses,
@@ -114,6 +116,10 @@ export class PrayerDataProvider {
    * Load prayer definitions from manifest
    */
   public loadPrayers(manifest: PrayersManifest): void {
+    // Zod-validate manifest shape up-front; malformed entries now throw
+    // at load time instead of being silently skipped with warnings
+    // inside buildPrayerDataFromManifest.
+    PrayersManifestSchema.parse(manifest);
     this.prayerManifest = manifest;
   }
 
@@ -158,6 +164,21 @@ export class PrayerDataProvider {
     this.prayersByCategory.clear();
     this.isInitialized = false;
     this.initialize();
+  }
+
+  /**
+   * Hot-reload prayer definitions from a new manifest. Validates, swaps the
+   * underlying manifest, clears indexes, and rebuilds in one shot. Used by
+   * the PIE editor session to push editor manifest edits into a running
+   * game without requiring a Stop → Play cycle.
+   *
+   * Throws (via `loadPrayers` → `PrayersManifestSchema.parse`) if the new
+   * manifest is malformed; the previous manifest is left untouched in that
+   * case.
+   */
+  public hotReload(manifest: PrayersManifest): void {
+    this.loadPrayers(manifest);
+    this.rebuild();
   }
 
   // ==========================================================================

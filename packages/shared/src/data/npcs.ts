@@ -20,11 +20,20 @@
  * DO NOT add NPC data here - keep it in JSON!
  */
 
+import {
+  NpcsManifestSchema,
+  type NpcsManifest,
+} from "@hyperforge/manifest-schema";
+
 import type { NPCData, NPCCategory } from "../types/core/core";
 import {
   calculateCombatLevel,
   normalizeCombatSkills,
 } from "../utils/game/CombatLevelCalculator";
+
+import npcsSpawnConstantsJson from "./npcs-spawn-constants.json" with { type: "json" };
+
+const npcsManifest = NpcsManifestSchema.parse(npcsSpawnConstantsJson);
 
 /**
  * NPC Database - Populated at runtime from JSON manifests
@@ -170,11 +179,69 @@ export function calculateNPCCombatLevel(npc: NPCData): number {
 }
 
 /**
- * Spawning Constants per GDD
+ * Spawning Constants per GDD — sourced from
+ * `npcs-spawn-constants.json` via `NpcsManifestSchema`.
+ *
+ * Exported as a mutable object (not `Object.freeze`) so
+ * `hotReloadNpcSpawnConstants(manifest)` can rewrite the fields
+ * in-place for editor hot-reload. `MobNPCSystem` and any other
+ * consumer reads through `NPC_SPAWN_CONSTANTS.X` at lookup time,
+ * so the new values take effect on the next spawn tick.
  */
-export const NPC_SPAWN_CONSTANTS = {
-  GLOBAL_RESPAWN_TIME: 900000, // 15 minutes per GDD
-  MAX_NPCS_PER_ZONE: 10,
-  SPAWN_RADIUS_CHECK: 5, // Don't spawn if player within 5 meters
-  AGGRO_LEVEL_THRESHOLD: 5, // Some NPCs ignore players above this combat level
-} as const;
+export const NPC_SPAWN_CONSTANTS: {
+  GLOBAL_RESPAWN_TIME: number;
+  MAX_NPCS_PER_ZONE: number;
+  SPAWN_RADIUS_CHECK: number;
+  AGGRO_LEVEL_THRESHOLD: number;
+} = {
+  GLOBAL_RESPAWN_TIME: npcsManifest.spawnConstants.globalRespawnTime,
+  MAX_NPCS_PER_ZONE: npcsManifest.spawnConstants.maxNpcsPerZone,
+  SPAWN_RADIUS_CHECK: npcsManifest.spawnConstants.spawnRadiusCheck,
+  AGGRO_LEVEL_THRESHOLD: npcsManifest.spawnConstants.aggroLevelThreshold,
+};
+
+/**
+ * Hot-reload the `NPC_SPAWN_CONSTANTS` record in-place from a new
+ * `NpcsManifest`. Zod-validates the input; on failure the existing
+ * constants are retained and the error bubbles to the caller.
+ *
+ * Used by `PIEEditorSession.updateManifests({ npcs })` for live
+ * spawn-rule tuning without a Stop → Play cycle.
+ */
+export function hotReloadNpcSpawnConstants(manifest: NpcsManifest): void {
+  const parsed = NpcsManifestSchema.parse(manifest);
+  NPC_SPAWN_CONSTANTS.GLOBAL_RESPAWN_TIME =
+    parsed.spawnConstants.globalRespawnTime;
+  NPC_SPAWN_CONSTANTS.MAX_NPCS_PER_ZONE = parsed.spawnConstants.maxNpcsPerZone;
+  NPC_SPAWN_CONSTANTS.SPAWN_RADIUS_CHECK =
+    parsed.spawnConstants.spawnRadiusCheck;
+  NPC_SPAWN_CONSTANTS.AGGRO_LEVEL_THRESHOLD =
+    parsed.spawnConstants.aggroLevelThreshold;
+}
+
+/**
+ * Hot-reload the `ALL_NPCS` map from a fully-normalized list of NPC
+ * definitions. Clears the existing entries in-place (preserving the
+ * stable top-level reference so consumers reading `ALL_NPCS.get(id)`
+ * at lookup time pick up edits) and re-populates from the new list.
+ *
+ * Caller is responsible for normalizing the input (`NPCDataInput[]` →
+ * `NPCData[]`). `DataManager.normalizeNPC` is the canonical
+ * normalization path; PIE / future hot-reload bridges should call
+ * it before invoking this function. No additional validation here —
+ * this is the hot-path mutator, not a gate.
+ *
+ * Future PIE wiring slot:
+ *   `PIEEditorSession.updateManifests({ npcDefinitions })` →
+ *     `hotReloadNPCs(normalizedList)`
+ *
+ * Until that wiring lands, this function is unused at runtime — added
+ * so the next session can plug in the consumer without touching
+ * `data/npcs.ts` again.
+ */
+export function hotReloadNPCs(npcs: readonly NPCData[]): void {
+  ALL_NPCS.clear();
+  for (const npc of npcs) {
+    ALL_NPCS.set(npc.id, npc);
+  }
+}

@@ -18,10 +18,23 @@
  * - quest: Quest-related NPCs (quest givers, quest objectives)
  */
 
+import {
+  FishingManifestSchema,
+  MiningManifestSchema,
+  WoodcuttingManifestSchema,
+} from "@hyperforge/manifest-schema";
+import { gatheringResources } from "../gathering/index.js";
 import { BANKS, GENERAL_STORES } from "./banks-stores";
 import { ITEMS } from "./items";
 import { ALL_NPCS } from "./npcs";
-import { COMBAT_CONSTANTS } from "../constants/CombatConstants";
+import {
+  getDefaultItemAttackRange,
+  getDefaultNpcAttackSpeedTicks,
+  getDefaultNpcCombatRange,
+  getDefaultNpcLeashRange,
+  getDefaultNpcRespawnTicks,
+  getTickDurationMs,
+} from "./live/combat-live";
 import { generateAllNotedItems } from "./NoteGenerator";
 import {
   ALL_WORLD_AREAS,
@@ -65,6 +78,231 @@ import {
   type ModelBoundsManifest,
 } from "./StationDataProvider";
 import { prayerDataProvider, type PrayersManifest } from "./PrayerDataProvider";
+import { dialogueConditionBindingsProvider } from "./DialogueConditionBindingsProvider";
+import { combatTuningProvider } from "./CombatTuningProvider";
+import { combatTuningAgentBindingsProvider } from "./CombatTuningAgentBindingsProvider";
+import { xpCurvesProvider } from "./XpCurvesProvider";
+import { achievementsProvider } from "./AchievementsProvider";
+import { timeWeatherProvider } from "./TimeWeatherProvider";
+import { accessibilityProvider } from "./AccessibilityProvider";
+import { analyticsEventsProvider } from "./AnalyticsEventsProvider";
+import { renderProfilesProvider } from "./RenderProfilesProvider";
+import {
+  renderProfileRegistry,
+  postProcessVolumeCompositor,
+} from "../rendering";
+import { damageTypeRegistry } from "../damage-types";
+import { xpCurveRegistry } from "../progression";
+import { achievementEvaluator } from "../achievements";
+import { npcScheduleRegistry } from "../npc-schedule";
+import { cameraProfileRegistry } from "../camera";
+import { audioBusMixer } from "../audio";
+import { interactionPromptRegistry } from "../interaction-prompts";
+import { chatChannelRegistry } from "../chat";
+import { musicStateMachineRegistry } from "../music";
+import { timeWeatherDriver } from "../time-weather";
+import { factionsRegistry } from "../factions";
+import { mountRegistry } from "../mounts";
+import { petRegistry } from "../pet-companion";
+import { statusEffectRegistry } from "../status-effects";
+import { enchantmentRegistry } from "../enchantments";
+import { titleRegistry } from "../titles";
+import { leaderboardEngine } from "../leaderboards";
+import { mailPolicyRegistry } from "../mail";
+import { featureFlagRegistry } from "../feature-flags";
+import { skyboxAtmosphereRegistry } from "../skybox-atmosphere";
+import { physicsConfigRegistry } from "../physics-config";
+import { voiceChatRegistry } from "../voice-chat";
+import { storeFrontRegistry } from "../store-front";
+import { commerceRegistry } from "../commerce";
+import { hapticsRegistry } from "../haptics";
+import { crashReporterRegistry } from "../crash-reporter";
+import { worldEventsRegistry } from "../world-events";
+import { housingRegistry } from "../housing";
+import { tooltipRegistry } from "../tooltips";
+import { screenshotRegistry } from "../screenshot";
+import { partyGuildRegistry } from "../party-guild";
+import { economyTuningRegistry } from "../economy-tuning";
+import { loadingScreensRegistry } from "../loading-screens";
+import { particleGraphRegistry } from "../particle-graph";
+import { auctionHouseRegistry } from "../auction-house";
+import { transmogRegistry } from "../transmog";
+import { groupFinderRegistry } from "../group-finder";
+import { tutorialFlowsRegistry } from "../tutorial-flows";
+import { talentTreeRegistry } from "../talent-trees";
+import { friendsSocialRegistry } from "../friends-social";
+import { itemSetRegistry } from "../item-sets";
+import { seasonRegistry } from "../seasons";
+import { loadoutPolicyRegistry } from "../loadouts";
+import { tradingRegistry } from "../trading";
+import { moderationRegistry } from "../moderation";
+import { newsFeedRegistry } from "../news-feed";
+import { licenseAgreementsRegistry } from "../license-agreements";
+import { pushNotificationsRegistry } from "../push-notifications";
+import { parentalControlsRegistry } from "../parental-controls";
+import { fastTravelGraph } from "../fast-travel";
+import { respawnPolicyResolver } from "../respawn";
+import { accessibilitySettings } from "../accessibility";
+import { replicationRegistry } from "../replication";
+import { prefabRegistry } from "../prefab";
+import { lightingBakeRegistry } from "../lighting-bake";
+import { inputActionsRegistry } from "../input-actions";
+import { deployTargetsRegistry } from "../deploy-targets";
+import { projectSettingsRegistry } from "../project-settings";
+import { qualityPresetsRegistry } from "../quality-presets";
+import { navMeshRegistry } from "../nav-mesh";
+import { lodSettingsRegistry } from "../lod-settings";
+import { sfxRegistry } from "../sfx";
+import { vfxRegistry } from "../vfx";
+import { vegetationRegistry } from "../vegetation";
+import { animationRegistry } from "../animations";
+import { biomesRegistry } from "../biomes";
+import { storesRegistry } from "../stores";
+import { skillUnlocksRegistry } from "../skill-unlocks";
+import { cinematicRegistry } from "../cinematic";
+import { editorSnapRegistry } from "../editor-snap";
+import { mainMenuRegistry } from "../main-menu";
+import { creditsRegistry } from "../credits";
+import { serverBrowserRegistry } from "../server-browser";
+import { spellVisualsRegistry } from "../spell-visuals";
+import { matchmakingRegistry } from "../matchmaking-tuning";
+import { skillIconsRegistry } from "../skill-icons";
+import { profilerOverlayRegistry } from "../profiler";
+import { levelStreamingRegistry } from "../level-streaming";
+import { ammunitionRegistry } from "../ammunition";
+import { arenaLayoutRegistry } from "../arena-layout";
+import { avatarsRegistry } from "../avatars";
+import { bankingRegistry } from "../banking";
+import { buildingsRegistry } from "../buildings";
+import { toolsRegistry } from "../tools";
+import { treeCatalogRegistry } from "../trees";
+import { weaponStylesRegistry } from "../weapon-styles";
+import { npcSizesRegistry } from "../npc-sizes";
+import { onboardingGoalsRegistry } from "../onboarding-goals";
+import { playerEmotesRegistry } from "../player-emotes";
+import { interactionConfigRegistry } from "../interaction";
+import { smithingRegistry } from "../smithing";
+import { processingRegistry } from "../processing";
+import { worldAreasRegistry } from "../world-areas";
+import { duelRulesRegistry } from "../duel";
+import { keyPromptGlyphRegistry } from "../key-prompts";
+import { equipmentManifestRegistry } from "../equipment-manifest";
+import { analyticsEventRouter } from "../analytics";
+import { damageTypesProvider } from "./DamageTypesProvider";
+import { statusEffectsProvider } from "./StatusEffectsProvider";
+import { cameraProfilesProvider } from "./CameraProfilesProvider";
+import { audioBusMixProvider } from "./AudioBusMixProvider";
+import { postProcessVolumesProvider } from "./PostProcessVolumesProvider";
+import { npcScheduleProvider } from "./NpcScheduleProvider";
+import { chatChannelsProvider } from "./ChatChannelsProvider";
+import { interactionPromptsProvider } from "./InteractionPromptsProvider";
+import { musicStateMachineProvider } from "./MusicStateMachineProvider";
+import { saveDataProvider } from "./SaveDataProvider";
+import { factionsProvider } from "./FactionsProvider";
+import { mountsProvider } from "./MountsProvider";
+import { voiceChatProvider } from "./VoiceChatProvider";
+import { parentalControlsProvider } from "./ParentalControlsProvider";
+import { tutorialFlowsProvider } from "./TutorialFlowsProvider";
+import { hapticsProvider } from "./HapticsProvider";
+import { physicsConfigProvider } from "./PhysicsConfigProvider";
+import { featureFlagsProvider } from "./FeatureFlagsProvider";
+import { crashReporterProvider } from "./CrashReporterProvider";
+import { pushNotificationsProvider } from "./PushNotificationsProvider";
+import { licenseAgreementsProvider } from "./LicenseAgreementsProvider";
+import { newsFeedProvider } from "./NewsFeedProvider";
+import { moderationProvider } from "./ModerationProvider";
+import { fastTravelProvider } from "./FastTravelProvider";
+import { respawnProvider } from "./RespawnProvider";
+import { talentTreesProvider } from "./TalentTreesProvider";
+import { auctionHouseProvider } from "./AuctionHouseProvider";
+import { transmogProvider } from "./TransmogProvider";
+import { housingProvider } from "./HousingProvider";
+import { groupFinderProvider } from "./GroupFinderProvider";
+import { friendsSocialProvider } from "./FriendsSocialProvider";
+import { loadoutsProvider } from "./LoadoutsProvider";
+import { tradingProvider } from "./TradingProvider";
+import { itemSetsProvider } from "./ItemSetsProvider";
+import { leaderboardsProvider } from "./LeaderboardsProvider";
+import { titlesProvider } from "./TitlesProvider";
+import { worldEventsProvider } from "./WorldEventsProvider";
+import { seasonsProvider } from "./SeasonsProvider";
+import { petCompanionProvider } from "./PetCompanionProvider";
+import { enchantmentsProvider } from "./EnchantmentsProvider";
+import { mailProvider } from "./MailProvider";
+import { tooltipsProvider } from "./TooltipsProvider";
+import { keyPromptIconsProvider } from "./KeyPromptIconsProvider";
+import { screenshotProvider } from "./ScreenshotProvider";
+import { partyGuildProvider } from "./PartyGuildProvider";
+import { economyTuningProvider } from "./EconomyTuningProvider";
+import { loadingScreensProvider } from "./LoadingScreensProvider";
+import { skyboxAtmosphereProvider } from "./SkyboxAtmosphereProvider";
+import { particleGraphProvider } from "./ParticleGraphProvider";
+import { cinematicProvider } from "./CinematicProvider";
+import { editorSnapProvider } from "./EditorSnapProvider";
+import { deployTargetsProvider } from "./DeployTargetsProvider";
+import { inputActionsProvider } from "./InputActionsProvider";
+import { profilerOverlayProvider } from "./ProfilerOverlayProvider";
+import { replicationProvider } from "./ReplicationProvider";
+import { prefabProvider } from "./PrefabProvider";
+import { levelStreamingProvider } from "./LevelStreamingProvider";
+import { lightingBakeProvider } from "./LightingBakeProvider";
+import { projectSettingsProvider } from "./ProjectSettingsProvider";
+import { aiBehaviorProvider } from "./AIBehaviorProvider";
+import { animationsProvider } from "./AnimationsProvider";
+import { qualityPresetsProvider } from "./QualityPresetsProvider";
+import { navMeshProvider } from "./NavMeshProvider";
+import { lodSettingsProvider } from "./LODSettingsProvider";
+import { soundEffectsProvider } from "./SoundEffectsProvider";
+import { vfxProvider } from "./VfxProvider";
+import { vegetationProvider } from "./VegetationProvider";
+import { mainMenuProvider } from "./MainMenuProvider";
+import { creditsProvider } from "./CreditsProvider";
+import { musicProvider } from "./MusicProvider";
+import { duelProvider } from "./DuelProvider";
+import { duelArenasProvider } from "./DuelArenasProvider";
+import { biomesProvider } from "./BiomesProvider";
+import { storesProvider } from "./StoresProvider";
+import { ammunitionProvider } from "./AmmunitionProvider";
+import { arenaLayoutProvider } from "./ArenaLayoutProvider";
+import { avatarsProvider } from "./AvatarsProvider";
+import { bankingProvider } from "./BankingProvider";
+import { buildingsProvider } from "./BuildingsProvider";
+import { toolsProvider } from "./ToolsProvider";
+import { treesProvider } from "./TreesProvider";
+import { weaponStylesProvider } from "./WeaponStylesProvider";
+import { npcSizesProvider } from "./NPCSizesProvider";
+import { onboardingGoalsProvider } from "./OnboardingGoalsProvider";
+import { skillIconsProvider } from "./SkillIconsProvider";
+import { playerEmotesProvider } from "./PlayerEmotesProvider";
+import { skillUnlocksProvider } from "./SkillUnlocksProvider";
+import { matchmakingTuningProvider } from "./MatchmakingTuningProvider";
+import { spellVisualsProvider } from "./SpellVisualsProvider";
+import { profilerProvider } from "./ProfilerProvider";
+import { serverBrowserProvider } from "./ServerBrowserProvider";
+import { storeFrontProvider } from "./StoreFrontProvider";
+import { commerceProvider } from "./CommerceProvider";
+import { interactionProvider } from "./InteractionProvider";
+import { combatProvider } from "./CombatProvider";
+import { equipmentProvider } from "./EquipmentProvider";
+import { gameProvider } from "./GameProvider";
+import { smithingProvider } from "./SmithingProvider";
+import { worldStructureProvider } from "./WorldStructureProvider";
+import { gatheringProvider } from "./GatheringProvider";
+import { processingProvider } from "./ProcessingProvider";
+import { woodcuttingProvider } from "./WoodcuttingProvider";
+import { miningProvider } from "./MiningProvider";
+import { fishingProvider } from "./FishingProvider";
+import { combatSpellsProvider } from "./CombatSpellsProvider";
+import { npcsProvider } from "./NpcsProvider";
+import { questsProvider } from "./QuestsProvider";
+import { worldAreasProvider } from "./WorldAreasProvider";
+import { worldConfigProvider } from "./WorldConfigProvider";
+import { lootTablesProvider } from "./LootTablesProvider";
+import { mobLootTableMappingsProvider } from "./MobLootTableMappingsProvider";
+import { dialogueProvider } from "./DialogueProvider";
+import { npcDialogueBindingsProvider } from "./NpcDialogueBindingsProvider";
+import { localizationProvider } from "./LocalizationProvider";
+import { pluginRegistryProvider } from "./PluginRegistryProvider";
 
 // Define constants from JSON data
 const STARTING_ITEMS: Array<{ id: string }> = []; // Stub - data removed
@@ -1561,7 +1799,7 @@ export class DataManager {
       attackRange:
         item.attackRange ??
         (attackType === AttackType.MELEE
-          ? COMBAT_CONSTANTS.DEFAULTS.ITEM.ATTACK_RANGE
+          ? getDefaultItemAttackRange()
           : undefined),
       equippedModelPath: item.equippedModelPath,
       bonuses: item.bonuses,
@@ -1779,6 +2017,2515 @@ export class DataManager {
         }
       })(),
 
+      // Dialogue condition bindings (optional)
+      (async () => {
+        try {
+          const res = await fetch(
+            `${baseUrl}/dialogue-condition-bindings.json`,
+          );
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          dialogueConditionBindingsProvider.loadRaw(raw);
+        } catch (err) {
+          // Missing manifest is fine — servers that don't author
+          // dialogue condition bindings stay on the safe empty
+          // default (unknown predicate names → false).
+          console.warn(
+            `[DataManager] dialogue-condition-bindings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored dialogue predicates will be unavailable`,
+          );
+        }
+      })(),
+
+      // Combat tuning manifest (optional). When absent or invalid,
+      // DuelCombatAI falls back to its hardcoded per-role defaults.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/combat-tuning.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          combatTuningProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] combat-tuning.json not found or invalid (${err instanceof Error ? err.message : String(err)}), duel AI will use hardcoded defaults`,
+          );
+        }
+      })(),
+
+      // Per-agent combat-tuning profile bindings manifest (optional).
+      // Maps `characterId → profileId | null`. Restored at boot by
+      // StreamingDuelScheduler so per-agent overrides survive restart.
+      (async () => {
+        try {
+          const res = await fetch(
+            `${baseUrl}/combat-tuning-agent-bindings.json`,
+          );
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          combatTuningAgentBindingsProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] combat-tuning-agent-bindings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), per-agent tuning overrides will be unavailable`,
+          );
+        }
+      })(),
+
+      // XP curves manifest (optional). Consumed by the XpCurvesRegistry
+      // to resolve level↔xp for every skill. When absent, consumers
+      // fall back to their hardcoded XP tables.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/xp-curves.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = xpCurvesProvider.loadRaw(raw);
+          // Seed the module-level runtime registry so skill/XP
+          // consumers reading through `xpCurveRegistry` pick up
+          // authored curves on cold boot (parity with PIE path).
+          xpCurveRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] xp-curves.json not found or invalid (${err instanceof Error ? err.message : String(err)}), level↔xp resolution will use hardcoded tables`,
+          );
+        }
+      })(),
+
+      // Achievements manifest (optional). Consumed by the
+      // AchievementEvaluator when a world wires one up. Missing file
+      // leaves the provider unloaded; consumers iterate an empty list.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/achievements.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = achievementsProvider.loadRaw(raw);
+          // Seed the module-level achievement evaluator so
+          // AwarderSystem consumers pick up authored achievements
+          // on cold boot (parity with PIE path).
+          achievementEvaluator.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] achievements.json not found or invalid (${err instanceof Error ? err.message : String(err)}), achievements will be unavailable`,
+          );
+        }
+      })(),
+
+      // Time/weather manifest (optional). Feeds the TimeWeatherDriver
+      // (day/night cycle + weather FSM). Missing/invalid file leaves
+      // the provider unloaded; consumers must guard with isLoaded()
+      // and supply their own hardcoded fallback since the schema
+      // requires ≥2 keyframes and ≥1 weather state.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/time-weather.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = timeWeatherProvider.loadRaw(raw);
+          // Seed runtime driver (parity with PIE hot-reload path).
+          timeWeatherDriver.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] time-weather.json not found or invalid (${err instanceof Error ? err.message : String(err)}), day/night + weather will use hardcoded fallback`,
+          );
+        }
+      })(),
+
+      // Accessibility manifest (optional). Every field has a schema
+      // default so a missing file still yields a fully-defaulted
+      // manifest via `accessibilityProvider.getManifest()` — safe
+      // to call unconditionally.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/accessibility.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = accessibilityProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          accessibilitySettings.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] accessibility.json not found or invalid (${err instanceof Error ? err.message : String(err)}), accessibility defaults will apply`,
+          );
+        }
+      })(),
+
+      // Analytics events manifest (optional). Consumed by the runtime
+      // analytics bridge to validate emitted event payloads before
+      // forwarding to sinks. Missing file leaves provider unloaded →
+      // bridge accepts anything (dev-loose).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/analytics-events.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = analyticsEventsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          analyticsEventRouter.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] analytics-events.json not found or invalid (${err instanceof Error ? err.message : String(err)}), analytics bridge will skip schema validation`,
+          );
+        }
+      })(),
+
+      // Render profiles manifest (optional). Feeds RenderProfileRegistry
+      // (already shipped) with tone mapping, bloom, fog, ambient,
+      // environment map, color grading. Missing/invalid leaves the
+      // provider unloaded — consumers must supply hardcoded defaults
+      // (schema requires min 1 profile, no safe empty).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/render-profiles.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = renderProfilesProvider.loadRaw(raw);
+          // Seed the module-level runtime registry so renderer
+          // consumers that read through `renderProfileRegistry` pick
+          // up authored profiles on cold boot (PIE hot-reload already
+          // covers the live-dispatch path in PIEEditorSession).
+          renderProfileRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] render-profiles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), render profiles will use hardcoded defaults`,
+          );
+        }
+      })(),
+
+      // Damage types manifest (optional). Consumed by DamageTypeRegistry
+      // (already shipped) for resolving attack↔defense multipliers in
+      // combat math. Missing/invalid leaves provider unloaded →
+      // combat falls back to untyped (1x) damage.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/damage-types.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = damageTypesProvider.loadRaw(raw);
+          // Seed the module-level damage-type registry so combat
+          // math consumers reading through `damageTypeRegistry` pick
+          // up authored resistances on cold boot (parity with PIE).
+          damageTypeRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] damage-types.json not found or invalid (${err instanceof Error ? err.message : String(err)}), combat will treat all damage as untyped`,
+          );
+        }
+      })(),
+
+      // Status effects manifest (optional). Consumed by
+      // StatusEffectSystem (not yet wired) for buff/debuff stacks,
+      // stat modifiers, and per-tick damage/heal. Missing/invalid
+      // leaves provider unloaded → no authored effects.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/status-effects.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = statusEffectsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          statusEffectRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] status-effects.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored buffs/debuffs will be available`,
+          );
+        }
+      })(),
+
+      // Camera profiles manifest (optional). Consumed by the Apr-20
+      // CameraProfileRegistry runtime (first-/third-person/top-down/
+      // orbit/free-fly rigs + FOV/lag/collision tuning). Missing or
+      // invalid leaves the provider unloaded → no authored profiles.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/camera-profiles.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = cameraProfilesProvider.loadRaw(raw);
+          // Seed runtime camera-profile registry (parity with PIE).
+          cameraProfileRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] camera-profiles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored camera rigs will be available`,
+          );
+        }
+      })(),
+
+      // Audio bus-mix manifest (optional). Consumed by the Apr-20
+      // AudioBusMixer runtime — master/music/sfx/ui/ambient DAG with
+      // per-bus volume/filters + duck rules. Missing/invalid leaves
+      // the provider unloaded → no authored mixer graph.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/audio-bus-mix.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = audioBusMixProvider.loadRaw(raw);
+          // Seed runtime mixer (parity with PIE hot-reload path).
+          audioBusMixer.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] audio-bus-mix.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored mixer graph will be available`,
+          );
+        }
+      })(),
+
+      // Post-process volumes manifest (optional). Consumed by the
+      // Apr-20 PostProcessVolumeCompositor — region-bounded overrides
+      // on top of the active render profile. Missing/invalid leaves
+      // the provider unloaded → compositor has no volumes to blend.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/post-process-volumes.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = postProcessVolumesProvider.loadRaw(raw);
+          // Seed runtime compositor (parity with PIE hot-reload path).
+          postProcessVolumeCompositor.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] post-process-volumes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored volumes will be available`,
+          );
+        }
+      })(),
+
+      // NPC schedule manifest (optional). Consumed by the Apr-20
+      // NPCScheduleDriver + NpcScheduleRegistry — authored time-of-day
+      // activity slots per NPC (work/sleep/patrol/socialize). Missing
+      // or invalid leaves the provider empty → NPCs fall back to
+      // their built-in behavior logic.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/npc-schedule.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = npcScheduleProvider.loadRaw(raw);
+          // Seed runtime schedule registry (parity with PIE).
+          npcScheduleRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] npc-schedule.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored NPC schedules will be available`,
+          );
+        }
+      })(),
+
+      // Chat-channels manifest (optional). Consumed by the Apr-20
+      // ChatRouter + ChatChannelRegistry — global/zone/party/guild/
+      // whisper/system/custom channels with permission tiers, rate
+      // limits, and filter-rule references. Missing/invalid leaves
+      // the provider unloaded → ChatRouter uses built-in defaults.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/chat-channels.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = chatChannelsProvider.loadRaw(raw);
+          // Seed runtime channel registry (parity with PIE path).
+          chatChannelRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] chat-channels.json not found or invalid (${err instanceof Error ? err.message : String(err)}), chat routing will use built-in defaults`,
+          );
+        }
+      })(),
+
+      // Mounts manifest (optional). Authored mount registry with
+      // ground/water/flight locomotion, speeds, stamina, capacity,
+      // summon rules. Runtime MountSystem is not yet shipped —
+      // provider only persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/mounts.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = mountsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          mountRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] mounts.json not found or invalid (${err instanceof Error ? err.message : String(err)}), mount system will be disabled`,
+          );
+        }
+      })(),
+
+      // Voice-chat manifest (optional). Authored voice rooms,
+      // transmission modes, codec tuning, mute defaults. Runtime
+      // VoiceChatSystem (LiveKit) is not yet shipped — provider
+      // only persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/voice-chat.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = voiceChatProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          voiceChatRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] voice-chat.json not found or invalid (${err instanceof Error ? err.message : String(err)}), voice-chat will be disabled`,
+          );
+        }
+      })(),
+
+      // Parental-controls manifest (optional). Age-gated profiles
+      // with playTime/spend/communication/content rules + guardian
+      // workflow. Runtime ParentalControlsSystem is not yet shipped
+      // — provider only persists authored data for future
+      // consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/parental-controls.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = parentalControlsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          parentalControlsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] parental-controls.json not found or invalid (${err instanceof Error ? err.message : String(err)}), parental-controls will be disabled`,
+          );
+        }
+      })(),
+
+      // Tutorial-flows manifest (optional). Declarative onboarding
+      // graphs with trigger-advanced steps. Runtime TutorialSystem
+      // is not yet shipped — provider only persists authored data
+      // for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/tutorial-flows.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = tutorialFlowsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          tutorialFlowsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] tutorial-flows.json not found or invalid (${err instanceof Error ? err.message : String(err)}), tutorial flows will be disabled`,
+          );
+        }
+      })(),
+
+      // Haptics manifest (optional). Controller rumble / touch /
+      // VR haptic pattern registry. Runtime HapticsSystem is not
+      // yet shipped — provider only persists authored data for
+      // future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/haptics.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = hapticsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          hapticsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] haptics.json not found or invalid (${err instanceof Error ? err.message : String(err)}), haptics will be disabled`,
+          );
+        }
+      })(),
+
+      // Physics-config manifest (optional). PhysX simulation
+      // tuning + physics-material registry + collision-layer
+      // matrix. Runtime PhysicsSystem already exists — provider
+      // only persists authored *tuning* data for future
+      // consumption; wiring the runtime consumer is a separate
+      // slice. Missing/invalid leaves the provider unloaded.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/physics-config.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = physicsConfigProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          physicsConfigRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] physics-config.json not found or invalid (${err instanceof Error ? err.message : String(err)}), physics config will be disabled`,
+          );
+        }
+      })(),
+
+      // Feature-flags manifest (optional). Authored targeting
+      // rules + boolean/variant flag registry + mutex groups.
+      // Runtime FeatureFlagRegistry (hash bucketing, admin
+      // override, remote-config bridge) is not yet shipped —
+      // provider only persists authored data for future
+      // consumption. Missing/invalid leaves provider unloaded.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/feature-flags.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = featureFlagsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          featureFlagRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] feature-flags.json not found or invalid (${err instanceof Error ? err.message : String(err)}), feature flags will be disabled`,
+          );
+        }
+      })(),
+
+      // Crash-reporter manifest (optional). Sink registry with
+      // endpointNameRefs (never real URLs — resolved via
+      // deploy-targets), severity/sampling/retry rules,
+      // symbolication, breadcrumbs, PII redaction, consent
+      // gating. Runtime CrashReporterSystem not yet shipped —
+      // provider only persists authored data. Missing/invalid
+      // leaves provider unloaded.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/crash-reporter.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = crashReporterProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          crashReporterRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] crash-reporter.json not found or invalid (${err instanceof Error ? err.message : String(err)}), crash reporter will be disabled`,
+          );
+        }
+      })(),
+
+      // Push-notifications manifest (optional). Delivery-channel
+      // registry (APNs/FCM/WebPush/email/inApp) with
+      // credentialsNameRefs (resolved via deploy-targets),
+      // notification categories with fan-out, quiet hours,
+      // consent gating. Runtime PushNotificationsSystem not yet
+      // shipped — provider only persists authored data.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/push-notifications.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = pushNotificationsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          pushNotificationsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] push-notifications.json not found or invalid (${err instanceof Error ? err.message : String(err)}), push notifications will be disabled`,
+          );
+        }
+      })(),
+
+      // License-agreements manifest (optional). 7-kind legal
+      // doc registry (eula/termsOfService/privacyPolicy/coc/
+      // ageConsent/dlcAddendum/custom), SemVer-versioned history,
+      // per-version JurisdictionalVariant[] (global / ISO-3166),
+      // acceptance gates, consent flow. Runtime LegalConsentSystem
+      // not yet shipped — provider only persists authored data.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/license-agreements.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = licenseAgreementsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          licenseAgreementsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] license-agreements.json not found or invalid (${err instanceof Error ? err.message : String(err)}), license agreements will be disabled`,
+          );
+        }
+      })(),
+
+      // News-feed manifest (optional). Authored announcement
+      // registry with targeting + publish/expire windows. Runtime
+      // NewsFeedSystem not yet shipped — provider only persists
+      // authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/news-feed.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = newsFeedProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          newsFeedRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] news-feed.json not found or invalid (${err instanceof Error ? err.message : String(err)}), news feed will be disabled`,
+          );
+        }
+      })(),
+
+      // Moderation manifest (optional). Authored report-category
+      // registry + filter-rule list + per-category sanction
+      // ladders + global rate/auto-mod/appeals/ban rule blocks.
+      // Runtime ModerationSystem not yet shipped — provider only
+      // persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/moderation.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = moderationProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          moderationRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] moderation.json not found or invalid (${err instanceof Error ? err.message : String(err)}), moderation substrate will be disabled`,
+          );
+        }
+      })(),
+
+      // Fast-travel manifest (optional). Authored flight-master
+      // graph — nodes + edges + global rules. Runtime
+      // FastTravelSystem not yet shipped — provider only persists
+      // authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/fast-travel.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = fastTravelProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          fastTravelGraph.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] fast-travel.json not found or invalid (${err instanceof Error ? err.message : String(err)}), fast travel graph will be empty`,
+          );
+        }
+      })(),
+
+      // Respawn manifest (optional). Authored bind-point registry
+      // + death-penalty / corpse-run / resurrection global rules.
+      // Runtime RespawnSystem not yet shipped — provider only
+      // persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/respawn.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = respawnProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          respawnPolicyResolver.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] respawn.json not found or invalid (${err instanceof Error ? err.message : String(err)}), respawn system will be disabled`,
+          );
+        }
+      })(),
+
+      // Talent-trees manifest (optional). Authored branching
+      // progression registry — 6-kind tree enum + 6-kind node
+      // enum DAG with prereq, tier gating, keystone/abilityGrant
+      // refinements, and respec rules. Runtime TalentTreeSystem
+      // not yet shipped — provider only persists authored data
+      // for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/talent-trees.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = talentTreesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          talentTreeRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] talent-trees.json not found or invalid (${err instanceof Error ? err.message : String(err)}), talent trees will be disabled`,
+          );
+        }
+      })(),
+
+      // Auction-house manifest (optional). Single policy blob
+      // governing listing models, bidding anti-snipe, fees,
+      // cancellation, search, and anti-manipulation heuristics.
+      // Runtime AuctionHouseSystem not yet shipped — provider
+      // only persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/auction-house.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = auctionHouseProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          auctionHouseRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] auction-house.json not found or invalid (${err instanceof Error ? err.message : String(err)}), auction house will be disabled`,
+          );
+        }
+      })(),
+
+      // Transmog manifest (optional). Global cosmetic-override
+      // rules + per-source appearance registry with 10-slot enum,
+      // 6-unlock-model, per-char/per-account scope, race/class/
+      // faction restrictions, and outfit-save rules. Runtime
+      // TransmogSystem not yet shipped — provider only persists
+      // authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/transmog.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = transmogProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          transmogRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] transmog.json not found or invalid (${err instanceof Error ? err.message : String(err)}), transmog will be disabled`,
+          );
+        }
+      })(),
+
+      // Housing manifest (optional). Plot-type registry (6-category
+      // apartment/cottage/manor/estate/openWorld/guildHall) with
+      // per-plot size/slots/visitorCap/cost + global customization/
+      // permissions/upkeep/visitors rule blocks. Runtime HousingSystem
+      // not yet shipped — provider only persists authored data for
+      // future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/housing.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = housingProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          housingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] housing.json not found or invalid (${err instanceof Error ? err.message : String(err)}), housing will be disabled`,
+          );
+        }
+      })(),
+
+      // Group-finder manifest (optional). LFG / dungeon-finder content
+      // registry (7-kind dungeon/raid/scenario/battleground/arena/
+      // worldBoss/custom) with min/max group size, role requirements,
+      // 4-policy queue (random/specific/ranked/casual), level/gear/
+      // rating gates, and matchmaking/rewards blocks. Runtime
+      // GroupFinderSystem not yet shipped — provider only persists
+      // authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/group-finder.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = groupFinderProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          groupFinderRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] group-finder.json not found or invalid (${err instanceof Error ? err.message : String(err)}), group finder will be disabled`,
+          );
+        }
+      })(),
+
+      // Friends-social manifest (optional). MMO social graph policy
+      // blob with friends/ignore/recent/onlineStatus rule groups.
+      // Refinements enforce friends.scope == ignore.scope and
+      // defaultVisibility='invisible' requires allowPlayerOverride.
+      // Runtime SocialSystem not yet shipped — provider only persists
+      // authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/friends-social.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = friendsSocialProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          friendsSocialRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] friends-social.json not found or invalid (${err instanceof Error ? err.message : String(err)}), friends social will be disabled`,
+          );
+        }
+      })(),
+
+      // Loadouts manifest (optional). WoW Equipment-Manager-style
+      // saved-configuration policy blob with maxSlotsPerCharacter
+      // (premium freeSlotCount split), slot/naming/swap/sharing
+      // rule groups. Runtime LoadoutSystem not yet shipped —
+      // provider only persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/loadouts.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = loadoutsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          loadoutPolicyRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] loadouts.json not found or invalid (${err instanceof Error ? err.message : String(err)}), loadouts will be disabled`,
+          );
+        }
+      })(),
+
+      // Trading manifest (optional). P2P trade policy blob with
+      // session/items/currency/eligibility/rateLimit/antiRmt rule
+      // groups. Refinement rejects confirmMode='none' +
+      // sessionTimeoutSec=0 (unsafe freeze vector) and rateLimit
+      // day<hour. Runtime TradeSystem not yet shipped — provider
+      // only persists authored data for future consumption.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/trading.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = tradingProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          tradingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] trading.json not found or invalid (${err instanceof Error ? err.message : String(err)}), trading will be disabled`,
+          );
+        }
+      })(),
+
+      // Item-sets manifest (optional). Array-shape registry of
+      // set-bonus definitions (6-category raid/dungeon/crafted/
+      // world/pvp/legacy) with incremental stages (2pc/4pc/6pc),
+      // 20-stat modifiers, triggered effects. Globally-unique
+      // triggered-effect ids enforced. Runtime ItemSetSystem not
+      // yet shipped — provider only persists authored data.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/item-sets.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = itemSetsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          itemSetRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] item-sets.json not found or invalid (${err instanceof Error ? err.message : String(err)}), item sets will be disabled`,
+          );
+        }
+      })(),
+
+      // Leaderboards manifest (optional). Array-shape registry
+      // of competitive boards (10-metric, 5-scope, 5-cadence,
+      // tie-break, rank|percent reward brackets with non-overlap
+      // refinement). Runtime LeaderboardSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/leaderboards.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = leaderboardsProvider.loadRaw(raw);
+          // Seed runtime leaderboard engine (parity with PIE hot-reload).
+          leaderboardEngine.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] leaderboards.json not found or invalid (${err instanceof Error ? err.message : String(err)}), leaderboards will be disabled`,
+          );
+        }
+      })(),
+
+      // Titles manifest (optional). Array-shape registry of
+      // honorifics with 7-kind unlock discriminated union, 6-
+      // rarity, 3-display-mode, revocation rules. Runtime
+      // TitleSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/titles.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = titlesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          titleRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] titles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), titles will be disabled`,
+          );
+        }
+      })(),
+
+      // World-events manifest (optional). Array-shape FATE/public-
+      // event/world-boss registry with 7-category, 5-kind trigger,
+      // linear phase chain with success/failure branches, tiered
+      // participation rewards. Runtime WorldEventSystem not yet
+      // shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/world-events.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = worldEventsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          worldEventsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] world-events.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world events will be disabled`,
+          );
+        }
+      })(),
+
+      // Seasons manifest (optional). Array-shape Battle-Pass/
+      // live-ops registry with free|premium|bonus tracks, tiered
+      // rewards, weekly/daily challenges, strict-before startsAt
+      // <endsAt, non-overlapping windows. Runtime SeasonSystem not
+      // yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/seasons.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = seasonsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          seasonRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] seasons.json not found or invalid (${err instanceof Error ? err.message : String(err)}), seasons will be disabled`,
+          );
+        }
+      })(),
+
+      // Pet-companion manifest (optional). Array-shape registry
+      // of summonable entities with 3-category (combat/utility/
+      // cosmetic), slot subsets, summon rules, progression opt-in.
+      // Cosmetic pets forbidden from abilities/progression.
+      // Runtime PetSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/pet-companion.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = petCompanionProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          petRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] pet-companion.json not found or invalid (${err instanceof Error ? err.message : String(err)}), pets will be disabled`,
+          );
+        }
+      })(),
+
+      // Enchantments manifest (optional). Array-shape registry
+      // of authored item modifiers (permanent/socket-gem/rune-word/
+      // temporary). Runtime EnchantmentSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/enchantments.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = enchantmentsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          enchantmentRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] enchantments.json not found or invalid (${err instanceof Error ? err.message : String(err)}), enchantments will be disabled`,
+          );
+        }
+      })(),
+
+      // Mail manifest (optional). Single policy blob (UE5-
+      // DefaultMail.ini style) for player/auction/system/guild/gm
+      // mail. Runtime MailSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/mail.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = mailProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          mailPolicyRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] mail.json not found or invalid (${err instanceof Error ? err.message : String(err)}), mail will be disabled`,
+          );
+        }
+      })(),
+
+      // Tooltips manifest (optional). UI tooltip registry keyed by
+      // localization keys. Runtime TooltipsSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/tooltips.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = tooltipsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          tooltipRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] tooltips.json not found or invalid (${err instanceof Error ? err.message : String(err)}), tooltips will be disabled`,
+          );
+        }
+      })(),
+
+      // Key-prompt-icons manifest (optional). 7-device input-glyph
+      // catalog for on-screen prompts. Runtime KeyPromptIconsSystem
+      // not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/key-prompt-icons.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = keyPromptIconsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          keyPromptGlyphRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] key-prompt-icons.json not found or invalid (${err instanceof Error ? err.message : String(err)}), key prompts will be disabled`,
+          );
+        }
+      })(),
+
+      // Screenshot manifest (optional). Photo-mode capture policy
+      // with share-target registry. Runtime ScreenshotSystem not
+      // yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/screenshot.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = screenshotProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          screenshotRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] screenshot.json not found or invalid (${err instanceof Error ? err.message : String(err)}), screenshots will be disabled`,
+          );
+        }
+      })(),
+
+      // Party-guild manifest (optional). Authored loot/xp
+      // policies + guild rank hierarchy. Runtime PartyManager/
+      // GuildRegistry not yet shipped — provider only persists
+      // authored data. Missing/invalid leaves the provider
+      // unloaded (safe default).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/party-guild.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = partyGuildProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          partyGuildRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] party-guild.json not found or invalid (${err instanceof Error ? err.message : String(err)}), party/guild will be disabled`,
+          );
+        }
+      })(),
+
+      // Economy-tuning manifest (optional). Authored currency
+      // registry + vendor/market/cost-curve tuning. Runtime
+      // VendorSystem/AuctionHouseSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/economy-tuning.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = economyTuningProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          economyTuningRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] economy-tuning.json not found or invalid (${err instanceof Error ? err.message : String(err)}), economy tuning will be disabled`,
+          );
+        }
+      })(),
+
+      // Loading-screens manifest (optional). Authored slate
+      // registry with weighted selection, fade rules, tip/
+      // progress-bar toggles. Runtime LoadingScreensSystem not
+      // yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/loading-screens.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = loadingScreensProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          loadingScreensRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] loading-screens.json not found or invalid (${err instanceof Error ? err.message : String(err)}), loading screens will be disabled`,
+          );
+        }
+      })(),
+
+      // Skybox-atmosphere manifest (optional). Authored sun/moon
+      // discs, star field, cloud layers, atmospheric scattering.
+      // Runtime SkyboxSystem not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/skybox-atmosphere.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = skyboxAtmosphereProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          skyboxAtmosphereRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] skybox-atmosphere.json not found or invalid (${err instanceof Error ? err.message : String(err)}), skybox will be disabled`,
+          );
+        }
+      })(),
+
+      // Particle-graph manifest (optional). Authored Niagara-style
+      // particle systems with emitter, initializers, updaters,
+      // renderer. Runtime ParticleSystem compiler not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/particle-graph.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = particleGraphProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          particleGraphRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] particle-graph.json not found or invalid (${err instanceof Error ? err.message : String(err)}), particle graph will be disabled`,
+          );
+        }
+      })(),
+
+      // Cinematic manifest (optional). Authored timeline cinematics
+      // with 5-kind track discriminated union (camera/entity-pose/
+      // dialogue/audio/event). Runtime CinematicPlayer not shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/cinematic.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = cinematicProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          cinematicRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] cinematic.json not found or invalid (${err instanceof Error ? err.message : String(err)}), cinematics will be disabled`,
+          );
+        }
+      })(),
+
+      // Editor-snap manifest (optional). Grid/surface snap defaults
+      // + gizmo settings. Consumed by the editor at boot to seed
+      // authoring snap behavior.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/editor-snap.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = editorSnapProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          editorSnapRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] editor-snap.json not found or invalid (${err instanceof Error ? err.message : String(err)}), editor snap defaults will be used`,
+          );
+        }
+      })(),
+
+      // Deploy-targets manifest (optional). Named endpoints
+      // referenced by crash-reporter/push-notifications/screenshot.
+      // Carries only secret *names*, never real values.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/deploy-targets.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = deployTargetsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          deployTargetsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] deploy-targets.json not found or invalid (${err instanceof Error ? err.message : String(err)}), deploy targets will be empty`,
+          );
+        }
+      })(),
+
+      // Input-actions manifest (optional). Author-side default
+      // bindings. Runtime overrides come from UserInputBindings.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/input-actions.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = inputActionsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          inputActionsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] input-actions.json not found or invalid (${err instanceof Error ? err.message : String(err)}), input actions will be empty`,
+          );
+        }
+      })(),
+
+      // Profiler-overlay manifest (optional). Declarative metrics
+      // with threshold-driven color bands. Runtime profiler HUD not
+      // yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/profiler.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = profilerOverlayProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          profilerOverlayRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] profiler.json not found or invalid (${err instanceof Error ? err.message : String(err)}), profiler overlay will be disabled`,
+          );
+        }
+      })(),
+
+      // Replication manifest (optional). Declarative replicated
+      // fields + events so plugins can participate in netcode
+      // without touching ServerNetwork. Runtime delta-replicator
+      // not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/replication.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = replicationProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          replicationRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] replication.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored replication contract will be disabled`,
+          );
+        }
+      })(),
+
+      // Prefab manifest (optional). Reusable entity composition
+      // with sparse overrides + nested prefab DAG. Runtime prefab
+      // instantiator not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/prefab.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = prefabProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          prefabRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] prefab.json not found or invalid (${err instanceof Error ? err.message : String(err)}), prefab library will be disabled`,
+          );
+        }
+      })(),
+
+      // Level-streaming manifest (optional). Sublevels with
+      // always-loaded / proximity / on-demand / server-authoritative
+      // policies and trigger volumes. Runtime sublevel streamer
+      // not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/level-streaming.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = levelStreamingProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          levelStreamingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] level-streaming.json not found or invalid (${err instanceof Error ? err.message : String(err)}), sublevel streaming will be disabled`,
+          );
+        }
+      })(),
+
+      // Lighting-bake manifest (optional). Offline lightmap + GI
+      // bake settings with per-sublevel overrides. Runtime offline
+      // baker not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/lighting-bake.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = lightingBakeProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          lightingBakeRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] lighting-bake.json not found or invalid (${err instanceof Error ? err.message : String(err)}), offline lighting bake settings will be disabled`,
+          );
+        }
+      })(),
+
+      // Project-settings manifest (optional). Top-level project
+      // identity (projectName + gameModeId) + installed plugin
+      // list. No baseline fixture because projectName +
+      // gameModeId are required.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/project-settings.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = projectSettingsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          projectSettingsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] project-settings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), project-level identity will be disabled`,
+          );
+        }
+      })(),
+
+      // AI-behavior manifest (optional). Array of named behavior
+      // trees that the BehaviorTreeInterpreter can bind to by id.
+      // Runtime binding registry not yet shipped.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/ai-behavior.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          aiBehaviorProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] ai-behavior.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored behavior trees will be disabled`,
+          );
+        }
+      })(),
+
+      // Animations manifest (optional). Clips + action→clip
+      // bindings consumed by the (forthcoming) AnimationSystem.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/animations.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = animationsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          animationRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] animations.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored animation bindings will be disabled`,
+          );
+        }
+      })(),
+
+      // Quality-presets manifest (optional). Array of ordered
+      // tiers (low/medium/high/ultra). No baseline — min(1) means
+      // empty is schema-invalid.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/quality-presets.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = qualityPresetsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          qualityPresetsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] quality-presets.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored quality presets will be disabled`,
+          );
+        }
+      })(),
+
+      // Nav-mesh manifest (optional). Voxelizer + agent profiles
+      // + modifier volumes + jump links. No baseline — agents
+      // min(1) means empty is schema-invalid.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/nav-mesh.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = navMeshProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          navMeshRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] nav-mesh.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored nav-mesh settings will be disabled`,
+          );
+        }
+      })(),
+
+      // LOD-settings manifest (optional). Versioned distance
+      // thresholds + dissolve transition. No baseline — required
+      // fields with no defaults.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/lod-settings.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = lodSettingsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          lodSettingsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] lod-settings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored LOD settings will be disabled`,
+          );
+        }
+      })(),
+
+      // SFX manifest (optional). Authored SoundEffect registry
+      // consumed by the (forthcoming) AudioSystem / 2D+3D spatial
+      // layer. Baseline `[]` means no authored sounds.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/sfx.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = soundEffectsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          sfxRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] sfx.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored sound effects will be disabled`,
+          );
+        }
+      })(),
+
+      // VFX manifest (optional). Authored VfxEffect registry
+      // consumed by the (forthcoming) VFX spawner. Baseline `[]`
+      // means no authored effects.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/vfx.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = vfxProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          vfxRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] vfx.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored VFX will be disabled`,
+          );
+        }
+      })(),
+
+      // Vegetation manifest (optional). Versioned asset registry
+      // feeding procgen vegetation layers + biome layer
+      // definitions. No baseline — version + assets required.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/vegetation.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = vegetationProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          vegetationRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] vegetation.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored vegetation registry will be disabled`,
+          );
+        }
+      })(),
+
+      // Main-menu manifest (optional). Pre-game menu tree with
+      // 9-action-kind entries. Baseline `{"enabled": false}`.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/main-menu.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = mainMenuProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          mainMenuRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] main-menu.json not found or invalid (${err instanceof Error ? err.message : String(err)}), main menu tree will be disabled`,
+          );
+        }
+      })(),
+
+      // Credits manifest (optional). Credit-roll structure with
+      // 7-entry-kind discriminated union. Baseline
+      // `{"enabled": false}`.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/credits.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = creditsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          creditsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] credits.json not found or invalid (${err instanceof Error ? err.message : String(err)}), credits roll will be disabled`,
+          );
+        }
+      })(),
+
+      // Music manifest (optional). Flat array of MusicTrack entries.
+      // Baseline `[]`.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/music.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          musicProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] music.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored music tracks will be disabled`,
+          );
+        }
+      })(),
+
+      // Duel manifest (optional). Challenge timeout + rule/slot
+      // definitions + slot mapping. No baseline — $schema and record
+      // fields are required without defaults.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/duel.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = duelProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          duelRulesRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] duel.json not found or invalid (${err instanceof Error ? err.message : String(err)}), duel rules will be disabled`,
+          );
+        }
+      })(),
+
+      // Duel-arenas manifest (optional). Hand-placed arena grid +
+      // lobby/hospital transit areas + visual constants. No baseline —
+      // arenas.nonempty() and required fields.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/duel-arenas.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          duelArenasProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] duel-arenas.json not found or invalid (${err instanceof Error ? err.message : String(err)}), streaming duel arenas will be disabled`,
+          );
+        }
+      })(),
+
+      // Biomes manifest (optional). Flat array of biome entries with
+      // color schemes + vegetation layers + mob pools. Baseline `[]`.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/biomes.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = biomesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          biomesRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] biomes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored biomes will be disabled`,
+          );
+        }
+      })(),
+
+      // Stores manifest (optional). Flat array of Store entries (shop
+      // inventories, buyback rules, item stock). Baseline `[]`.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/stores.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = storesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          storesRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] stores.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored stores will be disabled`,
+          );
+        }
+      })(),
+
+      // Ammunition manifest (optional). Authored bow tiers + arrow
+      // stats consumed by the combat runtime. No baseline fixture —
+      // schema requires $schema + bowTiers + arrows with no defaults.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/ammunition.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = ammunitionProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          ammunitionRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] ammunition.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored ammunition will be disabled`,
+          );
+        }
+      })(),
+
+      // Arena layout manifest (optional). Authored arena grid + lobby
+      // + hospital geometry consumed by the streaming duel scheduler.
+      // No baseline fixture — schema requires full layout with no defaults.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/arena-layout.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = arenaLayoutProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          arenaLayoutRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] arena-layout.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored arena layout will be disabled`,
+          );
+        }
+      })(),
+
+      // Avatars manifest (optional). Authored VRM avatar catalog with
+      // 3-tier LOD URLs + distance thresholds. No baseline fixture —
+      // schema requires avatars.min(1) + lodDistances.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/avatars.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = avatarsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          avatarsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] avatars.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored avatars will be disabled`,
+          );
+        }
+      })(),
+
+      // Banking manifest (optional). Authored bank sizes + UI settings
+      // + transaction limits + error/message catalogs consumed by the
+      // banking system runtime. No baseline fixture.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/banking.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = bankingProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          bankingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] banking.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored banking settings will be disabled`,
+          );
+        }
+      })(),
+
+      // Buildings manifest (optional). Flat array of building entries
+      // consumed by procgen town placement. Baseline `[]` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/buildings.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = buildingsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          buildingsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] buildings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored buildings will be disabled`,
+          );
+        }
+      })(),
+
+      // Tools manifest (optional). Flat array of gathering-skill tool
+      // entries (hatchets, pickaxes, fishing gear). Baseline `[]`.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/tools.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = toolsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          toolsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] tools.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored tools will be disabled`,
+          );
+        }
+      })(),
+
+      // Trees manifest (optional). Tree-type catalog keyed by subtype.
+      // Baseline `{$schema, trees: {}}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/trees.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = treesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          treeCatalogRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] trees.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored trees will be disabled`,
+          );
+        }
+      })(),
+
+      // Weapon-styles manifest (optional). OSRS-accurate combat style
+      // table by weapon type. No baseline — record key is exhaustive enum.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/weapon-styles.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = weaponStylesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          weaponStylesRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] weapon-styles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored weapon styles will be disabled`,
+          );
+        }
+      })(),
+
+      // NPC-sizes manifest (optional). NPC footprint dimensions keyed
+      // by NPC id. Baseline `{$schema, sizes: {}}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/npc-sizes.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = npcSizesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          npcSizesRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] npc-sizes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored NPC sizes will be disabled`,
+          );
+        }
+      })(),
+
+      // Onboarding-goals manifest (optional). New-player goal graph.
+      // Baseline `{enabled: false}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/onboarding-goals.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = onboardingGoalsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          onboardingGoalsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] onboarding-goals.json not found or invalid (${err instanceof Error ? err.message : String(err)}), onboarding tracker will be disabled`,
+          );
+        }
+      })(),
+
+      // Skill-icons manifest (optional). OSRS-style UI display
+      // metadata per skill + emoji icon lookup table. Runtime falls
+      // back to legacy hardcoded skill icons when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/skill-icons.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = skillIconsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          skillIconsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] skill-icons.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored skill icons will be disabled`,
+          );
+        }
+      })(),
+
+      // Player-emotes manifest (optional). Avatar animation asset URLs
+      // keyed by emote name + essential pre-load list. Runtime falls
+      // back to legacy hardcoded emotes when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/player-emotes.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = playerEmotesProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          playerEmotesRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] player-emotes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored player emotes will be disabled`,
+          );
+        }
+      })(),
+
+      // Skill-unlocks manifest (optional). OSRS-style level-unlock
+      // notifications per skill. Baseline `{skills: {}}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/skill-unlocks.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = skillUnlocksProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          skillUnlocksRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] skill-unlocks.json not found or invalid (${err instanceof Error ? err.message : String(err)}), skill unlock notifications will be disabled`,
+          );
+        }
+      })(),
+
+      // Matchmaking-tuning manifest (optional). Automatic matchmaking
+      // queue policy. Baseline `{enabled: false}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/matchmaking-tuning.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = matchmakingTuningProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          matchmakingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] matchmaking-tuning.json not found or invalid (${err instanceof Error ? err.message : String(err)}), matchmaking defaults will apply`,
+          );
+        }
+      })(),
+
+      // Spell-visuals manifest (optional). Projectile visual params
+      // (color, size, glow, trail, pulse) per spell/arrow id. Runtime
+      // falls back to legacy hardcoded projectile visuals when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/spell-visuals.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = spellVisualsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          spellVisualsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] spell-visuals.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored spell visuals will be disabled`,
+          );
+        }
+      })(),
+
+      // Profiler manifest (optional). On-screen performance HUD
+      // groups + metrics. Baseline `{}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/profiler.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          profilerProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] profiler.json not found or invalid (${err instanceof Error ? err.message : String(err)}), profiler overlay will use defaults`,
+          );
+        }
+      })(),
+
+      // Server-browser manifest (optional). Manual server list
+      // filters/columns/sort policy. Baseline `{}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/server-browser.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = serverBrowserProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          serverBrowserRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] server-browser.json not found or invalid (${err instanceof Error ? err.message : String(err)}), server browser will use defaults`,
+          );
+        }
+      })(),
+
+      // Store-front manifest (optional). Premium bundle catalog +
+      // shelves + discount rules. Baseline `{}` acceptable.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/store-front.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = storeFrontProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          storeFrontRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] store-front.json not found or invalid (${err instanceof Error ? err.message : String(err)}), premium store will be closed`,
+          );
+        }
+      })(),
+
+      // Commerce manifest (optional). Global commerce constants.
+      // No safe baseline — runtime falls back to legacy hardcoded
+      // constants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/commerce.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = commerceProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          commerceRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] commerce.json not found or invalid (${err instanceof Error ? err.message : String(err)}), commerce constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Interaction manifest (optional). Session/interaction tuning
+      // constants. No safe baseline — runtime falls back to legacy
+      // hardcoded constants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/interaction.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = interactionProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          interactionConfigRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] interaction.json not found or invalid (${err instanceof Error ? err.message : String(err)}), interaction constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Combat manifest (optional). Authored ranges/ticks/food/hit-
+      // delay/projectiles/rotation/aggro tables. Runtime falls back
+      // to legacy hardcoded CombatConstants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/combat-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          combatProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] combat-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), combat constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Equipment manifest (optional). Authored slot + bank grid
+      // layout + error messages. Runtime falls back to legacy
+      // hardcoded EquipmentConstants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/equipment-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = equipmentProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          equipmentManifestRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] equipment-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), equipment constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Game manifest (optional). Engine-wide constants —
+      // inventory/player/home-teleport/xp/distance/ui/physics/camera/network.
+      // Runtime falls back to legacy hardcoded GameConstants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/game-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          gameProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] game-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), game constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Smithing manifest (optional). Authored bar/recipe ticks +
+      // anvil messages + validation limits. Runtime falls back to
+      // legacy hardcoded SmithingConstants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/smithing-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = smithingProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          smithingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] smithing-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), smithing constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // World-structure manifest (optional). High-level world
+      // constants — grid size, water level, build height, safe zone.
+      // Runtime falls back to legacy hardcoded WorldStructureConstants
+      // when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/world-structure.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          worldStructureProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] world-structure.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world structure constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Gathering manifest (optional). Woodcutting/mining/fishing
+      // skill mechanics, ranges, timing. Runtime falls back to legacy
+      // hardcoded GatheringConstants when absent.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/gathering-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          gatheringProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] gathering-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), gathering constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Processing manifest (optional). Firemaking/cooking skill
+      // mechanics, success rates, fire duration, fire-walk priority.
+      // Runtime falls back to legacy hardcoded ProcessingConstants
+      // when absent. Distinct from ProcessingDataProvider (recipes).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/processing-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = processingProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          processingRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] processing-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), processing constants will use legacy defaults`,
+          );
+        }
+      })(),
+
+      // Woodcutting manifest (optional). Authored tree resource
+      // definitions. Runtime gathering path still parses inline in
+      // DataManager; provider gives boot-load anchor for future rewire.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/gathering/woodcutting.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          woodcuttingProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] gathering/woodcutting.json not found or invalid (${err instanceof Error ? err.message : String(err)}), woodcutting provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Mining manifest (optional). Authored rock resource
+      // definitions. Runtime gathering path still parses inline in
+      // DataManager; provider gives boot-load anchor for future rewire.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/gathering/mining.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          miningProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] gathering/mining.json not found or invalid (${err instanceof Error ? err.message : String(err)}), mining provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Fishing manifest (optional). Authored fishing spot
+      // definitions. Runtime gathering path still parses inline in
+      // DataManager; provider gives boot-load anchor for future rewire.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/gathering/fishing.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          fishingProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] gathering/fishing.json not found or invalid (${err instanceof Error ? err.message : String(err)}), fishing provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Combat-spells manifest (optional). Boot-load anchor for
+      // hot reload; runtime still parses inline in combat-spells.ts.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/combat-spells.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          combatSpellsProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] combat-spells.json not found or invalid (${err instanceof Error ? err.message : String(err)}), combat-spells provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Npcs spawn-constants manifest (optional). Boot-load anchor
+      // for hot reload of spawn rule constants.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/npcs-spawn-constants.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          npcsProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] npcs-spawn-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), npcs provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Quests manifest (optional; safe baseline = empty record).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/quests.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          questsProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] quests.json not found or invalid (${err instanceof Error ? err.message : String(err)}), quests provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Plugin registry manifest (optional; safe baseline = {} → empty plugins).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/plugin-registry.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          pluginRegistryProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] plugin-registry.json not found or invalid (${err instanceof Error ? err.message : String(err)}), plugin registry provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // World-areas manifest (optional; safe baseline = 5 empty records).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/world-areas.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = worldAreasProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          worldAreasRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] world-areas.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world-areas provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // World-config manifest (optional). Complements the existing
+      // `DataManager.setWorldConfig()` static setter.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/world-config.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          worldConfigProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] world-config.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world-config provider stays unloaded`,
+          );
+        }
+      })(),
+
+      // Factions manifest (optional). Authored reputation graph
+      // with tier bands + sparse pairwise relationships. Runtime
+      // FactionSystem is not yet shipped — provider only persists
+      // authored data for future consumption. Missing/invalid leaves
+      // the provider unloaded.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/factions.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = factionsProvider.loadRaw(raw);
+          // Seed runtime registry (parity with PIE hot-reload).
+          factionsRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] factions.json not found or invalid (${err instanceof Error ? err.message : String(err)}), faction system will be disabled`,
+          );
+        }
+      })(),
+
+      // Save-data manifest (optional). Consumed by the Apr-20
+      // SaveDataMigrator + SaveDataRegistry — plugin-contributed
+      // persisted state slices with versioned single-step migrations.
+      // Missing/invalid leaves the provider unloaded → no authored
+      // slices, only the engine's built-in persistence.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/save-data.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          saveDataProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] save-data.json not found or invalid (${err instanceof Error ? err.message : String(err)}), plugin save-data slices will be disabled`,
+          );
+        }
+      })(),
+
+      // Music-state-machine manifest (optional). Consumed by the
+      // Apr-20 MusicStateController + MusicStateMachineRegistry —
+      // dynamic music graphs (explore/combat/boss/victory) with
+      // predicate-gated transitions + crossfades + stingers.
+      // Missing/invalid leaves the provider unloaded → audio layer
+      // has no state machines to drive.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/music-state-machine.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = musicStateMachineProvider.loadRaw(raw);
+          // Seed runtime music-state registry (parity with PIE path).
+          musicStateMachineRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] music-state-machine.json not found or invalid (${err instanceof Error ? err.message : String(err)}), dynamic music state machines will be disabled`,
+          );
+        }
+      })(),
+
+      // Interaction-prompts manifest (optional). Consumed by the
+      // Apr-20 InteractionPromptSelector + InteractionPromptRegistry
+      // — "Press [E] to open chest", "Hold [F] to loot", etc.
+      // Missing/invalid leaves the provider unloaded → HUD silently
+      // skips the prompt layer.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/interaction-prompts.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          const parsed = interactionPromptsProvider.loadRaw(raw);
+          // Seed runtime prompt registry (parity with PIE path).
+          interactionPromptRegistry.load(parsed);
+        } catch (err) {
+          console.warn(
+            `[DataManager] interaction-prompts.json not found or invalid (${err instanceof Error ? err.message : String(err)}), interaction HUD prompts will be disabled`,
+          );
+        }
+      })(),
+
+      // Loot tables manifest (optional). When absent or invalid,
+      // LootSystem falls back to the legacy LootTableService path for
+      // every mob type (no authored rolls).
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/loot-tables.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          lootTablesProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] loot-tables.json not found or invalid (${err instanceof Error ? err.message : String(err)}), LootSystem will use legacy drop tables`,
+          );
+        }
+      })(),
+
+      // Mob → loot-table mappings manifest (optional). Without this,
+      // no `mobType` is bound to the authored roller and every death
+      // falls through to the legacy service.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/mob-loot-table-mappings.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          mobLootTableMappingsProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] mob-loot-table-mappings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored mob→table mappings will be unavailable`,
+          );
+        }
+      })(),
+
+      // Dialogue manifest (optional). When absent or invalid,
+      // DialogueSystem falls back to the legacy `NPCDialogueTree` data
+      // embedded in `npcs.json` for every NPC.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/dialogue.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          dialogueProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] dialogue.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored dialogue trees will be unavailable`,
+          );
+        }
+      })(),
+
+      // NPC → authored-dialogue-tree bindings manifest (optional).
+      // Without this, no NPC is routed to an authored tree and every
+      // interaction falls through to the legacy `npcs.json` tree.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/npc-dialogue-bindings.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          npcDialogueBindingsProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] npc-dialogue-bindings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored NPC→tree bindings will be unavailable`,
+          );
+        }
+      })(),
+
+      // Localization bundle (optional). When absent or invalid,
+      // DialogueSystem keeps no catalog and authored dialogue textKeys
+      // echo raw instead of resolving to translated strings.
+      (async () => {
+        try {
+          const res = await fetch(`${baseUrl}/localization.json`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          const raw = (await res.json()) as unknown;
+          localizationProvider.loadRaw(raw);
+        } catch (err) {
+          console.warn(
+            `[DataManager] localization.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored textKeys will echo raw`,
+          );
+        }
+      })(),
+
       // Model bounds → stations (sequential dependency: bounds must load before stations)
       (async () => {
         try {
@@ -1934,6 +4681,1857 @@ export class DataManager {
       );
     }
 
+    // Load dialogue condition bindings manifest (optional — servers
+    // without authored bindings stay on the safe empty default).
+    try {
+      const bindingsPath = path.join(
+        manifestsDir,
+        "dialogue-condition-bindings.json",
+      );
+      const bindingsData = await fs.readFile(bindingsPath, "utf-8");
+      const raw = JSON.parse(bindingsData) as unknown;
+      dialogueConditionBindingsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] dialogue-condition-bindings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored dialogue predicates will be unavailable`,
+      );
+    }
+
+    // Load combat tuning manifest (optional — DuelCombatAI falls back
+    // to hardcoded per-role defaults when no manifest is present).
+    try {
+      const tuningPath = path.join(manifestsDir, "combat-tuning.json");
+      const tuningData = await fs.readFile(tuningPath, "utf-8");
+      const raw = JSON.parse(tuningData) as unknown;
+      combatTuningProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] combat-tuning.json not found or invalid (${err instanceof Error ? err.message : String(err)}), duel AI will use hardcoded defaults`,
+      );
+    }
+
+    // Load per-agent combat-tuning bindings manifest (optional).
+    // Restored by StreamingDuelScheduler on boot so editor-authored
+    // overrides (character → profile) survive server restart.
+    try {
+      const bindingsPath = path.join(
+        manifestsDir,
+        "combat-tuning-agent-bindings.json",
+      );
+      const bindingsData = await fs.readFile(bindingsPath, "utf-8");
+      const raw = JSON.parse(bindingsData) as unknown;
+      combatTuningAgentBindingsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] combat-tuning-agent-bindings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), per-agent tuning overrides will be unavailable`,
+      );
+    }
+
+    // Load XP curves manifest (optional — consumers fall back to
+    // hardcoded XP tables when absent).
+    try {
+      const curvesPath = path.join(manifestsDir, "xp-curves.json");
+      const curvesData = await fs.readFile(curvesPath, "utf-8");
+      const raw = JSON.parse(curvesData) as unknown;
+      const parsed = xpCurvesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      xpCurveRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] xp-curves.json not found or invalid (${err instanceof Error ? err.message : String(err)}), level↔xp resolution will use hardcoded tables`,
+      );
+    }
+
+    // Load achievements manifest (optional).
+    try {
+      const achievementsPath = path.join(manifestsDir, "achievements.json");
+      const achievementsData = await fs.readFile(achievementsPath, "utf-8");
+      const raw = JSON.parse(achievementsData) as unknown;
+      const parsed = achievementsProvider.loadRaw(raw);
+      // Seed runtime evaluator (parity with PIE hot-reload).
+      achievementEvaluator.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] achievements.json not found or invalid (${err instanceof Error ? err.message : String(err)}), achievements will be unavailable`,
+      );
+    }
+
+    // Load time-weather manifest (optional — schema requires ≥2
+    // keyframes and ≥1 weather state, so missing/invalid leaves
+    // provider unloaded and consumers must supply their own fallback).
+    try {
+      const timeWeatherPath = path.join(manifestsDir, "time-weather.json");
+      const timeWeatherData = await fs.readFile(timeWeatherPath, "utf-8");
+      const raw = JSON.parse(timeWeatherData) as unknown;
+      const parsed = timeWeatherProvider.loadRaw(raw);
+      // Seed runtime driver (parity with PIE hot-reload path).
+      timeWeatherDriver.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] time-weather.json not found or invalid (${err instanceof Error ? err.message : String(err)}), day/night + weather will use hardcoded fallback`,
+      );
+    }
+
+    // Load accessibility manifest (optional — every field has a
+    // schema default so missing/invalid file still yields a fully-
+    // defaulted manifest via `getManifest()`).
+    try {
+      const accessibilityPath = path.join(manifestsDir, "accessibility.json");
+      const accessibilityData = await fs.readFile(accessibilityPath, "utf-8");
+      const raw = JSON.parse(accessibilityData) as unknown;
+      const parsed = accessibilityProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      accessibilitySettings.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] accessibility.json not found or invalid (${err instanceof Error ? err.message : String(err)}), accessibility defaults will apply`,
+      );
+    }
+
+    // Load analytics events manifest (optional — runtime bridge
+    // skips schema validation when absent/invalid).
+    try {
+      const analyticsPath = path.join(manifestsDir, "analytics-events.json");
+      const analyticsData = await fs.readFile(analyticsPath, "utf-8");
+      const raw = JSON.parse(analyticsData) as unknown;
+      const parsed = analyticsEventsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      analyticsEventRouter.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] analytics-events.json not found or invalid (${err instanceof Error ? err.message : String(err)}), analytics bridge will skip schema validation`,
+      );
+    }
+
+    // Load render profiles manifest (optional — schema requires
+    // min 1 profile, no safe empty).
+    try {
+      const renderProfilesPath = path.join(
+        manifestsDir,
+        "render-profiles.json",
+      );
+      const renderProfilesData = await fs.readFile(renderProfilesPath, "utf-8");
+      const raw = JSON.parse(renderProfilesData) as unknown;
+      const parsed = renderProfilesProvider.loadRaw(raw);
+      // Seed the module-level runtime registry so renderer consumers
+      // that read through `renderProfileRegistry` pick up authored
+      // profiles on cold boot (parity with PIE hot-reload path).
+      renderProfileRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] render-profiles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), render profiles will use hardcoded defaults`,
+      );
+    }
+
+    // Load damage types manifest (optional — schema requires
+    // types.min(1), no safe empty).
+    try {
+      const damageTypesPath = path.join(manifestsDir, "damage-types.json");
+      const damageTypesData = await fs.readFile(damageTypesPath, "utf-8");
+      const raw = JSON.parse(damageTypesData) as unknown;
+      const parsed = damageTypesProvider.loadRaw(raw);
+      // Seed runtime damage-type registry (parity with PIE hot-reload).
+      damageTypeRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] damage-types.json not found or invalid (${err instanceof Error ? err.message : String(err)}), combat will treat all damage as untyped`,
+      );
+    }
+
+    // Load status effects manifest (optional — StatusEffectSystem
+    // iterates empty list when absent).
+    try {
+      const statusEffectsPath = path.join(manifestsDir, "status-effects.json");
+      const statusEffectsData = await fs.readFile(statusEffectsPath, "utf-8");
+      const raw = JSON.parse(statusEffectsData) as unknown;
+      const parsed = statusEffectsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      statusEffectRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] status-effects.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored buffs/debuffs will be available`,
+      );
+    }
+
+    // Load camera profiles manifest (optional — empty list is
+    // schema-valid; provider returns [] until an author adds rigs).
+    try {
+      const cameraProfilesPath = path.join(
+        manifestsDir,
+        "camera-profiles.json",
+      );
+      const cameraProfilesData = await fs.readFile(cameraProfilesPath, "utf-8");
+      const raw = JSON.parse(cameraProfilesData) as unknown;
+      const parsed = cameraProfilesProvider.loadRaw(raw);
+      // Seed runtime camera-profile registry (parity with PIE).
+      cameraProfileRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] camera-profiles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored camera rigs will be available`,
+      );
+    }
+
+    // Load audio bus-mix manifest (optional — schema requires
+    // buses.min(1), no safe empty; missing → unloaded).
+    try {
+      const audioBusMixPath = path.join(manifestsDir, "audio-bus-mix.json");
+      const audioBusMixData = await fs.readFile(audioBusMixPath, "utf-8");
+      const raw = JSON.parse(audioBusMixData) as unknown;
+      const parsed = audioBusMixProvider.loadRaw(raw);
+      // Seed runtime mixer (parity with PIE hot-reload path).
+      audioBusMixer.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] audio-bus-mix.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored mixer graph will be available`,
+      );
+    }
+
+    // Load post-process volumes manifest (optional — empty list is
+    // schema-valid; provider returns [] until an author adds volumes).
+    try {
+      const ppvPath = path.join(manifestsDir, "post-process-volumes.json");
+      const ppvData = await fs.readFile(ppvPath, "utf-8");
+      const raw = JSON.parse(ppvData) as unknown;
+      const parsed = postProcessVolumesProvider.loadRaw(raw);
+      // Seed runtime compositor (parity with PIE hot-reload path).
+      postProcessVolumeCompositor.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] post-process-volumes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored volumes will be available`,
+      );
+    }
+
+    // Load NPC schedule manifest (optional — empty list is
+    // schema-valid; NPCs without an authored schedule fall back to
+    // their built-in behavior logic).
+    try {
+      const npcSchedPath = path.join(manifestsDir, "npc-schedule.json");
+      const npcSchedData = await fs.readFile(npcSchedPath, "utf-8");
+      const raw = JSON.parse(npcSchedData) as unknown;
+      const parsed = npcScheduleProvider.loadRaw(raw);
+      // Seed runtime schedule registry (parity with PIE).
+      npcScheduleRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] npc-schedule.json not found or invalid (${err instanceof Error ? err.message : String(err)}), no authored NPC schedules will be available`,
+      );
+    }
+
+    // Load chat-channels manifest (optional — schema requires
+    // channels.min(1), no safe empty; missing → unloaded → ChatRouter
+    // uses built-in defaults).
+    try {
+      const chatChannelsPath = path.join(manifestsDir, "chat-channels.json");
+      const chatChannelsData = await fs.readFile(chatChannelsPath, "utf-8");
+      const raw = JSON.parse(chatChannelsData) as unknown;
+      const parsed = chatChannelsProvider.loadRaw(raw);
+      // Seed runtime channel registry (parity with PIE path).
+      chatChannelRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] chat-channels.json not found or invalid (${err instanceof Error ? err.message : String(err)}), chat routing will use built-in defaults`,
+      );
+    }
+
+    // Load mounts manifest (optional — no authored mounts when
+    // absent, runtime has no mounts to resolve).
+    try {
+      const mountsPath = path.join(manifestsDir, "mounts.json");
+      const mountsRaw = await fs.readFile(mountsPath, "utf-8");
+      const raw = JSON.parse(mountsRaw) as unknown;
+      const parsed = mountsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      mountRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] mounts.json not found or invalid (${err instanceof Error ? err.message : String(err)}), mount system will be disabled`,
+      );
+    }
+
+    // Load voice-chat manifest (optional — pipeline disabled when
+    // absent, runtime VoiceChatSystem has nothing to wire up).
+    try {
+      const voiceChatPath = path.join(manifestsDir, "voice-chat.json");
+      const voiceChatRaw = await fs.readFile(voiceChatPath, "utf-8");
+      const raw = JSON.parse(voiceChatRaw) as unknown;
+      const parsed = voiceChatProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      voiceChatRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] voice-chat.json not found or invalid (${err instanceof Error ? err.message : String(err)}), voice-chat will be disabled`,
+      );
+    }
+
+    // Load parental-controls manifest (optional — no authored
+    // age-gated profiles when absent, runtime has nothing to
+    // enforce).
+    try {
+      const parentalPath = path.join(manifestsDir, "parental-controls.json");
+      const parentalRaw = await fs.readFile(parentalPath, "utf-8");
+      const raw = JSON.parse(parentalRaw) as unknown;
+      const parsed = parentalControlsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      parentalControlsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] parental-controls.json not found or invalid (${err instanceof Error ? err.message : String(err)}), parental-controls will be disabled`,
+      );
+    }
+
+    // Load tutorial-flows manifest (optional — no authored
+    // onboarding graphs when absent, runtime has nothing to run).
+    try {
+      const tutorialPath = path.join(manifestsDir, "tutorial-flows.json");
+      const tutorialRaw = await fs.readFile(tutorialPath, "utf-8");
+      const raw = JSON.parse(tutorialRaw) as unknown;
+      const parsed = tutorialFlowsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      tutorialFlowsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] tutorial-flows.json not found or invalid (${err instanceof Error ? err.message : String(err)}), tutorial flows will be disabled`,
+      );
+    }
+
+    // Load haptics manifest (optional — no authored haptic
+    // patterns when absent, runtime has nothing to dispatch).
+    try {
+      const hapticsPath = path.join(manifestsDir, "haptics.json");
+      const hapticsRaw = await fs.readFile(hapticsPath, "utf-8");
+      const raw = JSON.parse(hapticsRaw) as unknown;
+      const parsed = hapticsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      hapticsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] haptics.json not found or invalid (${err instanceof Error ? err.message : String(err)}), haptics will be disabled`,
+      );
+    }
+
+    // Load physics-config manifest (optional — PhysX tuning + materials +
+    // collision-layer matrix. Runtime PhysicsSystem reads provider for
+    // authored tuning once wired; absence leaves provider unloaded).
+    try {
+      const physicsConfigPath = path.join(manifestsDir, "physics-config.json");
+      const physicsConfigRaw = await fs.readFile(physicsConfigPath, "utf-8");
+      const raw = JSON.parse(physicsConfigRaw) as unknown;
+      const parsed = physicsConfigProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      physicsConfigRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] physics-config.json not found or invalid (${err instanceof Error ? err.message : String(err)}), physics config will be disabled`,
+      );
+    }
+
+    // Load feature-flags manifest (optional — rules + boolean/variant
+    // flag registry + mutex groups. Runtime FeatureFlagRegistry reads
+    // provider once wired; absence leaves provider unloaded).
+    try {
+      const featureFlagsPath = path.join(manifestsDir, "feature-flags.json");
+      const featureFlagsRaw = await fs.readFile(featureFlagsPath, "utf-8");
+      const raw = JSON.parse(featureFlagsRaw) as unknown;
+      const parsed = featureFlagsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      featureFlagRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] feature-flags.json not found or invalid (${err instanceof Error ? err.message : String(err)}), feature flags will be disabled`,
+      );
+    }
+
+    // Load crash-reporter manifest (optional — sink registry, PII
+    // rules, symbolication, breadcrumb ring buffer. Runtime
+    // CrashReporterSystem reads provider once wired; absence leaves
+    // provider unloaded).
+    try {
+      const crashReporterPath = path.join(manifestsDir, "crash-reporter.json");
+      const crashReporterRaw = await fs.readFile(crashReporterPath, "utf-8");
+      const raw = JSON.parse(crashReporterRaw) as unknown;
+      const parsed = crashReporterProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      crashReporterRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] crash-reporter.json not found or invalid (${err instanceof Error ? err.message : String(err)}), crash reporter will be disabled`,
+      );
+    }
+
+    // Load push-notifications manifest (optional — channels +
+    // categories + quiet hours + consent. Runtime
+    // PushNotificationsSystem reads provider once wired).
+    try {
+      const pushPath = path.join(manifestsDir, "push-notifications.json");
+      const pushRaw = await fs.readFile(pushPath, "utf-8");
+      const raw = JSON.parse(pushRaw) as unknown;
+      const parsed = pushNotificationsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      pushNotificationsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] push-notifications.json not found or invalid (${err instanceof Error ? err.message : String(err)}), push notifications will be disabled`,
+      );
+    }
+
+    // Load license-agreements manifest (optional — legal doc
+    // registry with SemVer-versioned histories + jurisdictional
+    // variants. Runtime LegalConsentSystem reads provider once
+    // wired).
+    try {
+      const licensePath = path.join(manifestsDir, "license-agreements.json");
+      const licenseRaw = await fs.readFile(licensePath, "utf-8");
+      const raw = JSON.parse(licenseRaw) as unknown;
+      const parsed = licenseAgreementsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      licenseAgreementsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] license-agreements.json not found or invalid (${err instanceof Error ? err.message : String(err)}), license agreements will be disabled`,
+      );
+    }
+
+    // Load news-feed manifest (optional — no announcements when
+    // absent, runtime feed is empty).
+    try {
+      const newsFeedPath = path.join(manifestsDir, "news-feed.json");
+      const newsFeedRaw = await fs.readFile(newsFeedPath, "utf-8");
+      const raw = JSON.parse(newsFeedRaw) as unknown;
+      const parsed = newsFeedProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      newsFeedRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] news-feed.json not found or invalid (${err instanceof Error ? err.message : String(err)}), news feed will be disabled`,
+      );
+    }
+
+    // Load moderation manifest (optional — safe disabled default
+    // keeps the substrate inert until categories + ladders are
+    // authored).
+    try {
+      const moderationPath = path.join(manifestsDir, "moderation.json");
+      const moderationRaw = await fs.readFile(moderationPath, "utf-8");
+      const raw = JSON.parse(moderationRaw) as unknown;
+      const parsed = moderationProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      moderationRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] moderation.json not found or invalid (${err instanceof Error ? err.message : String(err)}), moderation substrate will be disabled`,
+      );
+    }
+
+    // Load fast-travel manifest (optional — empty graph means
+    // runtime has no authored flight paths to expose).
+    try {
+      const fastTravelPath = path.join(manifestsDir, "fast-travel.json");
+      const fastTravelRaw = await fs.readFile(fastTravelPath, "utf-8");
+      const raw = JSON.parse(fastTravelRaw) as unknown;
+      const parsed = fastTravelProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      fastTravelGraph.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] fast-travel.json not found or invalid (${err instanceof Error ? err.message : String(err)}), fast travel graph will be empty`,
+      );
+    }
+
+    // Load respawn manifest (optional — safe disabled default
+    // keeps death handling inert until bind points are authored).
+    try {
+      const respawnPath = path.join(manifestsDir, "respawn.json");
+      const respawnRaw = await fs.readFile(respawnPath, "utf-8");
+      const raw = JSON.parse(respawnRaw) as unknown;
+      const parsed = respawnProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      respawnPolicyResolver.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] respawn.json not found or invalid (${err instanceof Error ? err.message : String(err)}), respawn system will be disabled`,
+      );
+    }
+
+    // Load talent-trees manifest (optional — safe disabled default
+    // keeps the branching-progression pipeline inert until trees
+    // are authored).
+    try {
+      const talentTreesPath = path.join(manifestsDir, "talent-trees.json");
+      const talentTreesRaw = await fs.readFile(talentTreesPath, "utf-8");
+      const raw = JSON.parse(talentTreesRaw) as unknown;
+      const parsed = talentTreesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      talentTreeRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] talent-trees.json not found or invalid (${err instanceof Error ? err.message : String(err)}), talent trees will be disabled`,
+      );
+    }
+
+    // Load auction-house manifest (optional — safe disabled default
+    // keeps the AH pipeline inert until policy is authored).
+    try {
+      const auctionHousePath = path.join(manifestsDir, "auction-house.json");
+      const auctionHouseRaw = await fs.readFile(auctionHousePath, "utf-8");
+      const raw = JSON.parse(auctionHouseRaw) as unknown;
+      const parsed = auctionHouseProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      auctionHouseRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] auction-house.json not found or invalid (${err instanceof Error ? err.message : String(err)}), auction house will be disabled`,
+      );
+    }
+
+    // Load transmog manifest (optional — empty-source baseline keeps
+    // the pipeline inert until appearances are authored).
+    try {
+      const transmogPath = path.join(manifestsDir, "transmog.json");
+      const transmogRaw = await fs.readFile(transmogPath, "utf-8");
+      const raw = JSON.parse(transmogRaw) as unknown;
+      const parsed = transmogProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      transmogRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] transmog.json not found or invalid (${err instanceof Error ? err.message : String(err)}), transmog will be disabled`,
+      );
+    }
+
+    // Load housing manifest (optional — safe disabled default keeps
+    // the housing pipeline inert until plotTypes are authored).
+    try {
+      const housingPath = path.join(manifestsDir, "housing.json");
+      const housingRaw = await fs.readFile(housingPath, "utf-8");
+      const raw = JSON.parse(housingRaw) as unknown;
+      const parsed = housingProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      housingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] housing.json not found or invalid (${err instanceof Error ? err.message : String(err)}), housing will be disabled`,
+      );
+    }
+
+    // Load group-finder manifest (optional — disabled default keeps
+    // matchmaking inert until content is authored).
+    try {
+      const groupFinderPath = path.join(manifestsDir, "group-finder.json");
+      const groupFinderRaw = await fs.readFile(groupFinderPath, "utf-8");
+      const raw = JSON.parse(groupFinderRaw) as unknown;
+      const parsed = groupFinderProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      groupFinderRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] group-finder.json not found or invalid (${err instanceof Error ? err.message : String(err)}), group finder will be disabled`,
+      );
+    }
+
+    // Load friends-social manifest (optional — disabled default
+    // keeps the social graph inert until authored).
+    try {
+      const friendsSocialPath = path.join(manifestsDir, "friends-social.json");
+      const friendsSocialRaw = await fs.readFile(friendsSocialPath, "utf-8");
+      const raw = JSON.parse(friendsSocialRaw) as unknown;
+      const parsed = friendsSocialProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      friendsSocialRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] friends-social.json not found or invalid (${err instanceof Error ? err.message : String(err)}), friends social will be disabled`,
+      );
+    }
+
+    // Load loadouts manifest (optional — disabled default keeps
+    // the equipment-manager feature inert until authored).
+    try {
+      const loadoutsPath = path.join(manifestsDir, "loadouts.json");
+      const loadoutsRaw = await fs.readFile(loadoutsPath, "utf-8");
+      const raw = JSON.parse(loadoutsRaw) as unknown;
+      const parsed = loadoutsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      loadoutPolicyRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] loadouts.json not found or invalid (${err instanceof Error ? err.message : String(err)}), loadouts will be disabled`,
+      );
+    }
+
+    // Load trading manifest (optional — disabled default keeps the
+    // P2P trade pipeline inert until authored).
+    try {
+      const tradingPath = path.join(manifestsDir, "trading.json");
+      const tradingRaw = await fs.readFile(tradingPath, "utf-8");
+      const raw = JSON.parse(tradingRaw) as unknown;
+      const parsed = tradingProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      tradingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] trading.json not found or invalid (${err instanceof Error ? err.message : String(err)}), trading will be disabled`,
+      );
+    }
+
+    // Load item-sets manifest (optional — empty array default
+    // keeps no set bonuses active until authored).
+    try {
+      const itemSetsPath = path.join(manifestsDir, "item-sets.json");
+      const itemSetsRaw = await fs.readFile(itemSetsPath, "utf-8");
+      const raw = JSON.parse(itemSetsRaw) as unknown;
+      const parsed = itemSetsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      itemSetRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] item-sets.json not found or invalid (${err instanceof Error ? err.message : String(err)}), item sets will be disabled`,
+      );
+    }
+
+    // Load leaderboards manifest (optional — empty array default
+    // keeps no boards active until authored).
+    try {
+      const leaderboardsPath = path.join(manifestsDir, "leaderboards.json");
+      const leaderboardsRaw = await fs.readFile(leaderboardsPath, "utf-8");
+      const raw = JSON.parse(leaderboardsRaw) as unknown;
+      const parsed = leaderboardsProvider.loadRaw(raw);
+      // Seed runtime leaderboard engine (parity with PIE hot-reload).
+      leaderboardEngine.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] leaderboards.json not found or invalid (${err instanceof Error ? err.message : String(err)}), leaderboards will be disabled`,
+      );
+    }
+
+    // Load titles manifest (optional — empty array default
+    // keeps no titles active until authored).
+    try {
+      const titlesPath = path.join(manifestsDir, "titles.json");
+      const titlesRaw = await fs.readFile(titlesPath, "utf-8");
+      const raw = JSON.parse(titlesRaw) as unknown;
+      const parsed = titlesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      titleRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] titles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), titles will be disabled`,
+      );
+    }
+
+    // Load world-events manifest (optional — empty array default
+    // keeps no events active until authored).
+    try {
+      const worldEventsPath = path.join(manifestsDir, "world-events.json");
+      const worldEventsRaw = await fs.readFile(worldEventsPath, "utf-8");
+      const raw = JSON.parse(worldEventsRaw) as unknown;
+      const parsed = worldEventsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      worldEventsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] world-events.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world events will be disabled`,
+      );
+    }
+
+    // Load seasons manifest (optional — empty array default
+    // keeps no seasons active until authored).
+    try {
+      const seasonsPath = path.join(manifestsDir, "seasons.json");
+      const seasonsRaw = await fs.readFile(seasonsPath, "utf-8");
+      const raw = JSON.parse(seasonsRaw) as unknown;
+      const parsed = seasonsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      seasonRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] seasons.json not found or invalid (${err instanceof Error ? err.message : String(err)}), seasons will be disabled`,
+      );
+    }
+
+    // Load pet-companion manifest (optional — empty array default
+    // keeps no pets available until authored).
+    try {
+      const petCompanionPath = path.join(manifestsDir, "pet-companion.json");
+      const petCompanionRaw = await fs.readFile(petCompanionPath, "utf-8");
+      const raw = JSON.parse(petCompanionRaw) as unknown;
+      const parsed = petCompanionProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      petRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] pet-companion.json not found or invalid (${err instanceof Error ? err.message : String(err)}), pets will be disabled`,
+      );
+    }
+
+    // Load enchantments manifest (optional — empty array default
+    // keeps no enchantments available until authored).
+    try {
+      const enchantmentsPath = path.join(manifestsDir, "enchantments.json");
+      const enchantmentsRaw = await fs.readFile(enchantmentsPath, "utf-8");
+      const raw = JSON.parse(enchantmentsRaw) as unknown;
+      const parsed = enchantmentsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      enchantmentRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] enchantments.json not found or invalid (${err instanceof Error ? err.message : String(err)}), enchantments will be disabled`,
+      );
+    }
+
+    // Load mail manifest (optional — inert {enabled:false} baseline
+    // keeps mail off until authored).
+    try {
+      const mailPath = path.join(manifestsDir, "mail.json");
+      const mailRaw = await fs.readFile(mailPath, "utf-8");
+      const raw = JSON.parse(mailRaw) as unknown;
+      const parsed = mailProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      mailPolicyRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] mail.json not found or invalid (${err instanceof Error ? err.message : String(err)}), mail will be disabled`,
+      );
+    }
+
+    // Load tooltips manifest (optional — inert {enabled:false}
+    // baseline keeps the tooltips system off until authored).
+    try {
+      const tooltipsPath = path.join(manifestsDir, "tooltips.json");
+      const tooltipsRaw = await fs.readFile(tooltipsPath, "utf-8");
+      const raw = JSON.parse(tooltipsRaw) as unknown;
+      const parsed = tooltipsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      tooltipRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] tooltips.json not found or invalid (${err instanceof Error ? err.message : String(err)}), tooltips will be disabled`,
+      );
+    }
+
+    // Load key-prompt-icons manifest (optional — inert {enabled:
+    // false} baseline keeps the prompt catalog off until authored).
+    try {
+      const keyPromptIconsPath = path.join(
+        manifestsDir,
+        "key-prompt-icons.json",
+      );
+      const keyPromptIconsRaw = await fs.readFile(keyPromptIconsPath, "utf-8");
+      const raw = JSON.parse(keyPromptIconsRaw) as unknown;
+      const parsed = keyPromptIconsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      keyPromptGlyphRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] key-prompt-icons.json not found or invalid (${err instanceof Error ? err.message : String(err)}), key prompts will be disabled`,
+      );
+    }
+
+    // Load screenshot manifest (optional — inert {enabled:false}
+    // baseline keeps photo-mode off until authored).
+    try {
+      const screenshotPath = path.join(manifestsDir, "screenshot.json");
+      const screenshotRaw = await fs.readFile(screenshotPath, "utf-8");
+      const raw = JSON.parse(screenshotRaw) as unknown;
+      const parsed = screenshotProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      screenshotRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] screenshot.json not found or invalid (${err instanceof Error ? err.message : String(err)}), screenshots will be disabled`,
+      );
+    }
+
+    // Load party-guild manifest (optional — no authored policies
+    // when absent, party/guild systems use engine defaults).
+    try {
+      const partyGuildPath = path.join(manifestsDir, "party-guild.json");
+      const partyGuildRaw = await fs.readFile(partyGuildPath, "utf-8");
+      const raw = JSON.parse(partyGuildRaw) as unknown;
+      const parsed = partyGuildProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      partyGuildRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] party-guild.json not found or invalid (${err instanceof Error ? err.message : String(err)}), party/guild will be disabled`,
+      );
+    }
+
+    // Load economy-tuning manifest (optional — no authored
+    // currencies when absent, economy systems stay unconfigured).
+    try {
+      const economyTuningPath = path.join(manifestsDir, "economy-tuning.json");
+      const economyTuningRaw = await fs.readFile(economyTuningPath, "utf-8");
+      const raw = JSON.parse(economyTuningRaw) as unknown;
+      const parsed = economyTuningProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      economyTuningRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] economy-tuning.json not found or invalid (${err instanceof Error ? err.message : String(err)}), economy tuning will be disabled`,
+      );
+    }
+
+    // Load loading-screens manifest (optional — inert
+    // {enabled:false} baseline keeps pipeline off until authored).
+    try {
+      const loadingScreensPath = path.join(
+        manifestsDir,
+        "loading-screens.json",
+      );
+      const loadingScreensRaw = await fs.readFile(loadingScreensPath, "utf-8");
+      const raw = JSON.parse(loadingScreensRaw) as unknown;
+      const parsed = loadingScreensProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      loadingScreensRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] loading-screens.json not found or invalid (${err instanceof Error ? err.message : String(err)}), loading screens will be disabled`,
+      );
+    }
+
+    // Load skybox-atmosphere manifest (optional — no authored sky
+    // configs when absent, runtime skybox stays unloaded).
+    try {
+      const skyboxPath = path.join(manifestsDir, "skybox-atmosphere.json");
+      const skyboxRaw = await fs.readFile(skyboxPath, "utf-8");
+      const raw = JSON.parse(skyboxRaw) as unknown;
+      const parsed = skyboxAtmosphereProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      skyboxAtmosphereRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] skybox-atmosphere.json not found or invalid (${err instanceof Error ? err.message : String(err)}), skybox will be disabled`,
+      );
+    }
+
+    // Load particle-graph manifest (optional — empty [] baseline
+    // keeps compiler inert until systems are authored).
+    try {
+      const particleGraphPath = path.join(manifestsDir, "particle-graph.json");
+      const particleGraphRaw = await fs.readFile(particleGraphPath, "utf-8");
+      const raw = JSON.parse(particleGraphRaw) as unknown;
+      const parsed = particleGraphProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      particleGraphRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] particle-graph.json not found or invalid (${err instanceof Error ? err.message : String(err)}), particle graph will be disabled`,
+      );
+    }
+
+    // Load cinematic manifest (optional — empty [] baseline).
+    try {
+      const cinematicPath = path.join(manifestsDir, "cinematic.json");
+      const cinematicRaw = await fs.readFile(cinematicPath, "utf-8");
+      const raw = JSON.parse(cinematicRaw) as unknown;
+      const parsed = cinematicProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      cinematicRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] cinematic.json not found or invalid (${err instanceof Error ? err.message : String(err)}), cinematics will be disabled`,
+      );
+    }
+
+    // Load editor-snap manifest (optional — {} baseline uses all defaults).
+    try {
+      const editorSnapPath = path.join(manifestsDir, "editor-snap.json");
+      const editorSnapRaw = await fs.readFile(editorSnapPath, "utf-8");
+      const raw = JSON.parse(editorSnapRaw) as unknown;
+      const parsed = editorSnapProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      editorSnapRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] editor-snap.json not found or invalid (${err instanceof Error ? err.message : String(err)}), editor snap defaults will be used`,
+      );
+    }
+
+    // Load deploy-targets manifest (optional — empty [] baseline).
+    try {
+      const deployTargetsPath = path.join(manifestsDir, "deploy-targets.json");
+      const deployTargetsRaw = await fs.readFile(deployTargetsPath, "utf-8");
+      const raw = JSON.parse(deployTargetsRaw) as unknown;
+      const parsed = deployTargetsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      deployTargetsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] deploy-targets.json not found or invalid (${err instanceof Error ? err.message : String(err)}), deploy targets will be empty`,
+      );
+    }
+
+    // Load input-actions manifest (optional — empty [] baseline).
+    try {
+      const inputActionsPath = path.join(manifestsDir, "input-actions.json");
+      const inputActionsRaw = await fs.readFile(inputActionsPath, "utf-8");
+      const raw = JSON.parse(inputActionsRaw) as unknown;
+      const parsed = inputActionsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      inputActionsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] input-actions.json not found or invalid (${err instanceof Error ? err.message : String(err)}), input actions will be empty`,
+      );
+    }
+
+    // Load profiler-overlay manifest (optional — {} baseline is disabled).
+    try {
+      const profilerPath = path.join(manifestsDir, "profiler.json");
+      const profilerRaw = await fs.readFile(profilerPath, "utf-8");
+      const raw = JSON.parse(profilerRaw) as unknown;
+      const parsed = profilerOverlayProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      profilerOverlayRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] profiler.json not found or invalid (${err instanceof Error ? err.message : String(err)}), profiler overlay will be disabled`,
+      );
+    }
+
+    // Load replication manifest (optional — {} baseline yields empty components/events).
+    try {
+      const replicationPath = path.join(manifestsDir, "replication.json");
+      const replicationRaw = await fs.readFile(replicationPath, "utf-8");
+      const raw = JSON.parse(replicationRaw) as unknown;
+      const parsed = replicationProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      replicationRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] replication.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored replication contract will be disabled`,
+      );
+    }
+
+    // Load prefab manifest (optional — {} baseline yields empty prefabs/instances).
+    try {
+      const prefabPath = path.join(manifestsDir, "prefab.json");
+      const prefabRaw = await fs.readFile(prefabPath, "utf-8");
+      const raw = JSON.parse(prefabRaw) as unknown;
+      const parsed = prefabProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      prefabRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] prefab.json not found or invalid (${err instanceof Error ? err.message : String(err)}), prefab library will be disabled`,
+      );
+    }
+
+    // Load level-streaming manifest (optional — [] baseline yields no sublevels).
+    try {
+      const levelStreamingPath = path.join(
+        manifestsDir,
+        "level-streaming.json",
+      );
+      const levelStreamingRaw = await fs.readFile(levelStreamingPath, "utf-8");
+      const raw = JSON.parse(levelStreamingRaw) as unknown;
+      const parsed = levelStreamingProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      levelStreamingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] level-streaming.json not found or invalid (${err instanceof Error ? err.message : String(err)}), sublevel streaming will be disabled`,
+      );
+    }
+
+    // Load lighting-bake manifest (optional — {} baseline is a no-bake pass-through).
+    try {
+      const lightingBakePath = path.join(manifestsDir, "lighting-bake.json");
+      const lightingBakeRaw = await fs.readFile(lightingBakePath, "utf-8");
+      const raw = JSON.parse(lightingBakeRaw) as unknown;
+      const parsed = lightingBakeProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      lightingBakeRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] lighting-bake.json not found or invalid (${err instanceof Error ? err.message : String(err)}), offline lighting bake settings will be disabled`,
+      );
+    }
+
+    // Load project-settings manifest (optional — no baseline fixture because
+    // projectName + gameModeId are required fields).
+    try {
+      const projectSettingsPath = path.join(
+        manifestsDir,
+        "project-settings.json",
+      );
+      const projectSettingsRaw = await fs.readFile(
+        projectSettingsPath,
+        "utf-8",
+      );
+      const raw = JSON.parse(projectSettingsRaw) as unknown;
+      const parsed = projectSettingsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      projectSettingsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] project-settings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), project-level identity will be disabled`,
+      );
+    }
+
+    // Load ai-behavior manifest (optional — [] baseline yields no trees).
+    try {
+      const aiBehaviorPath = path.join(manifestsDir, "ai-behavior.json");
+      const aiBehaviorRaw = await fs.readFile(aiBehaviorPath, "utf-8");
+      const raw = JSON.parse(aiBehaviorRaw) as unknown;
+      aiBehaviorProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] ai-behavior.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored behavior trees will be disabled`,
+      );
+    }
+
+    // Load animations manifest (optional — {} baseline yields empty clips/bindings).
+    try {
+      const animationsPath = path.join(manifestsDir, "animations.json");
+      const animationsRaw = await fs.readFile(animationsPath, "utf-8");
+      const raw = JSON.parse(animationsRaw) as unknown;
+      const parsed = animationsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      animationRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] animations.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored animation bindings will be disabled`,
+      );
+    }
+
+    // Load quality-presets manifest (optional — no baseline because min(1)).
+    try {
+      const qualityPresetsPath = path.join(
+        manifestsDir,
+        "quality-presets.json",
+      );
+      const qualityPresetsRaw = await fs.readFile(qualityPresetsPath, "utf-8");
+      const raw = JSON.parse(qualityPresetsRaw) as unknown;
+      const parsed = qualityPresetsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      qualityPresetsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] quality-presets.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored quality presets will be disabled`,
+      );
+    }
+
+    // Load nav-mesh manifest (optional — no baseline because agents.min(1)).
+    try {
+      const navMeshPath = path.join(manifestsDir, "nav-mesh.json");
+      const navMeshRaw = await fs.readFile(navMeshPath, "utf-8");
+      const raw = JSON.parse(navMeshRaw) as unknown;
+      const parsed = navMeshProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      navMeshRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] nav-mesh.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored nav-mesh settings will be disabled`,
+      );
+    }
+
+    // Load lod-settings manifest (optional — no baseline because required
+    // fields have no defaults).
+    try {
+      const lodSettingsPath = path.join(manifestsDir, "lod-settings.json");
+      const lodSettingsRaw = await fs.readFile(lodSettingsPath, "utf-8");
+      const raw = JSON.parse(lodSettingsRaw) as unknown;
+      const parsed = lodSettingsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      lodSettingsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] lod-settings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored LOD settings will be disabled`,
+      );
+    }
+
+    // Load sfx manifest (optional — [] baseline).
+    try {
+      const sfxPath = path.join(manifestsDir, "sfx.json");
+      const sfxRaw = await fs.readFile(sfxPath, "utf-8");
+      const raw = JSON.parse(sfxRaw) as unknown;
+      const parsed = soundEffectsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      sfxRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] sfx.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored sound effects will be disabled`,
+      );
+    }
+
+    // Load vfx manifest (optional — [] baseline).
+    try {
+      const vfxPath = path.join(manifestsDir, "vfx.json");
+      const vfxRaw = await fs.readFile(vfxPath, "utf-8");
+      const raw = JSON.parse(vfxRaw) as unknown;
+      const parsed = vfxProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      vfxRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] vfx.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored VFX will be disabled`,
+      );
+    }
+
+    // Load vegetation manifest (optional — no baseline because version + assets required).
+    try {
+      const vegetationPath = path.join(manifestsDir, "vegetation.json");
+      const vegetationRaw = await fs.readFile(vegetationPath, "utf-8");
+      const raw = JSON.parse(vegetationRaw) as unknown;
+      const parsed = vegetationProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      vegetationRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] vegetation.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored vegetation registry will be disabled`,
+      );
+    }
+
+    // Load main-menu manifest (optional — {"enabled":false} baseline).
+    try {
+      const mainMenuPath = path.join(manifestsDir, "main-menu.json");
+      const mainMenuRaw = await fs.readFile(mainMenuPath, "utf-8");
+      const raw = JSON.parse(mainMenuRaw) as unknown;
+      const parsed = mainMenuProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      mainMenuRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] main-menu.json not found or invalid (${err instanceof Error ? err.message : String(err)}), main menu tree will be disabled`,
+      );
+    }
+
+    // Load credits manifest (optional — {"enabled":false} baseline).
+    try {
+      const creditsPath = path.join(manifestsDir, "credits.json");
+      const creditsRaw = await fs.readFile(creditsPath, "utf-8");
+      const raw = JSON.parse(creditsRaw) as unknown;
+      const parsed = creditsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      creditsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] credits.json not found or invalid (${err instanceof Error ? err.message : String(err)}), credits roll will be disabled`,
+      );
+    }
+
+    // Load music manifest (optional — no authored tracks when absent).
+    try {
+      const musicPath = path.join(manifestsDir, "music.json");
+      const musicRaw = await fs.readFile(musicPath, "utf-8");
+      const raw = JSON.parse(musicRaw) as unknown;
+      musicProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] music.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored music tracks will be disabled`,
+      );
+    }
+
+    // Load duel manifest (optional — no authored duel rules/slots
+    // when absent).
+    try {
+      const duelPath = path.join(manifestsDir, "duel.json");
+      const duelRaw = await fs.readFile(duelPath, "utf-8");
+      const raw = JSON.parse(duelRaw) as unknown;
+      const parsed = duelProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      duelRulesRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] duel.json not found or invalid (${err instanceof Error ? err.message : String(err)}), duel rules will be disabled`,
+      );
+    }
+
+    // Load duel-arenas manifest (optional — no authored arena grid
+    // when absent).
+    try {
+      const duelArenasPath = path.join(manifestsDir, "duel-arenas.json");
+      const duelArenasRaw = await fs.readFile(duelArenasPath, "utf-8");
+      const raw = JSON.parse(duelArenasRaw) as unknown;
+      duelArenasProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] duel-arenas.json not found or invalid (${err instanceof Error ? err.message : String(err)}), streaming duel arenas will be disabled`,
+      );
+    }
+
+    // Load biomes manifest (optional — procgen falls back to
+    // engine defaults when absent).
+    try {
+      const biomesPath = path.join(manifestsDir, "biomes.json");
+      const biomesRaw = await fs.readFile(biomesPath, "utf-8");
+      const raw = JSON.parse(biomesRaw) as unknown;
+      const parsed = biomesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      biomesRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] biomes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored biomes will be disabled`,
+      );
+    }
+
+    // Load stores manifest (optional — no authored shop
+    // inventories when absent).
+    try {
+      const storesPath = path.join(manifestsDir, "stores.json");
+      const storesRaw = await fs.readFile(storesPath, "utf-8");
+      const raw = JSON.parse(storesRaw) as unknown;
+      const parsed = storesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      storesRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] stores.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored stores will be disabled`,
+      );
+    }
+
+    // Load ammunition manifest (optional — no authored bow/arrow
+    // catalog when absent, ranged combat falls back to defaults).
+    try {
+      const ammunitionPath = path.join(manifestsDir, "ammunition.json");
+      const ammunitionRaw = await fs.readFile(ammunitionPath, "utf-8");
+      const raw = JSON.parse(ammunitionRaw) as unknown;
+      const parsed = ammunitionProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      ammunitionRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] ammunition.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored ammunition will be disabled`,
+      );
+    }
+
+    // Load arena-layout manifest (optional — streaming duel
+    // scheduler falls back to hardcoded layout when absent).
+    try {
+      const arenaLayoutPath = path.join(manifestsDir, "arena-layout.json");
+      const arenaLayoutRaw = await fs.readFile(arenaLayoutPath, "utf-8");
+      const raw = JSON.parse(arenaLayoutRaw) as unknown;
+      const parsed = arenaLayoutProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      arenaLayoutRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] arena-layout.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored arena layout will be disabled`,
+      );
+    }
+
+    // Load avatars manifest (optional — character creation falls
+    // back to default avatar list when absent).
+    try {
+      const avatarsPath = path.join(manifestsDir, "avatars.json");
+      const avatarsRaw = await fs.readFile(avatarsPath, "utf-8");
+      const raw = JSON.parse(avatarsRaw) as unknown;
+      const parsed = avatarsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      avatarsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] avatars.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored avatars will be disabled`,
+      );
+    }
+
+    // Load banking manifest (optional — banking system falls back
+    // to built-in sizes/messages when absent).
+    try {
+      const bankingPath = path.join(manifestsDir, "banking.json");
+      const bankingRaw = await fs.readFile(bankingPath, "utf-8");
+      const raw = JSON.parse(bankingRaw) as unknown;
+      const parsed = bankingProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      bankingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] banking.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored banking settings will be disabled`,
+      );
+    }
+
+    // Load buildings manifest (optional — procgen town placement
+    // has no authored buildings to seed when absent).
+    try {
+      const buildingsPath = path.join(manifestsDir, "buildings.json");
+      const buildingsRaw = await fs.readFile(buildingsPath, "utf-8");
+      const raw = JSON.parse(buildingsRaw) as unknown;
+      const parsed = buildingsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      buildingsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] buildings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored buildings will be disabled`,
+      );
+    }
+
+    // Load tools manifest (optional — gathering systems fall back
+    // to legacy hardcoded tool lookups when absent).
+    try {
+      const toolsPath = path.join(manifestsDir, "tools.json");
+      const toolsRaw = await fs.readFile(toolsPath, "utf-8");
+      const raw = JSON.parse(toolsRaw) as unknown;
+      const parsed = toolsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      toolsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] tools.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored tools will be disabled`,
+      );
+    }
+
+    // Load trees manifest (optional — woodcutting falls back to
+    // legacy TreeTypes when absent).
+    try {
+      const treesPath = path.join(manifestsDir, "trees.json");
+      const treesRaw = await fs.readFile(treesPath, "utf-8");
+      const raw = JSON.parse(treesRaw) as unknown;
+      const parsed = treesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      treeCatalogRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] trees.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored trees will be disabled`,
+      );
+    }
+
+    // Load weapon-styles manifest (optional — combat falls back
+    // to legacy WeaponStyleConfig when absent).
+    try {
+      const weaponStylesPath = path.join(manifestsDir, "weapon-styles.json");
+      const weaponStylesRaw = await fs.readFile(weaponStylesPath, "utf-8");
+      const raw = JSON.parse(weaponStylesRaw) as unknown;
+      const parsed = weaponStylesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      weaponStylesRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] weapon-styles.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored weapon styles will be disabled`,
+      );
+    }
+
+    // Load npc-sizes manifest (optional — tile-grid collision falls
+    // back to legacy hardcoded sizes when absent).
+    try {
+      const npcSizesPath = path.join(manifestsDir, "npc-sizes.json");
+      const npcSizesRaw = await fs.readFile(npcSizesPath, "utf-8");
+      const raw = JSON.parse(npcSizesRaw) as unknown;
+      const parsed = npcSizesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      npcSizesRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] npc-sizes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored NPC sizes will be disabled`,
+      );
+    }
+
+    // Load onboarding-goals manifest (optional — onboarding tracker
+    // has no goals to display when absent).
+    try {
+      const onboardingPath = path.join(manifestsDir, "onboarding-goals.json");
+      const onboardingRaw = await fs.readFile(onboardingPath, "utf-8");
+      const raw = JSON.parse(onboardingRaw) as unknown;
+      const parsed = onboardingGoalsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      onboardingGoalsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] onboarding-goals.json not found or invalid (${err instanceof Error ? err.message : String(err)}), onboarding tracker will be disabled`,
+      );
+    }
+
+    // Load skill-icons manifest (optional — UI falls back to legacy
+    // hardcoded skill icons when absent).
+    try {
+      const skillIconsPath = path.join(manifestsDir, "skill-icons.json");
+      const skillIconsRaw = await fs.readFile(skillIconsPath, "utf-8");
+      const raw = JSON.parse(skillIconsRaw) as unknown;
+      const parsed = skillIconsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      skillIconsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] skill-icons.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored skill icons will be disabled`,
+      );
+    }
+
+    // Load player-emotes manifest (optional — avatar layer falls
+    // back to legacy hardcoded emotes when absent).
+    try {
+      const emotesPath = path.join(manifestsDir, "player-emotes.json");
+      const emotesRaw = await fs.readFile(emotesPath, "utf-8");
+      const raw = JSON.parse(emotesRaw) as unknown;
+      const parsed = playerEmotesProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      playerEmotesRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] player-emotes.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored player emotes will be disabled`,
+      );
+    }
+
+    // Load skill-unlocks manifest (optional — level-up popup has no
+    // content-unlock hints when absent).
+    try {
+      const skillUnlocksPath = path.join(manifestsDir, "skill-unlocks.json");
+      const skillUnlocksRaw = await fs.readFile(skillUnlocksPath, "utf-8");
+      const raw = JSON.parse(skillUnlocksRaw) as unknown;
+      const parsed = skillUnlocksProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      skillUnlocksRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] skill-unlocks.json not found or invalid (${err instanceof Error ? err.message : String(err)}), skill unlock notifications will be disabled`,
+      );
+    }
+
+    // Load matchmaking-tuning manifest (optional — runtime
+    // matchmaking defaults apply when absent).
+    try {
+      const mmtPath = path.join(manifestsDir, "matchmaking-tuning.json");
+      const mmtRaw = await fs.readFile(mmtPath, "utf-8");
+      const raw = JSON.parse(mmtRaw) as unknown;
+      const parsed = matchmakingTuningProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      matchmakingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] matchmaking-tuning.json not found or invalid (${err instanceof Error ? err.message : String(err)}), matchmaking defaults will apply`,
+      );
+    }
+
+    // Load spell-visuals manifest (optional — projectile renderer
+    // falls back to legacy hardcoded visuals when absent).
+    try {
+      const spellVisualsPath = path.join(manifestsDir, "spell-visuals.json");
+      const spellVisualsRaw = await fs.readFile(spellVisualsPath, "utf-8");
+      const raw = JSON.parse(spellVisualsRaw) as unknown;
+      const parsed = spellVisualsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      spellVisualsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] spell-visuals.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored spell visuals will be disabled`,
+      );
+    }
+
+    // Load profiler manifest (optional — profiler overlay uses
+    // built-in defaults when absent).
+    try {
+      const profilerPath = path.join(manifestsDir, "profiler.json");
+      const profilerRaw = await fs.readFile(profilerPath, "utf-8");
+      const raw = JSON.parse(profilerRaw) as unknown;
+      profilerProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] profiler.json not found or invalid (${err instanceof Error ? err.message : String(err)}), profiler overlay will use defaults`,
+      );
+    }
+
+    // Load server-browser manifest (optional — server browser uses
+    // built-in defaults when absent).
+    try {
+      const serverBrowserPath = path.join(manifestsDir, "server-browser.json");
+      const serverBrowserRaw = await fs.readFile(serverBrowserPath, "utf-8");
+      const raw = JSON.parse(serverBrowserRaw) as unknown;
+      const parsed = serverBrowserProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      serverBrowserRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] server-browser.json not found or invalid (${err instanceof Error ? err.message : String(err)}), server browser will use defaults`,
+      );
+    }
+
+    // Load store-front manifest (optional — premium store stays
+    // closed when absent).
+    try {
+      const storeFrontPath = path.join(manifestsDir, "store-front.json");
+      const storeFrontRaw = await fs.readFile(storeFrontPath, "utf-8");
+      const raw = JSON.parse(storeFrontRaw) as unknown;
+      const parsed = storeFrontProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      storeFrontRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] store-front.json not found or invalid (${err instanceof Error ? err.message : String(err)}), premium store will be closed`,
+      );
+    }
+
+    // Load commerce manifest (optional — legacy hardcoded commerce
+    // constants apply when absent).
+    try {
+      const commercePath = path.join(manifestsDir, "commerce.json");
+      const commerceRaw = await fs.readFile(commercePath, "utf-8");
+      const raw = JSON.parse(commerceRaw) as unknown;
+      const parsed = commerceProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      commerceRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] commerce.json not found or invalid (${err instanceof Error ? err.message : String(err)}), commerce constants will use legacy defaults`,
+      );
+    }
+
+    // Load interaction manifest (optional — legacy hardcoded
+    // interaction constants apply when absent).
+    try {
+      const interactionPath = path.join(manifestsDir, "interaction.json");
+      const interactionRaw = await fs.readFile(interactionPath, "utf-8");
+      const raw = JSON.parse(interactionRaw) as unknown;
+      const parsed = interactionProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      interactionConfigRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] interaction.json not found or invalid (${err instanceof Error ? err.message : String(err)}), interaction constants will use legacy defaults`,
+      );
+    }
+
+    // Load combat manifest (optional — legacy hardcoded combat
+    // constants apply when absent).
+    try {
+      const combatPath = path.join(manifestsDir, "combat-constants.json");
+      const combatRaw = await fs.readFile(combatPath, "utf-8");
+      const raw = JSON.parse(combatRaw) as unknown;
+      combatProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] combat-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), combat constants will use legacy defaults`,
+      );
+    }
+
+    // Load equipment manifest (optional — legacy hardcoded equipment
+    // constants apply when absent).
+    try {
+      const equipmentPath = path.join(manifestsDir, "equipment-constants.json");
+      const equipmentRaw = await fs.readFile(equipmentPath, "utf-8");
+      const raw = JSON.parse(equipmentRaw) as unknown;
+      const parsed = equipmentProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      equipmentManifestRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] equipment-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), equipment constants will use legacy defaults`,
+      );
+    }
+
+    // Load game manifest (optional — legacy hardcoded game
+    // constants apply when absent).
+    try {
+      const gamePath = path.join(manifestsDir, "game-constants.json");
+      const gameRaw = await fs.readFile(gamePath, "utf-8");
+      const raw = JSON.parse(gameRaw) as unknown;
+      gameProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] game-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), game constants will use legacy defaults`,
+      );
+    }
+
+    // Load smithing manifest (optional — legacy hardcoded smithing
+    // constants apply when absent).
+    try {
+      const smithingPath = path.join(manifestsDir, "smithing-constants.json");
+      const smithingRaw = await fs.readFile(smithingPath, "utf-8");
+      const raw = JSON.parse(smithingRaw) as unknown;
+      const parsed = smithingProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      smithingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] smithing-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), smithing constants will use legacy defaults`,
+      );
+    }
+
+    // Load world-structure manifest (optional — legacy hardcoded
+    // world structure constants apply when absent).
+    try {
+      const wsPath = path.join(manifestsDir, "world-structure.json");
+      const wsRaw = await fs.readFile(wsPath, "utf-8");
+      const raw = JSON.parse(wsRaw) as unknown;
+      worldStructureProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] world-structure.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world structure constants will use legacy defaults`,
+      );
+    }
+
+    // Load gathering manifest (optional — legacy hardcoded
+    // gathering constants apply when absent).
+    try {
+      const gatheringPath = path.join(manifestsDir, "gathering-constants.json");
+      const gatheringRaw = await fs.readFile(gatheringPath, "utf-8");
+      const raw = JSON.parse(gatheringRaw) as unknown;
+      gatheringProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] gathering-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), gathering constants will use legacy defaults`,
+      );
+    }
+
+    // Load processing manifest (optional — legacy hardcoded
+    // processing constants apply when absent).
+    try {
+      const processingPath = path.join(
+        manifestsDir,
+        "processing-constants.json",
+      );
+      const processingRaw = await fs.readFile(processingPath, "utf-8");
+      const raw = JSON.parse(processingRaw) as unknown;
+      const parsed = processingProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      processingRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] processing-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), processing constants will use legacy defaults`,
+      );
+    }
+
+    // Load woodcutting manifest (optional — runtime gathering path
+    // still parses inline; provider persists authored data for rewire).
+    try {
+      const woodcuttingPath = path.join(
+        manifestsDir,
+        "gathering",
+        "woodcutting.json",
+      );
+      const woodcuttingRaw = await fs.readFile(woodcuttingPath, "utf-8");
+      const raw = JSON.parse(woodcuttingRaw) as unknown;
+      woodcuttingProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] gathering/woodcutting.json not found or invalid (${err instanceof Error ? err.message : String(err)}), woodcutting provider stays unloaded`,
+      );
+    }
+
+    // Load mining manifest (optional).
+    try {
+      const miningPath = path.join(manifestsDir, "gathering", "mining.json");
+      const miningRaw = await fs.readFile(miningPath, "utf-8");
+      const raw = JSON.parse(miningRaw) as unknown;
+      miningProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] gathering/mining.json not found or invalid (${err instanceof Error ? err.message : String(err)}), mining provider stays unloaded`,
+      );
+    }
+
+    // Load fishing manifest (optional).
+    try {
+      const fishingPath = path.join(manifestsDir, "gathering", "fishing.json");
+      const fishingRaw = await fs.readFile(fishingPath, "utf-8");
+      const raw = JSON.parse(fishingRaw) as unknown;
+      fishingProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] gathering/fishing.json not found or invalid (${err instanceof Error ? err.message : String(err)}), fishing provider stays unloaded`,
+      );
+    }
+
+    // Load combat-spells manifest (optional).
+    try {
+      const combatSpellsPath = path.join(manifestsDir, "combat-spells.json");
+      const combatSpellsRaw = await fs.readFile(combatSpellsPath, "utf-8");
+      const raw = JSON.parse(combatSpellsRaw) as unknown;
+      combatSpellsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] combat-spells.json not found or invalid (${err instanceof Error ? err.message : String(err)}), combat-spells provider stays unloaded`,
+      );
+    }
+
+    // Load npcs spawn-constants manifest (optional).
+    try {
+      const npcsPath = path.join(manifestsDir, "npcs-spawn-constants.json");
+      const npcsRaw = await fs.readFile(npcsPath, "utf-8");
+      const raw = JSON.parse(npcsRaw) as unknown;
+      npcsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] npcs-spawn-constants.json not found or invalid (${err instanceof Error ? err.message : String(err)}), npcs provider stays unloaded`,
+      );
+    }
+
+    // Load quests manifest (optional).
+    try {
+      const questsPath = path.join(manifestsDir, "quests.json");
+      const questsRaw = await fs.readFile(questsPath, "utf-8");
+      const raw = JSON.parse(questsRaw) as unknown;
+      questsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] quests.json not found or invalid (${err instanceof Error ? err.message : String(err)}), quests provider stays unloaded`,
+      );
+    }
+
+    // Load plugin registry manifest (optional).
+    try {
+      const pluginRegistryPath = path.join(
+        manifestsDir,
+        "plugin-registry.json",
+      );
+      const pluginRegistryRaw = await fs.readFile(pluginRegistryPath, "utf-8");
+      const raw = JSON.parse(pluginRegistryRaw) as unknown;
+      pluginRegistryProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] plugin-registry.json not found or invalid (${err instanceof Error ? err.message : String(err)}), plugin registry provider stays unloaded`,
+      );
+    }
+
+    // Load world-areas manifest (optional).
+    try {
+      const worldAreasPath = path.join(manifestsDir, "world-areas.json");
+      const worldAreasRaw = await fs.readFile(worldAreasPath, "utf-8");
+      const raw = JSON.parse(worldAreasRaw) as unknown;
+      const parsed = worldAreasProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      worldAreasRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] world-areas.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world-areas provider stays unloaded`,
+      );
+    }
+
+    // Load world-config manifest (optional, singleton provider anchor —
+    // legacy `setWorldConfig()` static setter remains authoritative).
+    try {
+      const worldConfigPath = path.join(manifestsDir, "world-config.json");
+      const worldConfigRaw = await fs.readFile(worldConfigPath, "utf-8");
+      const raw = JSON.parse(worldConfigRaw) as unknown;
+      worldConfigProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] world-config.json not found or invalid (${err instanceof Error ? err.message : String(err)}), world-config provider stays unloaded`,
+      );
+    }
+
+    // Load factions manifest (optional — no authored reputation
+    // graph when absent, runtime has no factions to resolve).
+    try {
+      const factionsPath = path.join(manifestsDir, "factions.json");
+      const factionsRaw = await fs.readFile(factionsPath, "utf-8");
+      const raw = JSON.parse(factionsRaw) as unknown;
+      const parsed = factionsProvider.loadRaw(raw);
+      // Seed runtime registry (parity with PIE hot-reload).
+      factionsRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] factions.json not found or invalid (${err instanceof Error ? err.message : String(err)}), faction system will be disabled`,
+      );
+    }
+
+    // Load save-data manifest (optional — no authored slices when
+    // absent, engine's built-in persistence continues unchanged).
+    try {
+      const saveDataPath = path.join(manifestsDir, "save-data.json");
+      const saveDataRaw = await fs.readFile(saveDataPath, "utf-8");
+      const raw = JSON.parse(saveDataRaw) as unknown;
+      saveDataProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] save-data.json not found or invalid (${err instanceof Error ? err.message : String(err)}), plugin save-data slices will be disabled`,
+      );
+    }
+
+    // Load music-state-machine manifest (optional — audio layer
+    // has no state machines to drive when absent).
+    try {
+      const musicFSMPath = path.join(manifestsDir, "music-state-machine.json");
+      const musicFSMData = await fs.readFile(musicFSMPath, "utf-8");
+      const raw = JSON.parse(musicFSMData) as unknown;
+      const parsed = musicStateMachineProvider.loadRaw(raw);
+      // Seed runtime music-state registry (parity with PIE path).
+      musicStateMachineRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] music-state-machine.json not found or invalid (${err instanceof Error ? err.message : String(err)}), dynamic music state machines will be disabled`,
+      );
+    }
+
+    // Load interaction-prompts manifest (optional — HUD silently
+    // skips the prompt layer when absent).
+    try {
+      const interactionPromptsPath = path.join(
+        manifestsDir,
+        "interaction-prompts.json",
+      );
+      const interactionPromptsData = await fs.readFile(
+        interactionPromptsPath,
+        "utf-8",
+      );
+      const raw = JSON.parse(interactionPromptsData) as unknown;
+      const parsed = interactionPromptsProvider.loadRaw(raw);
+      // Seed runtime prompt registry (parity with PIE path).
+      interactionPromptRegistry.load(parsed);
+    } catch (err) {
+      console.warn(
+        `[DataManager] interaction-prompts.json not found or invalid (${err instanceof Error ? err.message : String(err)}), interaction HUD prompts will be disabled`,
+      );
+    }
+
+    // Load loot-tables manifest (optional — LootSystem falls back to
+    // the legacy LootTableService path for every mob type when absent).
+    try {
+      const lootPath = path.join(manifestsDir, "loot-tables.json");
+      const lootData = await fs.readFile(lootPath, "utf-8");
+      const raw = JSON.parse(lootData) as unknown;
+      lootTablesProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] loot-tables.json not found or invalid (${err instanceof Error ? err.message : String(err)}), LootSystem will use legacy drop tables`,
+      );
+    }
+
+    // Load mob→loot-table mappings manifest (optional — without it no
+    // `mobType` is bound to the authored roller).
+    try {
+      const mappingsPath = path.join(
+        manifestsDir,
+        "mob-loot-table-mappings.json",
+      );
+      const mappingsData = await fs.readFile(mappingsPath, "utf-8");
+      const raw = JSON.parse(mappingsData) as unknown;
+      mobLootTableMappingsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] mob-loot-table-mappings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored mob→table mappings will be unavailable`,
+      );
+    }
+
+    // Load dialogue manifest (optional — without it DialogueSystem
+    // falls back to the legacy `NPCDialogueTree` embedded in npcs.json).
+    try {
+      const dialoguePath = path.join(manifestsDir, "dialogue.json");
+      const dialogueData = await fs.readFile(dialoguePath, "utf-8");
+      const raw = JSON.parse(dialogueData) as unknown;
+      dialogueProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] dialogue.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored dialogue trees will be unavailable`,
+      );
+    }
+
+    // Load NPC → authored-dialogue-tree bindings manifest (optional).
+    try {
+      const bindingsPath = path.join(
+        manifestsDir,
+        "npc-dialogue-bindings.json",
+      );
+      const bindingsData = await fs.readFile(bindingsPath, "utf-8");
+      const raw = JSON.parse(bindingsData) as unknown;
+      npcDialogueBindingsProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] npc-dialogue-bindings.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored NPC→tree bindings will be unavailable`,
+      );
+    }
+
+    // Load localization bundle (optional — without it DialogueSystem
+    // echoes raw textKeys for authored dialogue lines).
+    try {
+      const locPath = path.join(manifestsDir, "localization.json");
+      const locData = await fs.readFile(locPath, "utf-8");
+      const raw = JSON.parse(locData) as unknown;
+      localizationProvider.loadRaw(raw);
+    } catch (err) {
+      console.warn(
+        `[DataManager] localization.json not found or invalid (${err instanceof Error ? err.message : String(err)}), authored textKeys will echo raw`,
+      );
+    }
+
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
@@ -1999,8 +6597,10 @@ export class DataManager {
           const woodcuttingRes = await fetch(
             `${baseUrl}/gathering/woodcutting.json`,
           );
-          const woodcuttingManifest =
-            (await woodcuttingRes.json()) as WoodcuttingManifest;
+          const woodcuttingManifest = WoodcuttingManifestSchema.parse(
+            await woodcuttingRes.json(),
+          );
+          gatheringResources.loadWoodcutting(woodcuttingManifest);
           for (const tree of woodcuttingManifest.trees) {
             resourcesMap.set(tree.id, tree);
           }
@@ -2015,7 +6615,10 @@ export class DataManager {
       (async () => {
         try {
           const miningRes = await fetch(`${baseUrl}/gathering/mining.json`);
-          const miningManifest = (await miningRes.json()) as MiningManifest;
+          const miningManifest = MiningManifestSchema.parse(
+            await miningRes.json(),
+          );
+          gatheringResources.loadMining(miningManifest);
           for (const rock of miningManifest.rocks) {
             resourcesMap.set(rock.id, rock);
           }
@@ -2030,7 +6633,10 @@ export class DataManager {
       (async () => {
         try {
           const fishingRes = await fetch(`${baseUrl}/gathering/fishing.json`);
-          const fishingManifest = (await fishingRes.json()) as FishingManifest;
+          const fishingManifest = FishingManifestSchema.parse(
+            await fishingRes.json(),
+          );
+          gatheringResources.loadFishing(fishingManifest);
           for (const spot of fishingManifest.spots) {
             resourcesMap.set(spot.id, spot);
           }
@@ -2123,9 +6729,10 @@ export class DataManager {
         source = repoPath;
       }
 
-      const woodcuttingManifest = JSON.parse(
-        woodcuttingData,
-      ) as WoodcuttingManifest;
+      const woodcuttingManifest = WoodcuttingManifestSchema.parse(
+        JSON.parse(woodcuttingData),
+      );
+      gatheringResources.loadWoodcutting(woodcuttingManifest);
       for (const tree of woodcuttingManifest.trees) {
         resourcesMap.set(tree.id, tree);
       }
@@ -2142,7 +6749,8 @@ export class DataManager {
     try {
       const miningPath = path.join(gatheringDir, "mining.json");
       const miningData = await fs.readFile(miningPath, "utf-8");
-      const miningManifest = JSON.parse(miningData) as MiningManifest;
+      const miningManifest = MiningManifestSchema.parse(JSON.parse(miningData));
+      gatheringResources.loadMining(miningManifest);
       for (const rock of miningManifest.rocks) {
         resourcesMap.set(rock.id, rock);
       }
@@ -2156,7 +6764,10 @@ export class DataManager {
     try {
       const fishingPath = path.join(gatheringDir, "fishing.json");
       const fishingData = await fs.readFile(fishingPath, "utf-8");
-      const fishingManifest = JSON.parse(fishingData) as FishingManifest;
+      const fishingManifest = FishingManifestSchema.parse(
+        JSON.parse(fishingData),
+      );
+      gatheringResources.loadFishing(fishingManifest);
       for (const spot of fishingManifest.spots) {
         resourcesMap.set(spot.id, spot);
       }
@@ -2236,17 +6847,13 @@ export class DataManager {
         aggressive: npc.combat?.aggressive ?? false,
         retaliates: npc.combat?.retaliates ?? true,
         aggroRange: npc.combat?.aggroRange ?? 0, // 0 = non-aggressive by default
-        combatRange:
-          npc.combat?.combatRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.COMBAT_RANGE,
-        leashRange:
-          npc.combat?.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
+        combatRange: npc.combat?.combatRange ?? getDefaultNpcCombatRange(),
+        leashRange: npc.combat?.leashRange ?? getDefaultNpcLeashRange(),
         attackSpeedTicks:
-          npc.combat?.attackSpeedTicks ??
-          COMBAT_CONSTANTS.DEFAULTS.NPC.ATTACK_SPEED_TICKS,
+          npc.combat?.attackSpeedTicks ?? getDefaultNpcAttackSpeedTicks(),
         respawnTime:
-          (npc.combat?.respawnTicks ??
-            COMBAT_CONSTANTS.DEFAULTS.NPC.RESPAWN_TICKS) *
-          COMBAT_CONSTANTS.TICK_DURATION_MS, // Convert ticks to ms
+          (npc.combat?.respawnTicks ?? getDefaultNpcRespawnTicks()) *
+          getTickDurationMs(), // Convert ticks to ms
         xpReward: npc.combat?.xpReward ?? 0,
         poisonous: npc.combat?.poisonous ?? false,
         immuneToPoison: npc.combat?.immuneToPoison ?? false,
@@ -2522,6 +7129,91 @@ export class DataManager {
    */
   public getItemsByType(itemType: string): Item[] {
     return Array.from(ITEMS.values()).filter((item) => item.type === itemType);
+  }
+
+  /**
+   * Hot-reload item metadata from the editor's PIE session (Phase B3).
+   *
+   * Partial-merge pattern: the editor's `ManifestItem` surface is lossy
+   * (no combat stats, no cooking/tool sub-objects, no equipment bonuses
+   * beyond the summary `bonuses` map). To avoid desyncing equipped gear
+   * mid-session, we only overlay the **metadata fields** the editor is
+   * allowed to edit: `name`, `value`, `weight`, `description`, `examine`,
+   * `tradeable`, `stackable`, `rarity`, `modelPath`, `iconPath`. Everything
+   * else on the live `Item` (combat stats, requirements, cooking data,
+   * tool data, noted variants) is preserved.
+   *
+   * Rows whose `id` is not already in `ITEMS` are skipped — adding brand-
+   * new items requires a full PIE restart because the engine `Item` shape
+   * cannot be fully reconstructed from `ManifestItem` alone.
+   */
+  public hotReloadItemsMetadata(
+    editorItems: Array<{
+      id: string;
+      name: string;
+      value: number;
+      weight?: number;
+      description?: string;
+      examine?: string;
+      tradeable?: boolean;
+      stackable?: boolean;
+      rarity?: string;
+      modelPath?: string;
+      iconPath?: string;
+
+      // Combat-stat fields — optional, omitted fields preserve the
+      // existing item's combat profile. Editors that don't care
+      // about combat data can leave these unset without corrupting
+      // legacy values.
+      weaponType?: Item["weaponType"];
+      attackType?: Item["attackType"];
+      attackSpeed?: number;
+      attackRange?: number;
+      is2h?: boolean;
+      equipSlot?: Item["equipSlot"];
+      equipable?: boolean;
+      bonuses?: Item["bonuses"];
+      requirements?: Item["requirements"];
+
+      // Consumable/prayer fields — same semantics: undefined = leave
+      // as-is, non-undefined = overwrite.
+      healAmount?: number;
+      prayerXp?: number;
+      buryLevelRequired?: number;
+    }>,
+  ): void {
+    for (const m of editorItems) {
+      const existing = ITEMS.get(m.id);
+      if (!existing) continue;
+      const merged: Item = {
+        ...existing,
+        name: m.name,
+        value: m.value,
+        weight: m.weight ?? existing.weight,
+        description: m.description ?? existing.description,
+        examine: m.examine ?? existing.examine,
+        tradeable: m.tradeable ?? existing.tradeable,
+        stackable: m.stackable ?? existing.stackable,
+        rarity: (m.rarity as Item["rarity"]) ?? existing.rarity,
+        modelPath: m.modelPath ?? existing.modelPath,
+        iconPath: m.iconPath ?? existing.iconPath,
+        weaponType:
+          m.weaponType !== undefined ? m.weaponType : existing.weaponType,
+        attackType:
+          m.attackType !== undefined ? m.attackType : existing.attackType,
+        attackSpeed: m.attackSpeed ?? existing.attackSpeed,
+        attackRange: m.attackRange ?? existing.attackRange,
+        is2h: m.is2h ?? existing.is2h,
+        equipSlot: m.equipSlot !== undefined ? m.equipSlot : existing.equipSlot,
+        equipable: m.equipable ?? existing.equipable,
+        bonuses: m.bonuses ?? existing.bonuses,
+        requirements: m.requirements ?? existing.requirements,
+        healAmount: m.healAmount ?? existing.healAmount,
+        prayerXp: m.prayerXp ?? existing.prayerXp,
+        buryLevelRequired: m.buryLevelRequired ?? existing.buryLevelRequired,
+      };
+      ITEMS.set(m.id, merged);
+    }
   }
 
   // =============================================================================

@@ -1,0 +1,32 @@
+{
+  "$schema": "hyperforge.arena-layout.v1",
+  "arenaGrid": {
+    "baseX": 340,
+    "baseZ": 394,
+    "baseY": 0.42,
+    "width": 20,
+    "length": 24,
+    "gap": 4,
+    "columns": 2,
+    "rows": 3,
+    "count": 6,
+    "spawnOffset": 8
+  },
+  "lobby": {
+    "centerX": 385,
+    "centerZ": 376,
+    "width": 40,
+    "length": 25
+  },
+  "hospital": {
+    "centerX": 345,
+    "centerZ": 376,
+    "width": 28,
+    "length": 23
+  },
+  "lobbySpawn": {
+    "x": 385,
+    "y": 0.42,
+    "z": 374
+  }
+}

@@ -1,42 +1,56 @@
 /**
- * NPC Size Manifest
- * Defines collision sizes for NPCs used in range calculations.
- * Most NPCs are 1x1 tiles. Bosses occupy larger footprints.
+ * NPC Size Data — MANIFEST FAÇADE
+ *
+ * As of Phase A11 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, NPC
+ * collision footprints live in `npc-sizes.json`, validated at module
+ * load time against `NPCSizesManifestSchema` from
+ * `@hyperforge/manifest-schema`.
+ *
+ * Most NPCs are 1×1 tiles. Bosses occupy larger footprints.
  * @see https://oldschool.runescape.wiki/w/Non-player_character
+ *
+ * **Hot-reload**: `NPC_SIZES` is a mutable `Record<string, NPCSize>`
+ * with a stable top-level reference. `hotReloadNPCSizes(manifest)`
+ * clears all keys and re-populates from a new manifest so callers
+ * that read via `NPC_SIZES[id]` at lookup time (e.g., `RangeSystem`,
+ * `LargeNPCSupport`) pick up editor edits without re-importing. No
+ * caller caches the inner `NPCSize` objects by reference.
  */
+
+import {
+  NPCSizesManifestSchema,
+  type NPCSizesManifest,
+} from "@hyperforge/manifest-schema";
+
+import npcSizesManifestJson from "./npc-sizes.json" with { type: "json" };
 
 export interface NPCSize {
   width: number;
   depth: number;
 }
 
-export const NPC_SIZES: Record<string, NPCSize> = {
-  // 1x1 (default for unlisted NPCs)
-  goblin: { width: 1, depth: 1 },
-  cow: { width: 1, depth: 1 },
-  chicken: { width: 1, depth: 1 },
-  rat: { width: 1, depth: 1 },
-  spider: { width: 1, depth: 1 },
-  skeleton: { width: 1, depth: 1 },
-  zombie: { width: 1, depth: 1 },
-  imp: { width: 1, depth: 1 },
+export const NPC_SIZES: Record<string, NPCSize> = {};
 
-  // 2x2
-  general_graardor: { width: 2, depth: 2 },
-  kril_tsutsaroth: { width: 2, depth: 2 },
-  commander_zilyana: { width: 2, depth: 2 },
-  kreearra: { width: 2, depth: 2 },
-  giant_mole: { width: 2, depth: 2 },
-  kalphite_queen: { width: 2, depth: 2 },
+function rebuildNPCSizes(manifest: NPCSizesManifest): void {
+  // Clear in-place — callers read through `NPC_SIZES[id]` at lookup
+  // time, so the stable top-level reference is what matters. Replacing
+  // the map itself would force every consumer to re-import.
+  for (const key of Object.keys(NPC_SIZES)) delete NPC_SIZES[key];
+  for (const [npcId, size] of Object.entries(manifest.sizes)) {
+    NPC_SIZES[npcId] = { width: size.width, depth: size.depth };
+  }
+}
 
-  // 3x3
-  corporeal_beast: { width: 3, depth: 3 },
-  cerberus: { width: 3, depth: 3 },
-  king_black_dragon: { width: 3, depth: 3 },
+// Initial load — module-level parse + rebuild. Happens once on import.
+rebuildNPCSizes(NPCSizesManifestSchema.parse(npcSizesManifestJson));
 
-  // 4x4
-  vorkath: { width: 4, depth: 4 },
-
-  // 5x5
-  olm_head: { width: 5, depth: 5 },
-};
+/**
+ * Swap in a new NPC size manifest at runtime — used by
+ * `PIEEditorSession.updateManifests` for editor hot-reload.
+ *
+ * Zod-validates the input; on failure the current `NPC_SIZES` state
+ * is retained and the error bubbles to the caller.
+ */
+export function hotReloadNPCSizes(manifest: NPCSizesManifest): void {
+  rebuildNPCSizes(NPCSizesManifestSchema.parse(manifest));
+}

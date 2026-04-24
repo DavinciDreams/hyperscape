@@ -1,9 +1,29 @@
 /**
- * Combat Spells Manifest
+ * Combat Spells Manifest — MANIFEST FAÇADE
+ *
+ * As of Phase A11 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, combat
+ * spells live in `combat-spells.json`, validated at module load time
+ * against `CombatSpellsManifestSchema` from
+ * `@hyperforge/manifest-schema`.
+ *
  * Defines all F2P combat spells (Strike and Bolt tiers).
+ *
+ * The exported map/array references (`COMBAT_SPELLS`, `SPELL_ORDER`)
+ * are stable; their contents are rebuilt in-place by
+ * `hotReloadCombatSpells()` (Phase B3.1e) so the editor's PIE session
+ * can swap the spell manifest without a Stop → Play cycle. They are
+ * intentionally NOT `Object.freeze`d so the hot-reload path can clear
+ * and refill them.
+ *
  * @see https://oldschool.runescape.wiki/w/Spells
  */
 
+import {
+  CombatSpellsManifestSchema,
+  type CombatSpellsManifest,
+} from "@hyperforge/manifest-schema";
+
+import combatSpellsManifestJson from "./combat-spells.json" with { type: "json" };
 import type { RuneRequirement } from "../systems/shared/combat/RuneService";
 
 export interface SpellData {
@@ -18,130 +38,46 @@ export interface SpellData {
 }
 
 /** All F2P combat spells keyed by spell ID */
-export const COMBAT_SPELLS: Record<string, SpellData> = {
-  // Strike tier
-  wind_strike: {
-    id: "wind_strike",
-    name: "Wind Strike",
-    level: 1,
-    baseMaxHit: 2,
-    baseXp: 5.5,
-    element: "air",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 1 },
-      { runeId: "mind_rune", quantity: 1 },
-    ],
-  },
-  water_strike: {
-    id: "water_strike",
-    name: "Water Strike",
-    level: 5,
-    baseMaxHit: 4,
-    baseXp: 7.5,
-    element: "water",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 1 },
-      { runeId: "water_rune", quantity: 1 },
-      { runeId: "mind_rune", quantity: 1 },
-    ],
-  },
-  earth_strike: {
-    id: "earth_strike",
-    name: "Earth Strike",
-    level: 9,
-    baseMaxHit: 6,
-    baseXp: 9.5,
-    element: "earth",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 1 },
-      { runeId: "earth_rune", quantity: 2 },
-      { runeId: "mind_rune", quantity: 1 },
-    ],
-  },
-  fire_strike: {
-    id: "fire_strike",
-    name: "Fire Strike",
-    level: 13,
-    baseMaxHit: 8,
-    baseXp: 11.5,
-    element: "fire",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 2 },
-      { runeId: "fire_rune", quantity: 3 },
-      { runeId: "mind_rune", quantity: 1 },
-    ],
-  },
-
-  // Bolt tier
-  wind_bolt: {
-    id: "wind_bolt",
-    name: "Wind Bolt",
-    level: 17,
-    baseMaxHit: 9,
-    baseXp: 13.5,
-    element: "air",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 2 },
-      { runeId: "chaos_rune", quantity: 1 },
-    ],
-  },
-  water_bolt: {
-    id: "water_bolt",
-    name: "Water Bolt",
-    level: 23,
-    baseMaxHit: 10,
-    baseXp: 16.5,
-    element: "water",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 2 },
-      { runeId: "water_rune", quantity: 2 },
-      { runeId: "chaos_rune", quantity: 1 },
-    ],
-  },
-  earth_bolt: {
-    id: "earth_bolt",
-    name: "Earth Bolt",
-    level: 29,
-    baseMaxHit: 11,
-    baseXp: 19.5,
-    element: "earth",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 2 },
-      { runeId: "earth_rune", quantity: 3 },
-      { runeId: "chaos_rune", quantity: 1 },
-    ],
-  },
-  fire_bolt: {
-    id: "fire_bolt",
-    name: "Fire Bolt",
-    level: 35,
-    baseMaxHit: 12,
-    baseXp: 22.5,
-    element: "fire",
-    attackSpeed: 5,
-    runes: [
-      { runeId: "air_rune", quantity: 3 },
-      { runeId: "fire_rune", quantity: 4 },
-      { runeId: "chaos_rune", quantity: 1 },
-    ],
-  },
-};
+export const COMBAT_SPELLS: Record<string, SpellData> = {};
 
 /** All spell IDs in order of level */
-export const SPELL_ORDER = [
-  "wind_strike",
-  "water_strike",
-  "earth_strike",
-  "fire_strike",
-  "wind_bolt",
-  "water_bolt",
-  "earth_bolt",
-  "fire_bolt",
-];
+export const SPELL_ORDER: string[] = [];
+
+function rebuildFromManifest(manifest: CombatSpellsManifest): void {
+  for (const k of Object.keys(COMBAT_SPELLS)) delete COMBAT_SPELLS[k];
+  SPELL_ORDER.length = 0;
+
+  for (const spell of [
+    ...manifest.standard.strike,
+    ...manifest.standard.bolt,
+  ]) {
+    COMBAT_SPELLS[spell.id] = {
+      id: spell.id,
+      name: spell.name,
+      level: spell.level,
+      baseMaxHit: spell.baseMaxHit,
+      baseXp: spell.baseXp,
+      element: spell.element,
+      attackSpeed: spell.attackSpeed,
+      runes: spell.runes.map((r) => ({
+        runeId: r.runeId,
+        quantity: r.quantity,
+      })),
+    };
+    SPELL_ORDER.push(spell.id);
+  }
+}
+
+// Initial load — schema-validated at module load so bad JSON fails fast.
+rebuildFromManifest(CombatSpellsManifestSchema.parse(combatSpellsManifestJson));
+
+/**
+ * Hot-reload combat spells from the editor's PIE session (Phase B3).
+ * Validates the manifest; on success, clears and refills the exported
+ * map/array in-place so the CombatSystem sees new spell data on its next
+ * attack-time lookup without re-importing. Throws (and leaves prior
+ * state intact) if the manifest fails schema validation.
+ */
+export function hotReloadCombatSpells(manifest: CombatSpellsManifest): void {
+  rebuildFromManifest(CombatSpellsManifestSchema.parse(manifest));
+}

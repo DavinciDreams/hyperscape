@@ -1,0 +1,50 @@
+{
+  "$schema": "hyperforge.ammunition.v1",
+  "bowTiers": {
+    "shortbow": 1,
+    "oak_shortbow": 5,
+    "willow_shortbow": 20,
+    "maple_shortbow": 30,
+    "longbow": 1,
+    "oak_longbow": 5,
+    "willow_longbow": 20,
+    "maple_longbow": 30
+  },
+  "arrows": {
+    "bronze_arrow": {
+      "id": "bronze_arrow",
+      "name": "Bronze arrow",
+      "rangedStrength": 7,
+      "requiredRangedLevel": 1,
+      "requiredBowTier": 1
+    },
+    "iron_arrow": {
+      "id": "iron_arrow",
+      "name": "Iron arrow",
+      "rangedStrength": 10,
+      "requiredRangedLevel": 1,
+      "requiredBowTier": 1
+    },
+    "steel_arrow": {
+      "id": "steel_arrow",
+      "name": "Steel arrow",
+      "rangedStrength": 16,
+      "requiredRangedLevel": 5,
+      "requiredBowTier": 5
+    },
+    "mithril_arrow": {
+      "id": "mithril_arrow",
+      "name": "Mithril arrow",
+      "rangedStrength": 22,
+      "requiredRangedLevel": 20,
+      "requiredBowTier": 20
+    },
+    "adamant_arrow": {
+      "id": "adamant_arrow",
+      "name": "Adamant arrow",
+      "rangedStrength": 31,
+      "requiredRangedLevel": 30,
+      "requiredBowTier": 30
+    }
+  }
+}

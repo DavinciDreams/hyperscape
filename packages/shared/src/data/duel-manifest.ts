@@ -8,13 +8,19 @@
  * @see packages/shared/src/types/game/duel-types.ts for type definitions
  */
 
+import { DuelManifestSchema } from "@hyperforge/manifest-schema";
+
 import type {
   DuelRules,
   EquipmentSlotRestriction,
 } from "../types/game/duel-types";
 
-/** Challenge timeout in milliseconds (30 seconds) */
-export const DUEL_CHALLENGE_TIMEOUT_MS = 30000;
+import duelManifestJson from "./duel.json" with { type: "json" };
+
+const duelManifest = DuelManifestSchema.parse(duelManifestJson);
+
+/** Challenge timeout in milliseconds. */
+export const DUEL_CHALLENGE_TIMEOUT_MS = duelManifest.challengeTimeoutMs;
 
 // ============================================================================
 // Rule Definitions
@@ -32,64 +38,49 @@ export interface DuelRuleDefinition {
   incompatibleWith: Array<keyof DuelRules>;
 }
 
+const DUEL_RULE_KEYS = [
+  "noRanged",
+  "noMelee",
+  "noMagic",
+  "noSpecialAttack",
+  "noPrayer",
+  "noPotions",
+  "noFood",
+  "noForfeit",
+  "noMovement",
+  "funWeapons",
+] as const satisfies ReadonlyArray<keyof DuelRules>;
+
 /**
- * Duel rules manifest - single source of truth
+ * Duel rules manifest - single source of truth. Keys and values
+ * come from `duel.json`; manifest is cross-checked against the
+ * hardcoded `keyof DuelRules` union at module load.
  */
 export const DUEL_RULE_DEFINITIONS: Record<
   keyof DuelRules,
   DuelRuleDefinition
-> = {
-  noRanged: {
-    label: "No Ranged",
-    description: "Cannot use ranged attacks",
-    incompatibleWith: [],
-  },
-  noMelee: {
-    label: "No Melee",
-    description: "Cannot use melee attacks",
-    incompatibleWith: [],
-  },
-  noMagic: {
-    label: "No Magic",
-    description: "Cannot use magic attacks",
-    incompatibleWith: [],
-  },
-  noSpecialAttack: {
-    label: "No Special Attack",
-    description: "Cannot use special attacks",
-    incompatibleWith: [],
-  },
-  noPrayer: {
-    label: "No Prayer",
-    description: "Prayer points drained",
-    incompatibleWith: [],
-  },
-  noPotions: {
-    label: "No Potions",
-    description: "Cannot drink potions",
-    incompatibleWith: [],
-  },
-  noFood: {
-    label: "No Food",
-    description: "Cannot eat food",
-    incompatibleWith: [],
-  },
-  noForfeit: {
-    label: "No Forfeit",
-    description: "Fight to the death",
-    incompatibleWith: ["funWeapons", "noMovement"],
-  },
-  noMovement: {
-    label: "No Movement",
-    description: "Frozen in place",
-    incompatibleWith: ["noForfeit"],
-  },
-  funWeapons: {
-    label: "Fun Weapons",
-    description: "Boxing gloves only",
-    incompatibleWith: ["noForfeit"],
-  },
-};
+> = Object.freeze(
+  Object.fromEntries(
+    DUEL_RULE_KEYS.map((key) => {
+      const cfg = duelManifest.rules[key];
+      if (!cfg) {
+        throw new Error(
+          `[duel-manifest] duel.json missing rule definition for "${key}"`,
+        );
+      }
+      return [
+        key,
+        Object.freeze({
+          label: cfg.label,
+          description: cfg.description,
+          incompatibleWith: Object.freeze([
+            ...cfg.incompatibleWith,
+          ]) as unknown as Array<keyof DuelRules>,
+        }),
+      ];
+    }),
+  ) as Record<keyof DuelRules, DuelRuleDefinition>,
+);
 
 /**
  * Get just the labels for simple display (e.g., ConfirmScreen)
@@ -119,25 +110,41 @@ export interface EquipmentSlotDefinition {
   order: number;
 }
 
+const DUEL_EQUIPMENT_SLOT_KEYS_LITERAL = [
+  "head",
+  "cape",
+  "amulet",
+  "weapon",
+  "body",
+  "shield",
+  "legs",
+  "gloves",
+  "boots",
+  "ring",
+  "ammo",
+] as const satisfies ReadonlyArray<DuelEquipmentSlot>;
+
 /**
- * Equipment slots manifest - single source of truth
+ * Equipment slots manifest - single source of truth, derived from
+ * `duel.json` with a drift check against the hardcoded
+ * `EquipmentSlotRestriction` union.
  */
 export const EQUIPMENT_SLOT_DEFINITIONS: Record<
   DuelEquipmentSlot,
   EquipmentSlotDefinition
-> = {
-  head: { label: "Head", order: 0 },
-  cape: { label: "Cape", order: 1 },
-  amulet: { label: "Amulet", order: 2 },
-  weapon: { label: "Weapon", order: 3 },
-  body: { label: "Body", order: 4 },
-  shield: { label: "Shield", order: 5 },
-  legs: { label: "Legs", order: 6 },
-  gloves: { label: "Gloves", order: 7 },
-  boots: { label: "Boots", order: 8 },
-  ring: { label: "Ring", order: 9 },
-  ammo: { label: "Ammo", order: 10 },
-};
+> = Object.freeze(
+  Object.fromEntries(
+    DUEL_EQUIPMENT_SLOT_KEYS_LITERAL.map((slot) => {
+      const cfg = duelManifest.equipmentSlots[slot];
+      if (!cfg) {
+        throw new Error(
+          `[duel-manifest] duel.json missing equipment slot "${slot}"`,
+        );
+      }
+      return [slot, Object.freeze({ label: cfg.label, order: cfg.order })];
+    }),
+  ) as Record<DuelEquipmentSlot, EquipmentSlotDefinition>,
+);
 
 /**
  * Get just the labels for simple display
@@ -197,20 +204,22 @@ export function isValidEquipmentSlot(slot: string): slot is DuelEquipmentSlot {
 /**
  * Maps duel equipment slot names to ECS EquipmentSlots property names.
  * Duel system uses "head"/"ammo" while EquipmentSlots uses "helmet"/"arrows".
+ * Derived from `duel.json` with a drift check.
  */
-export const DUEL_SLOT_TO_EQUIPMENT_SLOT: Record<DuelEquipmentSlot, string> = {
-  head: "helmet",
-  cape: "cape",
-  amulet: "amulet",
-  weapon: "weapon",
-  body: "body",
-  shield: "shield",
-  legs: "legs",
-  gloves: "gloves",
-  boots: "boots",
-  ring: "ring",
-  ammo: "arrows",
-};
+export const DUEL_SLOT_TO_EQUIPMENT_SLOT: Record<DuelEquipmentSlot, string> =
+  Object.freeze(
+    Object.fromEntries(
+      DUEL_EQUIPMENT_SLOT_KEYS_LITERAL.map((slot) => {
+        const mapped = duelManifest.duelSlotToEquipmentSlot[slot];
+        if (!mapped) {
+          throw new Error(
+            `[duel-manifest] duel.json missing duelSlotToEquipmentSlot mapping for "${slot}"`,
+          );
+        }
+        return [slot, mapped];
+      }),
+    ) as Record<DuelEquipmentSlot, string>,
+  );
 
 /**
  * Get incompatible rules for a given rule

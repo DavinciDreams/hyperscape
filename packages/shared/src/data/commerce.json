@@ -1,0 +1,8 @@
+{
+  "$schema": "hyperforge.commerce.v1",
+  "defaultBuybackRate": 0.5,
+  "bankStorageUnlimited": -1,
+  "storeUnlimitedStock": -1,
+  "interactionRange": 3,
+  "starterStoreItemIds": ["bronze_hatchet", "fishing_rod", "tinderbox", "arrows"]
+}

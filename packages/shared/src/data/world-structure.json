@@ -1,0 +1,10 @@
+{
+  "$schema": "hyperforge.world-structure.v1",
+  "constants": {
+    "gridSize": 4,
+    "defaultSpawnHeight": 2,
+    "waterLevel": 16,
+    "maxBuildHeight": 100,
+    "safeZoneRadius": 15
+  }
+}

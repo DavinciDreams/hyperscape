@@ -1,0 +1,30 @@
+{
+  "$schema": "hyperforge.spell-visuals.v1",
+  "spells": {
+    "wind_strike":  { "color": 13421772, "coreColor": 16777215, "size": 0.35, "glowIntensity": 0.4,  "trailLength": 3, "trailFade": 0.5, "pulseSpeed": 0, "pulseAmount": 0 },
+    "water_strike": { "color": 3900150,  "coreColor": 9684477,  "size": 0.35, "glowIntensity": 0.5,  "trailLength": 3, "trailFade": 0.5, "pulseSpeed": 0, "pulseAmount": 0 },
+    "earth_strike": { "color": 9127187,  "coreColor": 13789470, "size": 0.35, "glowIntensity": 0.4,  "trailLength": 3, "trailFade": 0.5, "pulseSpeed": 0, "pulseAmount": 0 },
+    "fire_strike":  { "color": 16729344, "coreColor": 16776960, "size": 0.35, "glowIntensity": 0.55, "trailLength": 3, "trailFade": 0.5, "pulseSpeed": 0, "pulseAmount": 0 },
+
+    "wind_bolt":  { "color": 13421772, "coreColor": 16777215, "size": 0.7, "glowIntensity": 0.7, "trailLength": 5, "trailFade": 0.4, "pulseSpeed": 5, "pulseAmount": 0.2 },
+    "water_bolt": { "color": 3900150,  "coreColor": 9684477,  "size": 0.7, "glowIntensity": 0.8, "trailLength": 5, "trailFade": 0.4, "pulseSpeed": 5, "pulseAmount": 0.2 },
+    "earth_bolt": { "color": 9127187,  "coreColor": 13789470, "size": 0.7, "glowIntensity": 0.7, "trailLength": 5, "trailFade": 0.4, "pulseSpeed": 5, "pulseAmount": 0.2 },
+    "fire_bolt":  { "color": 16729344, "coreColor": 16776960, "size": 0.7, "glowIntensity": 0.9, "trailLength": 5, "trailFade": 0.4, "pulseSpeed": 5, "pulseAmount": 0.2 }
+  },
+  "arrows": {
+    "default":       { "shaftColor": 9127187, "headColor": 10526880, "fletchingColor": 16777215, "length": 0.5, "width": 0.08, "rotateToDirection": true, "arcHeight": 0 },
+    "bronze_arrow":  { "shaftColor": 9127187, "headColor": 13467442, "fletchingColor": 16777215, "length": 0.5, "width": 0.08, "rotateToDirection": true, "arcHeight": 0 },
+    "iron_arrow":    { "shaftColor": 9127187, "headColor": 7436670,  "fletchingColor": 16777215, "length": 0.5, "width": 0.08, "rotateToDirection": true, "arcHeight": 0 },
+    "steel_arrow":   { "shaftColor": 9127187, "headColor": 11579568, "fletchingColor": 16777215, "length": 0.5, "width": 0.08, "rotateToDirection": true, "arcHeight": 0 },
+    "mithril_arrow": { "shaftColor": 9127187, "headColor": 4286945,  "fletchingColor": 14737663, "length": 0.5, "width": 0.08, "rotateToDirection": true, "arcHeight": 0 },
+    "adamant_arrow": { "shaftColor": 9127187, "headColor": 2263842,  "fletchingColor": 14745568, "length": 0.5, "width": 0.08, "rotateToDirection": true, "arcHeight": 0 }
+  },
+  "fallbackSpell": {
+    "color": 10053375,
+    "coreColor": 13413119,
+    "size": 0.3,
+    "glowIntensity": 0.4,
+    "trailLength": 4,
+    "trailFade": 0.35
+  }
+}

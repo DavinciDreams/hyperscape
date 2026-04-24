@@ -7,12 +7,18 @@
  * ARCHITECTURE:
  * - All skill unlocks are loaded from skill-unlocks.json manifest
  * - Single source of truth - no auto-generation
+ * - Manifest validated via `SkillUnlocksManifestSchema` on load
  *
  * @see packages/server/world/assets/manifests/skill-unlocks.json
  */
 
+import {
+  SkillUnlocksManifestSchema,
+  type SkillUnlockType,
+} from "@hyperforge/manifest-schema";
+
 /** Type of unlock */
-export type UnlockType = "item" | "ability" | "area" | "quest" | "activity";
+export type UnlockType = SkillUnlockType;
 
 /** A single skill unlock entry */
 export interface SkillUnlock {
@@ -34,32 +40,20 @@ let loadedUnlocks: Record<string, SkillUnlock[]> | null = null;
  * Called by DataManager after loading skill-unlocks.json
  */
 export function loadSkillUnlocks(manifest: SkillUnlocksManifest): void {
-  if (!manifest?.skills) {
+  const parsed = SkillUnlocksManifestSchema.safeParse(manifest);
+  if (!parsed.success) {
     console.warn(
-      "[SkillUnlocks] Invalid manifest format, expected { skills: {...} }",
+      `[SkillUnlocks] Invalid manifest: ${JSON.stringify(parsed.error.format())}`,
     );
     return;
   }
 
   loadedUnlocks = {};
 
-  for (const [skill, unlocks] of Object.entries(manifest.skills)) {
-    if (!Array.isArray(unlocks)) continue;
-
-    // Validate and normalize each unlock
-    loadedUnlocks[skill.toLowerCase()] = unlocks
-      .filter(
-        (u) =>
-          typeof u.level === "number" &&
-          typeof u.description === "string" &&
-          typeof u.type === "string",
-      )
-      .map((u) => ({
-        level: u.level,
-        description: u.description,
-        type: u.type as UnlockType,
-      }))
-      .sort((a, b) => a.level - b.level);
+  for (const [skill, unlocks] of Object.entries(parsed.data.skills)) {
+    loadedUnlocks[skill.toLowerCase()] = [...unlocks].sort(
+      (a, b) => a.level - b.level,
+    );
   }
 
   // Normalize British/American spelling: "defence" -> "defense"

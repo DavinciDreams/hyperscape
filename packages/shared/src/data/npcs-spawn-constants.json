@@ -1,0 +1,9 @@
+{
+  "$schema": "hyperforge.npcs.v1",
+  "spawnConstants": {
+    "globalRespawnTime": 900000,
+    "maxNpcsPerZone": 10,
+    "spawnRadiusCheck": 5,
+    "aggroLevelThreshold": 5
+  }
+}

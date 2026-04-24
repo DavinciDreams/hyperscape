@@ -19,9 +19,23 @@
  * @see packages/server/world/assets/manifests/recipes/ for source data
  */
 
+import {
+  CookingManifestSchema,
+  CraftingManifestSchema,
+  FiremakingManifestSchema,
+  FletchingManifestSchema,
+  RunecraftingManifestSchema,
+  SmeltingManifestSchema,
+  SmithingRecipesManifestSchema,
+  TanningManifestSchema,
+} from "@hyperforge/manifest-schema";
+
 import { ITEMS } from "./items";
 import type { SmithingCategory } from "./smithing-recipes";
-import { SMITHING_CONSTANTS } from "../constants/SmithingConstants";
+import {
+  getDefaultSmeltingTicks,
+  getDefaultSmithingTicks,
+} from "./live/smithing-live";
 
 // ============================================================================
 // RECIPE MANIFEST TYPES - Structures matching the JSON files
@@ -459,6 +473,7 @@ export class ProcessingDataProvider {
    * Load cooking recipes from manifest
    */
   public loadCookingRecipes(manifest: CookingManifest): void {
+    CookingManifestSchema.parse(manifest);
     this.cookingManifest = manifest;
   }
 
@@ -466,6 +481,7 @@ export class ProcessingDataProvider {
    * Load firemaking recipes from manifest
    */
   public loadFiremakingRecipes(manifest: FiremakingManifest): void {
+    FiremakingManifestSchema.parse(manifest);
     this.firemakingManifest = manifest;
   }
 
@@ -473,6 +489,7 @@ export class ProcessingDataProvider {
    * Load smelting recipes from manifest
    */
   public loadSmeltingRecipes(manifest: SmeltingManifest): void {
+    SmeltingManifestSchema.parse(manifest);
     this.smeltingManifest = manifest;
   }
 
@@ -480,6 +497,7 @@ export class ProcessingDataProvider {
    * Load smithing recipes from manifest
    */
   public loadSmithingRecipes(manifest: SmithingManifest): void {
+    SmithingRecipesManifestSchema.parse(manifest);
     this.smithingManifest = manifest;
   }
 
@@ -487,6 +505,7 @@ export class ProcessingDataProvider {
    * Load crafting recipes from manifest
    */
   public loadCraftingRecipes(manifest: CraftingManifest): void {
+    CraftingManifestSchema.parse(manifest);
     this.craftingManifest = manifest;
   }
 
@@ -494,6 +513,7 @@ export class ProcessingDataProvider {
    * Load tanning recipes from manifest
    */
   public loadTanningRecipes(manifest: TanningManifest): void {
+    TanningManifestSchema.parse(manifest);
     this.tanningManifest = manifest;
   }
 
@@ -501,6 +521,7 @@ export class ProcessingDataProvider {
    * Load fletching recipes from manifest
    */
   public loadFletchingRecipes(manifest: FletchingManifest): void {
+    FletchingManifestSchema.parse(manifest);
     this.fletchingManifest = manifest;
   }
 
@@ -508,6 +529,7 @@ export class ProcessingDataProvider {
    * Load runecrafting recipes from manifest
    */
   public loadRunecraftingRecipes(manifest: RunecraftingManifest): void {
+    RunecraftingManifestSchema.parse(manifest);
     this.runecraftingManifest = manifest;
   }
 
@@ -616,6 +638,37 @@ export class ProcessingDataProvider {
     this.initialize();
   }
 
+  /**
+   * Hot-reload recipe manifests from the editor's PIE session.
+   *
+   * Accepts any subset of the 8 recipe kinds; each provided manifest is
+   * re-validated via its schema (`load*Recipes` throws on failure) before
+   * derived maps are cleared and rebuilt. If validation fails for any
+   * kind, the prior state is retained (the throw propagates out before
+   * `rebuild()` runs).
+   */
+  public hotReload(partial: {
+    cooking?: CookingManifest;
+    firemaking?: FiremakingManifest;
+    smelting?: SmeltingManifest;
+    smithing?: SmithingManifest;
+    crafting?: CraftingManifest;
+    tanning?: TanningManifest;
+    fletching?: FletchingManifest;
+    runecrafting?: RunecraftingManifest;
+  }): void {
+    if (partial.cooking) this.loadCookingRecipes(partial.cooking);
+    if (partial.firemaking) this.loadFiremakingRecipes(partial.firemaking);
+    if (partial.smelting) this.loadSmeltingRecipes(partial.smelting);
+    if (partial.smithing) this.loadSmithingRecipes(partial.smithing);
+    if (partial.crafting) this.loadCraftingRecipes(partial.crafting);
+    if (partial.tanning) this.loadTanningRecipes(partial.tanning);
+    if (partial.fletching) this.loadFletchingRecipes(partial.fletching);
+    if (partial.runecrafting)
+      this.loadRunecraftingRecipes(partial.runecrafting);
+    this.rebuild();
+  }
+
   // ==========================================================================
   // BUILD FROM RECIPE MANIFESTS (Primary - uses recipe JSON files)
   // ==========================================================================
@@ -714,7 +767,7 @@ export class ProcessingDataProvider {
         levelRequired: recipe.level,
         xp: recipe.xp,
         successRate: recipe.successRate,
-        ticks: recipe.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMELTING_TICKS,
+        ticks: recipe.ticks ?? getDefaultSmeltingTicks(),
       };
       this.smeltingDataMap.set(recipe.output, smeltingData);
       this.smeltableBarIds.add(recipe.output);
@@ -748,7 +801,7 @@ export class ProcessingDataProvider {
         levelRequired: recipe.level,
         xp: recipe.xp,
         category: recipe.category as SmithingCategory,
-        ticks: recipe.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+        ticks: recipe.ticks ?? getDefaultSmithingTicks(),
         outputQuantity: recipe.outputQuantity ?? 1,
       };
 
@@ -821,8 +874,7 @@ export class ProcessingDataProvider {
           levelRequired: item.smelting.levelRequired,
           xp: item.smelting.xp,
           successRate: item.smelting.successRate,
-          ticks:
-            item.smelting.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMELTING_TICKS,
+          ticks: item.smelting.ticks ?? getDefaultSmeltingTicks(),
         };
         this.smeltingDataMap.set(itemId, smeltingData);
         this.smeltableBarIds.add(itemId);
@@ -844,8 +896,7 @@ export class ProcessingDataProvider {
           levelRequired: item.smithing.levelRequired,
           xp: item.smithing.xp,
           category: item.smithing.category as SmithingCategory,
-          ticks:
-            item.smithing.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+          ticks: item.smithing.ticks ?? getDefaultSmithingTicks(),
           outputQuantity: item.smithing.outputQuantity ?? 1,
         };
 
@@ -1023,7 +1074,7 @@ export class ProcessingDataProvider {
    */
   public getSmeltingTicks(barItemId: string): number {
     const data = this.getSmeltingData(barItemId);
-    return data?.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMELTING_TICKS;
+    return data?.ticks ?? getDefaultSmeltingTicks();
   }
 
   /**
@@ -1259,7 +1310,7 @@ export class ProcessingDataProvider {
    */
   public getSmithingTicks(itemId: string): number {
     const recipe = this.getSmithingRecipe(itemId);
-    return recipe?.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS;
+    return recipe?.ticks ?? getDefaultSmithingTicks();
   }
 
   /**

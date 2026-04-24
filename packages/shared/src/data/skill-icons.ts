@@ -1,21 +1,37 @@
 /**
- * Skill Data - Definitions and metadata for OSRS-style skills
+ * Skill Data — Definitions and metadata for OSRS-style skills.
+ *
+ * Manifest façade: data loaded from `skill-icons.json` and
+ * validated by `SkillIconsManifestSchema` from
+ * `@hyperforge/manifest-schema` at module load time. Legacy exports
+ * (`SkillCategory`, `SkillDefinition`, `SKILL_DEFINITIONS`,
+ * `SKILL_ICONS`, helpers) are preserved unchanged for consumers.
  *
  * Shared constant used by:
  * - XPProgressOrb (HUD orbs)
  * - XPDropSystem (3D floating drops)
  * - SkillsPanel (skill grid display)
  * - Other UI components displaying skill information
+ *
+ * Extracted as part of Phase A11 of
+ * `PLAN_WORLD_STUDIO_AAA_COMPLETION.md`.
  */
 
+import {
+  SkillIconsManifestSchema,
+  type SkillCategory as SchemaSkillCategory,
+} from "@hyperforge/manifest-schema";
+
 import type { Skills } from "../types/entities/entity-types";
+
+import skillIconsManifestJson from "./skill-icons.json" with { type: "json" };
 
 // ============================================================================
 // SKILL CATEGORIES
 // ============================================================================
 
 /** Skill category for grouping in UI */
-export type SkillCategory = "combat" | "gathering" | "production";
+export type SkillCategory = SchemaSkillCategory;
 
 // ============================================================================
 // SKILL DEFINITIONS
@@ -35,140 +51,28 @@ export interface SkillDefinition {
   defaultLevel: number;
 }
 
+export const manifest = SkillIconsManifestSchema.parse(skillIconsManifestJson);
+
 /**
  * All skill definitions in OSRS-style display order.
+ *
  * Arranged in 3-column grid matching RuneScape layout:
  *   Column 1: Combat (Attack, Strength, Defence, Ranged, Magic, Prayer)
  *   Column 2: Support (Constitution, Agility)
  *   Column 3: Gathering/Production (Mining, Smithing, Fishing, Cooking, Firemaking, Woodcutting)
  */
-export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
-  // Row 1: Attack, Constitution (Hitpoints), Mining
-  {
-    key: "attack",
-    label: "Attack",
-    icon: "⚔️",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "constitution",
-    label: "Constitution",
-    icon: "❤️",
-    category: "combat",
-    defaultLevel: 10,
-  },
-  {
-    key: "mining",
-    label: "Mining",
-    icon: "⛏️",
-    category: "gathering",
-    defaultLevel: 1,
-  },
-  // Row 2: Strength, Agility, Smithing
-  {
-    key: "strength",
-    label: "Strength",
-    icon: "💪",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "agility",
-    label: "Agility",
-    icon: "🏃",
-    category: "production",
-    defaultLevel: 1,
-  },
-  {
-    key: "smithing",
-    label: "Smithing",
-    icon: "🔨",
-    category: "production",
-    defaultLevel: 1,
-  },
-  // Row 3: Defence, Fishing, Cooking
-  {
-    key: "defense",
-    label: "Defence",
-    icon: "🛡️",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "fishing",
-    label: "Fishing",
-    icon: "🐟",
-    category: "gathering",
-    defaultLevel: 1,
-  },
-  {
-    key: "cooking",
-    label: "Cooking",
-    icon: "🍖",
-    category: "production",
-    defaultLevel: 1,
-  },
-  // Row 4: Ranged, Firemaking, Woodcutting
-  {
-    key: "ranged",
-    label: "Ranged",
-    icon: "🏹",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "firemaking",
-    label: "Firemaking",
-    icon: "🔥",
-    category: "production",
-    defaultLevel: 1,
-  },
-  {
-    key: "woodcutting",
-    label: "Woodcutting",
-    icon: "🪓",
-    category: "gathering",
-    defaultLevel: 1,
-  },
-  // Row 5: Magic, Prayer, Crafting
-  {
-    key: "magic",
-    label: "Magic",
-    icon: "🔮",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "prayer",
-    label: "Prayer",
-    icon: "✨",
-    category: "combat",
-    defaultLevel: 1,
-  },
-  {
-    key: "crafting",
-    label: "Crafting",
-    icon: "🧵",
-    category: "production",
-    defaultLevel: 1,
-  },
-  // Row 6: Fletching, Runecrafting
-  {
-    key: "fletching",
-    label: "Fletching",
-    icon: "🏹",
-    category: "production",
-    defaultLevel: 1,
-  },
-  {
-    key: "runecrafting",
-    label: "Runecrafting",
-    icon: "🔮",
-    category: "production",
-    defaultLevel: 1,
-  },
-] as const;
+export const SKILL_DEFINITIONS: readonly SkillDefinition[] = Object.freeze(
+  manifest.definitions.map(
+    (d) =>
+      Object.freeze({
+        key: d.key as keyof Skills,
+        label: d.label,
+        icon: d.icon,
+        category: d.category,
+        defaultLevel: d.defaultLevel,
+      }) as SkillDefinition,
+  ),
+);
 
 /**
  * Get skill definitions by category
@@ -197,44 +101,23 @@ export function getSkillDefinition(
 // ============================================================================
 
 /** Emoji icons for each skill, keyed by lowercase skill name */
-export const SKILL_ICONS: Readonly<Record<string, string>> = {
-  attack: "⚔️",
-  strength: "💪",
-  defence: "🛡️",
-  defense: "🛡️", // US spelling alias
-  constitution: "❤️",
-  hitpoints: "❤️", // OSRS alias
-  ranged: "🏹",
-  prayer: "✨",
-  magic: "🔮",
-  cooking: "🍖",
-  woodcutting: "🪓",
-  fishing: "🐟",
-  firemaking: "🔥",
-  mining: "⛏️",
-  smithing: "🔨",
-  crafting: "🧵",
-  fletching: "🏹",
-  herblore: "🧪",
-  agility: "🏃",
-  thieving: "🗝️",
-  slayer: "💀",
-  farming: "🌱",
-  runecrafting: "🔮",
-  hunter: "🦌",
-  construction: "🏠",
-  summoning: "🐺",
-  dungeoneering: "🚪",
-  divination: "✨",
-  invention: "⚙️",
-  archaeology: "🏺",
-} as const;
+export const SKILL_ICONS: Readonly<Record<string, string>> = Object.freeze({
+  ...manifest.icons,
+});
 
 /**
- * Get the emoji icon for a skill
+ * Get the emoji icon for a skill (legacy in-tree path).
+ *
+ * Prefer `getEffectiveSkillIcon` from `../skill-icons` for new
+ * consumers — it adds runtime-registry preference (PIE hot-reload)
+ * with safe fallback to this same constant. Consolidating this
+ * helper to delegate is blocked by a module-load cycle
+ * (`skill-icons/index.ts` already imports from this file). Refactor
+ * is a separate slice once the legacy constant is deletable.
+ *
  * @param skill - Skill name (case-insensitive)
- * @returns Emoji icon or star fallback
+ * @returns Emoji icon or fallback icon
  */
 export function getSkillIcon(skill: string): string {
-  return SKILL_ICONS[skill.toLowerCase()] ?? "⭐";
+  return SKILL_ICONS[skill.toLowerCase()] ?? manifest.fallbackIcon;
 }
