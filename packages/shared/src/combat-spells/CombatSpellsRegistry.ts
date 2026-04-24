@@ -37,11 +37,15 @@ export class UnknownCombatSpellError extends Error {
 
 export type CombatSpellTier = "strike" | "bolt";
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type CombatSpellsReloadListener = () => void;
+
 export class CombatSpellsRegistry {
   private _manifest: CombatSpellsManifest | null = null;
   private _byId = new Map<string, CombatSpellEntry>();
   private _order: string[] = [];
   private _tierByGroupId = new Map<string, CombatSpellTier>();
+  private _reloadListeners = new Set<CombatSpellsReloadListener>();
 
   constructor(manifest?: CombatSpellsManifest) {
     if (manifest) this.load(manifest);
@@ -62,10 +66,38 @@ export class CombatSpellsRegistry {
       this._order.push(s.id);
       this._tierByGroupId.set(s.id, "bolt");
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(CombatSpellsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()` — both at server boot
+   * (DataManager) and on PIE hot-reload (`PIEEditorSession.updateManifests`).
+   * Returns an unsubscribe function. Listener throws are caught + logged.
+   */
+  onReloaded(cb: CombatSpellsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[combatSpellsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): CombatSpellsManifest {

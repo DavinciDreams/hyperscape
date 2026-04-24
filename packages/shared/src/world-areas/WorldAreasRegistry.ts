@@ -56,9 +56,13 @@ interface IndexedArea {
   readonly category: WorldAreaCategoryKey;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type WorldAreasReloadListener = () => void;
+
 export class WorldAreasRegistry {
   private _manifest: WorldAreasManifest | null = null;
   private _byId = new Map<string, IndexedArea>();
+  private _reloadListeners = new Set<WorldAreasReloadListener>();
 
   constructor(manifest?: WorldAreasManifest) {
     if (manifest) this.load(manifest);
@@ -78,10 +82,38 @@ export class WorldAreasRegistry {
         this._byId.set(areaId, { area, category });
       }
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(WorldAreasManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()` — both at server boot
+   * (DataManager) and on PIE hot-reload (`PIEEditorSession.updateManifests`).
+   * Returns an unsubscribe function. Listener throws are caught + logged.
+   */
+  onReloaded(cb: WorldAreasReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[worldAreasRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): WorldAreasManifest {

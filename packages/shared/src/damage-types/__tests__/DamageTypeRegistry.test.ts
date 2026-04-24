@@ -260,3 +260,40 @@ describe("DamageTypeRegistry — integration", () => {
     expect(reg.applyDamage("pure", "slashing", 99)).toBe(99);
   });
 });
+
+describe("DamageTypeRegistry — onReloaded() reload listeners", () => {
+  it("fires after every load() and honors unsubscribe", () => {
+    const reg = new DamageTypeRegistry();
+    let count = 0;
+    const unsubscribe = reg.onReloaded(() => {
+      count += 1;
+    });
+    reg.load(manifest());
+    reg.load(manifest());
+    expect(count).toBe(2);
+    unsubscribe();
+    reg.load(manifest());
+    expect(count).toBe(2);
+  });
+
+  it("loadFromJson() also triggers the listener", () => {
+    const reg = new DamageTypeRegistry();
+    let fired = false;
+    reg.onReloaded(() => {
+      fired = true;
+    });
+    reg.loadFromJson(manifest());
+    expect(fired).toBe(true);
+  });
+
+  it("a throwing listener does not break sibling listeners", () => {
+    const reg = new DamageTypeRegistry();
+    const seen: string[] = [];
+    reg.onReloaded(() => {
+      throw new Error("boom");
+    });
+    reg.onReloaded(() => seen.push("ok"));
+    reg.load(manifest());
+    expect(seen).toEqual(["ok"]);
+  });
+});

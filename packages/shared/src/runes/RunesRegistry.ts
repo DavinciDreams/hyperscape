@@ -41,10 +41,14 @@ export interface RuneRequirement {
   quantity: number;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type RunesReloadListener = () => void;
+
 export class RunesRegistry {
   private _manifest: RunesManifest | null = null;
   private _byId = new Map<string, RuneEntry>();
   private _staffById = new Map<string, ElementalStaffEntry>();
+  private _reloadListeners = new Set<RunesReloadListener>();
 
   constructor(manifest?: RunesManifest) {
     if (manifest) this.load(manifest);
@@ -58,10 +62,38 @@ export class RunesRegistry {
     for (const s of manifest.elementalStaves) {
       this._staffById.set(s.staffId, s);
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(RunesManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()` — both at server boot
+   * (DataManager) and on PIE hot-reload (`PIEEditorSession.updateManifests`).
+   * Returns an unsubscribe function. Listener throws are caught + logged.
+   */
+  onReloaded(cb: RunesReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[runesRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): RunesManifest {

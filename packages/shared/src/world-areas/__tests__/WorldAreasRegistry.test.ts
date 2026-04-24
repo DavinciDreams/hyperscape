@@ -141,3 +141,50 @@ describe("WorldAreasRegistry", () => {
     expect(() => new WorldAreasRegistry(parsed)).toThrow(/id collision/);
   });
 });
+
+describe("WorldAreasRegistry — onReloaded() reload listeners", () => {
+  it("fires after every load()", () => {
+    const reg = new WorldAreasRegistry();
+    let count = 0;
+    reg.onReloaded(() => {
+      count += 1;
+    });
+    reg.load(manifest());
+    reg.load(manifest());
+    expect(count).toBe(2);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const reg = new WorldAreasRegistry();
+    let count = 0;
+    const unsubscribe = reg.onReloaded(() => {
+      count += 1;
+    });
+    reg.load(manifest());
+    expect(count).toBe(1);
+    unsubscribe();
+    reg.load(manifest());
+    expect(count).toBe(1);
+  });
+
+  it("loadFromJson() also triggers the listener", () => {
+    const reg = new WorldAreasRegistry();
+    let fired = false;
+    reg.onReloaded(() => {
+      fired = true;
+    });
+    reg.loadFromJson(manifest());
+    expect(fired).toBe(true);
+  });
+
+  it("a throwing listener does not break sibling listeners", () => {
+    const reg = new WorldAreasRegistry();
+    const seen: string[] = [];
+    reg.onReloaded(() => {
+      throw new Error("boom");
+    });
+    reg.onReloaded(() => seen.push("ok"));
+    reg.load(manifest());
+    expect(seen).toEqual(["ok"]);
+  });
+});
