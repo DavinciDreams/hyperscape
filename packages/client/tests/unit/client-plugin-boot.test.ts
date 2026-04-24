@@ -61,6 +61,7 @@ describe("client plugin boot — bilateral system registration", () => {
     // Client-only visual systems — register when world.isServer === false.
     expect(world.registered).toContain("damage-splat");
     expect(world.registered).toContain("duel-countdown-splat");
+    expect(world.registered).toContain("projectile-renderer");
     expect(world.registered).toContain("bfsPathDebug");
     expect(world.registered).toContain("walkableDebug");
 

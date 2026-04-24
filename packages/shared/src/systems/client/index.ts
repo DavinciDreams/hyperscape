@@ -19,7 +19,7 @@ export { EquipmentVisualSystem } from "./EquipmentVisualSystem";
 // DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 export { XPDropSystem } from "./XPDropSystem";
-export { ProjectileRenderer } from "./ProjectileRenderer";
+// ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 export { ZoneVisualsSystem } from "./ZoneVisualsSystem";
 export { ResourceTileDebugSystem } from "./ResourceTileDebugSystem";
 export { DuelArenaVisualsSystem } from "./DuelArenaVisualsSystem";

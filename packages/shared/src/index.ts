@@ -1244,6 +1244,15 @@ export { CircularSpawnArea } from "./utils/physics/CircularSpawnArea";
 export { TerrainSystem } from "./systems/shared";
 export { BridgeSystem } from "./systems/shared/world/BridgeSystem";
 
+// Spell + arrow visual configs — consumed by ProjectileRenderer
+// in @hyperforge/hyperscape (migrated 2026-04-24).
+export {
+  getSpellVisual,
+  getArrowVisual,
+  type SpellVisualConfig,
+  type ArrowVisualConfig,
+} from "./data/spell-visuals";
+
 // Export town, POI, and road systems
 export { TownSystem } from "./systems/shared";
 export { POISystem } from "./systems/shared";

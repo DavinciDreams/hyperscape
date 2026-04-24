@@ -143,7 +143,7 @@ import { ScriptingSystem } from "../scripting/ScriptingSystem";
 // NOTE: Import directly from specific files to avoid circular dependency
 // DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import { ProjectileRenderer } from "../../client/ProjectileRenderer";
+// ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 import { SocialSystem } from "../../client/SocialSystem";
 import { DuelArenaVisualsSystem } from "../../client/DuelArenaVisualsSystem";
 
@@ -412,10 +412,9 @@ export async function registerSystems(world: World): Promise<void> {
 
   // Client-only visual combat feedback systems
   if (world.isClient) {
-    // DamageSplatSystem + DuelCountdownSplatSystem registered by
-    // @hyperforge/hyperscape plugin (client-side onEnable, gated on
-    // !world.isServer). Migrated 2026-04-24.
-    world.register("projectile-renderer", ProjectileRenderer);
+    // DamageSplatSystem + DuelCountdownSplatSystem + ProjectileRenderer
+    // registered by @hyperforge/hyperscape plugin (client-side onEnable,
+    // gated on !world.isServer). Migrated 2026-04-24.
     world.register("inventory-interaction", InventoryInteractionSystem);
 
     // XP Drop System - 3D version disabled, using 2D screen-space drops in XPProgressOrb

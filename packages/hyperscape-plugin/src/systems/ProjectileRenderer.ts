@@ -23,18 +23,22 @@
  * @see spell-visuals.ts for visual configuration
  */
 
-import THREE from "../../extras/three/three";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (5th client-only migration). Visual
+// projectile renderer for ranged + magic attacks. Uses THREE.Sprite
+// arc + lerp interpolation. OSRS-specific feedback.
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { System } from "../shared/infrastructure/System";
-import { EventType } from "../../types/events";
-import type { World } from "../../core/World";
-import type { WorldOptions } from "../../types/index";
 import {
-  getSpellVisual,
-  getArrowVisual,
-  type SpellVisualConfig,
   type ArrowVisualConfig,
-} from "../../data/spell-visuals";
+  EventType,
+  getArrowVisual,
+  getSpellVisual,
+  type SpellVisualConfig,
+  SystemClass as System,
+  THREE,
+  type World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 /**
  * Trail sprite for spell effects

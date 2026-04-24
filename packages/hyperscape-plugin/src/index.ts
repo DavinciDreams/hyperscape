@@ -41,6 +41,7 @@ import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
+import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
 import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
 import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
@@ -151,6 +152,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       if (!ctx.world.isServer) {
         register("damage-splat", DamageSplatSystem);
         register("duel-countdown-splat", DuelCountdownSplatSystem);
+        register("projectile-renderer", ProjectileRenderer);
         // Debug overlays — toggled via F5 panel keys (B / W).
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);
