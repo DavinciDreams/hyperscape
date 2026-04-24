@@ -50,6 +50,10 @@ import hyperscapeFactory, {
   type HyperscapeContext,
 } from "@hyperforge/hyperscape";
 import { manifest as hyperscapeManifest } from "@hyperforge/hyperscape";
+import {
+  manifest as shooterDemoManifest,
+  shooterDemoPluginFactory,
+} from "@hyperforge/plugin-shooter-demo";
 
 /**
  * Per-plugin services live for the lifetime of the server. They get
@@ -128,27 +132,74 @@ export function _peekStubWorld(world: unknown): WorldStub | null {
 }
 
 /**
- * Build the in-binary plugin set. Exported separately so tests can
- * boot the same set through `startPluginSessionFromModules` without
- * needing the rest of the server bootstrap.
+ * Identifiers for the different game plugin sets the server knows
+ * how to boot. Extend by adding a new case to
+ * `getServerPluginModules()` and, if the new game has a typed
+ * context (beyond the combat/skills/hyperscape cases already
+ * handled), a new branch to `bootServerPlugins()`'s contextFactory.
+ *
+ * Today's entries:
+ *   - "hyperscape"   — production Hyperscape meta-plugin stack
+ *                       (combat + skills + @hyperforge/hyperscape).
+ *   - "shooter-demo" — acceptance-test alternate game stack
+ *                       (combat + @hyperforge/plugin-shooter-demo).
+ *                       Used to demonstrate master-plan criterion #4
+ *                       at the server-boot level.
  */
-export function getServerPluginModules(): ReadonlyArray<
-  LoadedPluginModule<PluginContextBase>
-> {
-  return [
-    {
-      manifest: combatManifest,
-      factory: combatPluginFactory(DEFAULT_COMBAT_ABILITIES),
-    },
-    {
-      manifest: skillsManifest,
-      factory: skillsPluginFactory(DEFAULT_SKILLS),
-    },
-    {
-      manifest: hyperscapeManifest,
-      factory: hyperscapeFactory,
-    },
-  ];
+export type GamePluginSetId = "hyperscape" | "shooter-demo";
+
+/**
+ * Resolve which game plugin set the server should boot from the
+ * `HYPERSCAPE_GAME_PLUGIN` env var. Defaults to "hyperscape" when
+ * unset or invalid, preserving every existing boot path's behavior.
+ */
+export function resolveGamePluginSetIdFromEnv(): GamePluginSetId {
+  const raw = process.env.HYPERSCAPE_GAME_PLUGIN;
+  if (raw === "shooter-demo") return "shooter-demo";
+  return "hyperscape";
+}
+
+/**
+ * Build the in-binary plugin set for the requested game. Exported
+ * separately so tests can feed a specific game id to
+ * `startPluginSessionFromModules` without going through env-var
+ * resolution or the full server bootstrap.
+ */
+export function getServerPluginModules(
+  gameId: GamePluginSetId = "hyperscape",
+): ReadonlyArray<LoadedPluginModule<PluginContextBase>> {
+  switch (gameId) {
+    case "hyperscape":
+      return [
+        {
+          manifest: combatManifest,
+          factory: combatPluginFactory(DEFAULT_COMBAT_ABILITIES),
+        },
+        {
+          manifest: skillsManifest,
+          factory: skillsPluginFactory(DEFAULT_SKILLS),
+        },
+        {
+          manifest: hyperscapeManifest,
+          factory: hyperscapeFactory,
+        },
+      ];
+    case "shooter-demo":
+      return [
+        {
+          // Combat is the ability-registry primitive. The shooter
+          // demo owns its own ability set, so combat loads with an
+          // empty starter pack here — mirrors the shooter-demo
+          // acceptance test in packages/plugin-shooter-demo/.
+          manifest: combatManifest,
+          factory: combatPluginFactory([]),
+        },
+        {
+          manifest: shooterDemoManifest,
+          factory: shooterDemoPluginFactory(),
+        },
+      ];
+  }
 }
 
 /**
@@ -164,8 +215,12 @@ export function getServerPluginModules(): ReadonlyArray<
  */
 export async function bootServerPlugins(
   world?: World,
+  gameId: GamePluginSetId = resolveGamePluginSetIdFromEnv(),
 ): Promise<PluginSession<PluginContextBase>> {
-  const modules = getServerPluginModules();
+  const modules = getServerPluginModules(gameId);
+  console.log(
+    `[plugin-boot] game=${gameId} — ${modules.length} plugin(s) in set`,
+  );
   const session = await startPluginSessionFromModules(modules, {
     // Context factory dispatches by manifest id. Each plugin receives
     // its declared context shape (CombatContext / SkillsContext /
@@ -208,6 +263,25 @@ export async function bootServerPlugins(
             pluginId,
             scope,
             world: world ?? createNoopWorldStub(),
+          };
+          return ctx as PluginContextBase;
+        }
+        case shooterDemoManifest.id: {
+          // Shooter demo contributes combat abilities through the same
+          // CombatContext shape the combat plugin does — shares the
+          // per-server `CombatAbilityService` so both plugins write to
+          // the same registry. When the active gameId is
+          // "shooter-demo", combat itself loaded with an empty starter
+          // pack (see getServerPluginModules), so only shooter's
+          // abilities end up registered.
+          const service = getCombatService();
+          const ctx: CombatContext = {
+            pluginId,
+            scope,
+            registerAbility(ability) {
+              service.registerAbility(ability);
+              scope.register(() => service.unregisterAbility(ability.id));
+            },
           };
           return ctx as PluginContextBase;
         }

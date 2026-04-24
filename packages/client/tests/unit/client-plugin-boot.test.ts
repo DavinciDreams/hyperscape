@@ -100,3 +100,36 @@ describe("client plugin boot — bilateral system registration", () => {
     await session.stop();
   });
 });
+
+describe("client plugin boot — alternate game id (shooter-demo)", () => {
+  it('bootClientPlugins(world, "shooter-demo") loads combat + shooter-demo only', async () => {
+    const world = createRecordingWorld({ isServer: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = await bootClientPlugins(world as any, "shooter-demo");
+
+    expect(session.failedPackages).toEqual([]);
+    expect(session.unresolvable).toEqual([]);
+
+    const startedIds = session.records.map((r) => r.manifest.id).sort();
+    expect(startedIds).toEqual(
+      ["com.hyperforge.combat", "com.hyperforge.plugin-shooter-demo"].sort(),
+    );
+
+    // Hyperscape-specific client systems are NOT registered under
+    // the shooter-demo game. No mob-death, no damage-splat, no
+    // duel-countdown-splat, no debug overlays.
+    expect(world.registered).not.toContain("mob-death");
+    expect(world.registered).not.toContain("damage-splat");
+    expect(world.registered).not.toContain("duel-countdown-splat");
+    expect(world.registered).not.toContain("bfsPathDebug");
+    expect(world.registered).not.toContain("walkableDebug");
+    expect(world.registered).not.toContain("projectile-renderer");
+
+    // Under shooter-demo, the only plugin that registers systems on
+    // the world is hyperscape-meta — and it isn't in this set. So
+    // world.registered should be empty.
+    expect(world.registered).toEqual([]);
+
+    await session.stop();
+  });
+});

@@ -50,6 +50,10 @@ import hyperscapeFactory, {
   type HyperscapeContext,
 } from "@hyperforge/hyperscape";
 import { manifest as hyperscapeManifest } from "@hyperforge/hyperscape";
+import {
+  manifest as shooterDemoManifest,
+  shooterDemoPluginFactory,
+} from "@hyperforge/plugin-shooter-demo";
 
 let _combatService: CombatAbilityService | null = null;
 let _skillsService: SkillsService | null = null;
@@ -64,23 +68,63 @@ function getSkillsService(): SkillsService {
   return _skillsService;
 }
 
-function getServerPluginModules(): ReadonlyArray<
-  LoadedPluginModule<PluginContextBase>
-> {
-  return [
-    {
-      manifest: combatManifest,
-      factory: combatPluginFactory(DEFAULT_COMBAT_ABILITIES),
-    },
-    {
-      manifest: skillsManifest,
-      factory: skillsPluginFactory(DEFAULT_SKILLS),
-    },
-    {
-      manifest: hyperscapeManifest,
-      factory: hyperscapeFactory,
-    },
-  ];
+/**
+ * Identifiers for the different game plugin sets the client knows
+ * how to boot. Mirrors `packages/server/src/startup/plugins.ts` —
+ * same set of values, same semantics. Today's entries:
+ *   - "hyperscape"   — production Hyperscape meta-plugin stack.
+ *   - "shooter-demo" — acceptance-test alternate game stack.
+ */
+export type GamePluginSetId = "hyperscape" | "shooter-demo";
+
+/**
+ * Resolve which game plugin set the client should boot. Reads
+ * `VITE_HYPERSCAPE_GAME_PLUGIN` at runtime; defaults to
+ * "hyperscape". The `VITE_` prefix is required for the variable
+ * to be exposed in the browser bundle.
+ */
+export function resolveGamePluginSetIdFromEnv(): GamePluginSetId {
+  const raw =
+    typeof import.meta.env === "object"
+      ? (import.meta.env as Record<string, string | undefined>)[
+          "VITE_HYPERSCAPE_GAME_PLUGIN"
+        ]
+      : undefined;
+  if (raw === "shooter-demo") return "shooter-demo";
+  return "hyperscape";
+}
+
+function getClientPluginModules(
+  gameId: GamePluginSetId = "hyperscape",
+): ReadonlyArray<LoadedPluginModule<PluginContextBase>> {
+  switch (gameId) {
+    case "hyperscape":
+      return [
+        {
+          manifest: combatManifest,
+          factory: combatPluginFactory(DEFAULT_COMBAT_ABILITIES),
+        },
+        {
+          manifest: skillsManifest,
+          factory: skillsPluginFactory(DEFAULT_SKILLS),
+        },
+        {
+          manifest: hyperscapeManifest,
+          factory: hyperscapeFactory,
+        },
+      ];
+    case "shooter-demo":
+      return [
+        {
+          manifest: combatManifest,
+          factory: combatPluginFactory([]),
+        },
+        {
+          manifest: shooterDemoManifest,
+          factory: shooterDemoPluginFactory(),
+        },
+      ];
+  }
 }
 
 /**
@@ -94,8 +138,12 @@ function getServerPluginModules(): ReadonlyArray<
  */
 export async function bootClientPlugins(
   world: World,
+  gameId: GamePluginSetId = resolveGamePluginSetIdFromEnv(),
 ): Promise<PluginSession<PluginContextBase>> {
-  const modules = getServerPluginModules();
+  const modules = getClientPluginModules(gameId);
+  console.log(
+    `[client-plugin-boot] game=${gameId} — ${modules.length} plugin(s) in set`,
+  );
   const session = await startPluginSessionFromModules(modules, {
     contextFactory: ({ pluginId, scope }) => {
       switch (pluginId) {
@@ -128,6 +176,21 @@ export async function bootClientPlugins(
             pluginId,
             scope,
             world,
+          };
+          return ctx as PluginContextBase;
+        }
+        case shooterDemoManifest.id: {
+          // Shooter demo contributes combat abilities through the
+          // same CombatContext shape combat itself uses. See the
+          // parallel comment in packages/server/src/startup/plugins.ts.
+          const service = getCombatService();
+          const ctx: CombatContext = {
+            pluginId,
+            scope,
+            registerAbility(ability) {
+              service.registerAbility(ability);
+              scope.register(() => service.unregisterAbility(ability.id));
+            },
           };
           return ctx as PluginContextBase;
         }

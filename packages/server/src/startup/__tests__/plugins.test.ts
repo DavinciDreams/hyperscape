@@ -20,6 +20,7 @@ import {
   _resetServerPluginServicesForTests,
   bootServerPlugins,
   getServerPluginModules,
+  resolveGamePluginSetIdFromEnv,
 } from "../plugins.js";
 
 /**
@@ -173,5 +174,80 @@ describe("server plugin boot — in-binary set", () => {
     expect(world.registered).not.toContain("health-regen");
 
     await session.stop();
+  });
+});
+
+describe("server plugin boot — alternate game id (shooter-demo)", () => {
+  it('bootServerPlugins("shooter-demo") starts only combat + shooter-demo, not hyperscape', async () => {
+    _resetServerPluginServicesForTests();
+    const world = createRecordingWorld({ isServer: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = await bootServerPlugins(world as any, "shooter-demo");
+
+    // Runs to completion cleanly.
+    expect(session.failedPackages).toEqual([]);
+    expect(session.unresolvable).toEqual([]);
+
+    const startedIds = session.records.map((r) => r.manifest.id).sort();
+    expect(startedIds).toEqual(
+      ["com.hyperforge.combat", "com.hyperforge.plugin-shooter-demo"].sort(),
+    );
+
+    // Shooter-demo's ability registered via shared CombatAbilityService.
+    // Combat's default starter pack was NOT loaded (empty pack when
+    // gameId is "shooter-demo"), so the service holds ONLY "demo-shoot".
+    const combatService = _peekCombatService();
+    expect(combatService).not.toBeNull();
+    if (combatService === null) return;
+    expect(combatService.getAbility("demo-shoot")).toBeDefined();
+    expect(combatService.list().size).toBe(1);
+
+    // Skills service was never constructed (no skills plugin in this set).
+    const skillsService = _peekSkillsService();
+    expect(skillsService).toBeNull();
+
+    // Hyperscape-specific systems (mob-death, health-regen, etc.) are
+    // NOT registered when the active game is shooter-demo.
+    expect(world.registered).not.toContain("mob-death");
+    expect(world.registered).not.toContain("health-regen");
+    expect(world.registered).not.toContain("gravestone-loot");
+
+    await session.stop();
+    expect(combatService.list().size).toBe(0);
+  });
+
+  it("getServerPluginModules returns different module sets per game id", () => {
+    const hyperscapeSet = getServerPluginModules("hyperscape").map(
+      (m) => m.manifest.id,
+    );
+    const shooterSet = getServerPluginModules("shooter-demo").map(
+      (m) => m.manifest.id,
+    );
+
+    expect(hyperscapeSet).toContain("com.hyperforge.hyperscape");
+    expect(hyperscapeSet).toContain("com.hyperforge.skills");
+    expect(shooterSet).not.toContain("com.hyperforge.hyperscape");
+    expect(shooterSet).not.toContain("com.hyperforge.skills");
+    expect(shooterSet).toContain("com.hyperforge.plugin-shooter-demo");
+  });
+
+  it("resolveGamePluginSetIdFromEnv respects HYPERSCAPE_GAME_PLUGIN", () => {
+    const save = process.env.HYPERSCAPE_GAME_PLUGIN;
+    try {
+      process.env.HYPERSCAPE_GAME_PLUGIN = "shooter-demo";
+      expect(resolveGamePluginSetIdFromEnv()).toBe("shooter-demo");
+
+      process.env.HYPERSCAPE_GAME_PLUGIN = "";
+      expect(resolveGamePluginSetIdFromEnv()).toBe("hyperscape");
+
+      process.env.HYPERSCAPE_GAME_PLUGIN = "bogus-unknown-id";
+      expect(resolveGamePluginSetIdFromEnv()).toBe("hyperscape");
+
+      delete process.env.HYPERSCAPE_GAME_PLUGIN;
+      expect(resolveGamePluginSetIdFromEnv()).toBe("hyperscape");
+    } finally {
+      if (save === undefined) delete process.env.HYPERSCAPE_GAME_PLUGIN;
+      else process.env.HYPERSCAPE_GAME_PLUGIN = save;
+    }
   });
 });

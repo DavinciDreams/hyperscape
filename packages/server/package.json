@@ -76,6 +76,7 @@
     "@hyperforge/hyperscape": "workspace:*",
     "@hyperforge/plugin-hyperia": "workspace:*",
     "@hyperforge/shared": "workspace:*",
+    "@hyperforge/plugin-shooter-demo": "workspace:*",
     "@hyperforge/skills": "workspace:*",
     "@hyperforge/web3": "workspace:*",
     "@livekit/rtc-node": "^0.13.24",
