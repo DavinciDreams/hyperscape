@@ -117,3 +117,45 @@ describe("xp-orb HUD → xpCurveRegistry consumer wiring", () => {
     expect(getXPForLevel(120)).toBe(13_034_431);
   });
 });
+
+describe("xp-orb HUD → xpCurveRegistry.onReloaded() subscription", () => {
+  it("fires HUD-side reload listener on every registry load (boot + PIE)", () => {
+    const calls: ReadonlyArray<string>[] = [];
+    const unsubscribe = xpCurveRegistry.onReloaded((ids) => calls.push(ids));
+
+    // First load — simulates DataManager boot path.
+    xpCurveRegistry.load([
+      {
+        id: "osrs-classic",
+        name: "OSRS Classic",
+        description: "",
+        kind: "formula",
+        formula: "rs-classic",
+        maxLevel: 99,
+        params: {},
+      },
+    ]);
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toEqual(["osrs-classic"]);
+
+    // Second load — simulates PIEEditorSession.updateManifests({ xpCurves }).
+    xpCurveRegistry.load([
+      {
+        id: "osrs-classic",
+        name: "Editor override",
+        description: "",
+        kind: "formula",
+        formula: "linear",
+        maxLevel: 99,
+        params: { base: 100, growth: 50 },
+      },
+    ]);
+    expect(calls.length).toBe(2);
+
+    unsubscribe();
+    xpCurveRegistry.load([]);
+    // No more notifications after unsubscribe — the HUD's useEffect
+    // cleanup is what calls this on unmount.
+    expect(calls.length).toBe(2);
+  });
+});

@@ -170,6 +170,10 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
   const [levelUpSkill, setLevelUpSkill] = useState<string | null>(null);
   const [floatingDrops, setFloatingDrops] = useState<GroupedXPDrop[]>([]);
   const [hoveredSkill, setHoveredSkill] = useState<string | null>(null);
+  // Bumped whenever `xpCurveRegistry` reloads (PIE hot-reload of
+  // xp-curves.json). Perturbs the derived `useMemo` deps so progress
+  // bars/xpToNext recompute without waiting for the next XP gain.
+  const [curveRevision, setCurveRevision] = useState(0);
 
   const dropIdRef = useRef(0);
   const pendingDropRef = useRef<GroupedXPDrop | null>(null);
@@ -202,21 +206,39 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
     }
   }, [world.entities?.player]);
 
-  // Calculate progress to next level (uses pre-computed XP table)
-  const calculateProgress = useCallback((xp: number, level: number): number => {
-    if (level >= 99) return 100;
-    const currentLevelXP = getXPForLevel(level);
-    const nextLevelXP = getXPForLevel(level + 1);
-    const xpInLevel = xp - currentLevelXP;
-    const xpNeeded = nextLevelXP - currentLevelXP;
-    return Math.min(100, Math.max(0, (xpInLevel / xpNeeded) * 100));
-  }, []);
+  // Calculate progress to next level (reads through xpCurveRegistry).
+  // `curveRevision` is in the dep list so the callback identity flips
+  // on every PIE hot-reload of xp-curves.json — keeping the downstream
+  // `useMemo` honest.
+  const calculateProgress = useCallback(
+    (xp: number, level: number): number => {
+      if (level >= 99) return 100;
+      const currentLevelXP = getXPForLevel(level);
+      const nextLevelXP = getXPForLevel(level + 1);
+      const xpInLevel = xp - currentLevelXP;
+      const xpNeeded = nextLevelXP - currentLevelXP;
+      return Math.min(100, Math.max(0, (xpInLevel / xpNeeded) * 100));
+    },
+    [curveRevision],
+  );
 
-  // Calculate XP to next level (uses pre-computed XP table)
-  const getXPToNextLevel = useCallback((xp: number, level: number): number => {
-    if (level >= 99) return 0;
-    const nextLevelXP = getXPForLevel(level + 1);
-    return nextLevelXP - xp;
+  // Calculate XP to next level (reads through xpCurveRegistry). See
+  // `calculateProgress` for why `curveRevision` is in the deps.
+  const getXPToNextLevel = useCallback(
+    (xp: number, level: number): number => {
+      if (level >= 99) return 0;
+      const nextLevelXP = getXPForLevel(level + 1);
+      return nextLevelXP - xp;
+    },
+    [curveRevision],
+  );
+
+  // Re-render derived progress on PIE hot-reload of `xp-curves.json`.
+  useEffect(() => {
+    const unsubscribe = xpCurveRegistry.onReloaded(() => {
+      setCurveRevision((r) => r + 1);
+    });
+    return unsubscribe;
   }, []);
 
   // Memoize derived skill data to avoid recalculating on every render
