@@ -24,6 +24,7 @@ import {
   WoodcuttingManifestSchema,
 } from "@hyperforge/manifest-schema";
 import { gatheringResources } from "../gathering/index.js";
+import { npcDefinitionsRegistry } from "../npc-definitions/index.js";
 import { BANKS, GENERAL_STORES } from "./banks-stores";
 import { ITEMS } from "./items";
 import { ALL_NPCS } from "./npcs";
@@ -984,10 +985,25 @@ export class DataManager {
             `${baseUrl}/npcs.json`,
             "npcs.json",
           );
+          const normalizedList: NPCData[] = [];
           for (const npc of npcList) {
             const normalized = this.normalizeNPC(npc);
             (ALL_NPCS as Map<string, NPCData>).set(normalized.id, normalized);
+            normalizedList.push(normalized);
           }
+          // Populate the runtime npcDefinitionsRegistry so the
+          // registry-prefer branch in `getNPCById` is hit at runtime.
+          // Without this, the registry stays empty in production and
+          // every getNPCById falls through to the legacy ALL_NPCS map
+          // forever — defeating the PIE-hot-reload path. Cast bridges
+          // the in-tree NPCData to the schema-derived NpcDefinition;
+          // shapes are structurally compatible (NPCData narrows
+          // sub-objects further but we only ever read the wider shape).
+          npcDefinitionsRegistry.load(
+            normalizedList as unknown as Parameters<
+              typeof npcDefinitionsRegistry.load
+            >[0],
+          );
         })(),
 
         // World areas
@@ -1392,10 +1408,20 @@ export class DataManager {
       const npcsPath = path.join(manifestsDir, "npcs.json");
       const npcsData = await fs.readFile(npcsPath, "utf-8");
       const npcList = JSON.parse(npcsData) as Array<NPCDataInput>;
+      const normalizedNpcsList: NPCData[] = [];
       for (const npc of npcList) {
         const normalized = this.normalizeNPC(npc);
         (ALL_NPCS as Map<string, NPCData>).set(normalized.id, normalized);
+        normalizedNpcsList.push(normalized);
       }
+      // Mirror Phase-2 boot-load: keep npcDefinitionsRegistry in sync
+      // with ALL_NPCS so the registry-prefer branch in `getNPCById`
+      // returns data on this filesystem-load path too.
+      npcDefinitionsRegistry.load(
+        normalizedNpcsList as unknown as Parameters<
+          typeof npcDefinitionsRegistry.load
+        >[0],
+      );
 
       // Load gathering resources from separate per-skill manifests
       // This matches the recipes/ pattern for organizational consistency
