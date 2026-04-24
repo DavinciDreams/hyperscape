@@ -29,6 +29,8 @@ function mkIO(opts?: {
   existing?: Iterable<string>;
   /** Optional catalog-loader stub for `lint` tests. */
   catalogLoader?: CliIO["catalogLoader"];
+  /** Optional fetch stub for `publish` tests. */
+  fetch?: CliIO["fetch"];
 }): {
   io: CliIO;
   stdout: () => string;
@@ -60,6 +62,7 @@ function mkIO(opts?: {
         mkdirs.push(p);
       },
       catalogLoader: opts?.catalogLoader,
+      fetch: opts?.fetch,
     },
     stdout: () => out,
     stderr: () => err,
@@ -1601,5 +1604,285 @@ describe("runCli — pack subcommand", () => {
     expect(out.includes("\n")).toBe(false);
     expect(out.startsWith("{")).toBe(true);
     expect(out.endsWith("}")).toBe(true);
+  });
+});
+
+describe("runCli — publish subcommand", () => {
+  // Publish reuses the same on-disk plugin-package fixture pattern
+  // as pack. Tests with --registry inject a `fetch` stub that
+  // captures the request + returns a canned response; tests with
+  // --dry-run don't need a network seam.
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    const os = await import("node:os");
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    tmpDir = await fs.mkdtemp(
+      pathMod.join(os.tmpdir(), "hyperforge-publish-test-"),
+    );
+  });
+
+  afterEach(async () => {
+    const fs = await import("node:fs/promises");
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function validPluginJson(id: string) {
+    return JSON.stringify(
+      {
+        id,
+        name: id,
+        version: "0.1.0",
+        description: "test plugin",
+        entry: "./dist/index.js",
+        author: { name: "test" },
+        hyperforgeApi: "0.1.0",
+        dependencies: [],
+        loadAfter: [],
+        enabledByDefault: false,
+        contributions: {
+          systems: [],
+          entities: [],
+          widgets: [],
+          manifestSchemas: [],
+          paletteCategories: [],
+          toolbarTools: [],
+          commands: [],
+        },
+        tags: [],
+      },
+      null,
+      2,
+    );
+  }
+
+  async function writePluginPackage(opts: {
+    id?: string;
+    distFiles?: Record<string, string>;
+    pluginJson?: string;
+  }): Promise<string> {
+    const fs = await import("node:fs/promises");
+    const pathMod = await import("node:path");
+    const id = opts.id ?? "com.test.publish";
+    await fs.writeFile(
+      pathMod.join(tmpDir, "plugin.json"),
+      opts.pluginJson ?? validPluginJson(id),
+    );
+    if (opts.distFiles !== undefined) {
+      const distDir = pathMod.join(tmpDir, "dist");
+      await fs.mkdir(distDir, { recursive: true });
+      for (const [name, contents] of Object.entries(opts.distFiles)) {
+        const filePath = pathMod.join(distDir, name);
+        await fs.mkdir(pathMod.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents);
+      }
+    }
+    return tmpDir;
+  }
+
+  it("publish with no dir → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["publish"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("missing <dir> argument");
+  });
+
+  it("publish with unknown flag → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["publish", "/abs", "--gibberish"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("Unknown flag: --gibberish");
+  });
+
+  it("--registry without value → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["publish", "/abs", "--registry"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("--registry requires a value");
+  });
+
+  it("--token without value → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["publish", "/abs", "--token"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("--token requires a value");
+  });
+
+  it("publish with invalid manifest → exit 1", async () => {
+    await writePluginPackage({ pluginJson: '{ "id": "bad" }' });
+    const { io, stderr } = mkIO();
+    const code = await runCli(["publish", tmpDir, "--dry-run"], io);
+    expect(code).toBe(1);
+    expect(stderr()).toContain("publish:");
+  });
+
+  it("dry-run (no --registry) → emits would-be POST as JSON, exit 0", async () => {
+    await writePluginPackage({
+      distFiles: { "index.js": "x" },
+    });
+    const { io, stdout } = mkIO();
+    const code = await runCli(["publish", tmpDir], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      mode: string;
+      request: {
+        method: string;
+        url: string | null;
+        headers: Record<string, string>;
+        body: { manifest: { id: string }; bundleHash: string };
+      };
+    };
+    expect(parsed.mode).toBe("dry-run");
+    expect(parsed.request.method).toBe("POST");
+    expect(parsed.request.url).toBeNull();
+    expect(parsed.request.headers["content-type"]).toBe("application/json");
+    expect(parsed.request.body.manifest.id).toBe("com.test.publish");
+    expect(parsed.request.body.bundleHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("--dry-run with --registry → URL appears in dry-run payload", async () => {
+    await writePluginPackage({});
+    const { io, stdout } = mkIO();
+    const code = await runCli(
+      [
+        "publish",
+        tmpDir,
+        "--registry",
+        "https://registry.example.com",
+        "--dry-run",
+      ],
+      io,
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      request: { url: string };
+    };
+    expect(parsed.request.url).toBe("https://registry.example.com/api/plugins");
+  });
+
+  it("--token redacted in dry-run output (no leaking secrets)", async () => {
+    await writePluginPackage({});
+    const { io, stdout } = mkIO();
+    await runCli(
+      [
+        "publish",
+        tmpDir,
+        "--registry",
+        "https://r.example.com",
+        "--token",
+        "secret-token-xyz",
+        "--dry-run",
+      ],
+      io,
+    );
+    const out = stdout();
+    expect(out).toContain("Bearer ***redacted***");
+    expect(out).not.toContain("secret-token-xyz");
+  });
+
+  it("--registry with successful 200 response → POSTs + prints success", async () => {
+    await writePluginPackage({
+      distFiles: { "index.js": "x" },
+    });
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const { io, stdout } = mkIO({
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return new Response('{"id":"published-id-1"}', {
+          status: 200,
+          statusText: "OK",
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    const code = await runCli(
+      [
+        "publish",
+        tmpDir,
+        "--registry",
+        "https://registry.example.com",
+        "--token",
+        "tok-xyz",
+      ],
+      io,
+    );
+    expect(code).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe("https://registry.example.com/api/plugins");
+    expect(requests[0]!.init?.method).toBe("POST");
+    const headers = requests[0]!.init?.headers as Record<string, string>;
+    expect(headers["content-type"]).toBe("application/json");
+    expect(headers.authorization).toBe("Bearer tok-xyz");
+    expect(stdout()).toContain(
+      "✓ Published com.test.publish@0.1.0 to https://registry.example.com/api/plugins",
+    );
+    expect(stdout()).toContain("manifestHash:");
+    expect(stdout()).toContain("bundleHash:");
+    expect(stdout()).toContain('"id":"published-id-1"');
+  });
+
+  it("trailing slash on --registry is normalized", async () => {
+    await writePluginPackage({});
+    const requests: Array<{ url: string }> = [];
+    const { io } = mkIO({
+      fetch: async (input) => {
+        requests.push({ url: String(input) });
+        return new Response("ok", { status: 200, statusText: "OK" });
+      },
+    });
+    await runCli(
+      ["publish", tmpDir, "--registry", "https://r.example.com/"],
+      io,
+    );
+    expect(requests[0]!.url).toBe("https://r.example.com/api/plugins");
+  });
+
+  it("--registry with 4xx response → exit 1, prints error + body", async () => {
+    await writePluginPackage({});
+    const { io, stderr } = mkIO({
+      fetch: async () =>
+        new Response('{"error":"version already published"}', {
+          status: 409,
+          statusText: "Conflict",
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    const code = await runCli(
+      ["publish", tmpDir, "--registry", "https://r.example.com"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("returned 409 Conflict");
+    expect(stderr()).toContain("version already published");
+  });
+
+  it("--registry with network error → exit 1 with stderr message", async () => {
+    await writePluginPackage({});
+    const { io, stderr } = mkIO({
+      fetch: async () => {
+        throw new Error("ECONNREFUSED 127.0.0.1:9999");
+      },
+    });
+    const code = await runCli(
+      ["publish", tmpDir, "--registry", "https://r.example.com"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("network error");
+    expect(stderr()).toContain("ECONNREFUSED");
+  });
+
+  it("--compact emits single-line dry-run JSON", async () => {
+    await writePluginPackage({});
+    const { io, stdout } = mkIO();
+    const code = await runCli(
+      ["publish", tmpDir, "--dry-run", "--compact"],
+      io,
+    );
+    expect(code).toBe(0);
+    const out = stdout().trim();
+    expect(out.includes("\n")).toBe(false);
+    expect(out.startsWith("{")).toBe(true);
   });
 });

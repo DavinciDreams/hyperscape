@@ -22,7 +22,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { PluginManifestSchema } from "@hyperforge/manifest-schema";
+import {
+  PluginManifestSchema,
+  type PluginManifest,
+} from "@hyperforge/manifest-schema";
 
 import { validatePluginDirectory } from "./validate.js";
 import {
@@ -83,6 +86,20 @@ export interface CliIO {
     pluginsDir: string,
     opts: LoadPluginCatalogOptions,
   ) => Promise<PluginCatalogResult>;
+
+  /**
+   * Optional fetch seam used by the `publish` subcommand. Tests
+   * supply an in-memory stub that records the request + returns a
+   * canned response; the binary leaves it undefined and the CLI
+   * falls back to globalThis.fetch.
+   *
+   * Signature mirrors the global `fetch` so the call site is
+   * indistinguishable.
+   */
+  readonly fetch?: (
+    input: string | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
 }
 
 /**
@@ -150,6 +167,10 @@ export async function runCli(
 
   if (sub === "pack") {
     return runPack(rest, io);
+  }
+
+  if (sub === "publish") {
+    return runPublish(rest, io);
   }
 
   io.stderr(`Unknown subcommand: ${sub}\n`);
@@ -1402,6 +1423,112 @@ function mapOriginsToPlainObject(
 }
 
 /**
+ * Plugin bundle descriptor — the registry-ready payload shared by
+ * the `pack` and `publish` subcommands. Carries the manifest, a
+ * content fingerprint over plugin.json, per-file path/size/sha256
+ * for everything under dist/, and a content-addressed bundleHash
+ * that uniquely identifies THIS version's payload.
+ */
+interface PluginBundleDescriptor {
+  readonly manifest: PluginManifest;
+  readonly manifestHash: string;
+  readonly files: ReadonlyArray<{
+    readonly path: string;
+    readonly size: number;
+    readonly sha256: string;
+  }>;
+  readonly totalSize: number;
+  readonly bundleHash: string;
+}
+
+type BuildBundleResult =
+  | { readonly ok: true; readonly bundle: PluginBundleDescriptor }
+  | { readonly ok: false; readonly exitCode: number };
+
+/**
+ * Build a {@link PluginBundleDescriptor} for the plugin package at
+ * `absDir`. Shared by `pack` and `publish` so both commands hash
+ * the same content the same way.
+ *
+ * Returns `{ ok: true, bundle }` on success or `{ ok: false, exitCode }`
+ * after writing diagnostics to `io.stderr`. The `commandLabel` is
+ * prefixed onto stderr messages so the user sees `pack:` or
+ * `publish:` consistently with the subcommand they invoked.
+ */
+async function buildPluginBundle(
+  absDir: string,
+  io: CliIO,
+  commandLabel: string,
+): Promise<BuildBundleResult> {
+  // Step 1: validate the manifest. If validation fails, refuse to
+  // bundle (parity with `npm pack` which also runs lifecycle gates).
+  const validation = await validatePluginDirectory(absDir);
+  if (!validation.ok) {
+    io.stderr(`${commandLabel}: ${validation.manifestPath}\n`);
+    for (const issue of validation.issues) {
+      io.stderr(`  • ${issue}\n`);
+    }
+    return { ok: false, exitCode: 1 };
+  }
+
+  // Step 2: read plugin.json content for the manifest hash. Hash the
+  // raw bytes, not the parsed manifest, so two byte-identical files
+  // produce identical hashes regardless of JSON key ordering.
+  const manifestPath = path.join(absDir, "plugin.json");
+  let manifestBytes: Buffer;
+  try {
+    manifestBytes = await fs.readFile(manifestPath);
+  } catch (err) {
+    io.stderr(
+      `${commandLabel}: failed to read plugin.json: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return { ok: false, exitCode: 1 };
+  }
+  const { createHash } = await import("node:crypto");
+  const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
+
+  // Step 3: walk dist/ to enumerate files. Missing dist/ is a warning,
+  // not an error — author may be packing source-only or hasn't built
+  // yet. Empty file list is allowed; bundleHash still computes (just
+  // over the manifest).
+  const distRoot = path.join(absDir, "dist");
+  const files: Array<{ path: string; size: number; sha256: string }> = [];
+  try {
+    await walkDistFiles(distRoot, distRoot, files);
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") {
+      io.stderr(
+        `${commandLabel}: warning — ${distRoot} does not exist; bundle will contain only the manifest\n`,
+      );
+    } else {
+      io.stderr(
+        `${commandLabel}: failed to walk dist/: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return { ok: false, exitCode: 1 };
+    }
+  }
+
+  // Step 4: compute totalSize + bundleHash. Sort files by path for
+  // determinism; the bundleHash is a stable content-addressed
+  // identity for THIS version of THIS plugin's payload.
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  const bundleSeed = [manifestHash, ...files.map((f) => f.sha256)].join(":");
+  const bundleHash = createHash("sha256").update(bundleSeed).digest("hex");
+
+  return {
+    ok: true,
+    bundle: {
+      manifest: validation.manifest,
+      manifestHash,
+      files,
+      totalSize,
+      bundleHash,
+    },
+  };
+}
+
+/**
  * Handler for `pack <dir> [--out <path>] [--compact]`.
  *
  * I5 substrate (publish flow). Builds a registry-ready bundle
@@ -1474,77 +1601,10 @@ async function runPack(rest: readonly string[], io: CliIO): Promise<number> {
   }
 
   const absDir = path.isAbsolute(dir) ? dir : path.resolve(io.cwd(), dir);
-
-  // Step 1: validate the manifest. If validation fails, refuse to pack
-  // (parity with `npm pack` which also runs lifecycle gates).
-  const validation = await validatePluginDirectory(absDir);
-  if (!validation.ok) {
-    io.stderr(`pack: ${validation.manifestPath}\n`);
-    for (const issue of validation.issues) {
-      io.stderr(`  • ${issue}\n`);
-    }
-    return 1;
-  }
-
-  // Step 2: read plugin.json content for the manifest hash. Hash the
-  // raw bytes, not the parsed manifest, so two byte-identical files
-  // produce identical hashes regardless of JSON key ordering. (The
-  // hash IS the content fingerprint, not a structural comparison.)
-  const manifestPath = path.join(absDir, "plugin.json");
-  let manifestBytes: Buffer;
-  try {
-    manifestBytes = await fs.readFile(manifestPath);
-  } catch (err) {
-    io.stderr(
-      `pack: failed to read plugin.json: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
-    return 1;
-  }
-  const { createHash } = await import("node:crypto");
-  const manifestHash = createHash("sha256").update(manifestBytes).digest("hex");
-
-  // Step 3: walk dist/ to enumerate files. dist/ is the conventional
-  // distribution root per package.json `"files": ["dist/", "plugin.json"]`.
-  // Missing dist/ is a warning, not an error — author may be packing
-  // a source-only plugin or hasn't built yet. Empty file list is
-  // allowed; bundleHash still computes (just over the manifest).
-  const distRoot = path.join(absDir, "dist");
-  const files: Array<{
-    path: string;
-    size: number;
-    sha256: string;
-  }> = [];
-  try {
-    await walkDistFiles(distRoot, distRoot, files);
-  } catch (err) {
-    if ((err as { code?: string }).code === "ENOENT") {
-      // dist/ missing — log a warning to stderr but continue with []
-      io.stderr(
-        `pack: warning — ${distRoot} does not exist; bundle will contain only the manifest\n`,
-      );
-    } else {
-      io.stderr(
-        `pack: failed to walk dist/: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
-      return 1;
-    }
-  }
-
-  // Step 4: compute totalSize + bundleHash. Sort files by path for
-  // determinism; the bundleHash is a stable content-addressed
-  // identity for THIS version of THIS plugin's payload.
-  files.sort((a, b) => a.path.localeCompare(b.path));
-  const totalSize = files.reduce((s, f) => s + f.size, 0);
-  const bundleSeed = [manifestHash, ...files.map((f) => f.sha256)].join(":");
-  const bundleHash = createHash("sha256").update(bundleSeed).digest("hex");
-
-  const bundle = {
-    manifest: validation.manifest,
-    manifestHash,
-    files,
-    totalSize,
-    bundleHash,
-  };
+  const result = await buildPluginBundle(absDir, io, "pack");
+  if (!result.ok) return result.exitCode;
+  const bundle = result.bundle;
+  const { manifestHash, bundleHash, totalSize, files } = bundle;
 
   const text = formatSnapshotJson(bundle, { indent: compact ? 0 : 2 }) + "\n";
   if (outPath !== undefined) {
@@ -1615,6 +1675,182 @@ async function defaultWriteFileNonExclusive(
   await fs.writeFile(absolutePath, contents);
 }
 
+/**
+ * Handler for `publish <dir> [--registry <url>] [--token <token>]
+ * [--dry-run] [--compact]`.
+ *
+ * I5 substrate (publish flow). Builds the same bundle descriptor
+ * as `pack`, then EITHER POSTs it to a registry endpoint OR
+ * prints it for inspection (`--dry-run` or no `--registry`).
+ *
+ * Without a real community registry yet, this command is the
+ * forward-compatible glue: authors / CI can iterate against it
+ * locally with `--dry-run`, and switch to the real registry by
+ * dropping `--dry-run` + adding `--registry <url>` when the
+ * service lands. The wire shape (POST {registry}/api/plugins +
+ * JSON body of the bundle descriptor + optional Bearer auth) is
+ * pinned now so the registry implementer has a reference.
+ *
+ * Exit codes:
+ *   - 0 on success (POST 2xx, or dry-run rendered)
+ *   - 1 on validation failure, filesystem error, network error,
+ *     or registry non-2xx response
+ *   - 2 on usage error
+ *
+ * Output:
+ *   - --dry-run / no --registry: prints the would-be request as
+ *     JSON to stdout (registry-bound payload + headers)
+ *   - With --registry: prints "✓ Published <id>@<version> to
+ *     <registry>" + the registry's response body to stdout on
+ *     success
+ *
+ * Security:
+ *   - --token is passed as `Authorization: Bearer <token>` header.
+ *     Never logged. Don't commit a registry token to source —
+ *     pass via env var or CI secret.
+ *   - Registry URL must use https:// in production. The CLI does
+ *     not enforce this today; future cuts may add a `--allow-http`
+ *     escape hatch with a warning.
+ */
+async function runPublish(rest: readonly string[], io: CliIO): Promise<number> {
+  let dir: string | undefined;
+  let registryUrl: string | undefined;
+  let token: string | undefined;
+  let dryRun = false;
+  let compact = false;
+
+  for (let i = 0; i < rest.length; i++) {
+    const token2 = rest[i]!;
+    if (token2 === "--registry") {
+      registryUrl = rest[++i];
+      if (registryUrl === undefined) {
+        io.stderr("--registry requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (token2 === "--token") {
+      token = rest[++i];
+      if (token === undefined) {
+        io.stderr("--token requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (token2 === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (token2 === "--compact") {
+      compact = true;
+      continue;
+    }
+    if (token2.startsWith("--")) {
+      io.stderr(`Unknown flag: ${token2}\n`);
+      return 2;
+    }
+    if (dir === undefined) {
+      dir = token2;
+      continue;
+    }
+    io.stderr(`Unexpected argument: ${token2}\n`);
+    return 2;
+  }
+
+  if (dir === undefined) {
+    io.stderr("publish: missing <dir> argument\n");
+    io.stderr(
+      "Usage: hyperforge-plugin publish <dir> [--registry <url>] [--token <token>] [--dry-run] [--compact]\n",
+    );
+    return 2;
+  }
+
+  const absDir = path.isAbsolute(dir) ? dir : path.resolve(io.cwd(), dir);
+  const result = await buildPluginBundle(absDir, io, "publish");
+  if (!result.ok) return result.exitCode;
+  const bundle = result.bundle;
+
+  // Construct the request body once. Registry is expected to accept
+  // POST application/json with this exact shape.
+  const requestBody = formatSnapshotJson(bundle, {
+    indent: compact ? 0 : 2,
+  });
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+  if (token !== undefined) {
+    headers.authorization = `Bearer ${token}`;
+  }
+
+  if (dryRun || registryUrl === undefined) {
+    // Dry-run / no-registry: print the would-be POST for inspection.
+    // Headers are surfaced but the auth value is REDACTED so the
+    // payload can be safely shared in bug reports / CI logs.
+    const safeHeaders: Record<string, string> = { ...headers };
+    if (safeHeaders.authorization) {
+      safeHeaders.authorization = "Bearer ***redacted***";
+    }
+    const dryRunPayload = {
+      mode: "dry-run" as const,
+      request: {
+        method: "POST" as const,
+        url:
+          registryUrl !== undefined
+            ? `${registryUrl.replace(/\/$/, "")}/api/plugins`
+            : null,
+        headers: safeHeaders,
+        body: bundle,
+      },
+    };
+    io.stdout(
+      formatSnapshotJson(dryRunPayload, { indent: compact ? 0 : 2 }) + "\n",
+    );
+    return 0;
+  }
+
+  // Real upload. Use the io.fetch seam if present (tests inject);
+  // fall back to globalThis.fetch (Node 18+, Bun).
+  const fetchImpl = io.fetch ?? globalThis.fetch.bind(globalThis);
+  const url = `${registryUrl.replace(/\/$/, "")}/api/plugins`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers,
+      body: requestBody,
+    });
+  } catch (err) {
+    io.stderr(
+      `publish: network error contacting ${url}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "(no response body)");
+    io.stderr(
+      `publish: ${url} returned ${response.status} ${response.statusText}\n`,
+    );
+    if (text.length > 0) io.stderr(`  ${text}\n`);
+    return 1;
+  }
+
+  const responseBody = await response.text().catch(() => "");
+  io.stdout(
+    `✓ Published ${bundle.manifest.id}@${bundle.manifest.version} to ${url}\n`,
+  );
+  io.stdout(`  manifestHash: ${bundle.manifestHash}\n`);
+  io.stdout(`  bundleHash:   ${bundle.bundleHash}\n`);
+  io.stdout(
+    `  totalSize:    ${bundle.totalSize} bytes (${bundle.files.length} files)\n`,
+  );
+  if (responseBody.length > 0) {
+    io.stdout(`Response:\n${responseBody}\n`);
+  }
+  return 0;
+}
+
 /** Template for the generated `src/index.ts`. */
 const SRC_INDEX_TEMPLATE = `import type {
   HyperforgePlugin,
@@ -1665,6 +1901,7 @@ Usage:
   hyperforge-plugin diff <baseline.json> <current.json> [--human] [--compact]
   hyperforge-plugin contributions <dir> [--host-api <range>] [--human] [--compact] [--with-origins]
   hyperforge-plugin pack <dir> [--out <path>] [--compact]
+  hyperforge-plugin publish <dir> [--registry <url>] [--token <token>] [--dry-run] [--compact]
   hyperforge-plugin --help
   hyperforge-plugin --version
 
@@ -1732,4 +1969,15 @@ Subcommands:
                     refuses to pack an invalid manifest. Foundation for
                     the future publish flow. Exit 0 on success, 1 on
                     validation failure or filesystem error.
+  publish <dir>     POST the same bundle descriptor (as \`pack\`)
+                    to a registry endpoint at \`{registry}/api/plugins\`.
+                    Pass \`--registry <url>\` to specify the endpoint
+                    and \`--token <token>\` for Bearer auth. Without
+                    \`--registry\`, OR with \`--dry-run\`, prints the
+                    would-be POST request (with auth header redacted)
+                    so authors can iterate locally before a real
+                    registry exists. Validates plugin.json first;
+                    refuses to publish an invalid manifest. Exit 0 on
+                    success, 1 on validation/network/registry-non-2xx,
+                    2 on usage error.
 `;
