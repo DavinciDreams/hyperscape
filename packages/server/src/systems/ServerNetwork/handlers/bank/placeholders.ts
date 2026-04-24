@@ -31,7 +31,7 @@ import {
   isValidGameItem,
   compactBankSlots,
   sendBankStateWithTabs,
-  MAX_INVENTORY_SLOTS,
+  getMaxInventorySlotsInputLimit,
   SLOT_OFFSET_TEMP,
 } from "./utils";
 
@@ -131,7 +131,7 @@ export async function handleBankWithdrawPlaceholder(
         }
 
         const freeSlots: number[] = [];
-        for (let i = 0; i < MAX_INVENTORY_SLOTS; i++) {
+        for (let i = 0; i < getMaxInventorySlotsInputLimit(); i++) {
           if (!usedSlots.has(i)) {
             freeSlots.push(i);
           }

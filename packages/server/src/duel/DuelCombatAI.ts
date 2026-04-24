@@ -12,7 +12,10 @@
  *   DuelOrchestrator calls DuelCombatAI.stop() when the duel ends.
  */
 
-import { TICK_DURATION_MS } from "@hyperforge/shared";
+import {
+  TICK_DURATION_MS,
+  type ResolvedCombatTuning,
+} from "@hyperforge/shared";
 import type { EmbeddedHyperiaService } from "../eliza/EmbeddedHyperiaService";
 import type { EmbeddedGameState } from "../eliza/types";
 import { type AgentRuntime, ModelType } from "@elizaos/core";
@@ -41,6 +44,13 @@ export interface DuelCombatConfig {
    * same standoff point.
    */
   initialStrafeSign?: 1 | -1;
+  /**
+   * Authored combat-tuning profile (resolved for this agent's role). When
+   * provided, overrides the hardcoded per-role defaults for prayers,
+   * engagement range, movement cadence, and strafe distance. Fields not
+   * present on the tuning still fall back to the static DEFAULT_CONFIG.
+   */
+  tuning?: ResolvedCombatTuning;
 }
 
 const DEFAULT_CONFIG: DuelCombatConfig = {
@@ -273,6 +283,69 @@ export class DuelCombatAI {
   /** Track last phase for change detection (#7) */
   private lastPhase: CombatPhase = "opening";
 
+  /**
+   * Resolve the offensive prayer id: authored tuning first, then the
+   * legacy per-role map, then the safe `superhuman_strength` default.
+   */
+  private resolveOffensivePrayer(): string {
+    return (
+      this.config.tuning?.offensivePrayerId ??
+      OFFENSIVE_PRAYER[this.config.combatRole] ??
+      "superhuman_strength"
+    );
+  }
+
+  /** Defensive/protection prayer id (tuning-overridable). */
+  private resolveDefensivePrayer(): string {
+    return this.config.tuning?.defensivePrayerId ?? DEFENSIVE_PRAYER;
+  }
+
+  /** Movement-AI cooldown (ms) — tuning-overridable. */
+  private resolveMoveCooldownMs(): number {
+    return this.config.tuning?.moveCooldownMs ?? DuelCombatAI.MOVE_COOLDOWN_MS;
+  }
+
+  /** Perpendicular strafe offset (world units) — tuning-overridable. */
+  private resolveStrafeStep(): number {
+    return this.config.tuning?.strafeStep ?? DuelCombatAI.STRAFE_STEP;
+  }
+
+  /** Ideal engagement band (center-to-center meters) — tuning-overridable. */
+  private resolveIdealRange(): { min: number; max: number } {
+    const tuned = this.config.tuning?.engagementRange;
+    if (tuned !== undefined) return { min: tuned.min, max: tuned.max };
+    return (
+      DuelCombatAI.IDEAL_RANGE[this.config.combatRole] ??
+      DuelCombatAI.IDEAL_RANGE.melee
+    );
+  }
+
+  /** HP% below which the agent attempts to heal — tuning-overridable. */
+  private resolveHealThresholdPct(): number {
+    return this.config.tuning?.healThresholdPct ?? this.config.healThresholdPct;
+  }
+
+  /** HP% above which the agent uses an aggressive style — tuning-overridable. */
+  private resolveAggressiveThresholdPct(): number {
+    return (
+      this.config.tuning?.aggressiveThresholdPct ??
+      this.config.aggressiveThresholdPct
+    );
+  }
+
+  /** HP% below which the agent enters the desperate phase — tuning-overridable. */
+  private resolveDefensiveThresholdPct(): number {
+    return (
+      this.config.tuning?.defensiveThresholdPct ??
+      this.config.defensiveThresholdPct
+    );
+  }
+
+  /** Skip-food rule — tuning-overridable. */
+  private resolveNoFood(): boolean {
+    return this.config.tuning?.noFood ?? this.config.noFood ?? false;
+  }
+
   constructor(
     service: EmbeddedHyperiaService,
     opponentId: string,
@@ -318,10 +391,13 @@ export class DuelCombatAI {
       this.config.initialStrafeSign ?? (Math.random() < 0.5 ? 1 : -1);
     this.strafeMoveCount = 0;
     this.warnedNoFood = false;
-    // Set default strategy prayer based on combat role
+    // Set default strategy from tuning-overrideable values so the LLM
+    // planner seeds from the same numbers as the scripted path.
     this.strategy = {
       ...DEFAULT_STRATEGY,
-      prayer: OFFENSIVE_PRAYER[this.config.combatRole] ?? "superhuman_strength",
+      prayer: this.resolveOffensivePrayer(),
+      foodThreshold: this.resolveHealThresholdPct(),
+      switchDefensiveAt: this.resolveDefensiveThresholdPct(),
     };
 
     // Reset trash talk state for new fight
@@ -505,7 +581,7 @@ export class DuelCombatAI {
     healthPct: number,
     opponentData: OpponentData | null,
   ): CombatPhase {
-    if (healthPct < this.config.defensiveThresholdPct) return "desperate";
+    if (healthPct < this.resolveDefensiveThresholdPct()) return "desperate";
 
     const oppHealthPct = opponentData
       ? opponentData.maxHealth && opponentData.maxHealth > 0
@@ -530,11 +606,11 @@ export class DuelCombatAI {
     opponentData?: OpponentData | null,
     damageThisTickPct = 0,
   ): Promise<boolean> {
-    if (this.config.noFood === true) return false;
+    if (this.resolveNoFood()) return false;
 
     const baseThreshold = this.config.useLlmTactics
       ? this.strategy.foodThreshold
-      : this.config.healThresholdPct;
+      : this.resolveHealThresholdPct();
     const burstEase =
       damageThisTickPct >= 12 ? 18 : damageThisTickPct >= 7 ? 10 : 0;
     let threshold =
@@ -602,7 +678,7 @@ export class DuelCombatAI {
     if (phase !== "opening" || this.tickCount > 2) return false;
 
     // Activate offensive prayer at fight start (#16)
-    const offPrayer = OFFENSIVE_PRAYER[this.config.combatRole];
+    const offPrayer = this.resolveOffensivePrayer();
     if (offPrayer) {
       await this.activatePrayer(offPrayer);
     }
@@ -788,14 +864,12 @@ export class DuelCombatAI {
     phase: CombatPhase,
     phaseChanged = false,
   ): Promise<void> {
-    const offPrayer =
-      OFFENSIVE_PRAYER[this.config.combatRole] ?? "superhuman_strength";
+    const offPrayer = this.resolveOffensivePrayer();
+    const defPrayer = this.resolveDefensivePrayer();
 
     // Override strategy for desperate situations — all roles (#3)
     if (phase === "desperate" || healthPct < this.strategy.switchDefensiveAt) {
-      await this.activatePrayer(
-        this.strategy.protectionPrayer || DEFENSIVE_PRAYER,
-      );
+      await this.activatePrayer(this.strategy.protectionPrayer || defPrayer);
       await this.deactivatePrayer(offPrayer);
       if (
         this.currentStyle !== "defensive" &&
@@ -909,15 +983,15 @@ export class DuelCombatAI {
     // Faster switching (#7): every 2 ticks, immediate on phase change
     if (!phaseChanged && this.tickCount % 2 !== 0) return;
 
-    const offPrayer =
-      OFFENSIVE_PRAYER[this.config.combatRole] ?? "superhuman_strength";
+    const offPrayer = this.resolveOffensivePrayer();
+    const defPrayer = this.resolveDefensivePrayer();
 
     try {
       if (phase === "opening" || phase === "finishing") {
         await this.activatePrayer(offPrayer);
-        await this.deactivatePrayer(DEFENSIVE_PRAYER);
+        await this.deactivatePrayer(defPrayer);
       } else if (phase === "desperate") {
-        await this.activatePrayer(DEFENSIVE_PRAYER);
+        await this.activatePrayer(defPrayer);
         await this.deactivatePrayer(offPrayer);
       } else {
         await this.activatePrayer(offPrayer);
@@ -948,7 +1022,7 @@ export class DuelCombatAI {
         desiredStyle = "aggressive";
       } else if (phase === "desperate") {
         desiredStyle = "defensive";
-      } else if (healthPct > this.config.aggressiveThresholdPct) {
+      } else if (healthPct > this.resolveAggressiveThresholdPct()) {
         desiredStyle = "aggressive";
       } else if (healthPct > 50) {
         desiredStyle = "accurate";
@@ -1209,13 +1283,11 @@ export class DuelCombatAI {
     now: number,
     phase: CombatPhase = "trading",
   ): void {
-    if (now - this.lastMoveTime < DuelCombatAI.MOVE_COOLDOWN_MS) return;
+    if (now - this.lastMoveTime < this.resolveMoveCooldownMs()) return;
     if (!opponentData) return;
 
     const distance = opponentData.distance;
-    const idealRange =
-      DuelCombatAI.IDEAL_RANGE[this.config.combatRole] ??
-      DuelCombatAI.IDEAL_RANGE.melee;
+    const idealRange = this.resolveIdealRange();
 
     // Check if we need to reposition
     const tooClose = distance < idealRange.min;
@@ -1288,7 +1360,7 @@ export class DuelCombatAI {
         dist < idealRange.max
           ? Math.max(0.35, Math.min(1, dist / idealRange.max))
           : 1;
-      const strafeAmt = DuelCombatAI.STRAFE_STEP * strafeScale * 0.7;
+      const strafeAmt = this.resolveStrafeStep() * strafeScale * 0.7;
       targetX += this.strafeSign * strafeAmt;
       targetZ -= this.strafeSign * strafeAmt;
     }

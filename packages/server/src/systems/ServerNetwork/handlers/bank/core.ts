@@ -42,8 +42,8 @@ import {
   isValidGameItem,
   compactBankSlots,
   sendBankStateWithTabs,
-  MAX_INVENTORY_SLOTS,
-  MAX_BANK_SLOTS,
+  getMaxInventorySlotsInputLimit,
+  getMaxBankSlots,
 } from "./utils";
 
 // Import coin handler for bank withdraw redirect (coins go to money pouch, RS3-style)
@@ -114,7 +114,7 @@ export async function handleBankOpen(
       items, // Includes qty=0 items (placeholders)
       tabs,
       alwaysSetPlaceholder,
-      maxSlots: MAX_BANK_SLOTS,
+      maxSlots: getMaxBankSlots(),
       isOpen: true,
     });
 
@@ -343,11 +343,11 @@ export async function handleBankDeposit(
             (tabItems.rows as Array<{ slot: number }>).map((i) => i.slot),
           );
           let nextSlot = 0;
-          while (usedSlots.has(nextSlot) && nextSlot < MAX_BANK_SLOTS) {
+          while (usedSlots.has(nextSlot) && nextSlot < getMaxBankSlots()) {
             nextSlot++;
           }
 
-          if (nextSlot >= MAX_BANK_SLOTS) {
+          if (nextSlot >= getMaxBankSlots()) {
             throw new Error("BANK_FULL");
           }
 
@@ -459,7 +459,7 @@ export async function handleBankWithdraw(
   const withdrawQty =
     withdrawAsNote || isBaseStackable
       ? data.quantity // Stackable items have no slot limit
-      : Math.min(data.quantity, MAX_INVENTORY_SLOTS);
+      : Math.min(data.quantity, getMaxInventorySlotsInputLimit());
 
   // Step 3: Execute transaction with inventory lock (prevents race conditions)
   // The executeInventoryTransaction wrapper handles:
@@ -492,7 +492,7 @@ export async function handleBankWithdraw(
         }
 
         const freeSlots: number[] = [];
-        for (let i = 0; i < MAX_INVENTORY_SLOTS; i++) {
+        for (let i = 0; i < getMaxInventorySlotsInputLimit(); i++) {
           if (!usedSlots.has(i)) {
             freeSlots.push(i);
           }
@@ -855,7 +855,7 @@ export async function handleBankDepositAll(
             newItemTypes++;
           }
         }
-        const freeSlots = MAX_BANK_SLOTS - usedBankSlots.size;
+        const freeSlots = getMaxBankSlots() - usedBankSlots.size;
         if (newItemTypes > freeSlots) {
           throw new Error("BANK_FULL");
         }

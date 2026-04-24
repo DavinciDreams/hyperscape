@@ -17,7 +17,7 @@
 import {
   type World,
   type SessionType,
-  INTERACTION_DISTANCE,
+  getInteractionDistanceFor,
   chebyshevDistance,
 } from "@hyperforge/shared";
 import type { ServerSocket } from "../../../../shared/types";
@@ -94,7 +94,7 @@ function verifyDistanceToTarget(
 
   // Chebyshev distance check (OSRS-style)
   const distance = chebyshevDistance(playerEntity.position, targetPos);
-  const maxDistance = INTERACTION_DISTANCE[sessionType];
+  const maxDistance = getInteractionDistanceFor(sessionType);
 
   if (distance > maxDistance) {
     const typeName = SESSION_TYPE_DISPLAY_NAMES[sessionType] || sessionType;

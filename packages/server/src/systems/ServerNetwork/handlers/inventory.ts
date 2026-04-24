@@ -22,9 +22,10 @@ import type { ServerSocket } from "../../../shared/types";
 import {
   EventType,
   World,
-  COMBAT_CONSTANTS,
-  INPUT_LIMITS,
+  getMaxQuantity,
+  getMaxInventorySlotsInputLimit,
   DeathState,
+  getPickupRange,
 } from "@hyperforge/shared";
 import { getTradingSystem } from "./trade/helpers";
 import {
@@ -225,8 +226,10 @@ export function handlePickupItem(
         Math.pow(playerEntity.position.z - itemEntity.position.z, 2),
     );
 
-    // Use constant for pickup range (slightly larger than client to account for movement)
-    const pickupRange = COMBAT_CONSTANTS.PICKUP_RANGE ?? 2.5;
+    // Use live-getter for pickup range so PIE-hotreloaded combat manifest is
+    // honored without a server restart. Slightly larger than client to account
+    // for movement.
+    const pickupRange = getPickupRange();
     if (distance > pickupRange) {
       console.warn(
         `[Inventory] Player ${playerEntity.id} tried to pickup item ${entityId} from too far away (${distance.toFixed(2)}m > ${pickupRange}m)`,
@@ -314,10 +317,7 @@ export function handleDropItem(
       console.warn("[Inventory] handleDropItem: invalid quantity type");
       return;
     }
-    quantity = Math.max(
-      1,
-      Math.min(payload.quantity, INPUT_LIMITS.MAX_QUANTITY),
-    );
+    quantity = Math.max(1, Math.min(payload.quantity, getMaxQuantity()));
   }
 
   // Validate slot if provided
@@ -325,7 +325,7 @@ export function handleDropItem(
     typeof payload.slot === "number" &&
     Number.isInteger(payload.slot) &&
     payload.slot >= 0 &&
-    payload.slot < INPUT_LIMITS.MAX_INVENTORY_SLOTS
+    payload.slot < getMaxInventorySlotsInputLimit()
       ? payload.slot
       : undefined;
 
@@ -936,7 +936,7 @@ export async function handleCoinPouchWithdraw(
         );
 
         let emptySlot = -1;
-        for (let i = 0; i < INPUT_LIMITS.MAX_INVENTORY_SLOTS; i++) {
+        for (let i = 0; i < getMaxInventorySlotsInputLimit(); i++) {
           if (!usedSlots.has(i)) {
             emptySlot = i;
             break;

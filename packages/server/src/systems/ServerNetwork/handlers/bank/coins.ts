@@ -24,7 +24,7 @@ import {
   rateLimiter,
   compactBankSlots,
   sendBankStateWithTabs,
-  MAX_BANK_SLOTS,
+  getMaxBankSlots,
   AUDIT_COIN_THRESHOLD,
 } from "./utils";
 
@@ -137,11 +137,11 @@ export async function handleBankDepositCoins(
 
         const usedSlots = new Set(allBankItems.map((i) => i.slot ?? 0));
         let nextSlot = 0;
-        while (usedSlots.has(nextSlot) && nextSlot < MAX_BANK_SLOTS) {
+        while (usedSlots.has(nextSlot) && nextSlot < getMaxBankSlots()) {
           nextSlot++;
         }
 
-        if (nextSlot >= MAX_BANK_SLOTS) {
+        if (nextSlot >= getMaxBankSlots()) {
           throw new Error("BANK_FULL");
         }
 

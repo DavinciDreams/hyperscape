@@ -5,7 +5,12 @@
  * IMPORTANT: This module must NOT import from any handler module to prevent circular imports.
  */
 
-import { getItem, INPUT_LIMITS } from "@hyperforge/shared";
+import {
+  getItem,
+  getMaxBankSlots,
+  getMaxInventorySlotsInputLimit,
+} from "@hyperforge/shared";
+export { getMaxBankSlots, getMaxInventorySlotsInputLimit };
 import type { ServerSocket } from "../../../../shared/types";
 import { BankRepository } from "../../../../database/repositories/BankRepository";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -21,10 +26,6 @@ import { sendToSocket, type DrizzleTransaction } from "../common";
 
 /** Single rate limiter instance shared across all bank modules */
 export const rateLimiter = new RateLimitService();
-
-/** Local aliases for shared constants */
-export const MAX_INVENTORY_SLOTS = INPUT_LIMITS.MAX_INVENTORY_SLOTS;
-export const MAX_BANK_SLOTS = INPUT_LIMITS.MAX_BANK_SLOTS;
 
 // ============================================================================
 // BANK OPERATION CONSTANTS
@@ -307,6 +308,6 @@ export async function sendBankStateWithTabs(
     items: bankItems, // Includes qty=0 items (placeholders)
     tabs: bankTabs,
     alwaysSetPlaceholder,
-    maxSlots: MAX_BANK_SLOTS,
+    maxSlots: getMaxBankSlots(),
   });
 }

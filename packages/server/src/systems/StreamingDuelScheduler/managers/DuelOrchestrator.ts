@@ -10,6 +10,7 @@ import type { World } from "@hyperforge/shared";
 import {
   AttackType,
   COMBAT_SPELLS,
+  CombatTuningRegistry,
   DeathState,
   DEFAULT_DUEL_RULES,
   ELEMENTAL_STAVES,
@@ -17,9 +18,13 @@ import {
   ITEMS,
   PlayerEntity,
   SPELL_ORDER,
+  UnknownCombatTuningProfileError,
   getDuelArenaConfig,
   getItem,
   isPositionInsideCombatArena,
+  type CombatRole,
+  type CombatTuningManifest,
+  type ResolvedCombatTuning,
 } from "@hyperforge/shared";
 import { DuelCombatAI } from "../../../duel/DuelCombatAI.js";
 import {
@@ -193,6 +198,18 @@ export class DuelOrchestrator {
     string,
     DuelCombatRole
   >();
+  /**
+   * Authored combat-tuning registry. Empty by default — when the editor
+   * (or server bootstrap) calls `setAuthoredCombatTuning()`, profiles are
+   * indexed here and resolved per-agent in `startCombatAIs()`. When no
+   * tuning is loaded (or the profile id doesn't resolve), DuelCombatAI
+   * falls back to its hardcoded per-role defaults.
+   */
+  private combatTuningRegistry = new CombatTuningRegistry();
+  /** Default profile id applied to every agent when no per-agent override exists. */
+  private defaultCombatTuningProfileId: string | null = null;
+  /** Per-agent override mapping: agent characterId → profile id. */
+  private combatTuningProfileIdByAgent = new Map<string, string>();
   /** Escalating stall nudge state (#20) */
   private combatStallNudgeCount = 0;
   private lastCombatStallNudgeTime = 0;
@@ -755,6 +772,71 @@ export class DuelOrchestrator {
   /** Remove a persistent role override (e.g. when a sparbot is unregistered). */
   clearDebugCombatRoleOverride(characterId: string): void {
     this.debugCombatRoleOverrideByCharacterId.delete(characterId);
+  }
+
+  /**
+   * Replace the authored combat-tuning registry contents. Called by the
+   * editor PIE session (via `PIEEditorSession.updateManifests`) or by
+   * server bootstrap after DataManager finishes loading manifests.
+   * Pass `null` to clear — falling back to hardcoded DuelCombatAI defaults.
+   */
+  setAuthoredCombatTuning(manifest: CombatTuningManifest | null): void {
+    if (manifest === null) {
+      this.combatTuningRegistry = new CombatTuningRegistry();
+      return;
+    }
+    this.combatTuningRegistry.load(manifest);
+  }
+
+  /**
+   * Set the default profile applied when no per-agent override exists.
+   * Pass `null` to clear.
+   */
+  setDefaultCombatTuningProfileId(profileId: string | null): void {
+    this.defaultCombatTuningProfileId = profileId;
+  }
+
+  /**
+   * Bind a specific profile id to one agent. Overrides the default when
+   * `startCombatAIs()` resolves tuning for that agent.
+   */
+  setCombatTuningProfileForAgent(characterId: string, profileId: string): void {
+    this.combatTuningProfileIdByAgent.set(characterId, profileId);
+  }
+
+  /** Remove a per-agent profile binding. */
+  clearCombatTuningProfileForAgent(characterId: string): void {
+    this.combatTuningProfileIdByAgent.delete(characterId);
+  }
+
+  /**
+   * Resolve the tuning applied to one agent for this duel. Returns
+   * `undefined` when no profile is configured or the configured id is
+   * not loaded — DuelCombatAI then uses its hardcoded defaults. The
+   * server-side "prayer" role has no direct tuning equivalent, so it's
+   * collapsed to "melee" for the schema's `CombatRole` lookup.
+   */
+  private resolveTuningForAgent(
+    characterId: string,
+    role: DuelCombatRole,
+  ): ResolvedCombatTuning | undefined {
+    const profileId =
+      this.combatTuningProfileIdByAgent.get(characterId) ??
+      this.defaultCombatTuningProfileId;
+    if (profileId === null || profileId === undefined) return undefined;
+    const schemaRole: CombatRole = role === "prayer" ? "melee" : role;
+    try {
+      return this.combatTuningRegistry.resolve(profileId, schemaRole);
+    } catch (err) {
+      if (err instanceof UnknownCombatTuningProfileError) {
+        Logger.warn(
+          "StreamingDuelScheduler",
+          `combat-tuning profile "${profileId}" not loaded; DuelCombatAI will use hardcoded defaults for ${characterId}`,
+        );
+        return undefined;
+      }
+      throw err;
+    }
   }
 
   private applyDebugCombatRoleOverrides(
@@ -2440,6 +2522,9 @@ export class DuelOrchestrator {
       this._arenaModeServices.push(svc);
     }
 
+    const tuning1 = this.resolveTuningForAgent(agent1.characterId, role1);
+    const tuning2 = this.resolveTuningForAgent(agent2.characterId, role2);
+
     if (service1) {
       const ai1 = new DuelCombatAI(
         service1,
@@ -2449,6 +2534,7 @@ export class DuelOrchestrator {
           useLlmTactics: llmTacticsEnabled && !!runtime1,
           combatRole: role1,
           initialStrafeSign: 1,
+          tuning: tuning1,
         },
         runtime1 ?? undefined,
         // Trash talk callback — sends chat as overhead bubble via the agent's service
@@ -2474,6 +2560,7 @@ export class DuelOrchestrator {
           useLlmTactics: llmTacticsEnabled && !!runtime2,
           combatRole: role2,
           initialStrafeSign: -1,
+          tuning: tuning2,
         },
         runtime2 ?? undefined,
         // Trash talk callback — sends chat as overhead bubble via the agent's service

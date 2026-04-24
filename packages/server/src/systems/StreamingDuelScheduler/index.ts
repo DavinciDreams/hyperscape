@@ -13,8 +13,13 @@
  * - Broadcasting (broadcastState, getStreamingState)
  */
 
-import type { World } from "@hyperforge/shared";
-import { EventType, DEFAULT_DUEL_RULES } from "@hyperforge/shared";
+import type { CombatTuningManifest, World } from "@hyperforge/shared";
+import {
+  EventType,
+  DEFAULT_DUEL_RULES,
+  combatTuningProvider,
+  combatTuningAgentBindingsProvider,
+} from "@hyperforge/shared";
 import crypto from "node:crypto";
 
 /** Type for network with send method */
@@ -686,6 +691,71 @@ export class StreamingDuelScheduler {
       event: EventType.ENTITY_DEATH,
       fn: onEntityDeath,
     });
+
+    // Authored combat-tuning hot-reload bridge. The PIE editor emits
+    // `"combat:tuning:updated"` on the world event bus when an editor
+    // user edits the combat-tuning manifest; the scheduler forwards
+    // the payload to the orchestrator which swaps the registry in-place.
+    // Arena-mode runs use the updated profile on the next duel pick.
+    const onCombatTuningUpdated = (payload: unknown) => {
+      // Payload is `{ manifest: CombatTuningManifest | null }` — wrapped
+      // by the editor so `null` (drop authored tuning) survives
+      // `World.emit`'s nullish-coalescing to `{}`. Unvalidated shapes are
+      // a caller bug (the editor emits validated data) so we pass through
+      // without re-validating on the hot path.
+      const p = payload as { manifest: CombatTuningManifest | null };
+      this.setAuthoredCombatTuning(p.manifest);
+    };
+    this.world.on("combat:tuning:updated", onCombatTuningUpdated);
+    this.eventListeners.push({
+      event: "combat:tuning:updated",
+      fn: onCombatTuningUpdated,
+    });
+
+    // Per-agent profile binding — editor emits one of these whenever
+    // a user changes which tuning profile an agent uses in the next
+    // fight (e.g. "boss" profile for an arena boss encounter).
+    const onCombatTuningBinding = (payload: unknown) => {
+      const p = payload as {
+        characterId: string;
+        profileId: string | null;
+      };
+      if (p.profileId === null) {
+        this.clearCombatTuningProfileForAgent(p.characterId);
+      } else {
+        this.setCombatTuningProfileForAgent(p.characterId, p.profileId);
+      }
+    };
+    this.world.on("combat:tuning:binding", onCombatTuningBinding);
+    this.eventListeners.push({
+      event: "combat:tuning:binding",
+      fn: onCombatTuningBinding,
+    });
+
+    // Boot-time: pick up any authored combat-tuning manifest that
+    // DataManager already loaded from disk. Runs once after listener
+    // registration so this init seam is self-contained; subsequent
+    // edits flow through the `combat:tuning:updated` event above.
+    const bootManifest = combatTuningProvider.getManifest();
+    if (bootManifest !== null) {
+      this.setAuthoredCombatTuning(bootManifest);
+    }
+
+    // Boot-time: restore authored per-agent combat-tuning profile
+    // bindings so overrides survive server restart. `null` values in
+    // the authored record are explicit-clear markers — honor them via
+    // the clear API so stale orchestrator state can't shadow the
+    // author's intent.
+    const bootBindings = combatTuningAgentBindingsProvider.getManifest();
+    if (bootBindings !== null) {
+      for (const [characterId, profileId] of Object.entries(bootBindings)) {
+        if (profileId === null) {
+          this.clearCombatTuningProfileForAgent(characterId);
+        } else {
+          this.setCombatTuningProfileForAgent(characterId, profileId);
+        }
+      }
+    }
   }
 
   // ============================================================================
@@ -727,6 +797,41 @@ export class StreamingDuelScheduler {
   /** Get recent duel history */
   getRecentDuels(limit: number = 30): RecentDuelEntry[] {
     return this.matchmaking.getRecentDuels(limit);
+  }
+
+  // ============================================================================
+  // Combat tuning (authored-manifest passthrough to DuelOrchestrator)
+  // ============================================================================
+
+  /**
+   * Load an authored combat-tuning manifest. Applies to every subsequent
+   * `startCombatAIs()` call; does not interrupt any currently-running
+   * duel (agents keep the tuning snapshot they were started with).
+   * Pass `null` to clear — falling back to DuelCombatAI hardcoded defaults.
+   */
+  setAuthoredCombatTuning(manifest: CombatTuningManifest | null): void {
+    this.orchestrator.setAuthoredCombatTuning(manifest);
+  }
+
+  /**
+   * Set the default profile id applied to every agent when no per-agent
+   * override exists. Pass `null` to fall back to DuelCombatAI defaults.
+   */
+  setDefaultCombatTuningProfileId(profileId: string | null): void {
+    this.orchestrator.setDefaultCombatTuningProfileId(profileId);
+  }
+
+  /**
+   * Bind one agent to a specific combat-tuning profile id. Overrides
+   * the default when resolving tuning for that agent's next duel.
+   */
+  setCombatTuningProfileForAgent(characterId: string, profileId: string): void {
+    this.orchestrator.setCombatTuningProfileForAgent(characterId, profileId);
+  }
+
+  /** Remove a per-agent combat-tuning override. */
+  clearCombatTuningProfileForAgent(characterId: string): void {
+    this.orchestrator.clearCombatTuningProfileForAgent(characterId);
   }
 
   // ============================================================================

@@ -26,7 +26,8 @@ import {
   getItem,
   StoreSystem,
   SessionType,
-  INPUT_LIMITS,
+  getMaxQuantity,
+  getMaxInventorySlotsInputLimit,
 } from "@hyperforge/shared";
 import type { ServerSocket } from "../../../shared/types";
 import { InventoryRepository } from "../../../database/repositories/InventoryRepository";
@@ -56,14 +57,11 @@ import {
 // Single rate limiter instance for store operations
 const rateLimiter = new RateLimitService();
 
-// Local alias for shared constant
-const MAX_INVENTORY_SLOTS = INPUT_LIMITS.MAX_INVENTORY_SLOTS;
-
 /**
  * Check if multiplication would overflow safe integer bounds
  */
 function wouldPriceOverflow(price: number, quantity: number): boolean {
-  return price > INPUT_LIMITS.MAX_QUANTITY / quantity;
+  return price > getMaxQuantity() / quantity;
 }
 
 /**
@@ -259,7 +257,8 @@ export async function handleStoreBuy(
         const freeSlots: number[] = [];
         for (
           let i = 0;
-          i < MAX_INVENTORY_SLOTS && freeSlots.length < slotsNeeded;
+          i < getMaxInventorySlotsInputLimit() &&
+          freeSlots.length < slotsNeeded;
           i++
         ) {
           if (!usedSlots.has(i)) {

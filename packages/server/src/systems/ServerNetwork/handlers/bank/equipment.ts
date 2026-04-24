@@ -34,7 +34,7 @@ import {
   isValidGameItem,
   compactBankSlots,
   sendBankStateWithTabs,
-  MAX_BANK_SLOTS,
+  getMaxBankSlots,
 } from "./utils";
 
 // ============================================================================
@@ -229,11 +229,11 @@ export async function handleBankWithdrawToEquipment(
             (slotsResult.rows as Array<{ slot: number }>).map((r) => r.slot),
           );
           let nextSlot = 0;
-          while (usedSlots.has(nextSlot) && nextSlot < MAX_BANK_SLOTS) {
+          while (usedSlots.has(nextSlot) && nextSlot < getMaxBankSlots()) {
             nextSlot++;
           }
 
-          if (nextSlot >= MAX_BANK_SLOTS) {
+          if (nextSlot >= getMaxBankSlots()) {
             throw new Error("BANK_FULL");
           }
 
@@ -380,11 +380,11 @@ export async function handleBankDepositEquipment(
           (slotsResult.rows as Array<{ slot: number }>).map((r) => r.slot),
         );
         let nextSlot = 0;
-        while (usedSlots.has(nextSlot) && nextSlot < MAX_BANK_SLOTS) {
+        while (usedSlots.has(nextSlot) && nextSlot < getMaxBankSlots()) {
           nextSlot++;
         }
 
-        if (nextSlot >= MAX_BANK_SLOTS) {
+        if (nextSlot >= getMaxBankSlots()) {
           throw new Error("BANK_FULL");
         }
 
@@ -531,11 +531,11 @@ export async function handleBankDepositAllEquipment(
             (slotsResult.rows as Array<{ slot: number }>).map((r) => r.slot),
           );
           let nextSlot = 0;
-          while (usedSlots.has(nextSlot) && nextSlot < MAX_BANK_SLOTS) {
+          while (usedSlots.has(nextSlot) && nextSlot < getMaxBankSlots()) {
             nextSlot++;
           }
 
-          if (nextSlot >= MAX_BANK_SLOTS) {
+          if (nextSlot >= getMaxBankSlots()) {
             throw new Error("BANK_FULL");
           }
 
