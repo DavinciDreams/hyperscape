@@ -1,8 +1,15 @@
 /**
  * HealthRegenSystem - Passive Health Regeneration (OSRS-style)
  *
- * Server-authoritative system that handles passive health regeneration for all players.
- * Implements OSRS-accurate mechanics using game ticks (600ms each):
+ * Migrated 2026-04-24 from `packages/shared/src/systems/shared/character/`
+ * into `@hyperforge/hyperscape` as the second slice of the
+ * Hyperscape→meta-plugin extraction. The 17-tick cooldown / 100-tick
+ * regen interval / no-regen-while-in-combat behavior is OSRS-specific
+ * Hyperscape gameplay — it belongs in the Hyperscape plugin, not in
+ * `@hyperforge/shared`.
+ *
+ * Server-authoritative system. Implements OSRS-accurate mechanics
+ * using game ticks (600ms each):
  * - No regeneration while in combat
  * - 17 tick cooldown (10.2 seconds) after taking damage before regen starts
  * - Regenerates 1 HP every 100 ticks (60 seconds) when conditions are met
@@ -14,16 +21,31 @@
  * @see {@link getHealthRegenIntervalTicks()} for regen interval (100 ticks)
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
 import {
+  type CombatSystem,
   getHealthRegenCooldownTicks,
   getHealthRegenIntervalTicks,
-} from "../../../data/live/combat-live";
-import { getHealthRegenRate } from "../../../data/live/game-live";
-import type { CombatSystem } from "../combat/CombatSystem";
-import type { PlayerSystem } from "./PlayerSystem";
-import type { Player } from "../../../types/core/core";
+  getHealthRegenRate,
+  type PlayerSystem,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
+
+/**
+ * Minimal player snapshot shape this system needs. Inlined because
+ * shared's barrel `Player` aliases to the entity class
+ * `PlayerEntity` (via `types/index.ts:133`), not the data interface
+ * with `alive` / `health.{current,max}` that lives in
+ * `types/entities/player-types.ts`. Both shapes coexist in shared
+ * for historical reasons; the data shape is what `getAllPlayers()`
+ * actually returns. Until that ambiguity is resolved upstream,
+ * declare exactly the fields this system reads.
+ */
+interface PlayerSnapshot {
+  readonly id: string;
+  readonly alive?: boolean;
+  readonly health?: { readonly current?: number; readonly max?: number };
+}
 
 // Default regen rate if not defined in GameConstants
 const DEFAULT_REGEN_RATE = 1; // 1 HP per regen tick
@@ -126,7 +148,11 @@ export class HealthRegenSystem extends SystemBase {
   private processPlayerRegen(): void {
     if (!this.playerSystem) return;
 
-    const players = this.playerSystem.getAllPlayers();
+    // Cast bridges the barrel-export ambiguity around `Player` (see
+    // PlayerSnapshot interface above). At runtime `getAllPlayers()`
+    // returns objects with the snapshot fields this system reads.
+    const players =
+      this.playerSystem.getAllPlayers() as unknown as PlayerSnapshot[];
 
     for (const player of players) {
       // Check if player should regenerate
@@ -144,7 +170,7 @@ export class HealthRegenSystem extends SystemBase {
   /**
    * Get detailed regen status for debugging
    */
-  private getRegenStatus(player: Player): {
+  private getRegenStatus(player: PlayerSnapshot): {
     shouldRegen: boolean;
     alive: boolean;
     healthFull: boolean;
@@ -178,7 +204,7 @@ export class HealthRegenSystem extends SystemBase {
   /**
    * Apply health regeneration to a player
    */
-  private applyRegen(player: Player): void {
+  private applyRegen(player: PlayerSnapshot): void {
     if (!this.playerSystem) return;
 
     const currentHealth = player.health?.current ?? 0;

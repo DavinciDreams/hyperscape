@@ -28,12 +28,13 @@ import {
  * attached its migrated systems. Mirrors the noop stub
  * `bootServerPlugins()` builds when no world is supplied.
  */
-function createRecordingWorld() {
+function createRecordingWorld(opts: { isServer?: boolean } = {}) {
   const registered: string[] = [];
   const unregistered: string[] = [];
   return {
     registered,
     unregistered,
+    isServer: opts.isServer ?? true,
     register(name: string, _ctor: unknown) {
       registered.push(name);
     },
@@ -120,21 +121,37 @@ describe("server plugin boot — in-binary set", () => {
     await session.stop();
   });
 
-  it("hyperscape meta-plugin onEnable registers MobDeathSystem on the host world", async () => {
-    const world = createRecordingWorld();
+  it("hyperscape meta-plugin onEnable registers migrated systems on the host world", async () => {
+    const world = createRecordingWorld({ isServer: true });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const session = await bootServerPlugins(world as any);
 
-    // First migrated system: MobDeathSystem (out of
-    // packages/shared/src/systems/shared/combat/ → into
-    // @hyperforge/hyperscape on 2026-04-24).
+    // Migrated systems (2026-04-24 wave):
+    // - MobDeathSystem (combat/ → meta-plugin)
+    // - HealthRegenSystem (character/ → meta-plugin, server-only)
     expect(world.registered).toContain("mob-death");
+    expect(world.registered).toContain("health-regen");
     expect(world.unregistered).toEqual([]);
 
-    // session.stop() runs scope disposers in LIFO order — the
-    // disposer registered alongside the world.register call should
-    // call world.unregister.
+    // session.stop() runs scope disposers in LIFO order — both
+    // registrations have matching disposers.
     await session.stop();
     expect(world.unregistered).toContain("mob-death");
+    expect(world.unregistered).toContain("health-regen");
+  });
+
+  it("HealthRegenSystem is NOT registered when world.isServer === false", async () => {
+    const world = createRecordingWorld({ isServer: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = await bootServerPlugins(world as any);
+
+    // MobDeathSystem registers on both server and client (no gate).
+    expect(world.registered).toContain("mob-death");
+    // HealthRegenSystem is server-only — preserves the SystemLoader
+    // behavior pre-migration, which gated registration on
+    // `isServerEnvironment`.
+    expect(world.registered).not.toContain("health-regen");
+
+    await session.stop();
   });
 });

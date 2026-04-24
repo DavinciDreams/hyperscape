@@ -159,7 +159,7 @@ import { CraftingSystem } from "..";
 import { FletchingSystem } from "..";
 import { RunecraftingSystem } from "..";
 import { TanningSystem } from "..";
-import { HealthRegenSystem } from "..";
+// HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { PrayerSystem } from "..";
 import { QuestSystem } from "..";
 
@@ -198,7 +198,7 @@ export interface Systems {
   mobNpcSpawner?: MobNPCSpawnerSystem;
   stationSpawner?: StationSpawnerSystem;
   itemSpawner?: ItemSpawnerSystem;
-  healthRegen?: HealthRegenSystem;
+  // healthRegen: registered by @hyperforge/hyperscape plugin (2026-04-24)
   scripting?: ScriptingSystem;
 }
 
@@ -352,10 +352,9 @@ export async function registerSystems(world: World): Promise<void> {
     (typeof process.versions.node === "string" ||
       typeof (process.versions as { bun?: string }).bun === "string");
 
-  if (isServerEnvironment) {
-    world.register("health-regen", HealthRegenSystem);
-    console.log("[SystemLoader] ✅ HealthRegenSystem registered (server-only)");
-  }
+  // HealthRegenSystem registered by @hyperforge/hyperscape plugin
+  // onEnable (server-only via plugin's check). Migrated 2026-04-24.
+  void isServerEnvironment;
 
   // === SPECIALIZED SYSTEMS ===
   // These systems provide specific game features
@@ -492,7 +491,8 @@ export async function registerSystems(world: World): Promise<void> {
   systems.aggro = getSystem(world, "aggro") as AggroSystem;
   systems.equipment = getSystem(world, "equipment") as EquipmentSystem;
   systems.processing = getSystem(world, "processing") as ProcessingSystem;
-  systems.healthRegen = getSystem(world, "health-regen") as HealthRegenSystem;
+  // healthRegen registration moved to @hyperforge/hyperscape plugin —
+  // no SystemReferences slot needed (no consumer reads it today).
   systems.playerDeath = getSystem(world, "player-death") as PlayerDeathSystem;
   // mobDeath registration moved to @hyperforge/hyperscape plugin —
   // no SystemReferences slot needed (no consumer reads it today).

@@ -659,7 +659,10 @@ export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
 export { CombatSystem } from "./systems/shared/combat";
+export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 export { PrayerSystem } from "./systems/shared/character/PrayerSystem";
+// `Player` type already exported from the shared types block above
+// (line ~157) — no duplicate export needed here.
 export { LootSystem } from "./systems/shared/economy/LootSystem";
 export { StoreSystem } from "./systems/shared/economy/StoreSystem";
 export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
@@ -1405,7 +1408,11 @@ export {
 } from "./data/live/game-live";
 
 // Live getters — provider-first reads of boot-captured COMBAT_CONSTANTS fields.
-export { getPickupRange } from "./data/live/combat-live";
+export {
+  getHealthRegenCooldownTicks,
+  getHealthRegenIntervalTicks,
+  getPickupRange,
+} from "./data/live/combat-live";
 
 // Live getters — provider-first reads of boot-captured TRADE_CONSTANTS fields.
 export { getMaxTradeSlots } from "./data/live/trading-live";

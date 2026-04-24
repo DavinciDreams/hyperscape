@@ -33,6 +33,7 @@ import type {
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
 
+import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 
 // Re-export combat surface so callers have one import path.
@@ -114,6 +115,18 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         const w = ctx.world as { unregister?: (name: string) => void };
         w.unregister?.("mob-death");
       });
+
+      // HealthRegenSystem is server-only (the original SystemLoader
+      // gated it on `isServerEnvironment`). Preserve that behavior:
+      // only register when world.isServer is true. On client builds
+      // the system never registers — same as before the migration.
+      if (ctx.world.isServer) {
+        ctx.world.register("health-regen", HealthRegenSystem);
+        ctx.scope.register(() => {
+          const w = ctx.world as { unregister?: (name: string) => void };
+          w.unregister?.("health-regen");
+        });
+      }
     },
     onDisable(_ctx) {
       // Scope disposers (registered in onEnable) handle teardown.

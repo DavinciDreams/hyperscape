@@ -19,7 +19,9 @@ import type { DialogueSystem } from "../systems/shared";
 import type { EntityManager } from "../systems/shared";
 import type { EquipmentSystem } from "../systems/shared";
 import type { GravestoneLootSystem } from "../systems/shared";
-import type { HealthRegenSystem } from "../systems/shared";
+// HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24).
+// SystemMap entry removed — its only consumer was a dead
+// `systems.healthRegen = ...` lookup in SystemLoader.
 import type { InventoryInteractionSystem } from "../systems/shared";
 import type { InventorySystem } from "../systems/shared";
 import type { ItemSpawnerSystem } from "../systems/shared";
@@ -106,7 +108,7 @@ export interface SystemMap {
   equipment: EquipmentSystem;
   skills: SkillsSystem;
   prayer: PrayerSystem;
-  "health-regen": HealthRegenSystem;
+  // "health-regen" registered by @hyperforge/hyperscape plugin onEnable
   aggro: AggroSystem;
 
   // Economy
