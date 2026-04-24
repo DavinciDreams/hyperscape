@@ -13,16 +13,20 @@
  * @see ProcessingDataProvider for smithing recipes from manifest
  */
 
+// Migrated 2026-04-24 from
+// `packages/shared/src/systems/shared/interaction/` into
+// `@hyperforge/hyperscape` as part of the third migration batch.
+// Hammer + anvil + bar = OSRS-specific gameplay.
 import {
-  isLooseInventoryItem,
+  EventType,
+  getHammerItemId,
   getItemQuantity,
   getSmithingLevelSafe,
-} from "../../../constants/SmithingConstants";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import { getHammerItemId } from "../../../data/live/smithing-live";
-import { EventType } from "../../../types/events";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
+  isLooseInventoryItem,
+  processingDataProvider,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 /** Active smithing session for a player */
 interface SmithingSession {

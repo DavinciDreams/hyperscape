@@ -14,15 +14,23 @@
  * @see ProcessingDataProvider for runecrafting recipes from manifest
  */
 
+/**
+ * Migrated 2026-04-24 from `packages/shared/src/systems/shared/interaction/`
+ * into `@hyperforge/hyperscape` as part of the third Hyperscape→
+ * meta-plugin batch (with ItemTargetingSystem + SmithingSystem).
+ * OSRS-specific gameplay (essence + altar = runes) — belongs in the
+ * Hyperscape plugin, not in `@hyperforge/shared`.
+ */
+
 import {
-  isLooseInventoryItem,
+  EventType,
   getItemQuantity,
   hasSkills,
-} from "../../../constants/SmithingConstants";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import { EventType } from "../../../types/events";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
+  isLooseInventoryItem,
+  processingDataProvider,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 export class RunecraftingSystem extends SystemBase {
   /** Cache player skill levels to avoid repeated lookups */

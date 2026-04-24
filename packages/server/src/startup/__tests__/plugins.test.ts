@@ -130,17 +130,24 @@ describe("server plugin boot — in-binary set", () => {
     // - MobDeathSystem (combat/ → meta-plugin)
     // - HealthRegenSystem (character/ → meta-plugin, server-only)
     // - TanningSystem (interaction/ → meta-plugin)
-    expect(world.registered).toContain("mob-death");
-    expect(world.registered).toContain("health-regen");
-    expect(world.registered).toContain("tanning");
+    // 5 systems migrated so far. Each registration has a matching
+    // disposer attached to the plugin's scope.
+    const expected = [
+      "mob-death",
+      "health-regen",
+      "tanning",
+      "smithing",
+      "runecrafting",
+    ];
+    for (const name of expected) {
+      expect(world.registered).toContain(name);
+    }
     expect(world.unregistered).toEqual([]);
 
-    // session.stop() runs scope disposers in LIFO order — every
-    // registration has a matching disposer.
     await session.stop();
-    expect(world.unregistered).toContain("mob-death");
-    expect(world.unregistered).toContain("health-regen");
-    expect(world.unregistered).toContain("tanning");
+    for (const name of expected) {
+      expect(world.unregistered).toContain(name);
+    }
   });
 
   it("HealthRegenSystem is NOT registered when world.isServer === false", async () => {

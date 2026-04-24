@@ -17,7 +17,7 @@ export * from "./TargetValidator";
 
 // Smithing skill systems (furnace smelting, anvil smithing)
 export * from "./SmeltingSystem";
-export * from "./SmithingSystem";
+// SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 
 // Crafting skill system (leather, jewelry, gem cutting)
 export * from "./CraftingSystem";
@@ -28,5 +28,4 @@ export * from "./FletchingSystem";
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // — NPC tanner: hides → leather, OSRS-specific gameplay.
 
-// Runecrafting skill system (essence + altar → runes)
-export * from "./RunecraftingSystem";
+// RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)

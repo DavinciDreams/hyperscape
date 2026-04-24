@@ -154,10 +154,10 @@ import type { CameraSystem as CameraSystemInterface } from "../../../types/syste
 import { ActionRegistry } from "..";
 import { SkillsSystem } from "..";
 import { SmeltingSystem } from "..";
-import { SmithingSystem } from "..";
+// SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { CraftingSystem } from "..";
 import { FletchingSystem } from "..";
-import { RunecraftingSystem } from "..";
+// RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { PrayerSystem } from "..";
@@ -374,8 +374,8 @@ export async function registerSystems(world: World): Promise<void> {
   // 18a. Smelting system - Furnace smelting (depends on inventory, skills)
   world.register("smelting", SmeltingSystem);
 
-  // 18b. Smithing system - Anvil smithing (depends on inventory, skills)
-  world.register("smithing", SmithingSystem);
+  // (Slot 18b — SmithingSystem — registered by @hyperforge/hyperscape
+  //  plugin onEnable. Migrated 2026-04-24.)
 
   // 18c. Crafting system - Leather, jewelry, gem cutting (depends on inventory, skills)
   world.register("crafting", CraftingSystem);
@@ -386,8 +386,8 @@ export async function registerSystems(world: World): Promise<void> {
   // (Slot 18d — TanningSystem — registered by @hyperforge/hyperscape
   //  plugin onEnable. Migrated 2026-04-24.)
 
-  // 18f. Runecrafting system - Essence + altar → runes (depends on inventory, skills)
-  world.register("runecrafting", RunecraftingSystem);
+  // (Slot 18f — RunecraftingSystem — registered by
+  //  @hyperforge/hyperscape plugin onEnable. Migrated 2026-04-24.)
 
   // === GAMEPLAY SYSTEMS ===
   // These systems provide advanced gameplay mechanics

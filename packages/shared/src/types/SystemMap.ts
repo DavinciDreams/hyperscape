@@ -40,10 +40,10 @@ import type { QuestSystem } from "../systems/shared";
 import type { ResourceSystem } from "../systems/shared";
 import type { SkillsSystem } from "../systems/shared";
 import type { SmeltingSystem } from "../systems/shared";
-import type { SmithingSystem } from "../systems/shared";
+// SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { CraftingSystem } from "../systems/shared";
 import type { FletchingSystem } from "../systems/shared";
-import type { RunecraftingSystem } from "../systems/shared";
+// RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { StationSpawnerSystem } from "../systems/shared";
 import type { StoreSystem } from "../systems/shared";
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -121,11 +121,11 @@ export interface SystemMap {
   // Processing / crafting
   processing: ProcessingSystem;
   smelting: SmeltingSystem;
-  smithing: SmithingSystem;
+  // "smithing" registered by @hyperforge/hyperscape plugin onEnable
   crafting: CraftingSystem;
   fletching: FletchingSystem;
   // "tanning" registered by @hyperforge/hyperscape plugin onEnable
-  runecrafting: RunecraftingSystem;
+  // "runecrafting" registered by @hyperforge/hyperscape plugin onEnable
 
   // Death
   "player-death": PlayerDeathSystem;

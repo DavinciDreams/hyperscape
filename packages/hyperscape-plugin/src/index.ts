@@ -35,6 +35,8 @@ import type { World } from "@hyperforge/shared";
 
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
+import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
+import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
 
 // Re-export combat surface so callers have one import path.
@@ -135,6 +137,21 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       ctx.scope.register(() => {
         const w = ctx.world as { unregister?: (name: string) => void };
         w.unregister?.("tanning");
+      });
+
+      // SmithingSystem + RunecraftingSystem: same shape as Tanning —
+      // OSRS-specific resource-processing systems that self-gate
+      // their init() on world.isServer.
+      ctx.world.register("smithing", SmithingSystem);
+      ctx.scope.register(() => {
+        const w = ctx.world as { unregister?: (name: string) => void };
+        w.unregister?.("smithing");
+      });
+
+      ctx.world.register("runecrafting", RunecraftingSystem);
+      ctx.scope.register(() => {
+        const w = ctx.world as { unregister?: (name: string) => void };
+        w.unregister?.("runecrafting");
       });
     },
     onDisable(_ctx) {

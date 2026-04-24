@@ -1380,11 +1380,19 @@ export { TERRAIN_CONSTANTS } from "./constants/GameConstants";
 export { INVENTORY_CONSTANTS } from "./constants/GameConstants";
 
 // Smithing/inventory item helpers — used by gameplay plugins that
-// migrated out of shared/ (e.g. TanningSystem in @hyperforge/hyperscape).
+// migrated out of shared/ (e.g. TanningSystem, SmithingSystem,
+// RunecraftingSystem in @hyperforge/hyperscape).
 export {
-  isLooseInventoryItem,
   getItemQuantity,
+  getSmithingLevelSafe,
+  hasSkills,
+  isLooseInventoryItem,
 } from "./constants/SmithingConstants";
+
+// Smithing live-getters — provider-first reads of boot-captured
+// smithing constants. Consumed by SmithingSystem in
+// @hyperforge/hyperscape.
+export { getHammerItemId } from "./data/live/smithing-live";
 
 // Processing data provider — manifest-driven processing recipes
 // (smithing, smelting, tanning, fletching, runecrafting, cooking, ...).
