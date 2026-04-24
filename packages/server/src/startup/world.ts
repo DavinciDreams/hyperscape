@@ -139,6 +139,17 @@ export async function initializeWorld(
 
   world.register("network", ServerNetwork);
 
+  // Boot the in-binary plugin set (Phase I production-wiring step).
+  // All plugins are no-op today — this just proves the gameplay-
+  // framework runtime executes inside the production server. Future
+  // Hyperscape→meta-plugin migrations attach their `onLoad` here.
+  // Session is stashed on the world so a graceful shutdown can call
+  // `pluginSession.stop()` for clean disposer teardown.
+  const { bootServerPlugins } = await import("./plugins.js");
+  const pluginSession = await bootServerPlugins();
+  (world as { pluginSession?: typeof pluginSession }).pluginSession =
+    pluginSession;
+
   // Make PostgreSQL pool and Drizzle DB available for DatabaseSystem to use
   world.pgPool = dbContext.pgPool;
   world.drizzleDb = dbContext.drizzleDb;
