@@ -25,6 +25,8 @@ import {
   type RunesManifest,
 } from "@hyperforge/manifest-schema";
 
+import { runesRegistry } from "../runes/index.js";
+
 import runesManifestJson from "./runes.json" with { type: "json" };
 
 /**
@@ -53,6 +55,13 @@ function rebuildFromManifest(manifest: RunesManifest): void {
 
   VALID_RUNES.length = 0;
   for (const rune of manifest.runes) VALID_RUNES.push(rune.id);
+
+  // Mirror into the runtime runesRegistry so RuneService's
+  // registry-prefer branch (added 2026-04-24) actually fires in
+  // production. Without this the legacy ELEMENTAL_STAVES/RUNE_NAMES/
+  // VALID_RUNES would still work (consumers would fall through), but
+  // the PIE-hot-reload path wouldn't carry through to the registry.
+  runesRegistry.load(manifest);
 }
 
 // Initial load — schema-validated at module load so bad JSON fails fast.
