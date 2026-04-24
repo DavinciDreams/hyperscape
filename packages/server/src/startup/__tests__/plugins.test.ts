@@ -129,15 +129,18 @@ describe("server plugin boot — in-binary set", () => {
     // Migrated systems (2026-04-24 wave):
     // - MobDeathSystem (combat/ → meta-plugin)
     // - HealthRegenSystem (character/ → meta-plugin, server-only)
+    // - TanningSystem (interaction/ → meta-plugin)
     expect(world.registered).toContain("mob-death");
     expect(world.registered).toContain("health-regen");
+    expect(world.registered).toContain("tanning");
     expect(world.unregistered).toEqual([]);
 
-    // session.stop() runs scope disposers in LIFO order — both
-    // registrations have matching disposers.
+    // session.stop() runs scope disposers in LIFO order — every
+    // registration has a matching disposer.
     await session.stop();
     expect(world.unregistered).toContain("mob-death");
     expect(world.unregistered).toContain("health-regen");
+    expect(world.unregistered).toContain("tanning");
   });
 
   it("HealthRegenSystem is NOT registered when world.isServer === false", async () => {

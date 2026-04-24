@@ -158,7 +158,7 @@ import { SmithingSystem } from "..";
 import { CraftingSystem } from "..";
 import { FletchingSystem } from "..";
 import { RunecraftingSystem } from "..";
-import { TanningSystem } from "..";
+// TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { PrayerSystem } from "..";
 import { QuestSystem } from "..";
@@ -383,8 +383,8 @@ export async function registerSystems(world: World): Promise<void> {
   // 18e. Fletching system - Knife + logs, stringing, arrow tipping (depends on inventory, skills)
   world.register("fletching", FletchingSystem);
 
-  // 18d. Tanning system - NPC tanner: hides → leather (depends on inventory)
-  world.register("tanning", TanningSystem);
+  // (Slot 18d — TanningSystem — registered by @hyperforge/hyperscape
+  //  plugin onEnable. Migrated 2026-04-24.)
 
   // 18f. Runecrafting system - Essence + altar → runes (depends on inventory, skills)
   world.register("runecrafting", RunecraftingSystem);

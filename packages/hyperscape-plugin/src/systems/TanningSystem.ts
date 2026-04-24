@@ -1,6 +1,13 @@
 /**
  * TanningSystem - Handles Hide Tanning at Tanner NPCs
  *
+ * Migrated 2026-04-24 from `packages/shared/src/systems/shared/interaction/`
+ * into `@hyperforge/hyperscape` as the third slice of the
+ * Hyperscape→meta-plugin extraction. Tanning is OSRS-specific
+ * gameplay (cowhide → leather, dragonhide → dragon leather, fixed
+ * 1gp / 20gp coin cost per hide) so it belongs in the Hyperscape
+ * plugin, not in `@hyperforge/shared`.
+ *
  * OSRS-accurate tanning implementation:
  * - Talk to tanner NPC to open tanning interface
  * - Select hide type and quantity
@@ -13,13 +20,13 @@
  */
 
 import {
-  isLooseInventoryItem,
+  EventType,
   getItemQuantity,
-} from "../../../constants/SmithingConstants";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import { EventType } from "../../../types/events";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
+  isLooseInventoryItem,
+  processingDataProvider,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 export class TanningSystem extends SystemBase {
   constructor(world: World) {
@@ -178,7 +185,6 @@ export class TanningSystem extends SystemBase {
     const totalCost = actualQuantity * recipe.cost;
 
     // Check if player has enough coins
-    // Use a callback-based coin check via INVENTORY_CHECK
     let playerCoins = 0;
     const coinItems = inventory.filter(
       (item) => isLooseInventoryItem(item) && item.itemId === "coins",
@@ -281,7 +287,7 @@ export class TanningSystem extends SystemBase {
     // Tanning is instant, no active sessions to process
   }
 
-  destroy(): void {
-    // No cleanup needed - tanning has no active sessions
+  override destroy(): void {
+    super.destroy();
   }
 }

@@ -35,6 +35,7 @@ import type { World } from "@hyperforge/shared";
 
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
+import { TanningSystem } from "./systems/TanningSystem.js";
 
 // Re-export combat surface so callers have one import path.
 export {
@@ -127,6 +128,14 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           w.unregister?.("health-regen");
         });
       }
+
+      // TanningSystem: registers on both server + client (its init()
+      // self-gates on world.isServer). Same shape as MobDeathSystem.
+      ctx.world.register("tanning", TanningSystem);
+      ctx.scope.register(() => {
+        const w = ctx.world as { unregister?: (name: string) => void };
+        w.unregister?.("tanning");
+      });
     },
     onDisable(_ctx) {
       // Scope disposers (registered in onEnable) handle teardown.

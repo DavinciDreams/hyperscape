@@ -1379,6 +1379,18 @@ export { TERRAIN_CONSTANTS } from "./constants/GameConstants";
 // Inventory constants (slot counts, stack sizes)
 export { INVENTORY_CONSTANTS } from "./constants/GameConstants";
 
+// Smithing/inventory item helpers — used by gameplay plugins that
+// migrated out of shared/ (e.g. TanningSystem in @hyperforge/hyperscape).
+export {
+  isLooseInventoryItem,
+  getItemQuantity,
+} from "./constants/SmithingConstants";
+
+// Processing data provider — manifest-driven processing recipes
+// (smithing, smelting, tanning, fletching, runecrafting, cooking, ...).
+// Consumed by gameplay plugins migrated out of shared/.
+export { processingDataProvider } from "./data/ProcessingDataProvider";
+
 // Live getters — provider-first reads of boot-captured GAME_CONSTANTS fields.
 // Prefer these over the frozen `*_CONSTANTS` re-exports above when a consumer
 // needs to see PIE-hotreloaded authored data.

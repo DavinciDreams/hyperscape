@@ -25,8 +25,8 @@ export * from "./CraftingSystem";
 // Fletching skill system (knife + logs, stringing, arrow tipping)
 export * from "./FletchingSystem";
 
-// Tanning system (NPC tanner: hides → leather)
-export * from "./TanningSystem";
+// TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
+// — NPC tanner: hides → leather, OSRS-specific gameplay.
 
 // Runecrafting skill system (essence + altar → runes)
 export * from "./RunecraftingSystem";

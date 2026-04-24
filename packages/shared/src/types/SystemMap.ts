@@ -46,7 +46,7 @@ import type { FletchingSystem } from "../systems/shared";
 import type { RunecraftingSystem } from "../systems/shared";
 import type { StationSpawnerSystem } from "../systems/shared";
 import type { StoreSystem } from "../systems/shared";
-import type { TanningSystem } from "../systems/shared";
+// TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { GroundItemSystem } from "../systems/shared/economy/GroundItemSystem";
 import type { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import type { PersistenceSystem } from "../systems/server/PersistenceSystem";
@@ -124,7 +124,7 @@ export interface SystemMap {
   smithing: SmithingSystem;
   crafting: CraftingSystem;
   fletching: FletchingSystem;
-  tanning: TanningSystem;
+  // "tanning" registered by @hyperforge/hyperscape plugin onEnable
   runecrafting: RunecraftingSystem;
 
   // Death
