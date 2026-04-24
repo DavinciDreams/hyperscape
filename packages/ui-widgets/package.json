@@ -1,0 +1,42 @@
+{
+  "name": "@hyperforge/ui-widgets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "React widget implementations for the Hyperforge UI framework. Each widget satisfies a schema exported by @hyperforge/ui-framework and can be rendered by the ManifestRenderer in the live game client or the World Studio UI Layout Editor.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hyperforge/ui-framework": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}

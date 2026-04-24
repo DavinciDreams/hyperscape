@@ -1,0 +1,25 @@
+{
+  "id": "com.hyperforge.plugin-hello-reference",
+  "name": "Hello Reference",
+  "version": "0.1.0",
+  "description": "Minimal reference plugin. Registers a single greeting on enable, scope-cleans it on disable. Used to prove the @hyperforge/gameplay-framework author surface end-to-end.",
+  "entry": "./dist/index.js",
+  "author": {
+    "name": "Hyperforge"
+  },
+  "license": "GPL-3.0",
+  "hyperforgeApi": "0.1.0",
+  "dependencies": [],
+  "loadAfter": [],
+  "enabledByDefault": false,
+  "contributions": {
+    "systems": [],
+    "entities": [],
+    "widgets": [],
+    "manifestSchemas": [],
+    "paletteCategories": [],
+    "toolbarTools": [],
+    "commands": []
+  },
+  "tags": ["reference", "demo"]
+}
