@@ -8,7 +8,13 @@ runtime), `ServerNetwork` and its transitive deps must relocate to
 
 ## Status
 
-Driven by Task #25. Started 2026-04-17.
+Driven by Task #25. Started 2026-04-17. Steps 1–9 complete
+(2026-04-18 21:00 EDT). PIE now runs the real `ServerNetwork` +
+`ClientNetwork` loopback in-process via `PIEEditorSession`; legacy
+`createPlayTestWorld.ts` + `PIENetworkStub` deleted. Remaining
+follow-up is a cosmetic Step 8 sweep of server-side re-export shims for
+managers that are still imported by server-only DB-coupled handlers —
+non-blocking and low-priority.
 
 ## Invariants (do not violate)
 
@@ -279,19 +285,91 @@ In shared, build `PIEServerSession` that:
 Then point `usePIESession.ts` at `PIEServerSession` and delete
 `createPlayTestWorld.ts` + `PIENetworkStub`.
 
-**Step 9 — PARTIAL (2026-04-18 19:03 EDT)**:
+**Step 9 — COMPLETE (2026-04-18 21:00 EDT)**:
+- Editor façade `PIEEditorSession` landed in
+  `packages/shared/src/runtime/pie/PIEEditorSession.ts`. Composes a real
+  `PIEServerSession` + `NodeClientWorld` + `attachPreconnectedSocket` so
+  PIE runs the real ServerNetwork + ClientNetwork protocol in-process.
+  Mirrors the old `PlayTestWorld` public surface (`entities`,
+  `gameMode`, `isRunning`, `start/stop/tick/interactWith`) with async
+  `start/stop`.
+- `PIEEntity` type lifted to `packages/shared/src/runtime/pie/PIEEntity.ts`
+  so it has a stable home independent of the deleted legacy file.
+- Controller + shim ticks (`playerController.tick`,
+  `cameraController.tick`, `routerShim.tick`, `orbitShim.tick`) driven
+  from `PIEEditorSession.tick(dt)`.
+- `ScriptingSystem` wrapped its event-adapter `emit` to also fire a
+  `scripting:action` observability event so the editor's debug console
+  sees every action a script runs.
+- All 4 callers of the old `createPlayTestWorld` migrated to the async
+  façade: `playTestWorldPIE.test.ts`,
+  `pieScriptExecution.test.ts`, `templateIntegration.test.ts`,
+  `pieRoundtrip.test.ts`.
+- `packages/shared/src/runtime/createPlayTestWorld.ts` (657 lines,
+  including `PIENetworkStub`) deleted. Zero remaining
+  `createPlayTestWorld` / `new PlayTestWorld` / `PIENetworkStub`
+  imports or usages in the codebase (grep-clean — remaining mentions
+  are historical docstrings in comments / PLAN.md files only).
+- Tests green: 41/41 PIE + roundtrip (`playTestWorldPIE`,
+  `PIEClientNetwork.integration`, `pie/*`, `pieRoundtrip`), 287/287
+  scripting integration, 109/109 shared runtime/gameMode/platform.
+- Editor (`usePIESession.ts`) now consumes `PIEEditorSession` end-to-end
+  through the `runtime-pie.js` bundle export; the legacy `PlayTestWorld`
+  path is fully removed.
+
+**Step 9 — historical PARTIAL snapshot (2026-04-18 20:05 EDT)**:
 - ✅ `InMemoryStubs.ts` — 14 narrow-interface stubs + `createPIEStubSystemDatabase()`
 - ✅ `PIEBridgeSystems.ts` — 8 `SystemBase` adapters + `registerPIEBridges(world)`
 - ✅ `createPIEServerWorld.ts` — minimal server-world factory (skips procgen/towns/POI/docks/livekit/bot)
 - ✅ `PIEServerSession.ts` — composes world + bridges + `ServerNetwork` + `InMemorySocketPair`
 - ✅ `PIELoopbackConnectionHandler` (replaces `PIENoopConnectionHandler`) — wraps `InMemorySocket` in real `Socket`, registers in `ServerNetwork.sockets` with a synthetic `accountId` (from `ConnectionParams.characterId` or uuid). No Privy auth, no snapshot send, no player-entity creation (editor owns those).
-- ✅ 20 unit + integration tests green: bridges, lifecycle guards, `SystemDatabase` stub, real `start()` + `connect()`, socket registration, server→client packet roundtrip via `sendPacket`, clean disconnect teardown (`Socket.onClose` → `SocketManager.handleDisconnect` → `sockets.delete`).
-- ✅ Commits `054588a48` (foundation) + `79822c7ef` (loopback handler).
+- ✅ `ClientNetwork.attachPreconnectedSocket(ws, options)` — PIE entry point that bypasses the `wsUrl` + auth handshake and brings the real client online over a pre-connected transport. Shared `finalizeConnection()` is the single post-connect code path for both the live `wsUrl` flow and PIE so they cannot drift.
+- ✅ `InMemoryClientSocket` + `asClientWebSocket()` — DOM `WebSocket`-compatible adapter over `InMemorySocket` (addEventListener/readyState/binaryType/send/close) so PIE can hand the client end to `ClientNetwork.attachPreconnectedSocket`.
+- ✅ End-to-end loopback proven: `PIEClientNetwork.integration.test.ts` drives real `ClientNetwork` from `createNodeClientWorld()` through `PIEServerSession` and asserts (a) server→client `writePacket('rtt', ...)` decodes and enqueues as `['onRtt', payload]` on the client's real dispatch queue, (b) client→server `writePacket('keepalive', ...)` arrives on the server socket's `message` listener. Both directions go through the real protocol — no simulated packets, no compat shim.
+- ✅ 49 unit + integration tests green: bridges, lifecycle guards, `SystemDatabase` stub, real `start()` + `connect()`, socket registration, server→client packet roundtrip via `sendPacket`, clean disconnect teardown (`Socket.onClose` → `SocketManager.handleDisconnect` → `sockets.delete`), 8 `InMemoryClientSocket` adapter tests (MessageEvent shape, peer-close → readyState=3, idempotent close), 2 client↔server roundtrip tests.
+- ✅ Commits `054588a48` (foundation) + `79822c7ef` (loopback handler) + `295a08bb6` (plan doc) + `0a5be8fac` (attachPreconnectedSocket + DOM adapter).
 
-**Step 9 — REMAINING** (next phase, not blocking migration):
-- ⏳ Editor repoint (`usePIESession.ts`): depends on `PlayTestWorld`'s lightweight entity map (`entities.values()`), simulate mode, per-entity script-graph injection, `interactWith()`, `gameMode`, `isRunning`, debug sink. `PIEServerSession` wraps a real server world whose entity/gameplay surface is different — repoint requires either a compatibility façade or an editor rework that consumes the real ECS via `ClientNetwork`-over-`InMemorySocket`.
-- ⏳ `ClientNetwork` PIE-friendliness: real client currently expects a `wsUrl` and constructs its own WebSocket; PIE needs it to accept a pre-connected `InMemorySocket` so the editor can speak to `PIEServerSession` over the same code path the live client uses.
-- ⏳ Delete `createPlayTestWorld.ts` + `PIENetworkStub`: blocked on editor repoint above.
+**Step 9 — REMAINING (editor repoint)**:
+
+**Decision: Option A — compat façade** (preserves editor behavior; façade is disposable when Option B lands later).
+
+Editor-facing `PlayTestWorld` surface the façade must honor (enumerated from `packages/asset-forge/src/components/WorldStudio/hooks/usePIESession.ts`):
+
+| Surface | Usage |
+| --- | --- |
+| `createPlayTestWorld()` | factory, returns `PlayTestWorld` |
+| `world.start(options)` | starts PIE with `PlayTestWorldOptions` |
+| `world.stop()` | teardown |
+| `world.tick(dt)` | per-rAF; drives AI + scripts |
+| `world.isRunning` | lifecycle guard in tick loop |
+| `world.entities: Map<string, PIEEntity>` | editor iterates for marker creation + per-frame position sync |
+| `world.gameMode: GameMode \| null` | `.id` read to choose controller-attach branch |
+| `world.interactWith(entityId)` | E-key / click-at-center routing |
+
+`PlayTestWorldOptions` body:
+- Entity data: `mobSpawns[] / npcs[] / resources[] / stations[]` (id, type, name, world-space position, optional `behaviorGraph`)
+- `playerSpawn`, `playerObject` (Object3D the controllers possess)
+- `viewport` (HTMLElement), `camera` (THREE.Camera)
+- `mode: "play" | "simulate"`
+- `gameMode: GameModeManifest`
+- `debugSink: (entry: PIEDebugEntry) => void`
+
+`PIEEntity` shape: `{ id, type: "player"|"mob"|"npc"|"resource"|"station", position: {x,y,z}, rotation, name, ...optional-mob/npc/resource/station fields, proximityRadius? }`.
+
+**Façade plan (`PIEEditorSession` in `packages/shared/src/runtime/pie/PIEEditorSession.ts`)**:
+1. Owns a `PIEServerSession` (real server world + `ServerNetwork`) + a `NodeClientWorld` wired via `attachPreconnectedSocket(asClientWebSocket(pair.client))`.
+2. Spawns editor-provided entities directly into the server world's ECS (bypass network for writes — same process; editor is authoritative for placement). Script-graph attachment happens on the server.
+3. Presents a `PlayTestWorld`-shaped read surface: `entities` is a synced `Map<string, PIEEntity>` rebuilt each `tick()` from the server ECS (or from `ClientNetwork` snapshots — decide during implementation based on whether snapshots are emitted for a bare `createPIEServerWorld`).
+4. Controllers + shims (`PIEInteractionRouterShim`, `PIEOrbitCameraShim`) + script runtime stay as-is — they operate on the `entities` map and `playerObject`, which the façade still owns.
+5. `interactWith(id)` → server-side `entity:interacted` event (the editor can emit through `ClientNetwork.ws.send` via a new packet, OR directly on the server world's event bus since same-process).
+6. Debug sink: register the façade's debug callback on the server's script runtime.
+
+**Open questions to resolve in the façade PR**:
+- Should `createPIEServerWorld` register `ScriptGraphInterpreter` so behavior graphs run server-side? (Yes — otherwise graphs would need to run client-side in the editor, which diverges from production.)
+- Does `ServerNetwork` emit entity snapshots for a world with no RPG systems? If not, the façade's `entities` map reads from server ECS directly (in-process, type-safe).
+- How does the editor spawn one-off entities not in manifests? New helper on `createPIEServerWorld` exposing `spawnMob(data) / spawnNPC(data) / spawnResource(data) / spawnStation(data)`.
+
+**After façade lands**: delete `createPlayTestWorld.ts` (657 lines) + `PIENetworkStub`. The façade is then the supported editor entry point until Option B replaces it.
 
 ## Per-step checklist
 

@@ -129,7 +129,12 @@
         "^build"
       ],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "SKIP_CHAIN_SETUP",
+        "CI",
+        "NODE_ENV"
+      ]
     },
     "app#dev": {
       "dependsOn": [
