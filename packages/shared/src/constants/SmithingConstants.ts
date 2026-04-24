@@ -1,56 +1,69 @@
 /**
- * SmithingConstants - Centralized constants for smelting and smithing systems
+ * SmithingConstants — MANIFEST FAÇADE
  *
- * This file contains all hardcoded values used across the smithing feature,
- * making it easier to maintain consistency and adjust values.
+ * As of Phase A5 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the source of truth
+ * for smithing/smelting mechanic constants lives in
+ * `smithing-constants.json`, validated at module load time against
+ * `SmithingManifestSchema` from `@hyperforge/manifest-schema`.
+ *
+ * The JSON authoritative copy is served from
+ * `packages/server/world/assets/manifests/smithing-constants.json`
+ * (editor-editable, loaded at runtime). This TS file preserves the exact
+ * legacy export shape (`SMITHING_CONSTANTS`, helper functions, type
+ * guards) so the existing consumers don't have to change.
  *
  * @see https://oldschool.runescape.wiki/w/Game_tick for tick timing
  */
 
-import { COMBAT_CONSTANTS } from "./CombatConstants";
+import { SmithingManifestSchema } from "@hyperforge/manifest-schema";
 
-export const SMITHING_CONSTANTS = {
+import { COMBAT_CONSTANTS } from "./CombatConstants";
+import smithingManifestJson from "./smithing-constants.json" with { type: "json" };
+
+const manifest = SmithingManifestSchema.parse(smithingManifestJson);
+
+export const SMITHING_CONSTANTS = Object.freeze({
   // Item IDs
-  HAMMER_ITEM_ID: "hammer",
-  COAL_ITEM_ID: "coal",
+  HAMMER_ITEM_ID: manifest.items.hammerItemId,
+  COAL_ITEM_ID: manifest.items.coalItemId,
 
   // Tick-based timing defaults (used when manifest doesn't specify)
   // OSRS: smelting and smithing both take 4 ticks
-  DEFAULT_SMELTING_TICKS: 4,
-  DEFAULT_SMITHING_TICKS: 4,
+  DEFAULT_SMELTING_TICKS: manifest.timing.defaultSmeltingTicks,
+  DEFAULT_SMITHING_TICKS: manifest.timing.defaultSmithingTicks,
 
   // Tick duration (from CombatConstants for consistency)
   TICK_DURATION_MS: COMBAT_CONSTANTS.TICK_DURATION_MS,
 
   // Input validation limits
-  MAX_QUANTITY: 10000,
-  MIN_QUANTITY: 1,
-  MAX_ITEM_ID_LENGTH: 64,
+  MAX_QUANTITY: manifest.validation.maxQuantity,
+  MIN_QUANTITY: manifest.validation.minQuantity,
+  MAX_ITEM_ID_LENGTH: manifest.validation.maxItemIdLength,
 
-  // Messages - Smelting
-  MESSAGES: {
+  // Messages - Smelting & Smithing
+  MESSAGES: Object.freeze({
     // Smelting messages
-    ALREADY_SMELTING: "You are already smelting.",
-    NO_ITEMS: "You have no items.",
-    NO_ORES: "You don't have the ores to smelt anything.",
-    INVALID_BAR: "Invalid bar type.",
-    LEVEL_TOO_LOW_SMELT: "You need level {level} Smithing to smelt that.",
-    SMELTING_START: "You begin smelting {item}s.",
-    OUT_OF_MATERIALS: "You have run out of materials.",
-    SMELT_SUCCESS: "You smelt a {item}.",
-    IRON_SMELT_FAIL: "The ore is too impure and you fail to smelt it.",
+    ALREADY_SMELTING: manifest.messages.alreadySmelting,
+    NO_ITEMS: manifest.messages.noItems,
+    NO_ORES: manifest.messages.noOres,
+    INVALID_BAR: manifest.messages.invalidBar,
+    LEVEL_TOO_LOW_SMELT: manifest.messages.levelTooLowSmelt,
+    SMELTING_START: manifest.messages.smeltingStart,
+    OUT_OF_MATERIALS: manifest.messages.outOfMaterials,
+    SMELT_SUCCESS: manifest.messages.smeltSuccess,
+    IRON_SMELT_FAIL: manifest.messages.ironSmeltFail,
 
     // Smithing messages
-    ALREADY_SMITHING: "You are already smithing.",
-    NO_HAMMER: "You need a hammer to work the metal on this anvil.",
-    NO_BARS: "You don't have the bars to smith anything.",
-    INVALID_RECIPE: "Invalid smithing recipe.",
-    LEVEL_TOO_LOW_SMITH: "You need level {level} Smithing to make that.",
-    SMITHING_START: "You begin smithing {item}s.",
-    OUT_OF_BARS: "You have run out of bars.",
-    SMITH_SUCCESS: "You hammer the {metal} and make a {item}.",
-  },
-} as const;
+    ALREADY_SMITHING: manifest.messages.alreadySmithing,
+    NO_HAMMER: manifest.messages.noHammer,
+    NO_BARS: manifest.messages.noBars,
+    INVALID_RECIPE: manifest.messages.invalidRecipe,
+    LEVEL_TOO_LOW_SMITH: manifest.messages.levelTooLowSmith,
+    SMITHING_START: manifest.messages.smithingStart,
+    OUT_OF_BARS: manifest.messages.outOfBars,
+    SMITH_SUCCESS: manifest.messages.smithSuccess,
+  }),
+});
 
 /**
  * Helper function to format messages with placeholders

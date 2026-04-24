@@ -1,73 +1,54 @@
 /**
- * WeaponStyleConfig - OSRS-accurate combat style availability per weapon type
+ * WeaponStyleConfig — MANIFEST FAÇADE
+ *
+ * As of Phase A8 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the OSRS-accurate
+ * combat style availability table lives in `weapon-styles.json`, validated
+ * at module load time against `WeaponStylesManifestSchema` from
+ * `@hyperforge/manifest-schema`.
+ *
+ * This TS file preserves the exact legacy export shape
+ * (`WEAPON_STYLE_CONFIG`, `getAvailableStyles`, `isStyleValidForWeapon`,
+ * `getDefaultStyleForWeapon`) so existing consumers don't have to change.
+ * A runtime integrity check asserts every `WeaponType` enum value has a
+ * style list in the JSON.
  *
  * In OSRS, different weapon types have different available combat styles.
- * This configuration maps weapon types to their allowed combat styles.
  *
  * @see https://oldschool.runescape.wiki/w/Combat_Options
  */
 
-import { WeaponType } from "../types/game/item-types";
+import { WeaponStylesManifestSchema } from "@hyperforge/manifest-schema";
+
 import type { CombatStyleExtended } from "../types/game/combat-types";
+import { WeaponType } from "../types/game/item-types";
+import weaponStylesManifestJson from "./weapon-styles.json" with { type: "json" };
+
+const manifest = WeaponStylesManifestSchema.parse(weaponStylesManifestJson);
 
 /**
  * Combat styles available for each weapon type.
  * OSRS-accurate: Not all weapons have all 4 styles.
+ *
+ * Built at module load by iterating `WeaponType` enum values and looking
+ * up the manifest. Fails fast if any enum value is missing from the JSON.
  */
-export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyleExtended[]> = {
-  // Swords - full style selection (slash/stab versatility)
-  [WeaponType.SWORD]: ["accurate", "aggressive", "defensive", "controlled"],
-
-  // Scimitars - full style selection (curved blade versatility)
-  [WeaponType.SCIMITAR]: ["accurate", "aggressive", "defensive", "controlled"],
-
-  // Maces - full style selection (crush weapon with defensive option)
-  [WeaponType.MACE]: ["accurate", "aggressive", "defensive", "controlled"],
-
-  // Spears - full style selection (reach weapon)
-  [WeaponType.SPEAR]: ["accurate", "aggressive", "defensive", "controlled"],
-
-  // Longswords - full style selection (slash weapon)
-  [WeaponType.LONGSWORD]: ["accurate", "aggressive", "defensive", "controlled"],
-
-  // Two-handed swords - full style selection (2H melee)
-  [WeaponType.TWO_HAND_SWORD]: [
-    "accurate",
-    "aggressive",
-    "defensive",
-    "controlled",
-  ],
-
-  // Halberds - full style selection (2H reach weapon)
-  [WeaponType.HALBERD]: ["accurate", "aggressive", "defensive", "controlled"],
-
-  // Axes - no controlled (pure damage weapons in OSRS)
-  [WeaponType.AXE]: ["accurate", "aggressive", "defensive"],
-
-  // Daggers - no controlled (quick stabbing weapons)
-  [WeaponType.DAGGER]: ["accurate", "aggressive", "defensive"],
-
-  // Unarmed - no controlled (punching)
-  [WeaponType.NONE]: ["accurate", "aggressive", "defensive"],
-
-  // Ranged weapons - OSRS-accurate styles
-  // Accurate: +3 ranged level, normal speed
-  // Rapid: no bonus, -1 tick faster attack
-  // Longrange: +2 attack range, XP split to ranged/defence
-  [WeaponType.BOW]: ["accurate", "rapid", "longrange"],
-  [WeaponType.CROSSBOW]: ["accurate", "rapid", "longrange"],
-
-  // Magic weapons - OSRS-accurate styles
-  // Staves/wands have both melee and magic styles:
-  //   Melee (crush): Bash=accurate, Pound=aggressive, Focus=defensive
-  //   Magic: Spell=autocast (defensive autocast is a toggle, not a separate style)
-  // @see https://oldschool.runescape.wiki/w/Staff
-  [WeaponType.STAFF]: ["accurate", "aggressive", "defensive", "autocast"],
-  [WeaponType.WAND]: ["accurate", "aggressive", "defensive", "autocast"],
-
-  // Shield - not a weapon, but if somehow selected, default to defensive
-  [WeaponType.SHIELD]: ["defensive"],
-};
+export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyleExtended[]> =
+  (() => {
+    const config: Partial<Record<WeaponType, CombatStyleExtended[]>> = {};
+    for (const weaponType of Object.values(WeaponType)) {
+      const styles = manifest.styles[weaponType];
+      if (!styles) {
+        throw new Error(
+          `WeaponStyleConfig drift: manifest missing styles for WeaponType "${weaponType}"`,
+        );
+      }
+      // Copy the styles into a new mutable array so external consumers that
+      // have historically mutated the arrays (none found today, but the
+      // original declaration wasn't Readonly) continue to work.
+      config[weaponType] = [...styles] as CombatStyleExtended[];
+    }
+    return config as Record<WeaponType, CombatStyleExtended[]>;
+  })();
 
 /**
  * Get available combat styles for a weapon type

@@ -1,0 +1,17 @@
+{
+  "$schema": "hyperforge.trees.v1",
+  "trees": {
+    "pine": { "id": "tree_pine", "name": "Pine Tree", "levelRequired": 1 },
+    "oak": { "id": "tree_oak", "name": "Oak Tree", "levelRequired": 15 },
+    "maple": { "id": "tree_maple", "name": "Maple Tree", "levelRequired": 45 },
+    "palm": { "id": "tree_palm", "name": "Desert Palm", "levelRequired": 1 },
+    "banana": { "id": "tree_banana", "name": "Banana Tree", "levelRequired": 1 },
+    "dead": { "id": "tree_dead", "name": "Dead Tree", "levelRequired": 1 },
+    "pineDead": { "id": "tree_pineDead", "name": "Dead Pine", "levelRequired": 1 },
+    "bamboo": { "id": "tree_bamboo", "name": "Bamboo", "levelRequired": 1 },
+    "eucalyptus": { "id": "tree_eucalyptus", "name": "Eucalyptus Tree", "levelRequired": 30 },
+    "general": { "id": "tree_general", "name": "Tree", "levelRequired": 1 },
+    "magic": { "id": "tree_magic", "name": "Magic Tree", "levelRequired": 60 },
+    "mahogany": { "id": "tree_mahogany", "name": "Mahogany Tree", "levelRequired": 50 }
+  }
+}

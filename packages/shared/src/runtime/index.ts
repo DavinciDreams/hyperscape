@@ -14,13 +14,13 @@ export {
 } from "./createEditorWorld";
 
 export {
-  createPlayTestWorld,
-  PlayTestWorld,
-  type PlayTestWorldOptions,
-  type PIEEntity,
-  type PIEDebugEntry,
-  type PIEDebugSink,
-} from "./createPlayTestWorld";
+  PIEEditorSession,
+  type PIEEditorSessionOptions,
+} from "./pie/PIEEditorSession";
+
+export type { PIEEntity } from "./pie/PIEEntity";
+
+export type { PIEDebugEntry, PIEDebugSink } from "./PIEScriptRunner";
 
 export {
   PIEScriptRunner,

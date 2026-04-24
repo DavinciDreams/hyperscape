@@ -1,0 +1,33 @@
+{
+  "$schema": "hyperforge.processing.v1",
+  "skillMechanics": {
+    "firemaking": {
+      "type": "fixed-roll-retry-on-fail",
+      "baseRollTicks": 4,
+      "retryOnFail": true,
+      "levelAffectsSuccess": true
+    },
+    "cooking": {
+      "type": "fixed-tick-continuous",
+      "ticksPerItem": 4,
+      "levelAffectsBurn": true,
+      "levelAffectsSpeed": false
+    }
+  },
+  "firemakingSuccessRate": {
+    "low": 65,
+    "high": 513
+  },
+  "fire": {
+    "minDurationTicks": 100,
+    "maxDurationTicks": 198,
+    "maxFiresPerPlayer": 3,
+    "maxFiresPerArea": 20,
+    "interactionRange": 1
+  },
+  "fireWalkPriority": ["west", "east", "south", "north"],
+  "timing": {
+    "rateLimitMs": 600,
+    "minimumCycleTicks": 2
+  }
+}

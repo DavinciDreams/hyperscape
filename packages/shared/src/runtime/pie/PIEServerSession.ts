@@ -52,6 +52,12 @@ export interface PIEServerSessionOptions {
   skipTerrain?: boolean;
   /** Skip Environment (lighting/shadow registration). */
   skipEnvironment?: boolean;
+  /**
+   * Skip `MobNPCSpawnerSystem`. Defaults to `true` — PIE sessions
+   * provide their own spawns via the editor, and the spawner hard-
+   * depends on `terrain` during its `start()`.
+   */
+  skipAutoSpawners?: boolean;
 }
 
 export interface PIEConnectResult {
@@ -105,6 +111,7 @@ export class PIEServerSession {
       includeRpgSystems: !this._opts.skipRpgSystems,
       includeTerrain: !this._opts.skipTerrain,
       includeEnvironment: !this._opts.skipEnvironment,
+      skipAutoSpawners: this._opts.skipAutoSpawners ?? true,
     });
 
     // Register PIE bridges BEFORE ServerNetwork so its constructor can

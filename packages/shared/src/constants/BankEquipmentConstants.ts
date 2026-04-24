@@ -1,10 +1,29 @@
 /**
- * Bank Equipment Constants
+ * Bank Equipment Constants — MANIFEST FAÇADE
  *
- * Pre-allocated, immutable slot definitions for bank equipment view.
- * CRITICAL: These are frozen to prevent runtime modification and
- * declared once to avoid repeated allocations.
+ * As of Phase A6 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the UI grid
+ * layout and error messages for the bank equipment view live in
+ * `equipment-constants.json`, validated at module load time against
+ * `EquipmentManifestSchema` from `@hyperforge/manifest-schema`.
+ *
+ * This TS file preserves the exact legacy export shape
+ * (`BankEquipmentError` enum, `BANK_EQUIPMENT_SLOT_DEFS`,
+ * `VALID_EQUIPMENT_SLOT_KEYS`, `BANK_EQUIPMENT_SLOT_NAMES`,
+ * `BANK_EQUIPMENT_ERROR_MESSAGES`, `EquipmentSlotDefinition`) so the
+ * existing consumers don't have to change. Slots are pre-frozen at module
+ * load to preserve the "no per-render allocation" property of the
+ * original.
+ *
+ * The `BankEquipmentError` enum remains a TypeScript enum because its
+ * values are used as code-level identifiers; the manifest supplies the
+ * human-facing message for each enum key.
  */
+
+import { EquipmentManifestSchema } from "@hyperforge/manifest-schema";
+
+import equipmentManifestJson from "./equipment-constants.json" with { type: "json" };
+
+const manifest = EquipmentManifestSchema.parse(equipmentManifestJson);
 
 // ============================================================================
 // ERROR CODES (defined here to avoid circular dependency with bank-equipment.ts)
@@ -48,78 +67,19 @@ export interface EquipmentSlotDefinition {
  * Row 3: [ring]   [empty]  [arrows]
  */
 export const BANK_EQUIPMENT_SLOT_DEFS: ReadonlyArray<EquipmentSlotDefinition> =
-  Object.freeze([
-    // Row 0
-    Object.freeze({
-      key: "amulet",
-      label: "Neck",
-      icon: "amulet",
-      gridPosition: Object.freeze({ row: 0, col: 0 }),
-    }),
-    Object.freeze({
-      key: "helmet",
-      label: "Head",
-      icon: "helmet",
-      gridPosition: Object.freeze({ row: 0, col: 1 }),
-    }),
-    Object.freeze({
-      key: "cape",
-      label: "Cape",
-      icon: "cape",
-      gridPosition: Object.freeze({ row: 0, col: 2 }),
-    }),
-    // Row 1
-    Object.freeze({
-      key: "weapon",
-      label: "Weapon",
-      icon: "weapon",
-      gridPosition: Object.freeze({ row: 1, col: 0 }),
-    }),
-    Object.freeze({
-      key: "body",
-      label: "Body",
-      icon: "body",
-      gridPosition: Object.freeze({ row: 1, col: 1 }),
-    }),
-    Object.freeze({
-      key: "shield",
-      label: "Shield",
-      icon: "shield",
-      gridPosition: Object.freeze({ row: 1, col: 2 }),
-    }),
-    // Row 2
-    Object.freeze({
-      key: "gloves",
-      label: "Hands",
-      icon: "gloves",
-      gridPosition: Object.freeze({ row: 2, col: 0 }),
-    }),
-    Object.freeze({
-      key: "legs",
-      label: "Legs",
-      icon: "legs",
-      gridPosition: Object.freeze({ row: 2, col: 1 }),
-    }),
-    Object.freeze({
-      key: "boots",
-      label: "Feet",
-      icon: "boots",
-      gridPosition: Object.freeze({ row: 2, col: 2 }),
-    }),
-    // Row 3
-    Object.freeze({
-      key: "ring",
-      label: "Ring",
-      icon: "ring",
-      gridPosition: Object.freeze({ row: 3, col: 0 }),
-    }),
-    Object.freeze({
-      key: "arrows",
-      label: "Ammo",
-      icon: "arrows",
-      gridPosition: Object.freeze({ row: 3, col: 2 }),
-    }),
-  ]);
+  Object.freeze(
+    manifest.bankEquipmentSlots.map((slot) =>
+      Object.freeze({
+        key: slot.key,
+        label: slot.label,
+        icon: slot.icon,
+        gridPosition: Object.freeze({
+          row: slot.gridPosition.row,
+          col: slot.gridPosition.col,
+        }),
+      }),
+    ),
+  );
 
 /**
  * Set of valid equipment slot keys for O(1) lookup
@@ -140,22 +100,22 @@ export const BANK_EQUIPMENT_SLOT_NAMES: ReadonlyArray<string> = Object.freeze(
 // ============================================================================
 
 /**
- * Pre-allocated error messages to avoid string allocation on every error
+ * Pre-allocated error messages to avoid string allocation on every error.
+ * Sourced from the manifest at module load and frozen. Fails fast at
+ * module load if any enum key is missing a message in the JSON.
  */
 export const BANK_EQUIPMENT_ERROR_MESSAGES: Readonly<
   Record<BankEquipmentError, string>
-> = Object.freeze({
-  [BankEquipmentError.NOT_EQUIPABLE]: "This item cannot be equipped.",
-  [BankEquipmentError.REQUIREMENTS_NOT_MET]:
-    "You do not meet the requirements to equip this item.",
-  [BankEquipmentError.SLOT_OCCUPIED]: "That equipment slot is occupied.",
-  [BankEquipmentError.INVENTORY_FULL]: "Your inventory is full.",
-  [BankEquipmentError.ITEM_NOT_FOUND]: "Item not found in bank.",
-  [BankEquipmentError.TWO_HANDED_CONFLICT]:
-    "You cannot equip a shield while wielding a two-handed weapon.",
-  [BankEquipmentError.BANK_SESSION_INVALID]:
-    "Bank session expired. Please reopen the bank.",
-  [BankEquipmentError.RATE_LIMITED]: "Too many requests. Please slow down.",
-  [BankEquipmentError.INVALID_REQUEST]: "Invalid request.",
-  [BankEquipmentError.BANK_FULL]: "Your bank is full.",
-});
+> = (() => {
+  const messages: Partial<Record<BankEquipmentError, string>> = {};
+  for (const enumKey of Object.values(BankEquipmentError)) {
+    const message = manifest.bankEquipmentErrorMessages[enumKey];
+    if (message === undefined) {
+      throw new Error(
+        `BankEquipmentConstants drift: manifest is missing message for enum key "${enumKey}"`,
+      );
+    }
+    messages[enumKey] = message;
+  }
+  return Object.freeze(messages as Record<BankEquipmentError, string>);
+})();

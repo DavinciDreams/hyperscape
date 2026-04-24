@@ -1,0 +1,20 @@
+{
+  "$schema": "hyperforge.weapon-styles.v1",
+  "styles": {
+    "sword": ["accurate", "aggressive", "defensive", "controlled"],
+    "scimitar": ["accurate", "aggressive", "defensive", "controlled"],
+    "mace": ["accurate", "aggressive", "defensive", "controlled"],
+    "spear": ["accurate", "aggressive", "defensive", "controlled"],
+    "longsword": ["accurate", "aggressive", "defensive", "controlled"],
+    "two_hand_sword": ["accurate", "aggressive", "defensive", "controlled"],
+    "halberd": ["accurate", "aggressive", "defensive", "controlled"],
+    "axe": ["accurate", "aggressive", "defensive"],
+    "dagger": ["accurate", "aggressive", "defensive"],
+    "none": ["accurate", "aggressive", "defensive"],
+    "bow": ["accurate", "rapid", "longrange"],
+    "crossbow": ["accurate", "rapid", "longrange"],
+    "staff": ["accurate", "aggressive", "defensive", "autocast"],
+    "wand": ["accurate", "aggressive", "defensive", "autocast"],
+    "shield": ["defensive"]
+  }
+}

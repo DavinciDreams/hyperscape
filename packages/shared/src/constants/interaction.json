@@ -1,0 +1,27 @@
+{
+  "$schema": "hyperforge.interaction.v1",
+  "sessionTypes": {
+    "store": "store",
+    "bank": "bank",
+    "dialogue": "dialogue"
+  },
+  "interactionDistance": {
+    "store": 2,
+    "bank": 2,
+    "dialogue": 2
+  },
+  "transactionRateLimitMs": 50,
+  "sessionConfig": {
+    "validationIntervalTicks": 1,
+    "gracePeriodTicks": 2,
+    "maxSessionTicks": 3000
+  },
+  "inputLimits": {
+    "maxItemIdLength": 64,
+    "maxStoreIdLength": 64,
+    "maxQuantity": 2147483647,
+    "maxInventorySlots": 28,
+    "maxRequestAgeMs": 5000,
+    "maxClockSkewMs": 1000
+  }
+}

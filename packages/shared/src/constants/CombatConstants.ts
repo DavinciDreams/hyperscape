@@ -1,13 +1,27 @@
 /**
- * Combat Constants
+ * Combat Constants — MANIFEST FAÇADE
  *
- * OSRS-accurate timing and combat values.
- * All tick-based values assume 600ms per tick.
+ * As of Phase A1 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the source of truth
+ * for every combat constant lives in `combat-constants.json`, validated at
+ * module load time against `CombatManifestSchema` from `@hyperforge/manifest-schema`.
+ *
+ * The JSON authoritative copy is served from
+ * `packages/server/world/assets/manifests/combat-constants.json` (editor-editable,
+ * loaded at runtime). This TS file preserves the exact legacy export shape
+ * (COMBAT_CONSTANTS / AGGRO_CONSTANTS / LEVEL_CONSTANTS / etc.) so the 55
+ * existing consumers don't have to change.
+ *
+ * To tune combat values, edit the JSON — not this file. The JSON → façade
+ * mapping below is deliberately mechanical.
  *
  * @see https://oldschool.runescape.wiki/w/Game_tick
  */
 
-import { WeaponType } from "../types/game/item-types";
+import { CombatManifestSchema } from "@hyperforge/manifest-schema";
+
+import combatManifestJson from "./combat-constants.json" with { type: "json" };
+
+const manifest = CombatManifestSchema.parse(combatManifestJson);
 
 /**
  * Melee attack style determines which per-style attack/defence bonuses are used.
@@ -16,174 +30,159 @@ import { WeaponType } from "../types/game/item-types";
 export type MeleeAttackStyle = "stab" | "slash" | "crush";
 
 /** Default melee attack style per weapon type (OSRS-accurate) */
-export const WEAPON_DEFAULT_ATTACK_STYLE: Record<string, MeleeAttackStyle> = {
-  [WeaponType.SWORD]: "slash",
-  [WeaponType.LONGSWORD]: "slash",
-  [WeaponType.SCIMITAR]: "slash",
-  [WeaponType.AXE]: "slash",
-  [WeaponType.MACE]: "crush",
-  [WeaponType.DAGGER]: "stab",
-  [WeaponType.SPEAR]: "stab",
-  [WeaponType.TWO_HAND_SWORD]: "slash",
-  [WeaponType.HALBERD]: "slash",
-  [WeaponType.NONE]: "crush", // unarmed = crush (fists)
-};
+export const WEAPON_DEFAULT_ATTACK_STYLE: Record<string, MeleeAttackStyle> =
+  Object.freeze({
+    ...(manifest.weaponDefaultAttackStyle as Record<string, MeleeAttackStyle>),
+  });
 
-export const COMBAT_CONSTANTS = {
+export const COMBAT_CONSTANTS = Object.freeze({
   // === Ranges (tiles) ===
-  RANGED_RANGE: 10,
-  MAGIC_RANGE: 10,
-  MELEE_RANGE_STANDARD: 1,
-  MELEE_RANGE_HALBERD: 2,
-  PICKUP_RANGE: 2.5,
+  RANGED_RANGE: manifest.ranges.ranged,
+  MAGIC_RANGE: manifest.ranges.magic,
+  MELEE_RANGE_STANDARD: manifest.ranges.meleeStandard,
+  MELEE_RANGE_HALBERD: manifest.ranges.meleeHalberd,
+  PICKUP_RANGE: manifest.ranges.pickup,
 
   // === Tick System ===
-  TICK_DURATION_MS: 600,
+  TICK_DURATION_MS: manifest.ticks.tickDurationMs,
 
   // === Combat Timing (ticks) ===
-  DEFAULT_ATTACK_SPEED_TICKS: 4,
-  COMBAT_TIMEOUT_TICKS: 17, // OSRS-accurate: 10.2 seconds (17 ticks * 600ms)
-  LOGOUT_PREVENTION_TICKS: 16,
-  HEALTH_REGEN_COOLDOWN_TICKS: 17,
-  HEALTH_REGEN_INTERVAL_TICKS: 100,
-  AFK_DISABLE_RETALIATE_TICKS: 2000,
+  DEFAULT_ATTACK_SPEED_TICKS: manifest.ticks.defaultAttackSpeedTicks,
+  COMBAT_TIMEOUT_TICKS: manifest.ticks.combatTimeoutTicks,
+  LOGOUT_PREVENTION_TICKS: manifest.ticks.logoutPreventionTicks,
+  HEALTH_REGEN_COOLDOWN_TICKS: manifest.ticks.healthRegenCooldownTicks,
+  HEALTH_REGEN_INTERVAL_TICKS: manifest.ticks.healthRegenIntervalTicks,
+  AFK_DISABLE_RETALIATE_TICKS: manifest.ticks.afkDisableRetaliateTicks,
 
   // === Food Consumption (OSRS-accurate) ===
-  /** Ticks before player can eat again after eating (3 ticks = 1.8s) */
-  EAT_DELAY_TICKS: 3,
-  /** Ticks added to attack cooldown when eating during combat */
-  EAT_ATTACK_DELAY_TICKS: 3,
-  /** Maximum heal amount per food item (prevents exploit with modified manifests) */
-  MAX_HEAL_AMOUNT: 99,
+  EAT_DELAY_TICKS: manifest.food.eatDelayTicks,
+  EAT_ATTACK_DELAY_TICKS: manifest.food.eatAttackDelayTicks,
+  MAX_HEAL_AMOUNT: manifest.food.maxHealAmount,
 
   // === Hit Delay ===
-  // Formula: MELEE=0, RANGED=1+floor((3+dist)/6), MAGIC=1+floor((1+dist)/3)
-  HIT_DELAY: {
-    MELEE_BASE: 0,
-    RANGED_BASE: 1,
-    RANGED_DISTANCE_OFFSET: 3,
-    RANGED_DISTANCE_DIVISOR: 6,
-    MAGIC_BASE: 1,
-    MAGIC_DISTANCE_OFFSET: 1,
-    MAGIC_DISTANCE_DIVISOR: 3,
-    MAX_HIT_DELAY: 10,
-  },
+  HIT_DELAY: Object.freeze({
+    MELEE_BASE: manifest.hitDelay.meleeBase,
+    RANGED_BASE: manifest.hitDelay.rangedBase,
+    RANGED_DISTANCE_OFFSET: manifest.hitDelay.rangedDistanceOffset,
+    RANGED_DISTANCE_DIVISOR: manifest.hitDelay.rangedDistanceDivisor,
+    MAGIC_BASE: manifest.hitDelay.magicBase,
+    MAGIC_DISTANCE_OFFSET: manifest.hitDelay.magicDistanceOffset,
+    MAGIC_DISTANCE_DIVISOR: manifest.hitDelay.magicDistanceDivisor,
+    MAX_HIT_DELAY: manifest.hitDelay.maxHitDelay,
+  }),
 
   // === Projectile Launch Delays (ms) ===
-  /** Delay before spell projectile spawns (allows cast animation wind-up) */
-  SPELL_LAUNCH_DELAY_MS: 600,
-  /** Delay before arrow projectile spawns (allows draw animation wind-up) */
-  ARROW_LAUNCH_DELAY_MS: 400,
+  SPELL_LAUNCH_DELAY_MS: manifest.projectiles.spellLaunchDelayMs,
+  ARROW_LAUNCH_DELAY_MS: manifest.projectiles.arrowLaunchDelayMs,
 
   // === Visual Rotation (client-side, exponential decay) ===
-  ROTATION: {
-    /** Combat facing slerp speed — ~95% convergence in 150ms. Tuned empirically. */
-    COMBAT_SLERP_SPEED: 20.0,
-    /** Movement facing slerp speed — ~90% convergence in 200ms. Tuned empirically. */
-    MOVEMENT_SLERP_SPEED: 12.0,
-    /** Max distance (tiles) to resolve a combat facing target. Beyond this, stop tracking. */
-    FACING_MAX_DISTANCE: 20,
-    /** Min squared distance (tiles²) to rotate toward target. Prevents flips when overlapping (0.5² = half-tile). */
-    MIN_ROTATION_DISTANCE_SQ: 0.25,
-  },
+  ROTATION: Object.freeze({
+    COMBAT_SLERP_SPEED: manifest.rotation.combatSlerpSpeed,
+    MOVEMENT_SLERP_SPEED: manifest.rotation.movementSlerpSpeed,
+    FACING_MAX_DISTANCE: manifest.rotation.facingMaxDistance,
+    MIN_ROTATION_DISTANCE_SQ: manifest.rotation.minRotationDistanceSq,
+  }),
 
   // === Animation ===
-  ANIMATION: {
-    HIT_FRAME_RATIO: 0.5,
-    MIN_ANIMATION_TICKS: 2,
-    HITSPLAT_DELAY_TICKS: 0,
-    HITSPLAT_DURATION_TICKS: 2,
-    EMOTE_COMBAT: "combat",
-    EMOTE_SWORD_SWING: "sword_swing",
-    EMOTE_2H_SLASH: "2h_slash",
-    EMOTE_2H_IDLE: "2h_idle",
-    EMOTE_RANGED: "ranged",
-    EMOTE_MAGIC: "magic",
-    EMOTE_IDLE: "idle",
-    /** Duration (seconds) for GLB animation crossfades. RS3 uses 300-400ms; 350ms splits the range. */
-    CROSSFADE_DURATION: 0.35,
-  },
+  ANIMATION: Object.freeze({
+    HIT_FRAME_RATIO: manifest.animation.hitFrameRatio,
+    MIN_ANIMATION_TICKS: manifest.animation.minAnimationTicks,
+    HITSPLAT_DELAY_TICKS: manifest.animation.hitsplatDelayTicks,
+    HITSPLAT_DURATION_TICKS: manifest.animation.hitsplatDurationTicks,
+    EMOTE_COMBAT: manifest.animation.emoteCombat,
+    EMOTE_SWORD_SWING: manifest.animation.emoteSwordSwing,
+    EMOTE_2H_SLASH: manifest.animation.emote2hSlash,
+    EMOTE_2H_IDLE: manifest.animation.emote2hIdle,
+    EMOTE_RANGED: manifest.animation.emoteRanged,
+    EMOTE_MAGIC: manifest.animation.emoteMagic,
+    EMOTE_IDLE: manifest.animation.emoteIdle,
+    CROSSFADE_DURATION: manifest.animation.crossfadeDuration,
+  }),
 
   // === Death & Loot (ticks) ===
-  RESPAWN_TICKS_RANDOMNESS: 8,
-  GRAVESTONE_TICKS: 1500,
-  GROUND_ITEM_DESPAWN_TICKS: 6000, // OSRS-accurate: 60 minutes (was 300 = 3 min)
-  UNTRADEABLE_DESPAWN_TICKS: 6000, // OSRS-accurate: 60 minutes (was 300 = 3 min)
-  LOOT_PROTECTION_TICKS: 100,
-  CORPSE_DESPAWN_TICKS: 200,
+  RESPAWN_TICKS_RANDOMNESS: manifest.death.respawnTicksRandomness,
+  GRAVESTONE_TICKS: manifest.death.gravestoneTicks,
+  GROUND_ITEM_DESPAWN_TICKS: manifest.death.groundItemDespawnTicks,
+  UNTRADEABLE_DESPAWN_TICKS: manifest.death.untradeableDespawnTicks,
+  LOOT_PROTECTION_TICKS: manifest.death.lootProtectionTicks,
+  CORPSE_DESPAWN_TICKS: manifest.death.corpseDespawnTicks,
 
-  DEATH: {
-    ANIMATION_TICKS: 7,
-    COOLDOWN_TICKS: 17,
-    RECONNECT_RESPAWN_DELAY_TICKS: 1,
-    STALE_LOCK_AGE_TICKS: 3000, // 30 minutes (was 6000 = 1 hour)
-    DEFAULT_RESPAWN_POSITION: { x: 0, y: 0, z: 0 } as const,
-    DEFAULT_RESPAWN_TOWN: "Central Haven",
-  } as const,
+  DEATH: Object.freeze({
+    ANIMATION_TICKS: manifest.death.animationTicks,
+    COOLDOWN_TICKS: manifest.death.cooldownTicks,
+    RECONNECT_RESPAWN_DELAY_TICKS: manifest.death.reconnectRespawnDelayTicks,
+    STALE_LOCK_AGE_TICKS: manifest.death.staleLockAgeTicks,
+    DEFAULT_RESPAWN_POSITION: Object.freeze({
+      x: manifest.death.defaultRespawnPosition.x,
+      y: manifest.death.defaultRespawnPosition.y,
+      z: manifest.death.defaultRespawnPosition.z,
+    }),
+    DEFAULT_RESPAWN_TOWN: manifest.death.defaultRespawnTown,
+  }),
 
   // === Damage Formulas ===
-  BASE_CONSTANT: 64,
-  EFFECTIVE_LEVEL_CONSTANT: 8,
-  DAMAGE_DIVISOR: 640,
-  MIN_DAMAGE: 0,
-  MAX_DAMAGE: 200,
+  BASE_CONSTANT: manifest.damage.baseConstant,
+  EFFECTIVE_LEVEL_CONSTANT: manifest.damage.effectiveLevelConstant,
+  DAMAGE_DIVISOR: manifest.damage.damageDivisor,
+  MIN_DAMAGE: manifest.damage.minDamage,
+  MAX_DAMAGE: manifest.damage.maxDamage,
 
   // === XP per Damage ===
-  XP: {
-    COMBAT_XP_PER_DAMAGE: 4,
-    HITPOINTS_XP_PER_DAMAGE: 1.33,
-    CONTROLLED_XP_PER_DAMAGE: 1.33,
-  },
+  XP: Object.freeze({
+    COMBAT_XP_PER_DAMAGE: manifest.xp.combatXpPerDamage,
+    HITPOINTS_XP_PER_DAMAGE: manifest.xp.hitpointsXpPerDamage,
+    CONTROLLED_XP_PER_DAMAGE: manifest.xp.controlledXpPerDamage,
+  }),
 
-  COMBAT_STATES: {
+  COMBAT_STATES: Object.freeze({
     IDLE: "idle",
     IN_COMBAT: "in_combat",
     FLEEING: "fleeing",
-  } as const,
+  } as const),
 
   // === Manifest Defaults (fallback when not specified) ===
-  DEFAULTS: {
-    NPC: {
-      ATTACK_SPEED_TICKS: 4,
-      AGGRO_RANGE: 4,
-      COMBAT_RANGE: 1,
-      LEASH_RANGE: 42, // Extended from OSRS default of 7 for better gameplay
-      RESPAWN_TICKS: 25,
-      WANDER_RADIUS: 5,
-    },
-    ITEM: {
-      ATTACK_SPEED: 4,
-      ATTACK_RANGE: 1,
-    },
-  } as const,
-} as const;
+  DEFAULTS: Object.freeze({
+    NPC: Object.freeze({
+      ATTACK_SPEED_TICKS: manifest.npcDefaults.attackSpeedTicks,
+      AGGRO_RANGE: manifest.npcDefaults.aggroRange,
+      COMBAT_RANGE: manifest.npcDefaults.combatRange,
+      LEASH_RANGE: manifest.npcDefaults.leashRange,
+      RESPAWN_TICKS: manifest.npcDefaults.respawnTicks,
+      WANDER_RADIUS: manifest.npcDefaults.wanderRadius,
+    }),
+    ITEM: Object.freeze({
+      ATTACK_SPEED: manifest.itemDefaults.attackSpeed,
+      ATTACK_RANGE: manifest.itemDefaults.attackRange,
+    }),
+  }),
+});
 
-export const AGGRO_CONSTANTS = {
-  DEFAULT_BEHAVIOR: "passive" as const,
-  AGGRO_UPDATE_INTERVAL_MS: 100,
-  ALWAYS_AGGRESSIVE_LEVEL: 999,
-} as const;
+export const AGGRO_CONSTANTS = Object.freeze({
+  DEFAULT_BEHAVIOR: manifest.aggro.defaultBehavior,
+  AGGRO_UPDATE_INTERVAL_MS: manifest.aggro.updateIntervalMs,
+  ALWAYS_AGGRESSIVE_LEVEL: manifest.aggro.alwaysAggressiveLevel,
+});
 
-export const LEVEL_CONSTANTS = {
-  DEFAULT_COMBAT_LEVEL: 3,
-  MIN_COMBAT_LEVEL: 3,
-  MAX_LEVEL: 99,
+export const LEVEL_CONSTANTS = Object.freeze({
+  DEFAULT_COMBAT_LEVEL: manifest.levels.defaultCombatLevel,
+  MIN_COMBAT_LEVEL: manifest.levels.minCombatLevel,
+  MAX_LEVEL: manifest.levels.maxLevel,
 
-  XP_BASE: 50,
-  XP_GROWTH_FACTOR: 8,
+  XP_BASE: manifest.levels.xpBase,
+  XP_GROWTH_FACTOR: manifest.levels.xpGrowthFactor,
 
-  COMBAT_LEVEL_WEIGHTS: {
-    DEFENSE_WEIGHT: 0.25,
-    OFFENSE_WEIGHT: 0.325,
-    RANGED_MULTIPLIER: 1.5,
-  },
-} as const;
+  COMBAT_LEVEL_WEIGHTS: Object.freeze({
+    DEFENSE_WEIGHT: manifest.levels.combatLevelWeights.defenseWeight,
+    OFFENSE_WEIGHT: manifest.levels.combatLevelWeights.offenseWeight,
+    RANGED_MULTIPLIER: manifest.levels.combatLevelWeights.rangedMultiplier,
+  }),
+});
 
 export type CombatState =
   (typeof COMBAT_CONSTANTS.COMBAT_STATES)[keyof typeof COMBAT_CONSTANTS.COMBAT_STATES];
 
 // ============================================================================
-// Ranged & Magic Style Bonuses (moved from types/game/combat-types.ts)
+// Ranged & Magic Style Bonuses
 // ============================================================================
 
 export type RangedCombatStyle = "accurate" | "rapid" | "longrange";
@@ -203,50 +202,56 @@ export interface MagicStyleBonus {
   readonly xpSplit: "magic" | "magic_defence";
 }
 
-/** Pre-allocated frozen style bonuses for ranged combat (OSRS-accurate) */
-export const RANGED_STYLE_BONUSES: Readonly<
+function buildRangedStyleBonuses(): Readonly<
   Record<RangedCombatStyle, Readonly<RangedStyleBonus>>
-> = Object.freeze({
-  accurate: Object.freeze({
-    attackBonus: 3,
-    speedModifier: 0,
-    rangeModifier: 0,
-    xpSplit: "ranged" as const,
-  }),
-  rapid: Object.freeze({
-    attackBonus: 0,
-    speedModifier: -1,
-    rangeModifier: 0,
-    xpSplit: "ranged" as const,
-  }),
-  longrange: Object.freeze({
-    attackBonus: 0,
-    speedModifier: 0,
-    rangeModifier: 2,
-    xpSplit: "ranged_defence" as const,
-  }),
-});
+> {
+  const result: Partial<Record<RangedCombatStyle, Readonly<RangedStyleBonus>>> =
+    {};
+  for (const style of ["accurate", "rapid", "longrange"] as const) {
+    const src = manifest.rangedStyleBonuses[style];
+    if (!src) {
+      throw new Error(
+        `combat-constants.json is missing rangedStyleBonuses.${style}`,
+      );
+    }
+    result[style] = Object.freeze({
+      attackBonus: src.attackBonus,
+      speedModifier: src.speedModifier,
+      rangeModifier: src.rangeModifier,
+      xpSplit: src.xpSplit as "ranged" | "ranged_defence",
+    });
+  }
+  return Object.freeze(
+    result as Record<RangedCombatStyle, Readonly<RangedStyleBonus>>,
+  );
+}
+
+function buildMagicStyleBonuses(): Readonly<
+  Record<MagicCombatStyle, Readonly<MagicStyleBonus>>
+> {
+  const result: Partial<Record<MagicCombatStyle, Readonly<MagicStyleBonus>>> =
+    {};
+  for (const style of ["accurate", "longrange", "autocast"] as const) {
+    const src = manifest.magicStyleBonuses[style];
+    if (!src) {
+      throw new Error(
+        `combat-constants.json is missing magicStyleBonuses.${style}`,
+      );
+    }
+    result[style] = Object.freeze({
+      attackBonus: src.attackBonus,
+      speedModifier: src.speedModifier,
+      rangeModifier: src.rangeModifier,
+      xpSplit: src.xpSplit as "magic" | "magic_defence",
+    });
+  }
+  return Object.freeze(
+    result as Record<MagicCombatStyle, Readonly<MagicStyleBonus>>,
+  );
+}
+
+/** Pre-allocated frozen style bonuses for ranged combat (OSRS-accurate) */
+export const RANGED_STYLE_BONUSES = buildRangedStyleBonuses();
 
 /** Pre-allocated frozen style bonuses for magic combat */
-export const MAGIC_STYLE_BONUSES: Readonly<
-  Record<MagicCombatStyle, Readonly<MagicStyleBonus>>
-> = Object.freeze({
-  accurate: Object.freeze({
-    attackBonus: 3,
-    speedModifier: 0,
-    rangeModifier: 0,
-    xpSplit: "magic" as const,
-  }),
-  longrange: Object.freeze({
-    attackBonus: 1,
-    speedModifier: 0,
-    rangeModifier: 2,
-    xpSplit: "magic_defence" as const,
-  }),
-  autocast: Object.freeze({
-    attackBonus: 0,
-    speedModifier: 0,
-    rangeModifier: 0,
-    xpSplit: "magic" as const,
-  }),
-});
+export const MAGIC_STYLE_BONUSES = buildMagicStyleBonuses();

@@ -1,24 +1,35 @@
 /**
- * Tree Types — Single Source of Truth
+ * Tree Types — MANIFEST FAÇADE
  *
- * All tree type definitions live here. Every other file that needs tree type
- * information imports from this module instead of defining its own copy.
+ * As of Phase A2 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the tree catalog
+ * lives in `trees.json`, validated at module load time against
+ * `TreeManifestSchema` from `@hyperforge/manifest-schema`.
  *
- * To add a new tree type: add an entry to TREE_TYPES and TreeId below.
- * To rename a tree type: change the key/enum and update the manifest ID.
- * To remove a tree type: delete the entry from both.
+ * The JSON authoritative copy is served from
+ * `packages/server/world/assets/manifests/trees.json` (editor-editable,
+ * loaded at runtime). This TS file preserves the exact legacy export shape
+ * (TreeId, TREE_TYPES, TreeSubType, TREE_SUBTYPE_KEYS, getTreeLevelRequired,
+ * treeIdToSubType) so every consumer keeps working.
  *
- * The manifest (`assets/manifests/gathering/woodcutting.json`) must list each
- * choppable tree; `TreeId` values match manifest `"id"` fields. GLB paths use
- * `asset://models/trees/<folder>/...` per on-disk layout under `models/trees/`.
+ * To add/remove/rename a tree, edit the JSON — not this file.
  *
  * Per-biome tree configs (distribution, placement, density) live in
  * TerrainBiomeTypes.ts alongside the BiomeType enum.
  */
 
+import { TreeManifestSchema } from "@hyperforge/manifest-schema";
+
+import treeManifestJson from "./trees.json" with { type: "json" };
+
+const manifest = TreeManifestSchema.parse(treeManifestJson);
+
 /**
  * Enum of all tree IDs — values match the manifest resource IDs.
  * Use this instead of hardcoded "tree_xxx" strings everywhere.
+ *
+ * NOTE: This enum is hardcoded for type-level ergonomics (TreeId.Oak in
+ * consumer code). We assert at module-load time that every enum entry exists
+ * in the validated JSON with matching `id`.
  */
 export enum TreeId {
   Pine = "tree_pine",
@@ -77,39 +88,55 @@ export interface TreeTypeDefinition {
 }
 
 /**
- * Master tree type registry.
+ * Master tree type registry, derived from trees.json.
  *
  * Keys are subtypes (e.g., "oak"). Placement rules live in per-biome configs
  * in TerrainBiomeTypes.ts.
  */
-export const TREE_TYPES = {
-  pine: { name: "Pine Tree", levelRequired: 1 },
-  oak: { name: "Oak Tree", levelRequired: 15 },
-  maple: { name: "Maple Tree", levelRequired: 45 },
-  palm: { name: "Desert Palm", levelRequired: 1 },
-  banana: { name: "Banana Tree", levelRequired: 1 },
-  dead: { name: "Dead Tree", levelRequired: 1 },
-  pineDead: { name: "Dead Pine", levelRequired: 1 },
-  bamboo: { name: "Bamboo", levelRequired: 1 },
-  eucalyptus: { name: "Eucalyptus Tree", levelRequired: 30 },
-  general: { name: "Tree", levelRequired: 1 },
-  magic: { name: "Magic Tree", levelRequired: 60 },
-  mahogany: { name: "Mahogany Tree", levelRequired: 50 },
-} as const satisfies Record<string, TreeTypeDefinition>;
+function buildTreeTypes(): Record<string, TreeTypeDefinition> {
+  const out: Record<string, TreeTypeDefinition> = {};
+  for (const [subtype, entry] of Object.entries(manifest.trees)) {
+    out[subtype] = { name: entry.name, levelRequired: entry.levelRequired };
+  }
+  // Runtime assertion: every TreeId value must appear in the manifest
+  for (const treeId of Object.values(TreeId)) {
+    const subtype = treeIdToSubType(treeId);
+    if (!out[subtype]) {
+      throw new Error(
+        `TreeTypes façade: TreeId.${treeId} has no matching entry in trees.json (expected key "${subtype}")`,
+      );
+    }
+    const expectedId = manifest.trees[subtype]?.id;
+    if (expectedId !== treeId) {
+      throw new Error(
+        `TreeTypes façade: trees.json["${subtype}"].id is "${expectedId}" but TreeId value is "${treeId}"`,
+      );
+    }
+  }
+  return Object.freeze(out);
+}
 
-/** All valid tree subtype keys (e.g., "oak", "maple") */
-export type TreeSubType = keyof typeof TREE_TYPES;
+export const TREE_TYPES: Readonly<Record<string, TreeTypeDefinition>> =
+  buildTreeTypes();
+
+/**
+ * All valid tree subtype keys (e.g., "oak", "maple").
+ *
+ * Derived from the JSON import's literal type (pre-parse), so we keep the
+ * narrow discriminated union at the type level while the runtime value still
+ * comes from the validated manifest.
+ */
+export type TreeSubType = keyof typeof treeManifestJson.trees;
 
 /** All valid tree subtype keys as a runtime array */
-export const TREE_SUBTYPE_KEYS = Object.keys(TREE_TYPES) as TreeSubType[];
+export const TREE_SUBTYPE_KEYS: readonly TreeSubType[] = Object.freeze(
+  Object.keys(TREE_TYPES) as TreeSubType[],
+);
 
 /**
  * Get the level requirement for a tree subtype.
  * Returns 1 for unknown types.
  */
 export function getTreeLevelRequired(subType: string): number {
-  return (
-    (TREE_TYPES as Record<string, TreeTypeDefinition>)[subType]
-      ?.levelRequired ?? 1
-  );
+  return TREE_TYPES[subType]?.levelRequired ?? 1;
 }

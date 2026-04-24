@@ -2,23 +2,26 @@
  * PIE (Play-In-Editor) entry point.
  *
  * This file exists as a *narrow* public surface for the editor — it only
- * exports the PlayTestWorld + PIEScriptRunner pair and their associated types.
- * That keeps the asset-forge TypeScript program from transitively pulling in
- * the entire shared/runtime graph (createClientWorld, createServerWorld, …)
- * which would blow past asset-forge's `rootDir`.
+ * exports the PIEEditorSession + PIEScriptRunner pair and their associated
+ * types. That keeps the asset-forge TypeScript program from transitively
+ * pulling in the entire shared/runtime graph (createClientWorld,
+ * createServerWorld, …) which would blow past asset-forge's `rootDir`.
  *
  * If you find yourself adding a non-PIE export here, add it to
  * `runtime/index.ts` instead and re-export it through the `.` entry.
  */
 
+// Real-loopback PIE session. Boots real ServerNetwork + ClientNetwork
+// over an in-memory socket pair. Replaces the old `PlayTestWorld` +
+// `PIENetworkStub` pair that simulated the network locally.
 export {
-  createPlayTestWorld,
-  PlayTestWorld,
-  type PlayTestWorldOptions,
-  type PIEEntity,
-  type PIEDebugEntry,
-  type PIEDebugSink,
-} from "./createPlayTestWorld";
+  PIEEditorSession,
+  type PIEEditorSessionOptions,
+} from "./pie/PIEEditorSession";
+
+export type { PIEEntity } from "./pie/PIEEntity";
+
+export type { PIEDebugEntry, PIEDebugSink } from "./PIEScriptRunner";
 
 export {
   PIEScriptRunner,

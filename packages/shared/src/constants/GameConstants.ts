@@ -1,72 +1,97 @@
 /**
- * Game Constants
+ * Game Constants — MANIFEST FAÇADE
  *
- * Centralized location for all game constants to eliminate magic numbers
- * and ensure consistency across the system.
+ * As of Phase A9 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the raw tuning
+ * values previously hardcoded here live in `game-constants.json`,
+ * validated at module load time against `GameManifestSchema` from
+ * `@hyperforge/manifest-schema`.
+ *
+ * This TS file preserves the exact legacy export shape
+ * (`GAME_CONSTANTS`, `INVENTORY_CONSTANTS`, `PLAYER_CONSTANTS`, …,
+ * `ITEM_IDS`, `ITEM_ID_TO_KEY`, `computeDistanceFade`, etc.) so the
+ * existing 50+ consumer files don't have to change.
+ *
+ * Derived / computed values (WATER_CUTOFF, *_SQ pre-squared distances,
+ * MOB_RESPAWN_TIME, ITEM_ID_TO_KEY map) are built at module load from
+ * the parsed manifest — same values as before, same export shape.
+ *
+ * Non-manifest values that live elsewhere:
+ *   - COMBAT_CONSTANTS — CombatConstants.ts (extracted in A1)
+ *   - GATHERING_CONSTANTS — GatheringConstants.ts (extracted in A3)
+ *   - BANKING_CONSTANTS.MAX_BANK_SLOTS — BankingConstants.ts (A7)
+ *   - HEALTH_BAR_DIMENSIONS — HealthBarRenderer (single source of truth)
+ *   - BiomeType / DEFAULT_BIOME / BIOME_LIST — TerrainBiomeTypes
  */
 
-// Import COMBAT_CONSTANTS from dedicated file
+import { GameManifestSchema } from "@hyperforge/manifest-schema";
+
+import { HEALTH_BAR_DIMENSIONS } from "../utils/rendering/HealthBarRenderer";
+import { BiomeType as _BT } from "../systems/shared/world/TerrainBiomeTypes";
+import { BANKING_CONSTANTS } from "./BankingConstants";
 import { COMBAT_CONSTANTS } from "./CombatConstants";
-// Re-export biome enum as the single source of truth
+import { GATHERING_CONSTANTS } from "./GatheringConstants";
+import gameManifestJson from "./game-constants.json" with { type: "json" };
+
+// Re-exports preserved for backwards compat
 export {
   BiomeType,
   DEFAULT_BIOME,
   BIOME_LIST,
 } from "../systems/shared/world/TerrainBiomeTypes";
-// Import banking constants - single source of truth for MAX_BANK_SLOTS
-import { BANKING_CONSTANTS } from "./BankingConstants";
+export { GATHERING_CONSTANTS };
+
+const manifest = GameManifestSchema.parse(gameManifestJson);
 
 // === INVENTORY AND ITEMS ===
-export const INVENTORY_CONSTANTS = {
-  MAX_INVENTORY_SLOTS: 28,
+export const INVENTORY_CONSTANTS = Object.freeze({
+  MAX_INVENTORY_SLOTS: manifest.inventory.maxInventorySlots,
   MAX_BANK_SLOTS: BANKING_CONSTANTS.MAX_BANK_SLOTS, // Single source: BankingConstants.ts
-  MAX_STACK_SIZE: 1000,
-  DEFAULT_ITEM_VALUE: 1,
-} as const;
+  MAX_STACK_SIZE: manifest.inventory.maxStackSize,
+  DEFAULT_ITEM_VALUE: manifest.inventory.defaultItemValue,
+});
 
 // === PLAYER STATS AND HEALTH ===
-export const PLAYER_CONSTANTS = {
-  DEFAULT_HEALTH: 100,
-  DEFAULT_MAX_HEALTH: 100,
-  DEFAULT_STAMINA: 100,
-  DEFAULT_MAX_STAMINA: 100,
-  BASE_MOVEMENT_SPEED: 1.0,
-  RUNNING_SPEED_MULTIPLIER: 1.5,
-  HEALTH_REGEN_RATE: 1, // 1 HP per regen tick (RuneScape-style)
-  // Note: Health regen cooldown/interval use COMBAT_CONSTANTS tick-based values
-  STAMINA_REGEN_RATE: 2.0,
-  STAMINA_DRAIN_RATE: 5.0,
-} as const;
+export const PLAYER_CONSTANTS = Object.freeze({
+  DEFAULT_HEALTH: manifest.player.defaultHealth,
+  DEFAULT_MAX_HEALTH: manifest.player.defaultMaxHealth,
+  DEFAULT_STAMINA: manifest.player.defaultStamina,
+  DEFAULT_MAX_STAMINA: manifest.player.defaultMaxStamina,
+  BASE_MOVEMENT_SPEED: manifest.player.baseMovementSpeed,
+  RUNNING_SPEED_MULTIPLIER: manifest.player.runningSpeedMultiplier,
+  HEALTH_REGEN_RATE: manifest.player.healthRegenRate,
+  STAMINA_REGEN_RATE: manifest.player.staminaRegenRate,
+  STAMINA_DRAIN_RATE: manifest.player.staminaDrainRate,
+});
 
 // === HOME TELEPORT ===
-export const HOME_TELEPORT_CONSTANTS = {
+export const HOME_TELEPORT_CONSTANTS = Object.freeze({
   /** Cooldown in milliseconds (30 seconds) */
-  COOLDOWN_MS: 30 * 1000,
+  COOLDOWN_MS: manifest.homeTeleport.cooldownMs,
   /** Cast time in milliseconds (10 seconds - can be interrupted by movement/combat) */
-  CAST_TIME_MS: 10 * 1000,
+  CAST_TIME_MS: manifest.homeTeleport.castTimeMs,
   /** Cast time in ticks (for server-side processing, 10s = ~17 ticks at 600ms/tick) */
-  CAST_TIME_TICKS: 17,
-} as const;
+  CAST_TIME_TICKS: manifest.homeTeleport.castTimeTicks,
+});
 
 // === EXPERIENCE AND LEVELING ===
-export const XP_CONSTANTS = {
-  BASE_XP_MULTIPLIER: 83,
-  MAX_LEVEL: 99,
-  XP_TABLE_LENGTH: 99,
-  DEFAULT_XP_GAIN: {
-    COMBAT: 10,
-    WOODCUTTING: 25,
-    FISHING: 20,
-    FIREMAKING: 40,
-    COOKING: 30,
-  },
-} as const;
+export const XP_CONSTANTS = Object.freeze({
+  BASE_XP_MULTIPLIER: manifest.xp.baseXpMultiplier,
+  MAX_LEVEL: manifest.xp.maxLevel,
+  XP_TABLE_LENGTH: manifest.xp.xpTableLength,
+  DEFAULT_XP_GAIN: Object.freeze({
+    COMBAT: manifest.xp.defaultXpGain.combat,
+    WOODCUTTING: manifest.xp.defaultXpGain.woodcutting,
+    FISHING: manifest.xp.defaultXpGain.fishing,
+    FIREMAKING: manifest.xp.defaultXpGain.firemaking,
+    COOKING: manifest.xp.defaultXpGain.cooking,
+  }),
+});
 
 // === WORLD AND SPATIAL PARTITIONING ===
-export const WORLD_CONSTANTS = {
+export const WORLD_CONSTANTS = Object.freeze({
   /** Spatial partition chunk size for entity registry (meters). */
-  CHUNK_SIZE: 64,
-} as const;
+  CHUNK_SIZE: manifest.world.chunkSize,
+});
 
 // === TERRAIN CONSTANTS ===
 /**
@@ -77,129 +102,93 @@ export const WORLD_CONSTANTS = {
  * CONFIG object for backwards compatibility. When changing values here,
  * ensure TerrainSystem.CONFIG is also updated.
  */
-export const TERRAIN_CONSTANTS = {
-  /**
-   * Water threshold in world Y units.
-   * Terrain below this height is underwater and impassable.
-   * Used by: TerrainSystem, VegetationSystem, DissolveMaterial, RoadNetworkSystem, ResourceSystem
-   */
-  WATER_THRESHOLD: 16,
-
-  /**
-   * Buffer distance above water where vegetation shouldn't spawn.
-   * Prevents plants from appearing in the shoreline splash zone.
-   */
-  WATER_EDGE_BUFFER: 1.5,
-
-  /**
-   * Minimum depth below water surface for terrain to be considered
-   * visibly submerged. Terrain within this depth of the surface looks
-   * like wet beach, not water. Used by minimap and fishing spot placement
-   * to align visual shoreline with the 3D water mesh appearance.
-   */
-  MIN_VISIBLE_WATER_DEPTH: 1.5,
-
-  /**
-   * Maximum slope for walkable terrain (tan of angle).
-   * Slopes steeper than this block movement.
-   * 2.5 ≈ 68 degree angle.
-   */
-  MAX_WALKABLE_SLOPE: 2.5,
-
-  /**
-   * Distance to sample for slope calculation (in meters).
-   * Larger values average slope over a wider area, preventing
-   * terraced cliffs and landscape features from blocking movement.
-   */
-  SLOPE_CHECK_DISTANCE: 4.0,
-
-  /**
-   * Tile size in meters (1 tile = 1 meter for movement grid).
-   */
-  TILE_SIZE: 1.0,
-
-  /**
-   * Terrain tile size in meters (100m x 100m per terrain chunk).
-   */
-  TERRAIN_TILE_SIZE: 100,
-
+export const TERRAIN_CONSTANTS = Object.freeze({
+  WATER_THRESHOLD: manifest.terrain.waterThreshold,
+  WATER_EDGE_BUFFER: manifest.terrain.waterEdgeBuffer,
+  MIN_VISIBLE_WATER_DEPTH: manifest.terrain.minVisibleWaterDepth,
+  MAX_WALKABLE_SLOPE: manifest.terrain.maxWalkableSlope,
+  SLOPE_CHECK_DISTANCE: manifest.terrain.slopeCheckDistance,
+  TILE_SIZE: manifest.terrain.tileSize,
+  TERRAIN_TILE_SIZE: manifest.terrain.terrainTileSize,
   /**
    * Pre-computed water threshold + buffer for vegetation checks.
    * Vegetation should not spawn below this level.
    */
-  get WATER_CUTOFF(): number {
-    return this.WATER_THRESHOLD + this.WATER_EDGE_BUFFER;
-  },
-} as const;
+  WATER_CUTOFF:
+    manifest.terrain.waterThreshold + manifest.terrain.waterEdgeBuffer,
+});
 
 // === DISTANCE AND CULLING ===
 /** Distance constants for render culling, LOD, and server simulation (meters) */
-export const DISTANCE_CONSTANTS = {
+const _RENDER = manifest.distance.render;
+const _SIM = manifest.distance.simulation;
+const _LOD = manifest.distance.animationLod;
+export const DISTANCE_CONSTANTS = Object.freeze({
   /** Client render distances (includes fade zone before cutoff) */
-  RENDER: {
-    MOB: 150,
-    MOB_FADE_START: 130,
-    NPC: 120,
-    NPC_FADE_START: 100,
-    PLAYER: 200,
-    PLAYER_FADE_START: 180,
-    ITEM: 100,
-    ITEM_FADE_START: 80,
-    VEGETATION: 300,
-    TERRAIN: 400,
-  },
+  RENDER: Object.freeze({
+    MOB: _RENDER.mob,
+    MOB_FADE_START: _RENDER.mobFadeStart,
+    NPC: _RENDER.npc,
+    NPC_FADE_START: _RENDER.npcFadeStart,
+    PLAYER: _RENDER.player,
+    PLAYER_FADE_START: _RENDER.playerFadeStart,
+    ITEM: _RENDER.item,
+    ITEM_FADE_START: _RENDER.itemFadeStart,
+    VEGETATION: _RENDER.vegetation,
+    TERRAIN: _RENDER.terrain,
+  }),
 
   /** Server simulation distances (dormant beyond these) */
-  SIMULATION: {
-    ENTITY_UPDATE: 200,
-    NETWORK_BROADCAST: 200,
-    AI_ACTIVE: 100,
-    AI_DORMANT: 200,
-    CHUNK_ACTIVE: 256,
-    CHUNK_HYSTERESIS: 5,
-  },
+  SIMULATION: Object.freeze({
+    ENTITY_UPDATE: _SIM.entityUpdate,
+    NETWORK_BROADCAST: _SIM.networkBroadcast,
+    AI_ACTIVE: _SIM.aiActive,
+    AI_DORMANT: _SIM.aiDormant,
+    CHUNK_ACTIVE: _SIM.chunkActive,
+    CHUNK_HYSTERESIS: _SIM.chunkHysteresis,
+  }),
 
-  /** Animation LOD tiers by distance - values doubled to prevent skating at medium distances */
-  ANIMATION_LOD: {
-    FULL: 60, // 60fps - full animation up to 60m
-    HALF: 120, // 30fps - half-rate animation 60-120m
-    QUARTER: 160, // 15fps - quarter-rate animation 120-160m
-    FROZEN: 200, // static pose - frozen 160-200m
-    CULLED: 250, // not rendered - cull at 250m
-  },
+  /** Animation LOD tiers by distance */
+  ANIMATION_LOD: Object.freeze({
+    FULL: _LOD.full,
+    HALF: _LOD.half,
+    QUARTER: _LOD.quarter,
+    FROZEN: _LOD.frozen,
+    CULLED: _LOD.culled,
+  }),
 
   /** Pre-computed squared distances for hot paths */
-  RENDER_SQ: {
-    MOB: 150 * 150,
-    MOB_FADE_START: 130 * 130,
-    NPC: 120 * 120,
-    NPC_FADE_START: 100 * 100,
-    PLAYER: 200 * 200,
-    PLAYER_FADE_START: 180 * 180,
-    ITEM: 100 * 100,
-    ITEM_FADE_START: 80 * 80,
-  },
+  RENDER_SQ: Object.freeze({
+    MOB: _RENDER.mob * _RENDER.mob,
+    MOB_FADE_START: _RENDER.mobFadeStart * _RENDER.mobFadeStart,
+    NPC: _RENDER.npc * _RENDER.npc,
+    NPC_FADE_START: _RENDER.npcFadeStart * _RENDER.npcFadeStart,
+    PLAYER: _RENDER.player * _RENDER.player,
+    PLAYER_FADE_START: _RENDER.playerFadeStart * _RENDER.playerFadeStart,
+    ITEM: _RENDER.item * _RENDER.item,
+    ITEM_FADE_START: _RENDER.itemFadeStart * _RENDER.itemFadeStart,
+  }),
 
-  SIMULATION_SQ: {
-    ENTITY_UPDATE: 200 * 200,
-    NETWORK_BROADCAST: 200 * 200,
-    AI_ACTIVE: 100 * 100,
-    AI_DORMANT: 200 * 200,
-    CHUNK_ACTIVE: 256 * 256,
-  },
+  SIMULATION_SQ: Object.freeze({
+    ENTITY_UPDATE: _SIM.entityUpdate * _SIM.entityUpdate,
+    NETWORK_BROADCAST: _SIM.networkBroadcast * _SIM.networkBroadcast,
+    AI_ACTIVE: _SIM.aiActive * _SIM.aiActive,
+    AI_DORMANT: _SIM.aiDormant * _SIM.aiDormant,
+    CHUNK_ACTIVE: _SIM.chunkActive * _SIM.chunkActive,
+  }),
 
-  ANIMATION_LOD_SQ: {
-    FULL: 60 * 60,
-    HALF: 120 * 120,
-    QUARTER: 160 * 160,
-    FROZEN: 200 * 200,
-    CULLED: 250 * 250,
-  },
-} as const;
+  ANIMATION_LOD_SQ: Object.freeze({
+    FULL: _LOD.full * _LOD.full,
+    HALF: _LOD.half * _LOD.half,
+    QUARTER: _LOD.quarter * _LOD.quarter,
+    FROZEN: _LOD.frozen * _LOD.frozen,
+    CULLED: _LOD.culled * _LOD.culled,
+  }),
+});
 
 /**
- * Helper to compute fade alpha based on distance
- * Returns 1.0 at fadeStart, 0.0 at maxDistance, linear interpolation between
+ * Helper to compute fade alpha based on distance.
+ * Returns 1.0 at fadeStart, 0.0 at maxDistance, linear interpolation between.
  */
 export function computeDistanceFade(
   distanceSq: number,
@@ -208,281 +197,262 @@ export function computeDistanceFade(
 ): number {
   if (distanceSq <= fadeStartSq) return 1.0;
   if (distanceSq >= maxDistanceSq) return 0.0;
-  // Linear interpolation: 1.0 at fadeStart, 0.0 at maxDistance
   const t = (distanceSq - fadeStartSq) / (maxDistanceSq - fadeStartSq);
   return 1.0 - t;
 }
 
-// === RESOURCE GATHERING ===
-// Re-export from dedicated file for backwards compatibility
-// Also import for use in GAME_CONSTANTS object below
-import { GATHERING_CONSTANTS } from "./GatheringConstants";
-export { GATHERING_CONSTANTS };
-
 // === MOB SYSTEM ===
-// Mob stats (HP, damage, etc.) are loaded from world/assets/manifests/mobs.json
-// Only system-level constants here, no mob-specific data
-export const MOB_CONSTANTS = {
-  SPAWN_RADIUS: 20,
-  MAX_MOBS_PER_AREA: 10,
+// Mob stats (HP, damage, etc.) are loaded from world/assets/manifests/mobs.json.
+// Only system-level constants here, no mob-specific data.
+export const MOB_CONSTANTS = Object.freeze({
+  SPAWN_RADIUS: manifest.mob.spawnRadius,
+  MAX_MOBS_PER_AREA: manifest.mob.maxMobsPerArea,
   /** Max concurrent bandit-type mobs world-wide (matches manifest npc ids, e.g. bandit). */
-  MAX_BANDIT_MOBS_WORLD: 100,
-  /** Mob ids counted toward {@link MAX_BANDIT_MOBS_WORLD} (extend if you add variants). */
-  BANDIT_MOB_IDS_FOR_GLOBAL_CAP: ["bandit", "desert_bandit"] as const,
+  MAX_BANDIT_MOBS_WORLD: manifest.mob.maxBanditMobsWorld,
+  /** Mob ids counted toward {@link MAX_BANDIT_MOBS_WORLD}. */
+  BANDIT_MOB_IDS_FOR_GLOBAL_CAP: Object.freeze([
+    ...manifest.mob.banditMobIdsForGlobalCap,
+  ]),
   // Derived from tick-based constant for consistency (25 ticks * 600ms = 15000ms)
   MOB_RESPAWN_TIME:
     COMBAT_CONSTANTS.DEFAULTS.NPC.RESPAWN_TICKS *
     COMBAT_CONSTANTS.TICK_DURATION_MS,
-  // Note: AI update interval is TICK_DURATION_MS (600ms) - see AggroSystem.ts
-} as const;
-
-// Import health bar dimensions from single source of truth
-import { HEALTH_BAR_DIMENSIONS } from "../utils/rendering/HealthBarRenderer";
+});
 
 // === UI AND VISUAL ===
-export const UI_CONSTANTS = {
-  // Health bar dimensions - from HealthBarRenderer (single source of truth)
+export const UI_CONSTANTS = Object.freeze({
+  // Health bar dimensions — from HealthBarRenderer (single source of truth)
   HEALTH_BAR_WIDTH: HEALTH_BAR_DIMENSIONS.WIDTH,
   HEALTH_BAR_HEIGHT: HEALTH_BAR_DIMENSIONS.HEIGHT,
   HEALTH_BAR_BORDER: HEALTH_BAR_DIMENSIONS.BORDER_WIDTH,
   HEALTH_SPRITE_SCALE: HEALTH_BAR_DIMENSIONS.SPRITE_SCALE,
-  // Other UI constants
-  NAME_TAG_WIDTH: 200,
-  NAME_TAG_HEIGHT: 25,
-  UI_SCALE: 0.1, // Canvas to world scale
-  SPRITE_SCALE: 0.1,
-  HUD_UPDATE_RATE: 100, // 10 FPS for UI updates
-  CHAT_MESSAGE_TIMEOUT: 5000, // 5 seconds
-} as const;
+  // Manifest-driven UI constants
+  NAME_TAG_WIDTH: manifest.ui.nameTagWidth,
+  NAME_TAG_HEIGHT: manifest.ui.nameTagHeight,
+  UI_SCALE: manifest.ui.uiScale,
+  SPRITE_SCALE: manifest.ui.spriteScale,
+  HUD_UPDATE_RATE: manifest.ui.hudUpdateRate,
+  CHAT_MESSAGE_TIMEOUT: manifest.ui.chatMessageTimeout,
+});
 
 // === OSRS-STYLE CONTEXT MENU COLORS ===
-export const CONTEXT_MENU_COLORS = {
+export const CONTEXT_MENU_COLORS = Object.freeze({
   /** Item name color in context menus (OSRS orange) */
-  ITEM: "#ff9040",
+  ITEM: manifest.contextMenuColors.item,
   /** NPC name color in context menus (OSRS yellow) */
-  NPC: "#ffff00",
+  NPC: manifest.contextMenuColors.npc,
   /** Object name color in context menus (OSRS cyan) */
-  OBJECT: "#00ffff",
+  OBJECT: manifest.contextMenuColors.object,
   /** Player name color in context menus */
-  PLAYER: "#ffffff",
-} as const;
+  PLAYER: manifest.contextMenuColors.player,
+});
 
 // === PHYSICS AND MOVEMENT ===
-export const PHYSICS_CONSTANTS = {
-  GRAVITY: -9.81,
-  CHARACTER_CAPSULE_RADIUS: 0.4,
-  CHARACTER_CAPSULE_HEIGHT: 1.2,
-  ITEM_BOX_SIZE: 0.3,
-  COLLISION_MARGIN: 0.04,
-  GROUND_CHECK_DISTANCE: 0.1,
-  STEP_HEIGHT: 0.25,
-} as const;
+export const PHYSICS_CONSTANTS = Object.freeze({
+  GRAVITY: manifest.physics.gravity,
+  CHARACTER_CAPSULE_RADIUS: manifest.physics.characterCapsuleRadius,
+  CHARACTER_CAPSULE_HEIGHT: manifest.physics.characterCapsuleHeight,
+  ITEM_BOX_SIZE: manifest.physics.itemBoxSize,
+  COLLISION_MARGIN: manifest.physics.collisionMargin,
+  GROUND_CHECK_DISTANCE: manifest.physics.groundCheckDistance,
+  STEP_HEIGHT: manifest.physics.stepHeight,
+});
 
 // === CAMERA SYSTEM ===
-export const CAMERA_CONSTANTS = {
-  DEFAULT_CAM_HEIGHT: 1.6,
-  THIRD_PERSON_DISTANCE: 5.0,
-  TOP_DOWN_DISTANCE: 10.0,
-  CAMERA_LERP_SPEED: 0.1,
-  MOUSE_SENSITIVITY: 0.002,
-  ZOOM_SPEED: 0.1,
-  MIN_ZOOM: 2.0,
-  MAX_ZOOM: 20.0,
-} as const;
+export const CAMERA_CONSTANTS = Object.freeze({
+  DEFAULT_CAM_HEIGHT: manifest.camera.defaultCamHeight,
+  THIRD_PERSON_DISTANCE: manifest.camera.thirdPersonDistance,
+  TOP_DOWN_DISTANCE: manifest.camera.topDownDistance,
+  CAMERA_LERP_SPEED: manifest.camera.cameraLerpSpeed,
+  MOUSE_SENSITIVITY: manifest.camera.mouseSensitivity,
+  ZOOM_SPEED: manifest.camera.zoomSpeed,
+  MIN_ZOOM: manifest.camera.minZoom,
+  MAX_ZOOM: manifest.camera.maxZoom,
+});
 
 // === NETWORKING ===
-export const NETWORK_CONSTANTS = {
-  UPDATE_RATE: 20, // 20 Hz
-  INTERPOLATION_DELAY: 100, // milliseconds
-  MAX_PACKET_SIZE: 1024,
-  POSITION_SYNC_THRESHOLD: 0.1,
-  ROTATION_SYNC_THRESHOLD: 0.1,
-} as const;
+export const NETWORK_CONSTANTS = Object.freeze({
+  UPDATE_RATE: manifest.network.updateRate,
+  INTERPOLATION_DELAY: manifest.network.interpolationDelay,
+  MAX_PACKET_SIZE: manifest.network.maxPacketSize,
+  POSITION_SYNC_THRESHOLD: manifest.network.positionSyncThreshold,
+  ROTATION_SYNC_THRESHOLD: manifest.network.rotationSyncThreshold,
+});
 
 // === TESTING ===
-export const TEST_CONSTANTS = {
-  TEST_CUBE_SIZE: 1.0,
-  TEST_TIMEOUT: 30000, // 30 seconds
-  VISUAL_TEST_COLORS: {
-    PLAYER: 0x0000ff, // Blue
-    GOBLIN: 0x00ff00, // Green
-    ITEM: 0xffff00, // Yellow
-    CORPSE: 0xff0000, // Red
-    BANK: 0xff00ff, // Magenta
-    STORE: 0x00ffff, // Cyan
-    RESOURCE: 0x008000, // Dark Green
-    TEST_CUBE: 0xff4500, // Orange Red
-  },
-  SCREENSHOT_DELAY: 1000, // 1 second between screenshots
-  MAX_TEST_DURATION: 300000, // 5 minutes
-} as const;
+export const TEST_CONSTANTS = Object.freeze({
+  TEST_CUBE_SIZE: manifest.test.testCubeSize,
+  TEST_TIMEOUT: manifest.test.testTimeout,
+  VISUAL_TEST_COLORS: Object.freeze({
+    PLAYER: manifest.test.visualTestColors.player,
+    GOBLIN: manifest.test.visualTestColors.goblin,
+    ITEM: manifest.test.visualTestColors.item,
+    CORPSE: manifest.test.visualTestColors.corpse,
+    BANK: manifest.test.visualTestColors.bank,
+    STORE: manifest.test.visualTestColors.store,
+    RESOURCE: manifest.test.visualTestColors.resource,
+    TEST_CUBE: manifest.test.visualTestColors.testCube,
+  }),
+  SCREENSHOT_DELAY: manifest.test.screenshotDelay,
+  MAX_TEST_DURATION: manifest.test.maxTestDuration,
+});
 
 // === ITEM TYPES AND IDS ===
-export const ITEM_IDS = {
+/**
+ * Legacy numeric id map. Built at module load from `manifest.itemIds` —
+ * fails fast if any of the hardcoded keys below is missing from the JSON.
+ * The canonical item data lives in items.json; this map is a
+ * backwards-compat shim.
+ */
+const itemIdByKey: Record<string, number> = {};
+for (const entry of manifest.itemIds) {
+  itemIdByKey[entry.key] = entry.id;
+}
+
+function requireItemId(key: string): number {
+  const id = itemIdByKey[key];
+  if (id === undefined) {
+    throw new Error(
+      `GameConstants drift: manifest.itemIds missing required key "${key}"`,
+    );
+  }
+  return id;
+}
+
+export const ITEM_IDS = Object.freeze({
   // Weapons
-  BRONZE_SWORD: 1,
-  STEEL_SWORD: 2,
-  MITHRIL_SWORD: 3,
-  WOOD_BOW: 4,
-  OAK_BOW: 5,
-  WILLOW_BOW: 6,
+  BRONZE_SWORD: requireItemId("bronze_sword"),
+  STEEL_SWORD: requireItemId("steel_sword"),
+  MITHRIL_SWORD: requireItemId("mithril_sword"),
+  WOOD_BOW: requireItemId("wood_bow"),
+  OAK_BOW: requireItemId("oak_bow"),
+  WILLOW_BOW: requireItemId("willow_bow"),
 
   // Shields
-  BRONZE_SHIELD: 10,
-  STEEL_SHIELD: 11,
-  MITHRIL_SHIELD: 12,
+  BRONZE_SHIELD: requireItemId("bronze_shield"),
+  STEEL_SHIELD: requireItemId("steel_shield"),
+  MITHRIL_SHIELD: requireItemId("mithril_shield"),
 
   // Armor
-  LEATHER_HELMET: 20,
-  LEATHER_BODY: 21,
-  LEATHER_LEGS: 22,
-  BRONZE_HELMET: 23,
-  BRONZE_BODY: 24,
-  BRONZE_LEGS: 25,
+  LEATHER_HELMET: requireItemId("leather_helmet"),
+  LEATHER_BODY: requireItemId("leather_body"),
+  LEATHER_LEGS: requireItemId("leather_legs"),
+  BRONZE_HELMET: requireItemId("bronze_helmet"),
+  BRONZE_BODY: requireItemId("bronze_body"),
+  BRONZE_LEGS: requireItemId("bronze_legs"),
 
   // Tools
-  BRONZE_HATCHET: 30,
-  FISHING_ROD: 31,
-  TINDERBOX: 32,
+  BRONZE_HATCHET: requireItemId("bronze_hatchet"),
+  FISHING_ROD: requireItemId("fishing_rod"),
+  TINDERBOX: requireItemId("tinderbox"),
 
   // Resources
-  LOGS: 40,
-  RAW_FISH: 41,
-  COOKED_FISH: 42,
-  BURNT_FISH: 43,
-  ARROWS: 44,
+  LOGS: requireItemId("logs"),
+  RAW_FISH: requireItemId("raw_fish"),
+  COOKED_FISH: requireItemId("cooked_fish"),
+  BURNT_FISH: requireItemId("burnt_fish"),
+  ARROWS: requireItemId("arrows"),
 
   // Currency
-  COINS: 100,
-} as const;
+  COINS: requireItemId("coins"),
+});
 
-// Mapping from numeric IDs to string item keys
-export const ITEM_ID_TO_KEY: Record<number, string> = {
-  // Weapons
-  [ITEM_IDS.BRONZE_SWORD]: "bronze_sword",
-  [ITEM_IDS.STEEL_SWORD]: "steel_sword",
-  [ITEM_IDS.MITHRIL_SWORD]: "mithril_sword",
-  [ITEM_IDS.WOOD_BOW]: "wood_bow",
-  [ITEM_IDS.OAK_BOW]: "oak_bow",
-  [ITEM_IDS.WILLOW_BOW]: "willow_bow",
-
-  // Shields
-  [ITEM_IDS.BRONZE_SHIELD]: "bronze_shield",
-  [ITEM_IDS.STEEL_SHIELD]: "steel_shield",
-  [ITEM_IDS.MITHRIL_SHIELD]: "mithril_shield",
-
-  // Armor
-  [ITEM_IDS.LEATHER_HELMET]: "leather_helmet",
-  [ITEM_IDS.LEATHER_BODY]: "leather_body",
-  [ITEM_IDS.LEATHER_LEGS]: "leather_legs",
-  [ITEM_IDS.BRONZE_HELMET]: "bronze_helmet",
-  [ITEM_IDS.BRONZE_BODY]: "bronze_body",
-  [ITEM_IDS.BRONZE_LEGS]: "bronze_legs",
-
-  // Tools
-  [ITEM_IDS.BRONZE_HATCHET]: "bronze_hatchet",
-  [ITEM_IDS.FISHING_ROD]: "fishing_rod",
-  [ITEM_IDS.TINDERBOX]: "tinderbox",
-
-  // Resources
-  [ITEM_IDS.LOGS]: "logs",
-  [ITEM_IDS.RAW_FISH]: "raw_fish",
-  [ITEM_IDS.COOKED_FISH]: "cooked_fish",
-  [ITEM_IDS.BURNT_FISH]: "burnt_fish",
-  [ITEM_IDS.ARROWS]: "arrows",
-
-  // Currency
-  [ITEM_IDS.COINS]: "coins",
-} as const;
+// Mapping from numeric IDs to string item keys, built from the manifest
+export const ITEM_ID_TO_KEY: Record<number, string> = (() => {
+  const map: Record<number, string> = {};
+  for (const entry of manifest.itemIds) {
+    map[entry.id] = entry.key;
+  }
+  return Object.freeze(map);
+})();
 
 // === MOB TYPES ===
-// Mob types are now loaded dynamically from world/assets/manifests/mobs.json
-// Use getAllMobs() from data/mobs.ts to get available mob types at runtime
-export const MOB_TYPES = {} as const;
+// Mob types are loaded dynamically from world/assets/manifests/mobs.json.
+// Use getAllMobs() from data/mobs.ts to get available mob types at runtime.
+export const MOB_TYPES = Object.freeze({} as const);
 
 // === BIOME TYPES ===
 // Deprecated: use BiomeType enum (re-exported above) instead.
 // Kept for backward compat; maps to the same string values.
-import { BiomeType as _BT } from "../systems/shared/world/TerrainBiomeTypes";
-export const BIOME_TYPES = {
+export const BIOME_TYPES = Object.freeze({
   TUNDRA: _BT.Tundra,
   FOREST: _BT.Forest,
   CANYON: _BT.Canyon,
-} as const;
+});
 
 // === SKILL NAMES ===
 // All skills matching the Skills interface in entity-types.ts
-export const SKILLS = {
+export const SKILLS = Object.freeze({
   // Combat skills
-  ATTACK: "attack",
-  STRENGTH: "strength",
-  DEFENSE: "defense",
-  CONSTITUTION: "constitution",
-  RANGED: "ranged",
-  MAGIC: "magic",
-  PRAYER: "prayer",
+  ATTACK: manifest.skills.attack,
+  STRENGTH: manifest.skills.strength,
+  DEFENSE: manifest.skills.defense,
+  CONSTITUTION: manifest.skills.constitution,
+  RANGED: manifest.skills.ranged,
+  MAGIC: manifest.skills.magic,
+  PRAYER: manifest.skills.prayer,
   // Gathering skills
-  WOODCUTTING: "woodcutting",
-  MINING: "mining",
-  FISHING: "fishing",
+  WOODCUTTING: manifest.skills.woodcutting,
+  MINING: manifest.skills.mining,
+  FISHING: manifest.skills.fishing,
   // Production skills
-  FIREMAKING: "firemaking",
-  COOKING: "cooking",
-  SMITHING: "smithing",
-  AGILITY: "agility",
-} as const;
+  FIREMAKING: manifest.skills.firemaking,
+  COOKING: manifest.skills.cooking,
+  SMITHING: manifest.skills.smithing,
+  AGILITY: manifest.skills.agility,
+});
 
 // === EQUIPMENT SLOTS ===
-export const EQUIPMENT_SLOTS = {
-  WEAPON: "weapon",
-  SHIELD: "shield",
-  HELMET: "helmet",
-  BODY: "body",
-  LEGS: "legs",
-  ARROWS: "arrows",
-} as const;
+export const EQUIPMENT_SLOTS = Object.freeze({
+  WEAPON: manifest.equipmentSlots.weapon,
+  SHIELD: manifest.equipmentSlots.shield,
+  HELMET: manifest.equipmentSlots.helmet,
+  BODY: manifest.equipmentSlots.body,
+  LEGS: manifest.equipmentSlots.legs,
+  ARROWS: manifest.equipmentSlots.arrows,
+});
 
 // === ATTACK STYLES ===
-export const ATTACK_STYLES = {
-  AGGRESSIVE: "aggressive", // +3 STR XP per damage
-  CONTROLLED: "controlled", // +1 ATK, +1 STR, +1 DEF XP per damage
-  DEFENSIVE: "defensive", // +3 DEF XP per damage
-  ACCURATE: "accurate", // +3 ATK XP per damage
-} as const;
+export const ATTACK_STYLES = Object.freeze({
+  AGGRESSIVE: manifest.attackStyles.aggressive, // +3 STR XP per damage
+  CONTROLLED: manifest.attackStyles.controlled, // +1 ATK, +1 STR, +1 DEF XP per damage
+  DEFENSIVE: manifest.attackStyles.defensive, // +3 DEF XP per damage
+  ACCURATE: manifest.attackStyles.accurate, // +3 ATK XP per damage
+});
 
 // === WORLD AREAS (for content loading) ===
-export const WORLD_AREAS = {
-  CENTRAL_HAVEN: "central_haven",
-  VARROCK: "varrock",
-  FALADOR: "falador",
-  WILDERNESS: "wilderness",
-  BARBARIAN_VILLAGE: "barbarian_village",
-} as const;
+export const WORLD_AREAS = Object.freeze({
+  CENTRAL_HAVEN: manifest.worldAreas.centralHaven,
+  VARROCK: manifest.worldAreas.varrock,
+  FALADOR: manifest.worldAreas.falador,
+  WILDERNESS: manifest.worldAreas.wilderness,
+  BARBARIAN_VILLAGE: manifest.worldAreas.barbarianVillage,
+});
 
 // === ERROR CODES ===
-export const ERROR_CODES = {
-  INVALID_PLAYER: "INVALID_PLAYER",
-  INSUFFICIENT_ITEMS: "INSUFFICIENT_ITEMS",
-  INVENTORY_FULL: "INVENTORY_FULL",
-  INVALID_ACTION: "INVALID_ACTION",
-  COMBAT_COOLDOWN: "COMBAT_COOLDOWN",
-  OUT_OF_RANGE: "OUT_OF_RANGE",
-  INSUFFICIENT_LEVEL: "INSUFFICIENT_LEVEL",
-  SYSTEM_ERROR: "SYSTEM_ERROR",
-} as const;
+export const ERROR_CODES = Object.freeze({
+  INVALID_PLAYER: manifest.errorCodes.invalidPlayer,
+  INSUFFICIENT_ITEMS: manifest.errorCodes.insufficientItems,
+  INVENTORY_FULL: manifest.errorCodes.inventoryFull,
+  INVALID_ACTION: manifest.errorCodes.invalidAction,
+  COMBAT_COOLDOWN: manifest.errorCodes.combatCooldown,
+  OUT_OF_RANGE: manifest.errorCodes.outOfRange,
+  INSUFFICIENT_LEVEL: manifest.errorCodes.insufficientLevel,
+  SYSTEM_ERROR: manifest.errorCodes.systemError,
+});
 
 // === SUCCESS MESSAGES ===
-export const SUCCESS_MESSAGES = {
-  ITEM_PICKED_UP: "Item picked up successfully",
-  COMBAT_STARTED: "Combat initiated",
-  LEVEL_UP: "Congratulations! You have gained a level",
-  QUEST_COMPLETED: "Quest completed",
-  ITEM_EQUIPPED: "Item equipped",
-  BANK_DEPOSIT: "Item deposited to bank",
-} as const;
+export const SUCCESS_MESSAGES = Object.freeze({
+  ITEM_PICKED_UP: manifest.successMessages.itemPickedUp,
+  COMBAT_STARTED: manifest.successMessages.combatStarted,
+  LEVEL_UP: manifest.successMessages.levelUp,
+  QUEST_COMPLETED: manifest.successMessages.questCompleted,
+  ITEM_EQUIPPED: manifest.successMessages.itemEquipped,
+  BANK_DEPOSIT: manifest.successMessages.bankDeposit,
+});
 
 // Export all constants as a single object for easy importing
-export const GAME_CONSTANTS = {
+export const GAME_CONSTANTS = Object.freeze({
   INVENTORY: INVENTORY_CONSTANTS,
   PLAYER: PLAYER_CONSTANTS,
   COMBAT: COMBAT_CONSTANTS,
@@ -507,4 +477,4 @@ export const GAME_CONSTANTS = {
   WORLD_AREAS,
   ERROR_CODES,
   SUCCESS_MESSAGES,
-} as const;
+});

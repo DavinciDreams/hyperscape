@@ -1,0 +1,37 @@
+{
+  "$schema": "hyperforge.banking.v1",
+  "sizes": {
+    "maxBankSlots": 480,
+    "slotsPerTab": 40,
+    "maxTabs": 12,
+    "defaultTabs": 1,
+    "defaultSlots": 40
+  },
+  "ui": {
+    "itemsPerRow": 8
+  },
+  "transactionLimits": {
+    "maxItemStack": 2147483647,
+    "minItemQuantity": 1
+  },
+  "errors": {
+    "bankFull": "Bank is full",
+    "invalidQuantity": "Invalid quantity",
+    "itemNotFound": "Item not found",
+    "insufficientQuantity": "Insufficient quantity in bank",
+    "invalidSlot": "Invalid slot number",
+    "noBankData": "No bank data found",
+    "bankNotOpen": "Bank is not open",
+    "insufficientPouchCoins": "Not enough coins in money pouch",
+    "insufficientBankCoins": "Not enough coins in bank",
+    "coinOverflow": "Cannot carry that many coins"
+  },
+  "messages": {
+    "itemDeposited": "Item deposited successfully",
+    "itemWithdrawn": "Item withdrawn successfully",
+    "bankOpened": "Bank opened",
+    "bankClosed": "Bank closed",
+    "coinsDeposited": "Coins deposited to bank",
+    "coinsWithdrawn": "Coins withdrawn from bank"
+  }
+}

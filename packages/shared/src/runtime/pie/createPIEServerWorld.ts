@@ -49,6 +49,13 @@ export interface PIEServerWorldOptions {
    * be skipped for headless wiring tests.
    */
   includeEnvironment?: boolean;
+  /**
+   * Disable auto-populating the world from the global area manifest. PIE
+   * sessions should almost always set this `true` — the editor supplies
+   * its own entity spawns, and `MobNPCSpawnerSystem` hard-depends on a
+   * loaded terrain system. Default `false` for production parity.
+   */
+  skipAutoSpawners?: boolean;
 }
 
 /**
@@ -76,6 +83,7 @@ export async function createPIEServerWorld(
     includeRpgSystems = true,
     includeTerrain = true,
     includeEnvironment = true,
+    skipAutoSpawners = false,
   } = options;
   const world = new World();
 
@@ -91,6 +99,19 @@ export async function createPIEServerWorld(
   }
   if (includeRpgSystems) {
     await registerSystems(world);
+  }
+
+  if (skipAutoSpawners) {
+    // MobNPCSpawnerSystem auto-populates from the global area manifest on
+    // start() and hard-depends on `terrain`. PIE sessions provide their own
+    // entity spawns via the editor, so we pull it from the registry before
+    // it gets a chance to init.
+    const spawner = world.systemsByName.get("mob-npc-spawner");
+    if (spawner) {
+      world.systemsByName.delete("mob-npc-spawner");
+      const idx = world.systems.indexOf(spawner);
+      if (idx >= 0) world.systems.splice(idx, 1);
+    }
   }
 
   return world;
