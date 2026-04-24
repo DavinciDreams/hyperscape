@@ -64,8 +64,12 @@ export interface StaminaTickInput {
   stationary: boolean;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type MountReloadListener = () => void;
+
 export class MountRegistry {
   private _byId = new Map<string, Mount>();
+  private _reloadListeners = new Set<MountReloadListener>();
 
   constructor(manifest?: MountsManifest) {
     if (manifest) this.load(manifest);
@@ -74,10 +78,37 @@ export class MountRegistry {
   load(manifest: MountsManifest): void {
     this._byId.clear();
     for (const m of manifest) this._byId.set(m.id, m);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(MountsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()`. Returns an unsubscribe
+   * function. Listener throws are caught + logged.
+   */
+  onReloaded(cb: MountReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[mountRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get size(): number {

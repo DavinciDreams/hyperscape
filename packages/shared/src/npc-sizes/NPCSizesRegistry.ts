@@ -21,8 +21,12 @@ export class NPCSizesNotLoadedError extends Error {
 
 const DEFAULT_SIZE: NPCSizeEntry = { width: 1, depth: 1 };
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type NPCSizesReloadListener = () => void;
+
 export class NPCSizesRegistry {
   private _manifest: NPCSizesManifest | null = null;
+  private _reloadListeners = new Set<NPCSizesReloadListener>();
 
   constructor(manifest?: NPCSizesManifest) {
     if (manifest) this.load(manifest);
@@ -30,10 +34,37 @@ export class NPCSizesRegistry {
 
   load(manifest: NPCSizesManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(NPCSizesManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()`. Returns an unsubscribe
+   * function. Listener throws are caught + logged.
+   */
+  onReloaded(cb: NPCSizesReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[npcSizesRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

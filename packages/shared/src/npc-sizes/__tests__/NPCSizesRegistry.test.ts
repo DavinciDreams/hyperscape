@@ -42,3 +42,40 @@ describe("NPCSizesRegistry — lookup", () => {
     expect(r.ids().sort()).toEqual(["dragon", "goblin", "troll"]);
   });
 });
+
+describe("NPCSizesRegistry — onReloaded() reload listeners", () => {
+  it("fires after every load() and honors unsubscribe", () => {
+    const r = new NPCSizesRegistry();
+    let count = 0;
+    const unsubscribe = r.onReloaded(() => {
+      count += 1;
+    });
+    r.load(manifest());
+    r.load(manifest());
+    expect(count).toBe(2);
+    unsubscribe();
+    r.load(manifest());
+    expect(count).toBe(2);
+  });
+
+  it("loadFromJson() also triggers the listener", () => {
+    const r = new NPCSizesRegistry();
+    let fired = false;
+    r.onReloaded(() => {
+      fired = true;
+    });
+    r.loadFromJson(manifest());
+    expect(fired).toBe(true);
+  });
+
+  it("a throwing listener does not break sibling listeners", () => {
+    const r = new NPCSizesRegistry();
+    const seen: string[] = [];
+    r.onReloaded(() => {
+      throw new Error("boom");
+    });
+    r.onReloaded(() => seen.push("ok"));
+    r.load(manifest());
+    expect(seen).toEqual(["ok"]);
+  });
+});

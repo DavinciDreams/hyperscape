@@ -36,9 +36,13 @@ export class UnknownSkillDefinitionError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type SkillIconsReloadListener = () => void;
+
 export class SkillIconsRegistry {
   private _manifest: SkillIconsManifest | null = null;
   private _byKey = new Map<string, SkillDefinition>();
+  private _reloadListeners = new Set<SkillIconsReloadListener>();
 
   constructor(manifest?: SkillIconsManifest) {
     if (manifest) this.load(manifest);
@@ -48,10 +52,37 @@ export class SkillIconsRegistry {
     this._manifest = manifest;
     this._byKey.clear();
     for (const d of manifest.definitions) this._byKey.set(d.key, d);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(SkillIconsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()`. Returns an unsubscribe
+   * function. Listener throws are caught + logged.
+   */
+  onReloaded(cb: SkillIconsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[skillIconsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

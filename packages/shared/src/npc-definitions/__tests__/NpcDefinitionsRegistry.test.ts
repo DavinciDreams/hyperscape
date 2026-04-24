@@ -144,3 +144,40 @@ describe("NpcDefinitionsRegistry", () => {
     expect(npcDefinitionsRegistry.isLoaded()).toBe(false);
   });
 });
+
+describe("NpcDefinitionsRegistry — onReloaded() reload listeners", () => {
+  it("fires after every load() and honors unsubscribe", () => {
+    const r = new NpcDefinitionsRegistry();
+    let count = 0;
+    const unsubscribe = r.onReloaded(() => {
+      count += 1;
+    });
+    r.load(buildManifest());
+    r.load(buildManifest());
+    expect(count).toBe(2);
+    unsubscribe();
+    r.load(buildManifest());
+    expect(count).toBe(2);
+  });
+
+  it("loadFromJson() also triggers the listener", () => {
+    const r = new NpcDefinitionsRegistry();
+    let fired = false;
+    r.onReloaded(() => {
+      fired = true;
+    });
+    r.loadFromJson(buildManifest());
+    expect(fired).toBe(true);
+  });
+
+  it("a throwing listener does not break sibling listeners", () => {
+    const r = new NpcDefinitionsRegistry();
+    const seen: string[] = [];
+    r.onReloaded(() => {
+      throw new Error("boom");
+    });
+    r.onReloaded(() => seen.push("ok"));
+    r.load(buildManifest());
+    expect(seen).toEqual(["ok"]);
+  });
+});
