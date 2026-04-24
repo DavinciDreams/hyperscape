@@ -35,6 +35,7 @@ import type { World } from "@hyperforge/shared";
 
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
+import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
@@ -147,6 +148,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // visual systems.
       if (!ctx.world.isServer) {
         register("damage-splat", DamageSplatSystem);
+        register("duel-countdown-splat", DuelCountdownSplatSystem);
       }
     },
     onDisable(_ctx) {

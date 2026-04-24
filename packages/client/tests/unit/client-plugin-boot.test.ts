@@ -58,9 +58,9 @@ describe("client plugin boot — bilateral system registration", () => {
       expect(world.registered).toContain(name);
     }
 
-    // Client-only visual systems — DamageSplatSystem registers
-    // when world.isServer === false.
+    // Client-only visual systems — register when world.isServer === false.
     expect(world.registered).toContain("damage-splat");
+    expect(world.registered).toContain("duel-countdown-splat");
 
     // Server-only systems — should NOT register on the client.
     expect(world.registered).not.toContain("health-regen");

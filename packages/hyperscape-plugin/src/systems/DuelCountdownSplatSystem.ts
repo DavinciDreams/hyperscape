@@ -17,11 +17,18 @@
  * - Animates with scale punch and fade effects
  */
 
-import * as THREE from "../../extras/three/three";
-import { System } from "../shared/infrastructure/System";
-import { EventType } from "../../types/events";
-import type { World } from "../../core/World";
-import type { WorldOptions } from "../../types/index";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` as the second client-only plugin
+// migration. Duel countdown numbers (3, 2, 1, FIGHT!) — Hyperscape-
+// specific feedback. Plugin onEnable gates registration on
+// !world.isServer.
+import {
+  EventType,
+  SystemClass as System,
+  THREE,
+  type World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 interface CountdownSplat {
   poolItem: SplatPoolItem;

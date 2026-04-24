@@ -146,8 +146,9 @@ describe("server plugin boot — in-binary set", () => {
     for (const name of expected) {
       expect(world.registered).toContain(name);
     }
-    // DamageSplatSystem is client-only — must NOT appear on server.
+    // Client-only systems must NOT appear on server.
     expect(world.registered).not.toContain("damage-splat");
+    expect(world.registered).not.toContain("duel-countdown-splat");
     expect(world.unregistered).toEqual([]);
 
     await session.stop();
