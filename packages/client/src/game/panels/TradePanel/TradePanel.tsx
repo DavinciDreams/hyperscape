@@ -38,7 +38,8 @@ import type {
   ContextMenuState,
   QuantityPromptState,
 } from "./types";
-import { TRADE_GRID_COLS, TRADE_SLOTS } from "./constants";
+import { TRADE_GRID_COLS } from "./constants";
+import { getMaxTradeSlots } from "@hyperforge/shared";
 import { formatGoldValue, getWealthDifferenceColor } from "./utils";
 import { TradeSlot, InventoryMiniPanel } from "./components";
 import { TradeContextMenu, QuantityPrompt } from "./modals";
@@ -300,7 +301,7 @@ export function TradePanel({
                       }),
                     }}
                   >
-                    {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
+                    {Array.from({ length: getMaxTradeSlots() }).map((_, i) => (
                       <TradeSlot
                         key={i}
                         item={myOfferBySlot.get(i) || null}
@@ -385,7 +386,7 @@ export function TradePanel({
                       }),
                     }}
                   >
-                    {Array.from({ length: TRADE_SLOTS }).map((_, i) => (
+                    {Array.from({ length: getMaxTradeSlots() }).map((_, i) => (
                       <TradeSlot
                         key={i}
                         item={theirOfferBySlot.get(i) || null}

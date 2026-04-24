@@ -30,7 +30,7 @@ import {
   Warehouse,
   RefreshCw,
 } from "lucide-react";
-import { INVENTORY_CONSTANTS } from "@hyperforge/shared";
+import { getMaxInventorySlots } from "@hyperforge/shared";
 import { AdminLiveControls } from "./AdminLiveControls";
 import "./AdminScreen.css";
 
@@ -1089,7 +1089,7 @@ const InventoryTab: React.FC<{
   }>;
 }> = ({ items }) => {
   // Create slots array using shared constant
-  const maxSlots = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
+  const maxSlots = getMaxInventorySlots();
   const slots = Array(maxSlots).fill(null);
   items.forEach((item) => {
     if (item.slotIndex >= 0 && item.slotIndex < maxSlots) {

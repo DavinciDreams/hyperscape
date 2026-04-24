@@ -10,7 +10,7 @@ import {
   getContextMenuItemStyle,
   getContextMenuSurfaceStyle,
 } from "@/ui/theme/themes";
-import { CONTEXT_MENU_COLORS } from "@hyperforge/shared";
+import { getContextMenuItemColor } from "@hyperforge/shared";
 import type {
   ActionBarSlotContent,
   ContextMenuItem,
@@ -85,7 +85,7 @@ export function useContextMenu(
             ? "#60a5fa"
             : slot.type === "skill"
               ? "#4ade80"
-              : CONTEXT_MENU_COLORS.ITEM;
+              : getContextMenuItemColor();
 
         menuItems.push({
           id: "use",

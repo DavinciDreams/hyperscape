@@ -4,6 +4,7 @@
  */
 
 import type { ReactNode } from "react";
+import type { UIUserLayout } from "@hyperforge/ui-framework";
 
 // ============================================================================
 // Branded Types
@@ -351,6 +352,14 @@ export interface LayoutPreset {
   modifiedAt: number;
   /** Screen resolution when preset was saved */
   resolution: Size;
+  /**
+   * Manifest-HUD overrides captured alongside the window state.
+   * Keyed the same way `useUserLayoutStore` stores them (`layoutId` →
+   * `UIUserLayout`). `undefined` means the preset was saved before U5
+   * and carries only window state — loading it leaves the player's
+   * current HUD overrides untouched.
+   */
+  uiOverrides?: Record<string, UIUserLayout>;
 }
 
 /** Return value from usePresets hook */

@@ -5,6 +5,19 @@ import type { EditMode, AlignmentGuide } from "../types";
 /** Storage key for edit mode settings */
 const STORAGE_KEY = "hyperia-edit-settings";
 
+/**
+ * Which UI surface responds to edit-mode interactions.
+ *
+ * Hyperscape has two customization surfaces that share one substrate:
+ * - `window`   — the classic Window Panel System (inventory, bank, etc.)
+ * - `manifest` — the manifest-driven HUD (HP bar, action bar, minimap)
+ * - `both`     — both surfaces edit at once (default)
+ *
+ * Splitting this knob lets a player enter edit-mode for just the HUD
+ * without accidentally shoving a carefully-placed inventory panel.
+ */
+export type EditScope = "window" | "manifest" | "both";
+
 /** Edit store state and actions */
 export interface EditStoreState {
   /** Current mode (locked or unlocked) */
@@ -30,17 +43,34 @@ export interface EditStoreState {
   /** The key used to toggle edit mode */
   toggleKey: string;
 
+  /**
+   * Which UI surfaces respond to edit-mode. Persisted, defaults to
+   * `"both"` so existing users see no behavior change. See
+   * {@link EditScope}.
+   */
+  editScope: EditScope;
+
   // Resize tracking state
   /** Whether a window is currently being resized */
   isResizing: boolean;
   /** The ID of the window currently being resized */
   resizingWindowId: string | null;
+  /**
+   * The manifest `instanceId` currently being resized (manifest HUD
+   * counterpart of `resizingWindowId`). Ephemeral, not persisted.
+   */
+  resizingInstanceId: string | null;
 
   // Alignment guide state (ephemeral, not persisted)
   /** Currently active alignment guides to display */
   activeGuides: AlignmentGuide[];
   /** The ID of the window currently being dragged */
   draggingWindowId: string | null;
+  /**
+   * The manifest `instanceId` currently being dragged (manifest HUD
+   * counterpart of `draggingWindowId`). Ephemeral, not persisted.
+   */
+  draggingInstanceId: string | null;
 
   // Hold-to-toggle visual state (ephemeral, not persisted)
   /** Whether the toggle key is currently being held */
@@ -52,6 +82,8 @@ export interface EditStoreState {
   toggleMode: () => void;
   /** Set specific mode */
   setMode: (mode: EditMode) => void;
+  /** Set which UI surfaces respond to edit-mode. */
+  setEditScope: (scope: EditScope) => void;
   /** Set grid size */
   setGridSize: (size: number) => void;
   /** Set snap enabled */
@@ -74,10 +106,16 @@ export interface EditStoreState {
   startResize: (windowId: string) => void;
   /** End resizing */
   endResize: () => void;
+  /** Start resizing a manifest HUD instance. */
+  startInstanceResize: (instanceId: string) => void;
+  /** End manifest HUD resize. */
+  endInstanceResize: () => void;
   /** Set active alignment guides */
   setActiveGuides: (guides: AlignmentGuide[]) => void;
   /** Set the currently dragging window ID */
   setDraggingWindowId: (windowId: string | null) => void;
+  /** Set the currently dragging manifest HUD instance ID. */
+  setDraggingInstanceId: (instanceId: string | null) => void;
   /** Clear all active guides */
   clearGuides: () => void;
   /** Set whether the toggle key is being held */
@@ -105,10 +143,13 @@ export const useEditStore = create<EditStoreState>()(
       holdToToggle: true, // Require holding key by default
       holdDuration: 250, // 0.25 second by default
       toggleKey: "l", // L key by default
+      editScope: "both",
       isResizing: false,
       resizingWindowId: null,
+      resizingInstanceId: null,
       activeGuides: [],
       draggingWindowId: null,
+      draggingInstanceId: null,
       isHolding: false,
       holdProgress: 0,
 
@@ -120,6 +161,10 @@ export const useEditStore = create<EditStoreState>()(
 
       setMode: (mode: EditMode) => {
         set({ mode });
+      },
+
+      setEditScope: (editScope: EditScope) => {
+        set({ editScope });
       },
 
       setGridSize: (gridSize: number) => {
@@ -166,6 +211,14 @@ export const useEditStore = create<EditStoreState>()(
         set({ isResizing: false, resizingWindowId: null });
       },
 
+      startInstanceResize: (instanceId: string) => {
+        set({ isResizing: true, resizingInstanceId: instanceId });
+      },
+
+      endInstanceResize: () => {
+        set({ isResizing: false, resizingInstanceId: null });
+      },
+
       setActiveGuides: (activeGuides: AlignmentGuide[]) => {
         set({ activeGuides });
       },
@@ -174,6 +227,13 @@ export const useEditStore = create<EditStoreState>()(
         set({ draggingWindowId });
         // Clear guides when drag ends
         if (!draggingWindowId) {
+          set({ activeGuides: [] });
+        }
+      },
+
+      setDraggingInstanceId: (draggingInstanceId: string | null) => {
+        set({ draggingInstanceId });
+        if (!draggingInstanceId) {
           set({ activeGuides: [] });
         }
       },
@@ -205,6 +265,7 @@ export const useEditStore = create<EditStoreState>()(
         holdToToggle: state.holdToToggle,
         holdDuration: state.holdDuration,
         toggleKey: state.toggleKey,
+        editScope: state.editScope,
       }),
       // Migrate old settings to new defaults
       migrate: (persistedState, version) => {

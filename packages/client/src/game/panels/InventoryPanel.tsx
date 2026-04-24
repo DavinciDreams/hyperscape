@@ -49,8 +49,8 @@ import {
   usesWear,
   isNotedItem,
   getPrimaryAction,
-  CONTEXT_MENU_COLORS,
-  INVENTORY_CONSTANTS,
+  getContextMenuItemColor,
+  getMaxInventorySlots,
   type PrimaryActionType,
 } from "@hyperforge/shared";
 import { ItemIcon } from "@/ui/components/ItemIcon";
@@ -61,10 +61,10 @@ import { CoinPouch } from "./inventory";
 import { zIndex } from "../../constants/tokens";
 
 /**
- * Maximum inventory slots (OSRS-style: 28 slots)
- * Uses INVENTORY_CONSTANTS from shared package as single source of truth
+ * Maximum inventory slots (OSRS-style: 28 slots).
+ * Read live through `getMaxInventorySlots()` so PIE-hotreloaded game-manifest
+ * edits take effect without a client reload.
  */
-const MAX_SLOTS = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
 
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
@@ -370,7 +370,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
               label: `${action} ${itemName}`,
               styledLabel: [
                 { text: `${action} ` },
-                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+                { text: itemName, color: getContextMenuItemColor() },
               ],
               enabled: true,
             });
@@ -383,7 +383,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
               label: `Eat ${itemName}`,
               styledLabel: [
                 { text: "Eat " },
-                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+                { text: itemName, color: getContextMenuItemColor() },
               ],
               enabled: true,
             });
@@ -393,7 +393,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
               label: `Drink ${itemName}`,
               styledLabel: [
                 { text: "Drink " },
-                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+                { text: itemName, color: getContextMenuItemColor() },
               ],
               enabled: true,
             });
@@ -403,7 +403,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
               label: `Bury ${itemName}`,
               styledLabel: [
                 { text: "Bury " },
-                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+                { text: itemName, color: getContextMenuItemColor() },
               ],
               enabled: true,
             });
@@ -413,7 +413,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
               label: `Wield ${itemName}`,
               styledLabel: [
                 { text: "Wield " },
-                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+                { text: itemName, color: getContextMenuItemColor() },
               ],
               enabled: true,
             });
@@ -423,7 +423,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
               label: `Wear ${itemName}`,
               styledLabel: [
                 { text: "Wear " },
-                { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+                { text: itemName, color: getContextMenuItemColor() },
               ],
               enabled: true,
             });
@@ -435,7 +435,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             label: `Use ${itemName}`,
             styledLabel: [
               { text: "Use " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           });
@@ -444,7 +444,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             label: `Drop ${itemName}`,
             styledLabel: [
               { text: "Drop " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           });
@@ -453,7 +453,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             label: `Examine ${itemName}`,
             styledLabel: [
               { text: "Examine " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           });
@@ -464,7 +464,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             label: `Use ${itemName}`,
             styledLabel: [
               { text: "Use " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           });
@@ -473,7 +473,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             label: `Drop ${itemName}`,
             styledLabel: [
               { text: "Drop " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           });
@@ -482,7 +482,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             label: `Examine ${itemName}`,
             styledLabel: [
               { text: "Examine " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           });
@@ -966,11 +966,12 @@ export function InventoryPanel({
       return;
     }
 
+    const maxSlots = getMaxInventorySlots();
     const newSlots: (InventorySlotViewItem | null)[] =
-      Array(MAX_SLOTS).fill(null);
+      Array(maxSlots).fill(null);
     items.forEach((item) => {
       const s = (item as { slot?: number }).slot;
-      if (typeof s === "number" && s >= 0 && s < MAX_SLOTS) {
+      if (typeof s === "number" && s >= 0 && s < maxSlots) {
         newSlots[s] = item;
       }
     });

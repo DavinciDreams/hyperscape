@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
-import { TERRAIN_CONSTANTS } from "@hyperforge/shared";
+import { getWaterThreshold } from "@hyperforge/shared";
 import type { ClientWorld } from "../../types";
 
 const TERRAIN_BASE_SAMPLE_SIZE = 96;
@@ -258,13 +258,10 @@ async function generateTerrainChunked(
       let g = 60;
       let b = 130;
 
-      if (height > TERRAIN_CONSTANTS.WATER_THRESHOLD) {
+      const waterThreshold = getWaterThreshold();
+      if (height > waterThreshold) {
         const biomeColor = getBiomeBaseColor(terrainSystem, worldX, worldZ);
-        const lift =
-          Math.min(
-            30,
-            ((height - TERRAIN_CONSTANTS.WATER_THRESHOLD) / 36) * 30,
-          ) | 0;
+        const lift = Math.min(30, ((height - waterThreshold) / 36) * 30) | 0;
         const slopeShade = Math.max(-18, Math.min(14, 8 - slope * 24)) | 0;
         const warmth = Math.max(-6, Math.min(10, (height - 18) * 0.18)) | 0;
         r = clampColorChannel(biomeColor.r + lift + slopeShade + warmth);
@@ -285,8 +282,7 @@ async function generateTerrainChunked(
         const waterDepth =
           Math.min(
             1,
-            (TERRAIN_CONSTANTS.WATER_THRESHOLD - height) /
-              Math.max(1, TERRAIN_CONSTANTS.WATER_THRESHOLD + 8),
+            (waterThreshold - height) / Math.max(1, waterThreshold + 8),
           ) || 0;
         r = clampColorChannel(24 - waterDepth * 8);
         g = clampColorChannel(58 + waterDepth * 10);

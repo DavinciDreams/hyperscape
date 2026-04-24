@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { useUserLayoutStore } from "../../../ui-framework/useUserLayout";
 import { usePresetStore } from "../../stores/presetStore";
 import { useWindowStore } from "../../stores/windowStore";
 import type { PresetsResult, LayoutPreset, Size } from "../../types";
@@ -58,7 +59,12 @@ export function usePresets(): PresetsResult {
         height: window.innerHeight,
       };
 
-      return savePresetStore(name, windows, resolution);
+      // Snapshot the player's current manifest-HUD overrides so
+      // loading this preset later restores HUD widget positions
+      // alongside window state. Pulled via `getState()` so the
+      // preset-save path doesn't subscribe to every override change.
+      const uiOverrides = useUserLayoutStore.getState().layouts;
+      return savePresetStore(name, windows, resolution, uiOverrides);
     },
     [getAllWindows, savePresetStore],
   );
@@ -91,6 +97,21 @@ export function usePresets(): PresetsResult {
       }));
 
       setWindows(scaledWindows);
+
+      // Restore manifest-HUD overrides if the preset carries any.
+      // Presets saved before U5 have `uiOverrides === undefined`; we
+      // intentionally leave the live HUD layouts alone in that case
+      // so the player doesn't lose current HUD customization when
+      // loading an old window-only preset.
+      if (preset.uiOverrides !== undefined) {
+        // Deep-clone on the way out so later mutations to the live
+        // store never mutate the saved preset.
+        const cloned = JSON.parse(
+          JSON.stringify(preset.uiOverrides),
+        ) as LayoutPreset["uiOverrides"];
+        useUserLayoutStore.setState({ layouts: cloned ?? {} });
+      }
+
       setActivePreset(id);
     },
     [presets, setWindows, setActivePreset],

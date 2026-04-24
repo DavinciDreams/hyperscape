@@ -68,6 +68,11 @@ import { WindowRenderer } from "./WindowRenderer";
 import { EditModeOverlayManager, HoldToEditIndicator } from "./EditModeUI";
 import { DndKitDragOverlayRenderer } from "./DndKitOverlay";
 
+// Phase D6 manifest-driven HUD (behind feature flag; renders nothing
+// when the flag is off). Mounts alongside the hand-coded HUD so we
+// can A/B visually per widget during migration.
+import { ManifestHud } from "@/ui-framework/ManifestHud";
+
 interface WindowStorePersistApi {
   hasHydrated: () => boolean;
   onFinishHydration: (listener: () => void) => () => void;
@@ -465,6 +470,11 @@ function DesktopInterfaceManager({
           isUnlocked={isUnlocked}
           editModeEnabled={editModeEnabled}
         />
+
+        {/* Manifest-driven HUD (D6) — no-ops unless the feature flag
+            is enabled. Mounts last so its position: fixed overlay
+            layers above the hand-coded HUD during A/B migration. */}
+        <ManifestHud />
       </DndProvider>
     </HintProvider>
   );

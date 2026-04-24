@@ -11,7 +11,11 @@ import React, {
   useRef,
 } from "react";
 import { useThemeStore } from "@/ui";
-import { HOME_TELEPORT_CONSTANTS, EventType } from "@hyperforge/shared";
+import {
+  getHomeTeleportCooldownMs,
+  getHomeTeleportCastTimeMs,
+  EventType,
+} from "@hyperforge/shared";
 import type { ClientWorld } from "../../types";
 import {
   getHomeTeleportCooldownProgress,
@@ -98,10 +102,8 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
       // Use ref to get current state (avoids stale closure)
       if (stateRef.current === "casting") {
         setState("cooldown");
-        setCooldownEndTime(
-          performance.now() + HOME_TELEPORT_CONSTANTS.COOLDOWN_MS,
-        );
-        setCooldownRemaining(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS);
+        setCooldownEndTime(performance.now() + getHomeTeleportCooldownMs());
+        setCooldownRemaining(getHomeTeleportCooldownMs());
         setCastStartTime(null);
         setCastProgress(0);
       }
@@ -148,8 +150,7 @@ export function HomeTeleportButton({ world }: { world: ClientWorld }) {
           0,
           Math.min(
             100,
-            ((now - castStartTimeRef.current) /
-              HOME_TELEPORT_CONSTANTS.CAST_TIME_MS) *
+            ((now - castStartTimeRef.current) / getHomeTeleportCastTimeMs()) *
               100,
           ),
         );

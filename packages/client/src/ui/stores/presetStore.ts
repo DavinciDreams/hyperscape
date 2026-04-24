@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { UIUserLayout } from "@hyperforge/ui-framework";
 import type { LayoutPreset, WindowState, Size } from "../types";
 
 /** Generate a unique preset ID */
@@ -22,6 +23,7 @@ export interface PresetStoreState {
     name: string,
     windows: WindowState[],
     resolution: Size,
+    uiOverrides?: Record<string, UIUserLayout>,
   ) => Promise<LayoutPreset>;
   /** Delete a preset */
   deletePreset: (id: string) => Promise<void>;
@@ -121,6 +123,7 @@ export const usePresetStore = create<PresetStoreState>((set, get) => ({
     name: string,
     windows: WindowState[],
     resolution: Size,
+    uiOverrides?: Record<string, UIUserLayout>,
   ): Promise<LayoutPreset> => {
     const now = Date.now();
     const preset: LayoutPreset = {
@@ -130,6 +133,11 @@ export const usePresetStore = create<PresetStoreState>((set, get) => ({
       createdAt: now,
       modifiedAt: now,
       resolution,
+      // Deep-clone the overrides map so later mutations to the live
+      // user-layout store don't bleed into the saved preset.
+      uiOverrides: uiOverrides
+        ? JSON.parse(JSON.stringify(uiOverrides))
+        : undefined,
     };
 
     await savePresetToDb(preset);

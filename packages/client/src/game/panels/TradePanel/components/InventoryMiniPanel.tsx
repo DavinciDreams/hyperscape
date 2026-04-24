@@ -7,7 +7,8 @@
  */
 
 import { getInteractiveTileStyle, getPanelInsetStyle } from "@/ui/theme/themes";
-import { TRADE_GRID_COLS, TRADE_SLOTS } from "../constants";
+import { TRADE_GRID_COLS } from "../constants";
+import { getMaxInventorySlots } from "@hyperforge/shared";
 import { InventoryItem } from "./InventoryItem";
 import type { InventoryMiniPanelProps } from "../types";
 
@@ -48,7 +49,7 @@ export function InventoryMiniPanel({
         }}
       >
         {/* Render all 28 slots, showing items in their actual positions */}
-        {Array.from({ length: TRADE_SLOTS }).map((_, slotIndex) => {
+        {Array.from({ length: getMaxInventorySlots() }).map((_, slotIndex) => {
           const item = itemsBySlot.get(slotIndex);
           if (item) {
             return (

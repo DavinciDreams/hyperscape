@@ -12,7 +12,18 @@
  */
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { EventType, SKILL_ICONS } from "@hyperforge/shared";
+import { EventType, SKILL_ICONS, xpCurveRegistry } from "@hyperforge/shared";
+
+/**
+ * Curve id resolved through the shared `xpCurveRegistry`. Populated at
+ * boot by DataManager and live-mutated on every PIE editor save, so
+ * edits to `packages/server/world/assets/manifests/xp-curves.json`
+ * propagate into the HUD without a restart.
+ *
+ * If the registry is unloaded (missing/invalid manifest), callers
+ * fall back to the canonical-OSRS hardcoded table below.
+ */
+const DEFAULT_XP_CURVE_ID = "osrs-classic";
 import type { ClientWorld } from "../../../types";
 
 // === CONSTANTS ===
@@ -84,9 +95,22 @@ const XP_TABLE: readonly number[] = (() => {
   return table;
 })();
 
-/** O(1) lookup for XP required at a given level */
+/**
+ * O(1) lookup for XP required at a given level.
+ *
+ * Prefers the shared `xpCurveRegistry` (manifest-driven, PIE
+ * hot-reloadable) when loaded. Falls back to the canonical-OSRS
+ * hardcoded `XP_TABLE` when the registry is unloaded or the default
+ * curve id is unknown — this keeps the HUD functional when the
+ * `xp-curves.json` manifest is missing or invalid on boot.
+ */
 export function getXPForLevel(level: number): number {
   if (level < 1) return 0;
+  if (xpCurveRegistry.isLoaded() && xpCurveRegistry.has(DEFAULT_XP_CURVE_ID)) {
+    const maxLevel = xpCurveRegistry.maxLevel(DEFAULT_XP_CURVE_ID);
+    const clamped = level > maxLevel ? maxLevel : level;
+    return xpCurveRegistry.xpForLevel(DEFAULT_XP_CURVE_ID, clamped);
+  }
   if (level > 99) return XP_TABLE[99];
   return XP_TABLE[level];
 }

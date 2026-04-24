@@ -41,6 +41,7 @@ import {
 } from "./lib/embeddedAuth";
 import type { StreamingWindow } from "./lib/streamingWindow";
 import { MaintenanceBanner } from "./components/common/MaintenanceBanner";
+import { bootstrapSafeLoadReporting } from "./ui-framework/bootstrapSafeLoadReporting";
 // Loading fallback for lazy-loaded screens
 function ScreenLoadingFallback() {
   return (
@@ -838,6 +839,12 @@ async function mountApp() {
   await ensurePublicRuntimeEnv();
   refreshApiConfig();
   syncRuntimeAssetBaseUrls();
+
+  // U11 — route ui-framework safeLoad failures into the shared
+  // notification store so players see a warning toast (and we still
+  // log to console) when persisted UI state or a server layout has to
+  // be reset to defaults. Idempotent; safe across HMR.
+  bootstrapSafeLoadReporting();
 
   // Reuse existing root if already created (prevents HMR double-mount warning)
   if (!reactRoot) {

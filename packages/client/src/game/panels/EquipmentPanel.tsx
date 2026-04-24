@@ -16,7 +16,7 @@ import {
   EventType,
   getItem,
   uuid,
-  CONTEXT_MENU_COLORS,
+  getContextMenuItemColor,
 } from "@hyperforge/shared";
 import type { PlayerEquipmentItems, ClientWorld } from "../../types";
 import {
@@ -173,7 +173,7 @@ function DroppableEquipmentSlot({
             label: `${slotActionLabel} ${itemName}`,
             styledLabel: [
               { text: `${slotActionLabel} ` },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           },
@@ -182,7 +182,7 @@ function DroppableEquipmentSlot({
             label: `Examine ${itemName}`,
             styledLabel: [
               { text: "Examine " },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
             enabled: true,
           },

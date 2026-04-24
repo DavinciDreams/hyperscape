@@ -569,6 +569,10 @@ export default defineConfig(({ mode }) => {
           ),
         },
         {
+          find: "@hyperforge/procgen/math",
+          replacement: path.resolve(__dirname, "../procgen/dist/math/index.js"),
+        },
+        {
           find: "@hyperforge/procgen/vegetation",
           replacement: path.resolve(
             __dirname,

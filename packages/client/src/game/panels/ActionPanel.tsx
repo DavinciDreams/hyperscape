@@ -32,7 +32,7 @@ import {
   isBone,
   usesWield,
   usesWear,
-  CONTEXT_MENU_COLORS,
+  getContextMenuItemColor,
 } from "@hyperforge/shared";
 import { ItemIcon } from "@/ui/components/ItemIcon";
 /**
@@ -436,7 +436,7 @@ export function ActionPanel({
             label: `${action} ${itemName}`,
             styledLabel: [
               { text: `${action} `, color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         }
@@ -447,7 +447,7 @@ export function ActionPanel({
             label: `Eat ${itemName}`,
             styledLabel: [
               { text: "Eat ", color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         } else if (isPotion(itemData)) {
@@ -456,7 +456,7 @@ export function ActionPanel({
             label: `Drink ${itemName}`,
             styledLabel: [
               { text: "Drink ", color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         } else if (isBone(itemData)) {
@@ -465,7 +465,7 @@ export function ActionPanel({
             label: `Bury ${itemName}`,
             styledLabel: [
               { text: "Bury ", color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         } else if (usesWield(itemData)) {
@@ -474,7 +474,7 @@ export function ActionPanel({
             label: `Wield ${itemName}`,
             styledLabel: [
               { text: "Wield ", color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         } else if (usesWear(itemData)) {
@@ -483,7 +483,7 @@ export function ActionPanel({
             label: `Wear ${itemName}`,
             styledLabel: [
               { text: "Wear ", color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         } else {
@@ -492,7 +492,7 @@ export function ActionPanel({
             label: `Use ${itemName}`,
             styledLabel: [
               { text: "Use ", color: "#fff" },
-              { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+              { text: itemName, color: getContextMenuItemColor() },
             ],
           });
         }
@@ -505,7 +505,7 @@ export function ActionPanel({
           label: `Drop ${itemName}`,
           styledLabel: [
             { text: "Drop ", color: "#fff" },
-            { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            { text: itemName, color: getContextMenuItemColor() },
           ],
         });
       }
@@ -517,7 +517,7 @@ export function ActionPanel({
           label: `Examine ${itemName}`,
           styledLabel: [
             { text: "Examine ", color: "#fff" },
-            { text: itemName, color: CONTEXT_MENU_COLORS.ITEM },
+            { text: itemName, color: getContextMenuItemColor() },
           ],
         });
       }
