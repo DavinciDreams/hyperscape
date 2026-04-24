@@ -1003,3 +1003,146 @@ describe("formatSnapshotJson", () => {
     expect(parsed.running.added[0]!.manifest.id).toBe("com.test.b");
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// aggregateContributions + computeContributionOrigins — Phase I3
+// ────────────────────────────────────────────────────────────────────────
+
+describe("aggregateContributions", () => {
+  it("empty input → all buckets empty (not undefined)", async () => {
+    const { aggregateContributions } = await import("../index.js");
+    const result = aggregateContributions<Ctx>([]);
+    expect(result.systems).toEqual([]);
+    expect(result.entities).toEqual([]);
+    expect(result.widgets).toEqual([]);
+    expect(result.manifestSchemas).toEqual([]);
+    expect(result.paletteCategories).toEqual([]);
+    expect(result.toolbarTools).toEqual([]);
+    expect(result.commands).toEqual([]);
+  });
+
+  it("single plugin → its contribution ids appear in the matching buckets", async () => {
+    const { aggregateContributions } = await import("../index.js");
+    const mod = mkModule(
+      mkManifest("com.test.alpha", {
+        contributions: {
+          systems: ["sys.a", "sys.b"],
+          widgets: ["w.a"],
+        },
+      }),
+    );
+    const result = aggregateContributions<Ctx>([mod]);
+    expect(result.systems).toEqual(["sys.a", "sys.b"]);
+    expect(result.widgets).toEqual(["w.a"]);
+    expect(result.entities).toEqual([]);
+  });
+
+  it("multiple plugins → ids accumulate across all of them, dedup preserved", async () => {
+    const { aggregateContributions } = await import("../index.js");
+    const a = mkModule(
+      mkManifest("com.test.alpha", {
+        contributions: { systems: ["sys.shared", "sys.alpha"] },
+      }),
+    );
+    const b = mkModule(
+      mkManifest("com.test.beta", {
+        contributions: { systems: ["sys.shared", "sys.beta"] },
+      }),
+    );
+    const result = aggregateContributions<Ctx>([a, b]);
+    // First-seen wins; "sys.shared" appears once at index 0.
+    expect(result.systems).toEqual(["sys.shared", "sys.alpha", "sys.beta"]);
+  });
+
+  it("preserves declaration-order across buckets", async () => {
+    const { aggregateContributions } = await import("../index.js");
+    const a = mkModule(
+      mkManifest("com.test.first", {
+        contributions: { commands: ["cmd.x", "cmd.y"] },
+      }),
+    );
+    const b = mkModule(
+      mkManifest("com.test.second", {
+        contributions: { commands: ["cmd.z"] },
+      }),
+    );
+    const c = mkModule(
+      mkManifest("com.test.third", {
+        contributions: { commands: ["cmd.y", "cmd.w"] }, // y is dup
+      }),
+    );
+    const result = aggregateContributions<Ctx>([a, b, c]);
+    expect(result.commands).toEqual(["cmd.x", "cmd.y", "cmd.z", "cmd.w"]);
+  });
+});
+
+describe("computeContributionOrigins", () => {
+  it("empty input → empty maps for every bucket", async () => {
+    const { computeContributionOrigins } = await import("../index.js");
+    const origins = computeContributionOrigins<Ctx>([]);
+    expect(origins.systems.size).toBe(0);
+    expect(origins.widgets.size).toBe(0);
+    expect(origins.commands.size).toBe(0);
+  });
+
+  it("single declarer → singleton plugin-id array", async () => {
+    const { computeContributionOrigins } = await import("../index.js");
+    const a = mkModule(
+      mkManifest("com.test.alpha", {
+        contributions: { widgets: ["w.solo"] },
+      }),
+    );
+    const origins = computeContributionOrigins<Ctx>([a]);
+    expect(origins.widgets.get("w.solo")).toEqual(["com.test.alpha"]);
+  });
+
+  it("multiple declarers of the same id → array of all declaring plugin ids", async () => {
+    const { computeContributionOrigins } = await import("../index.js");
+    const a = mkModule(
+      mkManifest("com.test.alpha", {
+        contributions: { systems: ["sys.shared"] },
+      }),
+    );
+    const b = mkModule(
+      mkManifest("com.test.beta", {
+        contributions: { systems: ["sys.shared"] },
+      }),
+    );
+    const origins = computeContributionOrigins<Ctx>([a, b]);
+    expect(origins.systems.get("sys.shared")).toEqual([
+      "com.test.alpha",
+      "com.test.beta",
+    ]);
+  });
+
+  it("same plugin declares same id twice → recorded once", async () => {
+    // Schema-side validation prevents duplicate strings within a
+    // single bucket, but defensive coding here ensures the helper
+    // doesn't double-count if the input ever drifts.
+    const { computeContributionOrigins } = await import("../index.js");
+    const manifest = mkManifest("com.test.alpha", {
+      contributions: { entities: ["e.x"] },
+    });
+    const a = mkModule(manifest);
+    const b = mkModule(manifest);
+    const origins = computeContributionOrigins<Ctx>([a, b]);
+    expect(origins.entities.get("e.x")).toEqual(["com.test.alpha"]);
+  });
+
+  it("disjoint contributions → each id maps to its declarer", async () => {
+    const { computeContributionOrigins } = await import("../index.js");
+    const a = mkModule(
+      mkManifest("com.test.alpha", {
+        contributions: { commands: ["cmd.a"] },
+      }),
+    );
+    const b = mkModule(
+      mkManifest("com.test.beta", {
+        contributions: { commands: ["cmd.b"] },
+      }),
+    );
+    const origins = computeContributionOrigins<Ctx>([a, b]);
+    expect(origins.commands.get("cmd.a")).toEqual(["com.test.alpha"]);
+    expect(origins.commands.get("cmd.b")).toEqual(["com.test.beta"]);
+  });
+});

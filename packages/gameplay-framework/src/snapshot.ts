@@ -671,3 +671,151 @@ function deepEqual(a: unknown, b: unknown): boolean {
   }
   return true;
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// aggregateContributions — Phase I3 host-bootstrap helper
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * Aggregated contribution-id buckets across one or more plugins.
+ * Each bucket is a deduplicated array of declared ids.
+ *
+ * Editor / host bootstrap reads this to know what to register on
+ * plugin enable: walk `result.systems` to know which system ids
+ * each loaded plugin module is expected to expose; walk `result.widgets`
+ * to know which widget ids the editor's render path should resolve;
+ * etc.
+ *
+ * Phase I3 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md (Editor plugin API).
+ * Pure read — does NOT instantiate or fetch the actual contribution
+ * objects (those live on the runtime plugin module, not the manifest).
+ */
+export interface AggregatedContributions {
+  readonly systems: ReadonlyArray<string>;
+  readonly entities: ReadonlyArray<string>;
+  readonly widgets: ReadonlyArray<string>;
+  readonly manifestSchemas: ReadonlyArray<string>;
+  readonly paletteCategories: ReadonlyArray<string>;
+  readonly toolbarTools: ReadonlyArray<string>;
+  readonly commands: ReadonlyArray<string>;
+}
+
+/**
+ * Per-bucket origin map: contribution id → array of plugin ids that
+ * declared it. Useful for editor "who provides X?" lookups and for
+ * conflict diagnostics ("widget Y is contributed by 3 plugins").
+ */
+export interface ContributionOrigins {
+  readonly systems: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly entities: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly widgets: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly manifestSchemas: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly paletteCategories: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly toolbarTools: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly commands: ReadonlyMap<string, ReadonlyArray<string>>;
+}
+
+const CONTRIBUTION_BUCKETS = [
+  "systems",
+  "entities",
+  "widgets",
+  "manifestSchemas",
+  "paletteCategories",
+  "toolbarTools",
+  "commands",
+] as const satisfies ReadonlyArray<keyof AggregatedContributions>;
+
+/**
+ * Aggregate contribution ids across a set of loaded plugin modules.
+ *
+ * Contract:
+ *   - Iteration order follows the input order; first-seen wins
+ *     (deduplication preserves stable wire shape for golden-file
+ *     tests).
+ *   - Empty input → all buckets empty (NOT undefined).
+ *   - Plugin manifests with empty buckets are no-ops; `.optional()`
+ *     fields default to [] per the schema, so this never reads
+ *     `undefined`.
+ *
+ * Use cases:
+ *   - Editor bootstrap: walk all enabled plugins → register UI
+ *   - Plugin Browser: show "this plugin contributes 3 widgets"
+ *   - Conflict diagnostics: pair with {@link computeContributionOrigins}
+ */
+export function aggregateContributions<TContext>(
+  modules: ReadonlyArray<LoadedPluginModule<TContext>>,
+): AggregatedContributions {
+  const seen: Record<keyof AggregatedContributions, Set<string>> = {
+    systems: new Set(),
+    entities: new Set(),
+    widgets: new Set(),
+    manifestSchemas: new Set(),
+    paletteCategories: new Set(),
+    toolbarTools: new Set(),
+    commands: new Set(),
+  };
+  const out: Record<keyof AggregatedContributions, string[]> = {
+    systems: [],
+    entities: [],
+    widgets: [],
+    manifestSchemas: [],
+    paletteCategories: [],
+    toolbarTools: [],
+    commands: [],
+  };
+  for (const m of modules) {
+    for (const bucket of CONTRIBUTION_BUCKETS) {
+      const ids = m.manifest.contributions[bucket];
+      for (const id of ids) {
+        if (!seen[bucket].has(id)) {
+          seen[bucket].add(id);
+          out[bucket].push(id);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Compute the per-bucket "contribution id → declaring plugin ids" map.
+ *
+ * Plugins MAY contribute the same id (e.g., two plugins providing
+ * the same widget for hot-swap or A/B testing). The host needs to
+ * know who claims what — this surfaces it.
+ *
+ * Each map's value is a deduplicated array of plugin ids that
+ * declared the contribution, in input iteration order. Singleton
+ * arrays are common; multi-entry arrays signal a conflict the
+ * editor / host should flag.
+ */
+export function computeContributionOrigins<TContext>(
+  modules: ReadonlyArray<LoadedPluginModule<TContext>>,
+): ContributionOrigins {
+  const buckets: Record<
+    keyof AggregatedContributions,
+    Map<string, string[]>
+  > = {
+    systems: new Map(),
+    entities: new Map(),
+    widgets: new Map(),
+    manifestSchemas: new Map(),
+    paletteCategories: new Map(),
+    toolbarTools: new Map(),
+    commands: new Map(),
+  };
+  for (const m of modules) {
+    for (const bucket of CONTRIBUTION_BUCKETS) {
+      const ids = m.manifest.contributions[bucket];
+      for (const id of ids) {
+        const existing = buckets[bucket].get(id);
+        if (existing === undefined) {
+          buckets[bucket].set(id, [m.manifest.id]);
+        } else if (!existing.includes(m.manifest.id)) {
+          existing.push(m.manifest.id);
+        }
+      }
+    }
+  }
+  return buckets as unknown as ContributionOrigins;
+}

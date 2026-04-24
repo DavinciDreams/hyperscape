@@ -13,13 +13,13 @@
   "loadAfter": [],
   "enabledByDefault": false,
   "contributions": {
-    "systems": [],
+    "systems": ["com.hyperforge.combat.ability-system"],
     "entities": [],
-    "widgets": [],
-    "manifestSchemas": [],
-    "paletteCategories": [],
+    "widgets": ["com.hyperforge.combat.ability-bar"],
+    "manifestSchemas": ["com.hyperforge.combat.abilities"],
+    "paletteCategories": ["com.hyperforge.combat.palette"],
     "toolbarTools": [],
-    "commands": []
+    "commands": ["com.hyperforge.combat.commands.swap-ability"]
   },
   "tags": ["reference", "combat"]
 }

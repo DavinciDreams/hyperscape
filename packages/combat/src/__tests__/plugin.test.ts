@@ -56,6 +56,32 @@ describe("@hyperforge/combat", () => {
     expect(manifest.tags).toContain("reference");
   });
 
+  it("declares contributions across multiple buckets (Phase I3 surface)", () => {
+    // Phase I3: plugins declare WHAT they contribute via the manifest;
+    // the actual contribution OBJECTS are exposed at runtime via the
+    // plugin module. Editor / host bootstrap walks
+    // `manifest.contributions.<bucket>` to know which ids to expect
+    // from the runtime module.
+    expect(manifest.contributions.systems).toEqual([
+      "com.hyperforge.combat.ability-system",
+    ]);
+    expect(manifest.contributions.widgets).toEqual([
+      "com.hyperforge.combat.ability-bar",
+    ]);
+    expect(manifest.contributions.manifestSchemas).toEqual([
+      "com.hyperforge.combat.abilities",
+    ]);
+    expect(manifest.contributions.paletteCategories).toEqual([
+      "com.hyperforge.combat.palette",
+    ]);
+    expect(manifest.contributions.commands).toEqual([
+      "com.hyperforge.combat.commands.swap-ability",
+    ]);
+    // Buckets we don't (yet) contribute to are explicit empty arrays:
+    expect(manifest.contributions.entities).toEqual([]);
+    expect(manifest.contributions.toolbarTools).toEqual([]);
+  });
+
   it("ships a default starter pack covering each ability kind", () => {
     expect(DEFAULT_COMBAT_ABILITIES).toHaveLength(3);
     const ids = DEFAULT_COMBAT_ABILITIES.map((a) => a.id);
