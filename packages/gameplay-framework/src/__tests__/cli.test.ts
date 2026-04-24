@@ -1166,3 +1166,213 @@ describe("runCli — diff subcommand", () => {
     expect(stderr()).toContain("diff:");
   });
 });
+
+describe("runCli — contributions subcommand", () => {
+  function stubManifest(
+    id: string,
+    contributions?: Partial<{
+      systems: string[];
+      entities: string[];
+      widgets: string[];
+      manifestSchemas: string[];
+      paletteCategories: string[];
+      toolbarTools: string[];
+      commands: string[];
+    }>,
+  ) {
+    return {
+      id,
+      name: id,
+      version: "0.1.0",
+      entry: "./dist/index.js",
+      author: { name: "stub" },
+      hyperforgeApi: "0.1.0",
+      description: "stub",
+      dependencies: [] as Array<{ id: string; versionRange: string }>,
+      loadAfter: [] as string[],
+      enabledByDefault: true,
+      tags: [] as string[],
+      contributions: {
+        systems: contributions?.systems ?? [],
+        entities: contributions?.entities ?? [],
+        widgets: contributions?.widgets ?? [],
+        manifestSchemas: contributions?.manifestSchemas ?? [],
+        paletteCategories: contributions?.paletteCategories ?? [],
+        toolbarTools: contributions?.toolbarTools ?? [],
+        commands: contributions?.commands ?? [],
+      },
+    };
+  }
+
+  function stubCatalog(
+    plugins: Array<{
+      id: string;
+      contributions?: Parameters<typeof stubManifest>[1];
+    }>,
+  ): CliIO["catalogLoader"] {
+    return async () =>
+      ({
+        loaded: plugins.map((entry) => ({
+          manifest: stubManifest(entry.id, entry.contributions),
+          factory: (() => ({})) as unknown as never,
+        })) as never,
+        failed: [],
+      }) as never;
+  }
+
+  it("contributions with no dir → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["contributions"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("missing <dir> argument");
+  });
+
+  it("contributions with unknown flag → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(
+      ["contributions", "/abs/plugins", "--gibberish"],
+      io,
+    );
+    expect(code).toBe(2);
+    expect(stderr()).toContain("Unknown flag: --gibberish");
+  });
+
+  it("empty catalog → all buckets [] in JSON, exit 0", async () => {
+    const { io, stdout } = mkIO({ catalogLoader: stubCatalog([]) });
+    const code = await runCli(["contributions", "/abs/plugins"], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      aggregated: { systems: string[]; widgets: string[] };
+    };
+    expect(parsed.aggregated.systems).toEqual([]);
+    expect(parsed.aggregated.widgets).toEqual([]);
+  });
+
+  it("aggregates contributions across plugins (default JSON output)", async () => {
+    const { io, stdout } = mkIO({
+      catalogLoader: stubCatalog([
+        {
+          id: "com.example.alpha",
+          contributions: {
+            systems: ["sys.shared", "sys.alpha"],
+            widgets: ["w.alpha"],
+          },
+        },
+        {
+          id: "com.example.beta",
+          contributions: {
+            systems: ["sys.shared", "sys.beta"],
+            widgets: ["w.beta"],
+          },
+        },
+      ]),
+    });
+    const code = await runCli(["contributions", "/abs/plugins"], io);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      aggregated: { systems: string[]; widgets: string[] };
+    };
+    expect(parsed.aggregated.systems).toEqual([
+      "sys.shared",
+      "sys.alpha",
+      "sys.beta",
+    ]);
+    expect(parsed.aggregated.widgets).toEqual(["w.alpha", "w.beta"]);
+  });
+
+  it("--with-origins surfaces declarer arrays in JSON output", async () => {
+    const { io, stdout } = mkIO({
+      catalogLoader: stubCatalog([
+        {
+          id: "com.example.alpha",
+          contributions: { systems: ["sys.shared"] },
+        },
+        {
+          id: "com.example.beta",
+          contributions: { systems: ["sys.shared"] },
+        },
+      ]),
+    });
+    const code = await runCli(
+      ["contributions", "/abs/plugins", "--with-origins"],
+      io,
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      aggregated: { systems: string[] };
+      origins: { systems: Record<string, string[]> };
+    };
+    expect(parsed.aggregated.systems).toEqual(["sys.shared"]);
+    expect(parsed.origins.systems["sys.shared"]).toEqual([
+      "com.example.alpha",
+      "com.example.beta",
+    ]);
+  });
+
+  it("--human emits ASCII summary with bucket counts + ids", async () => {
+    const { io, stdout } = mkIO({
+      catalogLoader: stubCatalog([
+        {
+          id: "com.example.alpha",
+          contributions: {
+            widgets: ["w.cool"],
+            commands: ["cmd.do-thing"],
+          },
+        },
+      ]),
+    });
+    const code = await runCli(["contributions", "/abs/plugins", "--human"], io);
+    expect(code).toBe(0);
+    expect(stdout()).toContain("Aggregated contributions across 1 plugin(s):");
+    expect(stdout()).toContain("widgets (1):");
+    expect(stdout()).toContain("• w.cool");
+    expect(stdout()).toContain("commands (1):");
+    expect(stdout()).toContain("• cmd.do-thing");
+    // Empty buckets render as (none) so the reader sees the full surface.
+    expect(stdout()).toContain("systems: (none)");
+  });
+
+  it("--human --with-origins flags multi-declarer conflicts", async () => {
+    const { io, stdout } = mkIO({
+      catalogLoader: stubCatalog([
+        { id: "com.a", contributions: { widgets: ["w.shared"] } },
+        { id: "com.b", contributions: { widgets: ["w.shared"] } },
+      ]),
+    });
+    const code = await runCli(
+      ["contributions", "/abs/plugins", "--human", "--with-origins"],
+      io,
+    );
+    expect(code).toBe(0);
+    expect(stdout()).toContain("w.shared");
+    expect(stdout()).toContain("com.a, com.b");
+    expect(stdout()).toContain("⚠ conflict");
+  });
+
+  it("--compact emits single-line JSON", async () => {
+    const { io, stdout } = mkIO({
+      catalogLoader: stubCatalog([
+        { id: "com.example.alpha", contributions: { systems: ["sys.x"] } },
+      ]),
+    });
+    const code = await runCli(
+      ["contributions", "/abs/plugins", "--compact"],
+      io,
+    );
+    expect(code).toBe(0);
+    const out = stdout().trim();
+    expect(out.includes("\n")).toBe(false);
+    expect(out.startsWith("{")).toBe(true);
+  });
+
+  it("catalog loader throwing → exit 1 with stderr message", async () => {
+    const { io, stderr } = mkIO({
+      catalogLoader: async () => {
+        throw new Error("ENOENT /abs/plugins");
+      },
+    });
+    const code = await runCli(["contributions", "/abs/plugins"], io);
+    expect(code).toBe(1);
+    expect(stderr()).toContain("contributions: ENOENT /abs/plugins");
+  });
+});

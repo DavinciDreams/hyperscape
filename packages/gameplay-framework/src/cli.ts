@@ -36,9 +36,13 @@ import {
   formatUnresolvableReason,
 } from "./diagnostics.js";
 import {
+  aggregateContributions,
+  computeContributionOrigins,
   diffSessionSnapshots,
   formatSnapshotJson,
   snapshotCatalogResolution,
+  type AggregatedContributions,
+  type ContributionOrigins,
   type SessionSnapshot,
   type SessionSnapshotDiff,
 } from "./snapshot.js";
@@ -138,6 +142,10 @@ export async function runCli(
 
   if (sub === "diff") {
     return runDiff(rest, io);
+  }
+
+  if (sub === "contributions") {
+    return runContributions(rest, io);
   }
 
   io.stderr(`Unknown subcommand: ${sub}\n`);
@@ -1191,6 +1199,204 @@ function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n);
 }
 
+/**
+ * Handler for `contributions <dir> [--host-api <range>] [--human]
+ * [--with-origins] [--compact]`.
+ *
+ * Walks the plugin catalog at `<dir>`, calls
+ * {@link aggregateContributions} (and optionally
+ * {@link computeContributionOrigins} when `--with-origins` is set),
+ * and prints the result.
+ *
+ * Output modes:
+ *   - default: deterministic pretty JSON (sorted keys, indent 2)
+ *   - `--compact`: single-line JSON
+ *   - `--human`: ASCII summary with per-bucket counts + ids
+ *
+ * Exit codes:
+ *   - 0 on successful catalog read (per-package failures are surfaced
+ *     in the summary but don't change the exit code — same contract
+ *     as `snapshot`)
+ *   - 1 on catalog read error
+ *   - 2 on usage error
+ *
+ * Use cases:
+ *   - Editor bootstrap audit: "what would these plugins register?"
+ *   - CI gate: pin the contribution surface so a plugin update can't
+ *     silently add a widget id
+ *   - Conflict diagnostics: pair with `--with-origins` to see who
+ *     declares each id (multi-declarer = potential conflict)
+ */
+async function runContributions(
+  rest: readonly string[],
+  io: CliIO,
+): Promise<number> {
+  let dir: string | undefined;
+  let hostApiRange: string | undefined;
+  let human = false;
+  let compact = false;
+  let withOrigins = false;
+
+  for (let i = 0; i < rest.length; i++) {
+    const token = rest[i]!;
+    if (token === "--host-api") {
+      hostApiRange = rest[++i];
+      if (hostApiRange === undefined) {
+        io.stderr("--host-api requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (token === "--human") {
+      human = true;
+      continue;
+    }
+    if (token === "--compact") {
+      compact = true;
+      continue;
+    }
+    if (token === "--with-origins") {
+      withOrigins = true;
+      continue;
+    }
+    if (token.startsWith("--")) {
+      io.stderr(`Unknown flag: ${token}\n`);
+      return 2;
+    }
+    if (dir === undefined) {
+      dir = token;
+      continue;
+    }
+    io.stderr(`Unexpected argument: ${token}\n`);
+    return 2;
+  }
+
+  if (dir === undefined) {
+    io.stderr("contributions: missing <dir> argument\n");
+    io.stderr(
+      "Usage: hyperforge-plugin contributions <dir> [--host-api <range>] [--human] [--compact] [--with-origins]\n",
+    );
+    return 2;
+  }
+
+  const absDir = path.isAbsolute(dir) ? dir : path.resolve(io.cwd(), dir);
+  const catalogLoader = io.catalogLoader ?? loadPluginCatalog;
+
+  let catalog: PluginCatalogResult;
+  try {
+    catalog = await catalogLoader(absDir, { hostApiRange });
+  } catch (err) {
+    io.stderr(
+      `contributions: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
+
+  const aggregated: AggregatedContributions = aggregateContributions(
+    catalog.loaded,
+  );
+
+  if (human) {
+    io.stdout(formatContributionsHuman(aggregated, catalog.loaded.length));
+    if (withOrigins) {
+      const origins = computeContributionOrigins(catalog.loaded);
+      io.stdout(formatOriginsHuman(origins));
+    }
+    return 0;
+  }
+
+  // JSON output. Convert the origin Maps to plain objects so the
+  // payload is JSON-serializable (Map serializes to {} via JSON.stringify
+  // — no good for the wire shape we want).
+  const payload: {
+    aggregated: AggregatedContributions;
+    origins?: Record<keyof AggregatedContributions, Record<string, string[]>>;
+  } = { aggregated };
+  if (withOrigins) {
+    const origins = computeContributionOrigins(catalog.loaded);
+    payload.origins = mapOriginsToPlainObject(origins);
+  }
+  io.stdout(formatSnapshotJson(payload, { indent: compact ? 0 : 2 }) + "\n");
+  return 0;
+}
+
+function formatContributionsHuman(
+  result: AggregatedContributions,
+  pluginCount: number,
+): string {
+  const lines: string[] = [];
+  lines.push(`Aggregated contributions across ${pluginCount} plugin(s):`);
+  const buckets: ReadonlyArray<keyof AggregatedContributions> = [
+    "systems",
+    "entities",
+    "widgets",
+    "manifestSchemas",
+    "paletteCategories",
+    "toolbarTools",
+    "commands",
+  ];
+  for (const bucket of buckets) {
+    const ids = result[bucket];
+    if (ids.length === 0) {
+      lines.push(`  ${bucket}: (none)`);
+    } else {
+      lines.push(`  ${bucket} (${ids.length}):`);
+      for (const id of ids) lines.push(`    • ${id}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+function formatOriginsHuman(origins: ContributionOrigins): string {
+  const lines: string[] = [];
+  lines.push("Origins (id → declaring plugin id(s)):");
+  const buckets: ReadonlyArray<keyof ContributionOrigins> = [
+    "systems",
+    "entities",
+    "widgets",
+    "manifestSchemas",
+    "paletteCategories",
+    "toolbarTools",
+    "commands",
+  ];
+  for (const bucket of buckets) {
+    const map = origins[bucket];
+    if (map.size === 0) continue;
+    lines.push(`  ${bucket}:`);
+    for (const [id, declarers] of map) {
+      const flag = declarers.length > 1 ? " ⚠ conflict" : "";
+      lines.push(`    • ${id} ← ${declarers.join(", ")}${flag}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+function mapOriginsToPlainObject(
+  origins: ContributionOrigins,
+): Record<keyof AggregatedContributions, Record<string, string[]>> {
+  const result = {} as Record<
+    keyof AggregatedContributions,
+    Record<string, string[]>
+  >;
+  const buckets: ReadonlyArray<keyof ContributionOrigins> = [
+    "systems",
+    "entities",
+    "widgets",
+    "manifestSchemas",
+    "paletteCategories",
+    "toolbarTools",
+    "commands",
+  ];
+  for (const bucket of buckets) {
+    const obj: Record<string, string[]> = {};
+    for (const [id, declarers] of origins[bucket]) {
+      obj[id] = [...declarers];
+    }
+    result[bucket] = obj;
+  }
+  return result;
+}
+
 /** Template for the generated `src/index.ts`. */
 const SRC_INDEX_TEMPLATE = `import type {
   HyperforgePlugin,
@@ -1239,6 +1445,7 @@ Usage:
   hyperforge-plugin graph <dir> [--host-api <range>] [--format ascii|dot|json]
   hyperforge-plugin snapshot <dir> [--host-api <range>] [--human]
   hyperforge-plugin diff <baseline.json> <current.json> [--human] [--compact]
+  hyperforge-plugin contributions <dir> [--host-api <range>] [--human] [--compact] [--with-origins]
   hyperforge-plugin --help
   hyperforge-plugin --version
 
@@ -1285,4 +1492,14 @@ Subcommands:
                     current branch to flag missing/changed/added
                     plugins. Exit 0 on success, 1 on read/parse
                     error.
+  contributions <dir>
+                    Aggregate contribution ids across every plugin in
+                    \`<dir>\` and print the per-bucket totals (systems,
+                    entities, widgets, manifestSchemas, paletteCategories,
+                    toolbarTools, commands). Default output is
+                    deterministic JSON; \`--human\` for ASCII summary.
+                    Pass \`--with-origins\` to also surface a per-id
+                    "declared by" map — useful for conflict diagnostics
+                    when multiple plugins claim the same widget/system
+                    id. Exit 0 on successful catalog read.
 `;
