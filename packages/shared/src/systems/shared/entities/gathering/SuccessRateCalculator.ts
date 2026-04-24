@@ -7,7 +7,14 @@
  * @see https://oldschool.runescape.wiki/w/Skilling_success_rate
  */
 
-import { GATHERING_CONSTANTS } from "../../../../constants/GatheringConstants";
+import {
+  getDefaultSuccessRate,
+  getFishingSuccessRates,
+  getGatheringSkillMechanics,
+  getMinimumCycleTicks,
+  getMiningSuccessRates,
+  getWoodcuttingSuccessRates,
+} from "../../../../data/live/gathering-live";
 import type { GatheringToolData } from "../../../../data/DataManager";
 import { TICK_DURATION_MS } from "../../movement/TileSystem";
 import { lerpSuccessRate } from "./DropRoller";
@@ -28,10 +35,9 @@ export function getSuccessRateValues(
 ): SuccessRateValues {
   if (skill === "woodcutting") {
     // Woodcutting: lookup by tree type AND axe tier
+    const woodcuttingRates = getWoodcuttingSuccessRates();
     const treeRates =
-      GATHERING_CONSTANTS.WOODCUTTING_SUCCESS_RATES[
-        resourceVariant as keyof typeof GATHERING_CONSTANTS.WOODCUTTING_SUCCESS_RATES
-      ];
+      woodcuttingRates[resourceVariant as keyof typeof woodcuttingRates];
     if (treeRates) {
       const tier = toolTier || "bronze";
       const tierRates = treeRates[tier as keyof typeof treeRates];
@@ -45,10 +51,8 @@ export function getSuccessRateValues(
 
   if (skill === "mining") {
     // Mining: lookup by ore type only (pickaxe doesn't affect success)
-    const oreRates =
-      GATHERING_CONSTANTS.MINING_SUCCESS_RATES[
-        resourceVariant as keyof typeof GATHERING_CONSTANTS.MINING_SUCCESS_RATES
-      ];
+    const miningRates = getMiningSuccessRates();
+    const oreRates = miningRates[resourceVariant as keyof typeof miningRates];
     if (oreRates) {
       return oreRates;
     }
@@ -56,17 +60,16 @@ export function getSuccessRateValues(
 
   if (skill === "fishing") {
     // Fishing: lookup by spot type only (equipment doesn't affect success)
+    const fishingRates = getFishingSuccessRates();
     const fishRates =
-      GATHERING_CONSTANTS.FISHING_SUCCESS_RATES[
-        resourceVariant as keyof typeof GATHERING_CONSTANTS.FISHING_SUCCESS_RATES
-      ];
+      fishingRates[resourceVariant as keyof typeof fishingRates];
     if (fishRates) {
       return fishRates;
     }
   }
 
   // Fallback to default values
-  return GATHERING_CONSTANTS.DEFAULT_SUCCESS_RATE;
+  return getDefaultSuccessRate();
 }
 
 /**
@@ -128,19 +131,15 @@ export function computeCycleTicks(
   toolData: GatheringToolData | null,
   bonusRollTriggered: boolean = false,
 ): number {
-  const mechanics =
-    GATHERING_CONSTANTS.SKILL_MECHANICS[
-      skill as keyof typeof GATHERING_CONSTANTS.SKILL_MECHANICS
-    ];
+  const skillMechanics = getGatheringSkillMechanics();
+  const minimumCycleTicks = getMinimumCycleTicks();
+  const mechanics = skillMechanics[skill as keyof typeof skillMechanics];
 
   if (mechanics) {
     if (mechanics.type === "fixed-roll-variable-success") {
       // WOODCUTTING: Fixed roll frequency, tool affects success rate (handled elsewhere)
       // Always use the skill's base roll ticks (4 for woodcutting)
-      return Math.max(
-        GATHERING_CONSTANTS.MINIMUM_CYCLE_TICKS,
-        mechanics.baseRollTicks,
-      );
+      return Math.max(minimumCycleTicks, mechanics.baseRollTicks);
     }
 
     if (mechanics.type === "variable-roll-fixed-success") {
@@ -156,20 +155,17 @@ export function computeCycleTicks(
         rollTicks = toolData.bonusRollTicks;
       }
 
-      return Math.max(GATHERING_CONSTANTS.MINIMUM_CYCLE_TICKS, rollTicks);
+      return Math.max(minimumCycleTicks, rollTicks);
     }
 
     if (mechanics.type === "fixed-roll-fixed-success") {
       // FISHING: Fixed roll frequency, equipment doesn't matter
-      return Math.max(
-        GATHERING_CONSTANTS.MINIMUM_CYCLE_TICKS,
-        mechanics.baseRollTicks,
-      );
+      return Math.max(minimumCycleTicks, mechanics.baseRollTicks);
     }
   }
 
   // Fallback to base ticks for unknown skills
-  return Math.max(GATHERING_CONSTANTS.MINIMUM_CYCLE_TICKS, baseCycleTicks);
+  return Math.max(minimumCycleTicks, baseCycleTicks);
 }
 
 /**

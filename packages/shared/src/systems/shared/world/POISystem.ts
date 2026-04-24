@@ -20,7 +20,10 @@ import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import { Logger } from "../../../utils/Logger";
 import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
 import { DataManager } from "../../../data/DataManager";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  getTerrainTileSize,
+  getWaterThreshold,
+} from "../../../data/live/game-live";
 import { dist2D } from "../../../utils/MathUtils";
 import type { TownSystem } from "./TownSystem";
 
@@ -235,7 +238,7 @@ export class POISystem extends System {
       this.config.countPerCategory,
     ) as POICategory[];
     // World is 100 tiles of TERRAIN_TILE_SIZE meters each
-    const worldSize = TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE * 100;
+    const worldSize = getTerrainTileSize() * 100;
     const halfWorld = worldSize / 2;
 
     for (const category of categories) {
@@ -324,7 +327,7 @@ export class POISystem extends System {
       const registry = this.terrainSystem?.getWaterBodyRegistry?.();
       const waterSurface = registry
         ? registry.getWaterSurfaceAt(x, z)
-        : TERRAIN_CONSTANTS.WATER_THRESHOLD;
+        : getWaterThreshold();
       if (y < waterSurface && category !== "crossing") continue;
 
       // Calculate importance based on biome suitability and noise
@@ -375,7 +378,7 @@ export class POISystem extends System {
     const pois: PointOfInterest[] = [];
     const properties = CATEGORY_PROPERTIES["fishing_spot"];
     const towns = this.townSystem?.getTowns() ?? [];
-    const waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD;
+    const waterThreshold = getWaterThreshold();
     const maxAttempts = targetCount * 50; // More attempts needed for water edge finding
     const searchRadius = 300; // Increased search radius for better water finding
     const searchStepSize = 8; // Smaller steps for more precise edge detection

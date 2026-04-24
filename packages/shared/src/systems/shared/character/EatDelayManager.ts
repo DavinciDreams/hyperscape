@@ -11,7 +11,7 @@
  * Memory: Uses Map with automatic cleanup on player disconnect/death
  */
 
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getEatDelayTicks } from "../../../data/live/combat-live";
 
 export class EatDelayManager {
   /** Map of playerId → last eat tick */
@@ -25,7 +25,7 @@ export class EatDelayManager {
    */
   canEat(playerId: string, currentTick: number): boolean {
     const lastTick = this.lastEatTick.get(playerId) ?? 0;
-    return currentTick - lastTick >= COMBAT_CONSTANTS.EAT_DELAY_TICKS;
+    return currentTick - lastTick >= getEatDelayTicks();
   }
 
   /**
@@ -37,7 +37,7 @@ export class EatDelayManager {
   getRemainingCooldown(playerId: string, currentTick: number): number {
     const lastTick = this.lastEatTick.get(playerId) ?? 0;
     const elapsed = currentTick - lastTick;
-    return Math.max(0, COMBAT_CONSTANTS.EAT_DELAY_TICKS - elapsed);
+    return Math.max(0, getEatDelayTicks() - elapsed);
   }
 
   /**

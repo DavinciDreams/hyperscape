@@ -13,9 +13,13 @@ import {
   EventType,
   TerrainSystem,
   CombatSystem,
-  HOME_TELEPORT_CONSTANTS,
   Emotes,
 } from "../../../../index";
+import {
+  getHomeTeleportCastTimeMs,
+  getHomeTeleportCastTimeTicks,
+  getHomeTeleportCooldownMs,
+} from "../../../../data/live/game-live";
 
 interface CastingState {
   endTick: number;
@@ -56,7 +60,7 @@ class HomeTeleportManager {
   isOnCooldown(playerId: string): boolean {
     const lastTeleport = this.cooldowns.get(playerId);
     return lastTeleport
-      ? Date.now() - lastTeleport < HOME_TELEPORT_CONSTANTS.COOLDOWN_MS
+      ? Date.now() - lastTeleport < getHomeTeleportCooldownMs()
       : false;
   }
 
@@ -65,7 +69,7 @@ class HomeTeleportManager {
     if (!lastTeleport) return 0;
     return Math.max(
       0,
-      HOME_TELEPORT_CONSTANTS.COOLDOWN_MS - (Date.now() - lastTeleport),
+      getHomeTeleportCooldownMs() - (Date.now() - lastTeleport),
     );
   }
 
@@ -107,17 +111,17 @@ class HomeTeleportManager {
     const targetPosition = this.getGroundedSpawnPosition();
 
     this.castingStates.set(playerId, {
-      endTick: currentTick + HOME_TELEPORT_CONSTANTS.CAST_TIME_TICKS,
+      endTick: currentTick + getHomeTeleportCastTimeTicks(),
       targetPosition,
     });
 
     this.world.emit(EventType.HOME_TELEPORT_CAST_START, {
       playerId,
-      castTimeMs: HOME_TELEPORT_CONSTANTS.CAST_TIME_MS,
+      castTimeMs: getHomeTeleportCastTimeMs(),
     });
 
     socket.send("homeTeleportStart", {
-      castTimeMs: HOME_TELEPORT_CONSTANTS.CAST_TIME_MS,
+      castTimeMs: getHomeTeleportCastTimeMs(),
     });
 
     return null;

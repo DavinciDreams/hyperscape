@@ -12,7 +12,10 @@
  * @see https://oldschool.runescape.wiki/w/Cooking
  */
 
-import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import {
+  getCookingTicksPerItem,
+  getProcessingRateLimitMs,
+} from "../../../../data/live/processing-live";
 import type { PlayerID } from "../../../../types/core/identifiers";
 import type { CookingSession, CookingSource } from "./types";
 import {
@@ -137,7 +140,7 @@ export class CookingSessionManager {
     // Rate limiting
     const now = Date.now();
     const lastRequest = this.rateLimits.get(playerId);
-    if (lastRequest && now - lastRequest < PROCESSING_CONSTANTS.RATE_LIMIT_MS) {
+    if (lastRequest && now - lastRequest < getProcessingRateLimitMs()) {
       return null; // Silently drop (OSRS behavior)
     }
     this.rateLimits.set(playerId, now);
@@ -195,8 +198,7 @@ export class CookingSessionManager {
     const session: CookingSession = {
       playerId,
       startTick: currentTick,
-      nextCookTick:
-        currentTick + PROCESSING_CONSTANTS.SKILL_MECHANICS.cooking.ticksPerItem,
+      nextCookTick: currentTick + getCookingTicksPerItem(),
       totalQuantity,
       cookedCount: 0,
       burntCount: 0,
@@ -363,9 +365,7 @@ export class CookingSessionManager {
         this.emitSessionComplete(session, "completed");
       } else {
         // Schedule next cook
-        session.nextCookTick =
-          currentTick +
-          PROCESSING_CONSTANTS.SKILL_MECHANICS.cooking.ticksPerItem;
+        session.nextCookTick = currentTick + getCookingTicksPerItem();
       }
     }
 

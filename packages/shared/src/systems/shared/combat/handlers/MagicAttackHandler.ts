@@ -16,7 +16,12 @@ import {
 } from "./AttackContext";
 import { AttackType } from "../../../../types/core/core";
 import { EventType } from "../../../../types/events";
-import { COMBAT_CONSTANTS } from "../../../../constants/CombatConstants";
+import {
+  getDefaultMagicRange,
+  getHitDelayConfig,
+  getSpellLaunchDelayMs,
+  getTickDurationMs,
+} from "../../../../data/live/combat-live";
 import { createEntityID } from "../../../../utils/IdentifierUtils";
 import {
   CombatViolationType,
@@ -117,7 +122,7 @@ export class MagicAttackHandler {
     const mobCtx = prepareMobAttack(
       this.ctx,
       data,
-      COMBAT_CONSTANTS.MAGIC_RANGE, // Fallback if NPC manifest omits combatRange
+      getDefaultMagicRange(), // Fallback if NPC manifest omits combatRange
       "magic",
       spell.attackSpeed, // Fallback attack speed from spell data
       { attacker: mobEntity, npcData },
@@ -193,7 +198,8 @@ export class MagicAttackHandler {
     targetPos: { x: number; y: number; z: number },
     distance: number,
   ): void {
-    const { HIT_DELAY, TICK_DURATION_MS } = COMBAT_CONSTANTS;
+    const HIT_DELAY = getHitDelayConfig();
+    const TICK_DURATION_MS = getTickDurationMs();
     const magicHitDelayTicks = Math.min(
       HIT_DELAY.MAX_HIT_DELAY,
       HIT_DELAY.MAGIC_BASE +
@@ -202,7 +208,7 @@ export class MagicAttackHandler {
             HIT_DELAY.MAGIC_DISTANCE_DIVISOR,
         ),
     );
-    const spellLaunchDelayMs = COMBAT_CONSTANTS.SPELL_LAUNCH_DELAY_MS;
+    const spellLaunchDelayMs = getSpellLaunchDelayMs();
     const travelDurationMs = Math.max(
       200,
       magicHitDelayTicks * TICK_DURATION_MS - spellLaunchDelayMs,

@@ -17,7 +17,10 @@
  * @see https://oldschool.runescape.wiki/w/Cooking
  */
 
-import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import {
+  getFireInteractionRange,
+  getProcessingRateLimitMs,
+} from "../../../../data/live/processing-live";
 import type { PlayerID } from "../../../../types/core/identifiers";
 import type { CookingSource } from "./types";
 import { FireManager } from "./FireManager";
@@ -158,7 +161,7 @@ export class PendingCookingManager {
     // Rate limiting
     const now = Date.now();
     const lastRequest = this.rateLimits.get(playerId);
-    if (lastRequest && now - lastRequest < PROCESSING_CONSTANTS.RATE_LIMIT_MS) {
+    if (lastRequest && now - lastRequest < getProcessingRateLimitMs()) {
       return; // Silently drop
     }
     this.rateLimits.set(playerId, now);
@@ -337,7 +340,7 @@ export class PendingCookingManager {
     const dz = Math.abs(playerPosition.z - sourcePosition.z);
     const distance = Math.max(dx, dz); // Chebyshev distance
 
-    if (distance > PROCESSING_CONSTANTS.FIRE.interactionRange) {
+    if (distance > getFireInteractionRange()) {
       return { error: "You need to be closer to cook.", position: null };
     }
 

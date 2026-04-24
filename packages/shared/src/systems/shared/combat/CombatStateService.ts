@@ -9,7 +9,7 @@ import type { World } from "../../../core/World";
 import { AttackType } from "../../../types/core/core";
 import { EntityID } from "../../../types/core/identifiers";
 import { createEntityID } from "../../../utils/IdentifierUtils";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getCombatTimeoutTicks } from "../../../data/live/combat-live";
 import { Logger } from "../../../utils/Logger";
 
 /**
@@ -165,7 +165,7 @@ export class CombatStateService {
     attackSpeedTicks: number,
     weaponType: AttackType = AttackType.MELEE,
   ): CombatData {
-    const combatEndTick = currentTick + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+    const combatEndTick = currentTick + getCombatTimeoutTicks();
 
     const state: CombatData = {
       attackerId,
@@ -197,7 +197,7 @@ export class CombatStateService {
     attackSpeedTicks: number,
     weaponType: AttackType = AttackType.MELEE,
   ): CombatData {
-    const combatEndTick = currentTick + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+    const combatEndTick = currentTick + getCombatTimeoutTicks();
 
     const state: CombatData = {
       attackerId: targetId,
@@ -222,7 +222,7 @@ export class CombatStateService {
   extendCombatTimer(entityId: EntityID, currentTick: number): void {
     const state = this.combatStates.get(entityId);
     if (state) {
-      state.combatEndTick = currentTick + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+      state.combatEndTick = currentTick + getCombatTimeoutTicks();
     }
   }
 

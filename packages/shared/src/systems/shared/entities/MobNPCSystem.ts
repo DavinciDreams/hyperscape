@@ -2,10 +2,11 @@ import { AttackType } from "../../../types/core/core";
 import { EventType } from "../../../types/events";
 import type { World } from "../../../types/index";
 import { SystemBase } from "../infrastructure/SystemBase";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getDefaultNpcLeashRange } from "../../../data/live/combat-live";
 // World eliminated - using base World instead
 import { ALL_NPCS, NPC_SPAWN_CONSTANTS } from "../../../data/npcs";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import { MobInstance, MobSpawnConfig } from "../../../types/core/core";
 import {
   calculateDistance,
@@ -39,9 +40,6 @@ export class MobNPCSystem extends SystemBase {
   private respawnTimers = new Map<string, number>(); // Changed to store respawn times instead of timers
   private entityManager?: EntityManager;
   private mobIdCounter = 0;
-
-  private readonly GLOBAL_RESPAWN_TIME =
-    NPC_SPAWN_CONSTANTS.GLOBAL_RESPAWN_TIME;
 
   // Mob configurations loaded from externalized data
   private readonly MOB_CONFIGS: Record<string, MobSpawnConfig> =
@@ -80,7 +78,9 @@ export class MobNPCSystem extends SystemBase {
           aggroRange: npcData.combat.aggroRange,
           leashRange: npcData.combat.leashRange,
           combatRange: npcData.combat.combatRange,
-          respawnTime: npcData.combat.respawnTime || this.GLOBAL_RESPAWN_TIME,
+          respawnTime:
+            npcData.combat.respawnTime ||
+            NPC_SPAWN_CONSTANTS.GLOBAL_RESPAWN_TIME,
         };
       }
     }
@@ -149,7 +149,9 @@ export class MobNPCSystem extends SystemBase {
     // Load spawn points from externalized world areas data
     let spawnId = 1;
 
-    for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
+    // Iterate registry-prefer; falls back to in-tree ALL_WORLD_AREAS.
+    for (const area of getEffectiveWorldAreas()) {
+      const areaId = area.id;
       if (area.mobSpawns && area.mobSpawns.length > 0) {
         for (const mobSpawn of area.mobSpawns) {
           const config = this.MOB_CONFIGS[mobSpawn.mobId];
@@ -503,8 +505,7 @@ export class MobNPCSystem extends SystemBase {
       lootTable: "default",
       isAggressive: config.isAggressive !== false, // Default to true if not specified
       aggroRange: config.aggroRange ?? 5,
-      leashRange:
-        config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
+      leashRange: config.leashRange ?? getDefaultNpcLeashRange(),
       combatRange: config.combatRange ?? 1,
       respawnTime: config.respawnTime ?? 0,
     };

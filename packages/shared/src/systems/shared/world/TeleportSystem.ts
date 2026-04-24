@@ -19,6 +19,7 @@ import type {
   TeleportNetworkConfig,
 } from "../../../types/world/world-types";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import { DataManager } from "../../../data/DataManager";
 import { dist2D } from "../../../utils/MathUtils";
 
@@ -80,11 +81,14 @@ export class TeleportSystem extends SystemBase {
       };
     }
 
-    // Collect all teleport nodes from world areas
+    // Collect all teleport nodes from world areas. Registry-prefer;
+    // falls back to in-tree ALL_WORLD_AREAS. Schema-extension slice
+    // (2026-04-24) added `teleports` to WorldAreaSchema so the
+    // registry can carry the same data the in-tree constant does.
     this.nodes.clear();
-    for (const area of Object.values(ALL_WORLD_AREAS)) {
+    for (const area of getEffectiveWorldAreas()) {
       if (area.teleports) {
-        for (const node of area.teleports) {
+        for (const node of area.teleports as TeleportNode[]) {
           this.nodes.set(node.id, node);
         }
       }

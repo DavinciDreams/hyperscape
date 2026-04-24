@@ -13,7 +13,13 @@ import {
 import { EntityID } from "../../../../types/core/identifiers";
 import { AttackType } from "../../../../types/core/core";
 import { EventType } from "../../../../types/events";
-import { COMBAT_CONSTANTS } from "../../../../constants/CombatConstants";
+import {
+  getArrowLaunchDelayMs,
+  getDefaultNpcAttackSpeedTicks,
+  getDefaultRangedRange,
+  getHitDelayConfig,
+  getTickDurationMs,
+} from "../../../../data/live/combat-live";
 import { createEntityID } from "../../../../utils/IdentifierUtils";
 import {
   CombatViolationType,
@@ -107,9 +113,9 @@ export class RangedAttackHandler {
     const mobCtx = prepareMobAttack(
       this.ctx,
       data,
-      COMBAT_CONSTANTS.RANGED_RANGE, // Fallback if NPC manifest omits combatRange
+      getDefaultRangedRange(), // Fallback if NPC manifest omits combatRange
       "ranged",
-      COMBAT_CONSTANTS.DEFAULTS.NPC.ATTACK_SPEED_TICKS, // Fallback attack speed
+      getDefaultNpcAttackSpeedTicks(), // Fallback attack speed
       { attacker: mobEntity, npcData },
     );
     if (!mobCtx) return;
@@ -183,7 +189,8 @@ export class RangedAttackHandler {
     targetPos: { x: number; y: number; z: number },
     distance: number,
   ): void {
-    const { HIT_DELAY, TICK_DURATION_MS } = COMBAT_CONSTANTS;
+    const HIT_DELAY = getHitDelayConfig();
+    const TICK_DURATION_MS = getTickDurationMs();
     const rangedHitDelayTicks = Math.min(
       HIT_DELAY.MAX_HIT_DELAY,
       HIT_DELAY.RANGED_BASE +
@@ -192,7 +199,7 @@ export class RangedAttackHandler {
             HIT_DELAY.RANGED_DISTANCE_DIVISOR,
         ),
     );
-    const arrowLaunchDelayMs = COMBAT_CONSTANTS.ARROW_LAUNCH_DELAY_MS;
+    const arrowLaunchDelayMs = getArrowLaunchDelayMs();
     const travelDurationMs = Math.max(
       200,
       rangedHitDelayTicks * TICK_DURATION_MS - arrowLaunchDelayMs,

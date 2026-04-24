@@ -21,7 +21,11 @@ import {
 import type { PrayerBonuses } from "../../../types/game/prayer-types";
 import { getGameRng, SeededRandom } from "../../../utils/SeededRandom";
 import { calculateHitChance } from "../../../utils/game/CombatCalculations";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getDamageBaseConstant,
+  getDamageDivisor,
+  getEffectiveLevelConstant,
+} from "../../../data/live/combat-live";
 
 /**
  * Parameters for ranged damage calculation
@@ -76,12 +80,10 @@ function calculateRangedAttackRoll(
   // Effective level = floor(rangedLevel * prayerMultiplier) + styleBonus + EFFECTIVE_LEVEL_CONSTANT
   const boostedLevel = Math.floor(rangedLevel * prayerMultiplier);
   const effectiveLevel =
-    boostedLevel +
-    styleBonus.attackBonus +
-    COMBAT_CONSTANTS.EFFECTIVE_LEVEL_CONSTANT;
+    boostedLevel + styleBonus.attackBonus + getEffectiveLevelConstant();
 
   // Attack roll = effectiveLevel * (equipmentBonus + BASE_CONSTANT)
-  return effectiveLevel * (rangedAttackBonus + COMBAT_CONSTANTS.BASE_CONSTANT);
+  return effectiveLevel * (rangedAttackBonus + getDamageBaseConstant());
 }
 
 /**
@@ -100,9 +102,7 @@ function calculateRangedDefenseRoll(
   const effectiveDefense = boostedLevel + 9;
 
   // Defense roll = effectiveDefense * (rangedDefenseBonus + BASE_CONSTANT)
-  return (
-    effectiveDefense * (rangedDefenseBonus + COMBAT_CONSTANTS.BASE_CONSTANT)
-  );
+  return effectiveDefense * (rangedDefenseBonus + getDamageBaseConstant());
 }
 
 /**
@@ -124,16 +124,13 @@ function calculateRangedMaxHit(
   // Accurate style gives +3 to effective level for accuracy, not strength
   // Only accurate gives invisible +3, rapid and longrange give 0
   const effectiveStrength =
-    boostedLevel +
-    (style === "accurate" ? 3 : 0) +
-    COMBAT_CONSTANTS.EFFECTIVE_LEVEL_CONSTANT;
+    boostedLevel + (style === "accurate" ? 3 : 0) + getEffectiveLevelConstant();
 
   // Max hit = floor(0.5 + effectiveStrength * (rangedStrengthBonus + BASE_CONSTANT) / DAMAGE_DIVISOR)
   return Math.floor(
     0.5 +
-      (effectiveStrength *
-        (rangedStrengthBonus + COMBAT_CONSTANTS.BASE_CONSTANT)) /
-        COMBAT_CONSTANTS.DAMAGE_DIVISOR,
+      (effectiveStrength * (rangedStrengthBonus + getDamageBaseConstant())) /
+        getDamageDivisor(),
   );
 }
 

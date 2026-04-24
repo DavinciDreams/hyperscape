@@ -7,7 +7,7 @@
  * SERVER-AUTHORITATIVE FLOW:
  * 1. Player clicks fire → client sends cookingSourceInteract with fireId
  * 2. Server looks up fire's TRUE position from injected FireRegistry
- * 3. Server calculates best cardinal tile using GATHERING_CONSTANTS.GATHERING_RANGE
+ * 3. Server calculates best cardinal tile using getGatheringRange()
  * 4. Server paths player to that tile via movePlayerToward()
  * 5. Every tick, server checks if player arrived at cardinal tile
  * 6. When arrived, server starts cooking via PROCESSING_COOKING_REQUEST event
@@ -26,8 +26,8 @@ import {
   worldToTileInto,
   tilesWithinMeleeRange,
   type TileCoord,
-  GATHERING_CONSTANTS,
 } from "../../../index";
+import { getGatheringRange } from "../../../data/live/gathering-live";
 import type { ITileMovementManager } from "./interfaces";
 
 /**
@@ -177,7 +177,7 @@ export class PendingCookManager {
       tilesWithinMeleeRange(
         this._playerTile,
         this._fireTile,
-        GATHERING_CONSTANTS.GATHERING_RANGE,
+        getGatheringRange(),
       )
     ) {
       console.log(
@@ -200,7 +200,7 @@ export class PendingCookManager {
       playerId,
       cookingSource.position,
       isRunning,
-      GATHERING_CONSTANTS.GATHERING_RANGE,
+      getGatheringRange(),
     );
 
     // Store pending cook
@@ -336,7 +336,7 @@ export class PendingCookManager {
     const hasArrived = tilesWithinMeleeRange(
       this._playerTile,
       pending.sourceTile,
-      GATHERING_CONSTANTS.GATHERING_RANGE,
+      getGatheringRange(),
     );
 
     if (hasArrived) {

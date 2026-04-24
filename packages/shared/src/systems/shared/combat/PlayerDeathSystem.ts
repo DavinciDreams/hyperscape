@@ -1,7 +1,15 @@
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getDeathAnimationTicks,
+  getDeathCooldownTicks,
+  getDeathReconnectRespawnDelayTicks,
+  getDeathStaleLockAgeTicks,
+  getDefaultRespawnPosition,
+  getDefaultRespawnTown,
+  getGravestoneTicks,
+} from "../../../data/live/combat-live";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
 import type {
   InventoryItem,
@@ -18,7 +26,7 @@ import { WildernessDeathHandler } from "../death/WildernessDeathHandler";
 import { ZoneType, type TransactionContext } from "../../../types/death";
 import type { InventorySystem } from "../character/InventorySystem";
 import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
-import { STARTER_TOWNS } from "../../../data/world-areas";
+import { resolveStarterTownArea } from "../../../world-areas";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 import type {
   PlayerSystemLike,
@@ -85,9 +93,7 @@ export class PlayerDeathSystem extends SystemBase {
   private persistRetryInFlight = new Set<string>();
 
   private lastDeathTime = new Map<string, number>();
-  private readonly DEATH_COOLDOWN = ticksToMs(
-    COMBAT_CONSTANTS.DEATH.COOLDOWN_TICKS,
-  );
+  private readonly DEATH_COOLDOWN = ticksToMs(getDeathCooldownTicks());
 
   // Tick-based respawn system (AAA quality - deterministic timing)
   private tickSystem: TickSystemLike | null = null;
@@ -796,7 +802,7 @@ export class PlayerDeathSystem extends SystemBase {
       playerId,
       message: `Oh dear, you are dead!`,
       killedBy,
-      respawnTime: ticksToMs(COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS),
+      respawnTime: ticksToMs(getDeathAnimationTicks()),
     });
 
     // Death state, emote, and deathPosition are already set by PlayerSystem.handleDeath.
@@ -808,7 +814,7 @@ export class PlayerDeathSystem extends SystemBase {
         // Calculate respawn tick using tick system
         // Use safe addition to prevent integer overflow
         const currentTick = this.tickSystem?.getCurrentTick() ?? 0;
-        const animationTicks = COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS;
+        const animationTicks = getDeathAnimationTicks();
         // Cap at 32-bit max to prevent overflow during serialization (MessagePack, etc.)
         const MAX_TICK = 2147483647; // 2^31-1, safe for 32-bit serialization
         const MAX_SAFE_TICK = MAX_TICK - animationTicks;
@@ -832,9 +838,7 @@ export class PlayerDeathSystem extends SystemBase {
     // Fallback: Use setTimeout if tick system is not available (e.g., client-side)
     // This maintains backward compatibility while preferring tick-based timing
     if (!this.tickSystem) {
-      const DEATH_ANIMATION_DURATION = ticksToMs(
-        COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS,
-      );
+      const DEATH_ANIMATION_DURATION = ticksToMs(getDeathAnimationTicks());
       const respawnTimer = setTimeout(() => {
         if (playerEntity && "data" in playerEntity) {
           const entityData = playerEntity.data as {
@@ -1020,17 +1024,20 @@ export class PlayerDeathSystem extends SystemBase {
       );
     }
 
-    // Get spawn position from manifest starter town (Central Haven at origin)
-    const centralHaven = STARTER_TOWNS["central_haven"];
+    // Get spawn position from manifest starter town (Central Haven at
+    // origin). resolveStarterTownArea prefers the runtime
+    // worldAreasRegistry and falls back to the in-tree STARTER_TOWNS
+    // constant. If the registry is loaded but the town is missing,
+    // returns undefined and the default-respawn helpers below take over.
+    const centralHaven = resolveStarterTownArea("central_haven");
     const spawnPosition = centralHaven
       ? {
           x: (centralHaven.bounds.minX + centralHaven.bounds.maxX) / 2,
           y: 0,
           z: (centralHaven.bounds.minZ + centralHaven.bounds.maxZ) / 2,
         }
-      : COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_POSITION;
-    const spawnTownName =
-      centralHaven?.name ?? COMBAT_CONSTANTS.DEATH.DEFAULT_RESPAWN_TOWN;
+      : getDefaultRespawnPosition();
+    const spawnTownName = centralHaven?.name ?? getDefaultRespawnTown();
 
     // CRITICAL: Must await to ensure death lock is cleared before next death
     await this.respawnPlayer(playerId, spawnPosition, spawnTownName);
@@ -1322,9 +1329,7 @@ export class PlayerDeathSystem extends SystemBase {
       });
       // Check if death lock is stale (older than 1 hour)
       // Stale death locks should be cleared, not restored
-      const MAX_DEATH_LOCK_AGE = ticksToMs(
-        COMBAT_CONSTANTS.DEATH.STALE_LOCK_AGE_TICKS,
-      );
+      const MAX_DEATH_LOCK_AGE = ticksToMs(getDeathStaleLockAgeTicks());
       const deathAge = Date.now() - deathLock.timestamp;
 
       if (deathAge > MAX_DEATH_LOCK_AGE) {
@@ -1383,7 +1388,7 @@ export class PlayerDeathSystem extends SystemBase {
             { playerId },
           );
         });
-      }, ticksToMs(COMBAT_CONSTANTS.DEATH.RECONNECT_RESPAWN_DELAY_TICKS));
+      }, ticksToMs(getDeathReconnectRespawnDelayTicks()));
       this.respawnTimers.set(playerId, reconnectTimer);
 
       // Block inventory load until respawn.
@@ -1653,10 +1658,7 @@ export class PlayerDeathSystem extends SystemBase {
     if (!deathData) return 0;
 
     const elapsed = Date.now() - deathData.timestamp;
-    return Math.max(
-      0,
-      ticksToMs(COMBAT_CONSTANTS.DEATH.ANIMATION_TICKS) - elapsed,
-    );
+    return Math.max(0, ticksToMs(getDeathAnimationTicks()) - elapsed);
   }
 
   getRemainingDespawnTime(playerId: string): number {
@@ -1664,7 +1666,7 @@ export class PlayerDeathSystem extends SystemBase {
     if (!deathData) return 0;
 
     const elapsed = Date.now() - deathData.timestamp;
-    return Math.max(0, ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS) - elapsed);
+    return Math.max(0, ticksToMs(getGravestoneTicks()) - elapsed);
   }
 
   forceRespawn(playerId: string): void {

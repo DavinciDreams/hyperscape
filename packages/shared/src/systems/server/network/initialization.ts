@@ -22,6 +22,7 @@
 import type { World } from "../../../index";
 import { STARTER_TOWNS, getRandomSpawnPoint } from "../../../index";
 import type { SystemDatabase } from "../../../index";
+import { worldAreasRegistry } from "../../../world-areas";
 import type { SpawnData } from "./server-types";
 
 /**
@@ -49,6 +50,27 @@ export class InitializationManager {
    * @returns Spawn point configuration
    */
   async loadSpawnPoint(): Promise<SpawnData> {
+    // Prefer the live-edited starter town from `worldAreasRegistry` when
+    // the editor/PIE has pushed a world-areas manifest via
+    // `PIEEditorSession.updateManifests({ worldAreas })`. The first
+    // safeZone town wins; fall through to the static `STARTER_TOWNS`
+    // constant and finally `getRandomSpawnPoint()` otherwise.
+    if (worldAreasRegistry.isLoaded()) {
+      const towns = worldAreasRegistry.byCategory("starterTowns");
+      const safe = towns.find((t) => t.safeZone) ?? towns[0];
+      if (safe) {
+        const centerX = (safe.bounds.minX + safe.bounds.maxX) / 2;
+        const centerZ = (safe.bounds.minZ + safe.bounds.maxZ) / 2;
+        console.log(
+          `[InitializationManager] Using starter town from worldAreasRegistry: ${safe.name} at (${centerX}, ${centerZ})`,
+        );
+        return {
+          position: [centerX, 0, centerZ],
+          quaternion: [0, 0, 0, 1],
+        };
+      }
+    }
+
     // Use manifest starter town (Central Haven at origin)
     const centralHaven = STARTER_TOWNS["central_haven"];
     if (centralHaven) {

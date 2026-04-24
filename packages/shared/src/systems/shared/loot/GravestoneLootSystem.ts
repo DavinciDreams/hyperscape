@@ -22,7 +22,7 @@ import type { LootFailureReason } from "../../../types/death";
 import { generateTransactionId } from "../../../utils/IdGenerator";
 import { DeathState } from "../../../types/entities";
 import { getItem } from "../../../data/items";
-import { INVENTORY_CONSTANTS } from "../../../constants/GameConstants";
+import { getMaxInventorySlots } from "../../../data/live/game-live";
 
 /** Interface for entities that can be looted (HeadstoneEntity) */
 type LootableEntity = {
@@ -315,8 +315,7 @@ export class GravestoneLootSystem extends SystemBase {
       return { hasSpace: false, reason: "No inventory" };
     }
 
-    const isFull =
-      inventory.items.length >= INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
+    const isFull = inventory.items.length >= getMaxInventorySlots();
     if (isFull) {
       const itemDef = getItem(itemId);
       const isStackable = itemDef?.stackable === true;
@@ -583,7 +582,7 @@ export class GravestoneLootSystem extends SystemBase {
       return;
     }
 
-    const maxSlots = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
+    const maxSlots = getMaxInventorySlots();
     let usedSlots = inventory.items.length;
     const existingItemIds = new Set(inventory.items.map((i) => i.itemId));
 

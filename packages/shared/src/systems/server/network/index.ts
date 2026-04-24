@@ -48,11 +48,11 @@ import {
   WeaponType,
   type EventMap,
   writePacket,
-  TERRAIN_CONSTANTS,
   TICK_DURATION_MS,
   MobEntity,
   getRandomSpawnPoint,
 } from "../../../index";
+import { getWaterThreshold } from "../../../data/live/game-live";
 import type {
   IBroadcastManager,
   IEventBridge,
@@ -848,7 +848,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
             if (
               typeof y === "number" &&
               Number.isFinite(y) &&
-              y < TERRAIN_CONSTANTS.WATER_THRESHOLD
+              y < getWaterThreshold()
             ) {
               console.warn(
                 `[WaterRecovery] Agent ${entity.id} is in water (y=${y}), teleporting home.`,

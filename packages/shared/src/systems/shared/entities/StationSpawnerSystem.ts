@@ -11,6 +11,7 @@
  */
 
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import { stationDataProvider } from "../../../data/StationDataProvider";
 import type { World } from "../../../types/index";
 import { SystemBase } from "../infrastructure/SystemBase";
@@ -70,8 +71,9 @@ export class StationSpawnerSystem extends SystemBase {
       getHeightAt?: (x: number, z: number) => number | null;
     } | null;
 
-    // Iterate through all world areas
-    for (const area of Object.values(ALL_WORLD_AREAS)) {
+    // Iterate through all world areas (registry-prefer; falls back
+    // to the in-tree ALL_WORLD_AREAS constant when unloaded).
+    for (const area of getEffectiveWorldAreas()) {
       if (!area.stations || area.stations.length === 0) continue;
 
       for (const station of area.stations) {

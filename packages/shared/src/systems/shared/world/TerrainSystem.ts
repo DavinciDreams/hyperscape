@@ -67,7 +67,9 @@ import { PhysicsHandle } from "../../../types/systems/physics";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import { BIOMES } from "../../../data/world-structure";
+import { getEffectiveBiomes } from "../../../biomes";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import { getDuelArenaConfig } from "../../../data/duel-manifest";
 import { DataManager } from "../../../data/DataManager";
 import type { WorldJsonResource } from "../../../data/world-structure";
@@ -83,7 +85,7 @@ import {
   type VegetationExclusionInput,
   type PrecomputedExclusions,
 } from "../../../world/vegetation-filter";
-import { getExternalResource } from "../../../utils/ExternalAssetUtils";
+import { gatheringResources } from "../../../gathering/index";
 // NOTE: Import directly to avoid circular dependency through barrel file
 import { WaterSystem } from "./WaterSystem";
 import {
@@ -127,7 +129,12 @@ import { isLamppostLightTextureReady } from "./LamppostLightMask";
 import { isCsmEnabled } from "./Environment";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import type { TownSystem } from "./TownSystem";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  getTerrainTileSize,
+  getWaterThreshold,
+  getMaxWalkableSlope,
+  getSlopeCheckDistance,
+} from "../../../data/live/game-live";
 import {
   TerrainComputeContext,
   isTerrainComputeAvailable,
@@ -900,9 +907,10 @@ export class TerrainSystem extends System {
         string,
         { heightModifier: number; color: { r: number; g: number; b: number } }
       > = {};
-      for (const [name, biome] of Object.entries(BIOMES)) {
+      // Registry-prefer; falls back to in-tree BIOMES.
+      for (const biome of getEffectiveBiomes()) {
         const color = new THREE.Color(biome.color);
-        biomeData[name] = {
+        biomeData[biome.id] = {
           // Use terrainMultiplier from BiomeData as heightModifier for worker
           heightModifier: biome.terrainMultiplier || 1,
           color: { r: color.r, g: color.g, b: color.b },
@@ -1469,11 +1477,12 @@ export class TerrainSystem extends System {
     const seed = this.computeSeedFromWorldId();
     const worldSizeMeters = this.getActiveWorldSizeMeters();
 
-    // Convert BIOMES data to BiomeDefinition format
+    // Convert biome data to BiomeDefinition format. Registry-prefer;
+    // falls back to in-tree BIOMES.
     const biomeDefinitions: Record<string, BiomeDefinition> = {};
-    for (const [id, biomeData] of Object.entries(BIOMES)) {
-      biomeDefinitions[id] = {
-        id,
+    for (const biomeData of getEffectiveBiomes()) {
+      biomeDefinitions[biomeData.id] = {
+        id: biomeData.id,
         name: biomeData.name,
         color: biomeData.color,
         terrainMultiplier: biomeData.terrainMultiplier || 1.0,
@@ -1574,11 +1583,17 @@ export class TerrainSystem extends System {
   // OSRS-STYLE: Rolling terrain with visible hills
   private readonly CONFIG = {
     // Core World Specs
-    TILE_SIZE: TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE,
+    // Provider-first live reads — PIE manifest hot-reload of
+    // `game.terrain.*` / `game.world.*` is honored without restart.
+    get TILE_SIZE() {
+      return getTerrainTileSize();
+    },
     WORLD_SIZE: 100, // 100x100 grid = 10km x 10km world
     TILE_RESOLUTION: 64, // 64x64 vertices per tile for smooth terrain
     SERVER_COLLISION_RESOLUTION: 16, // 16x16 vertices for PhysX collision (server only)
-    WATER_THRESHOLD: TERRAIN_CONSTANTS.WATER_THRESHOLD,
+    get WATER_THRESHOLD() {
+      return getWaterThreshold();
+    },
 
     // LOD (Level of Detail) - Resolution tiers based on distance
     LOD_DISTANCES: [200, 400, 700], // Distance thresholds
@@ -1590,8 +1605,12 @@ export class TerrainSystem extends System {
 
     // Movement Constraints
     WATER_IMPASSABLE: true, // Water blocks movement
-    MAX_WALKABLE_SLOPE: TERRAIN_CONSTANTS.MAX_WALKABLE_SLOPE, // Maximum slope for movement (tan of angle)
-    SLOPE_CHECK_DISTANCE: TERRAIN_CONSTANTS.SLOPE_CHECK_DISTANCE, // Distance to check for slope calculation
+    get MAX_WALKABLE_SLOPE() {
+      return getMaxWalkableSlope();
+    }, // Maximum slope for movement (tan of angle)
+    get SLOPE_CHECK_DISTANCE() {
+      return getSlopeCheckDistance();
+    }, // Distance to check for slope calculation
 
     // Features
     ROAD_WIDTH: 6, // 6m wide roads for better visibility
@@ -4994,17 +5013,20 @@ export class TerrainSystem extends System {
     const MOVEMENT_TILE_SIZE = 1.0;
 
     let loadedCount = 0;
-    const areaNames = Object.keys(ALL_WORLD_AREAS);
+    // Registry-prefer; falls back to in-tree ALL_WORLD_AREAS.
+    const effectiveAreas = getEffectiveWorldAreas();
+    const areaNames = effectiveAreas.map((a) => a.id);
 
     console.log(
       `[TerrainSystem] Loading flat zones from ${areaNames.length} world areas`,
     );
 
-    if (!ALL_WORLD_AREAS["duel_arena"]) {
-      console.warn(`[TerrainSystem] duel_arena NOT in ALL_WORLD_AREAS!`);
+    if (!effectiveAreas.some((a) => a.id === "duel_arena")) {
+      console.warn(`[TerrainSystem] duel_arena NOT in effective world areas!`);
     }
 
-    for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
+    for (const area of effectiveAreas) {
+      const areaId = area.id;
       // Check for both stations and explicit flatZones
       const areaConfig = area as {
         stations?: typeof area.stations;
@@ -6058,7 +6080,7 @@ export class TerrainSystem extends System {
           : "fish";
 
     // Look up level and metadata from gathering manifests
-    const externalData = getExternalResource(r.resourceId);
+    const externalData = gatheringResources.findResource(r.resourceId);
     const requiredLevel = externalData?.levelRequired ?? 1;
     const respawnTicks = externalData?.respawnTicks ?? 100;
 
@@ -7746,7 +7768,7 @@ export class TerrainSystem extends System {
   }
 
   private isPositionInSafeWorldArea(worldX: number, worldZ: number): boolean {
-    for (const area of Object.values(ALL_WORLD_AREAS)) {
+    for (const area of getEffectiveWorldAreas()) {
       if (!area.bounds) continue;
       if (!area.safeZone && area.difficultyLevel !== 0) continue;
       const { minX, maxX, minZ, maxZ } = area.bounds;

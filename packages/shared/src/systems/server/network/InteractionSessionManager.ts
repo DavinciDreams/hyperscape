@@ -24,8 +24,10 @@ import {
   type World,
   EventType,
   SessionType,
-  INTERACTION_DISTANCE,
-  SESSION_CONFIG,
+  getInteractionDistanceFor,
+  getSessionValidationIntervalTicks,
+  getSessionGracePeriodTicks,
+  getSessionMaxSessionTicks,
   chebyshevDistance,
   type ISessionReader,
   type InteractionSession as SharedInteractionSession,
@@ -331,7 +333,7 @@ export class InteractionSessionManager implements ISessionReader {
     this.tickCounter = tickNumber;
 
     // Only validate every N ticks to reduce CPU usage
-    if (tickNumber % SESSION_CONFIG.VALIDATION_INTERVAL_TICKS !== 0) {
+    if (tickNumber % getSessionValidationIntervalTicks() !== 0) {
       return;
     }
 
@@ -348,12 +350,12 @@ export class InteractionSessionManager implements ISessionReader {
       const ticksSinceOpen = this.tickCounter - session.openedAtTick;
 
       // Skip sessions in grace period
-      if (ticksSinceOpen < SESSION_CONFIG.GRACE_PERIOD_TICKS) {
+      if (ticksSinceOpen < getSessionGracePeriodTicks()) {
         continue;
       }
 
       // Close zombie sessions that have been open too long (30 min default)
-      if (ticksSinceOpen >= SESSION_CONFIG.MAX_SESSION_TICKS) {
+      if (ticksSinceOpen >= getSessionMaxSessionTicks()) {
         this.closeSession(playerId, "timeout");
         continue;
       }
@@ -403,7 +405,7 @@ export class InteractionSessionManager implements ISessionReader {
 
     // Calculate distance (Chebyshev/OSRS-style) using shared function and constants
     const distance = chebyshevDistance(playerEntity.position, targetPos);
-    const maxDistance = INTERACTION_DISTANCE[session.sessionType];
+    const maxDistance = getInteractionDistanceFor(session.sessionType);
 
     if (distance > maxDistance) {
       return { valid: false, reason: "distance" };

@@ -163,6 +163,14 @@ export class ScriptingSystem extends SystemBase {
     // Create a thin adapter so action handlers can emit events via the world
     this.scriptingWorld = {
       emit: (event: string, data: Record<string, unknown>) => {
+        // Observability: emit a synchronous `scripting:action` wrapper
+        // alongside the raw gameplay event so PIE debug sinks (and any
+        // other subscribers) can record that a scripted action fired.
+        // Not part of the gameplay contract — purely a diagnostics hook.
+        this.emitTypedEvent("scripting:action", {
+          type: event,
+          params: data,
+        });
         this.emitTypedEvent(event, data);
       },
       getEntityById: (id: string) => {
@@ -683,6 +691,17 @@ export class ScriptingSystem extends SystemBase {
         trigger.type,
         eventData,
       );
+
+      // Observability: emit a synchronous `scripting:trigger` event so PIE
+      // debug sinks (and any other subscribers) can record that a trigger
+      // fired on this entity before the async interpreter runs. Not part
+      // of the gameplay contract — purely a diagnostics hook.
+      this.emitTypedEvent("scripting:trigger", {
+        entityId,
+        triggerType: trigger.type,
+        graphId: instance.graph.id,
+        data: triggerData,
+      });
 
       const ctx: ExecutionContext = {
         triggerData,

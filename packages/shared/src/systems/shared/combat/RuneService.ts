@@ -9,6 +9,7 @@
 
 import type { Item } from "../../../types/game/item-types";
 import { ELEMENTAL_STAVES, RUNE_NAMES, VALID_RUNES } from "../../../data/runes";
+import { runesRegistry } from "../../../runes";
 
 /**
  * Rune requirement for a spell
@@ -52,10 +53,15 @@ export class RuneService {
       return [];
     }
 
-    // Check if weapon is an elemental staff
-    const infiniteRunes = ELEMENTAL_STAVES[weapon.id];
-    if (infiniteRunes) {
-      return infiniteRunes;
+    // Check if weapon is an elemental staff. Prefers the runtime
+    // runesRegistry (manifest-loaded; honors PIE hot-reload + authored
+    // staff-substitution rules) and falls back to the in-tree
+    // ELEMENTAL_STAVES constant when the registry hasn't been loaded.
+    const infiniteRunes = runesRegistry.isLoaded()
+      ? runesRegistry.staff(weapon.id)?.providesInfinite
+      : ELEMENTAL_STAVES[weapon.id];
+    if (infiniteRunes && infiniteRunes.length > 0) {
+      return [...infiniteRunes];
     }
 
     // Check for providesInfiniteRunes property on the item
@@ -164,6 +170,11 @@ export class RuneService {
    * Get human-readable rune name
    */
   getRuneName(runeId: string): string {
+    if (runesRegistry.isLoaded()) {
+      return runesRegistry.has(runeId)
+        ? runesRegistry.get(runeId).name
+        : runeId;
+    }
     return RUNE_NAMES[runeId] ?? runeId;
   }
 
@@ -171,6 +182,9 @@ export class RuneService {
    * Check if a rune ID is valid
    */
   isValidRune(runeId: string): boolean {
+    if (runesRegistry.isLoaded()) {
+      return runesRegistry.has(runeId);
+    }
     return (VALID_RUNES as readonly string[]).includes(runeId);
   }
 
@@ -178,6 +192,9 @@ export class RuneService {
    * Check if an item is an elemental staff
    */
   isElementalStaff(itemId: string): boolean {
+    if (runesRegistry.isLoaded()) {
+      return runesRegistry.staff(itemId) !== null;
+    }
     return itemId in ELEMENTAL_STAVES;
   }
 
@@ -185,6 +202,10 @@ export class RuneService {
    * Get which elemental rune a staff provides
    */
   getStaffElement(staffId: string): string | null {
+    if (runesRegistry.isLoaded()) {
+      const provided = runesRegistry.staff(staffId)?.providesInfinite;
+      return provided?.[0] ?? null;
+    }
     const runes = ELEMENTAL_STAVES[staffId];
     return runes?.[0] ?? null;
   }

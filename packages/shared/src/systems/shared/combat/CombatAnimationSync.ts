@@ -11,7 +11,11 @@
  */
 
 import type { World } from "../../../core/World";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getAnimationConfig,
+  getDefaultAttackSpeedTicks,
+  getHitDelayConfig,
+} from "../../../data/live/combat-live";
 import type { CombatAnimationManager } from "./CombatAnimationManager";
 import type { HitDelayAttackType } from "../../../utils/game/HitDelayCalculator";
 import type { EntityID } from "../../../types/core/identifiers";
@@ -170,11 +174,12 @@ export class CombatAnimationSync {
     damage: number,
     distance: number,
     currentTick: number,
-    attackSpeedTicks: number = COMBAT_CONSTANTS.DEFAULT_ATTACK_SPEED_TICKS,
+    attackSpeedTicks: number = getDefaultAttackSpeedTicks(),
   ): string {
     const attackerIdStr = String(attackerId);
     const targetIdStr = String(targetId);
-    const { ANIMATION, HIT_DELAY } = COMBAT_CONSTANTS;
+    const ANIMATION = getAnimationConfig();
+    const HIT_DELAY = getHitDelayConfig();
 
     // 1. Start animation IMMEDIATELY
     this.animationManager.setCombatEmote(
@@ -456,9 +461,10 @@ export class CombatAnimationSync {
     currentTick: number,
     attackType: HitDelayAttackType,
     distance: number,
-    attackSpeedTicks: number = COMBAT_CONSTANTS.DEFAULT_ATTACK_SPEED_TICKS,
+    attackSpeedTicks: number = getDefaultAttackSpeedTicks(),
   ): number {
-    const { ANIMATION, HIT_DELAY } = COMBAT_CONSTANTS;
+    const ANIMATION = getAnimationConfig();
+    const HIT_DELAY = getHitDelayConfig();
 
     // Animation hit frame
     const animationHitFrame = Math.ceil(

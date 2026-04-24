@@ -7,7 +7,10 @@
  * @see https://oldschool.runescape.wiki/w/Firemaking
  */
 
-import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import {
+  getFireDurationRangeTicks,
+  getFiremakingSuccessRate,
+} from "../../../../data/live/processing-live";
 import { processingDataProvider } from "../../../../data/ProcessingDataProvider";
 
 /**
@@ -24,7 +27,7 @@ import { processingDataProvider } from "../../../../data/ProcessingDataProvider"
  * @see https://oldschool.runescape.wiki/w/Firemaking
  */
 export function calculateFiremakingSuccess(level: number): number {
-  const { low, high } = PROCESSING_CONSTANTS.FIREMAKING_SUCCESS_RATE;
+  const { low, high } = getFiremakingSuccessRate();
   const successNumerator = low + ((high - low) * (level - 1)) / 98;
   return Math.min(successNumerator / 256, 1.0);
 }
@@ -83,7 +86,7 @@ export function isValidLog(itemId: string): boolean {
  * @returns Duration in ticks
  */
 export function getRandomFireDuration(): number {
-  const { minDurationTicks, maxDurationTicks } = PROCESSING_CONSTANTS.FIRE;
+  const { minDurationTicks, maxDurationTicks } = getFireDurationRangeTicks();
   return (
     minDurationTicks +
     Math.floor(Math.random() * (maxDurationTicks - minDurationTicks + 1))

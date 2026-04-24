@@ -22,7 +22,7 @@ import { getNPCById } from "../../../../data/npcs";
 import { getPlayerWeaponRange } from "../../../../utils/game/CombatUtils";
 import { calculateCombatLevel } from "../../../../utils/game/CombatLevelCalculator";
 import type { Player } from "../../../../types/core/core";
-import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
+import { getContextMenuNpcColor } from "../../../../data/live/game-live";
 import { EventType } from "../../../../types/events/event-types";
 
 /**
@@ -82,7 +82,7 @@ export class MobInteractionHandler extends BaseInteractionHandler {
       label: `Attack ${mobName} (Level: ${mobLevel})`,
       styledLabel: [
         { text: "Attack " },
-        { text: mobName, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for mob names (OSRS style)
+        { text: mobName, color: getContextMenuNpcColor() }, // Yellow for mob names (OSRS style)
         { text: " (Level: " },
         { text: `${mobLevel}`, color: levelColor },
         { text: ")" },
@@ -102,7 +102,7 @@ export class MobInteractionHandler extends BaseInteractionHandler {
       label: `Examine ${mobName}`,
       styledLabel: [
         { text: "Examine " },
-        { text: mobName, color: CONTEXT_MENU_COLORS.NPC }, // Yellow for NPC/mob names
+        { text: mobName, color: getContextMenuNpcColor() }, // Yellow for NPC/mob names
       ],
       enabled: true,
       priority: 100,

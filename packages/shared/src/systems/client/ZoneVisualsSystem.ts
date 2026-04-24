@@ -22,6 +22,7 @@ import type { World } from "../../types";
 import { ZoneDetectionSystem } from "../shared/death/ZoneDetectionSystem";
 import { Chat } from "../shared/presentation/Chat";
 import { ALL_WORLD_AREAS } from "../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../world-areas";
 import type { WorldArea } from "../../types/core/core";
 
 // Zone visual colors
@@ -272,7 +273,7 @@ export class ZoneVisualsSystem extends SystemBase {
    * Create visual elements for all zones (markers and optional border bands)
    */
   private createZoneVisuals(): void {
-    const areas = Object.values(ALL_WORLD_AREAS) as WorldArea[];
+    const areas = getEffectiveWorldAreas() as unknown as WorldArea[];
     console.log(
       `[ZoneVisualsSystem] Creating zone visuals. Total areas: ${areas.length}`,
       areas.map((a) => ({

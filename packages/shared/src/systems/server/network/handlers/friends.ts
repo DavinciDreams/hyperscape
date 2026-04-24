@@ -35,10 +35,14 @@ import {
   type PrivateMessage,
   type PrivateChatFailReason,
   type SocialErrorCode,
-  SOCIAL_CONSTANTS,
   isValidPlayerID,
   SystemLogger,
 } from "../../../../index";
+import {
+  getMaxFriends,
+  getMaxIgnore,
+  getPrivateMessageMaxLength,
+} from "../../../../data/live/social-live";
 import type { ServerSocket } from "../server-types";
 import type { IDatabaseSystem, IFriendRepository } from "../interfaces";
 import { RateLimitService } from "../services/IntervalRateLimiter";
@@ -74,9 +78,7 @@ function validateMessageContent(content: unknown): string | null {
   const trimmed = content.trim();
   if (trimmed.length === 0) return null;
   // Truncate to max length and sanitize basic HTML entities
-  return sanitizeString(
-    trimmed.slice(0, SOCIAL_CONSTANTS.PRIVATE_MESSAGE_MAX_LENGTH),
-  );
+  return sanitizeString(trimmed.slice(0, getPrivateMessageMaxLength()));
 }
 
 /**
@@ -337,7 +339,7 @@ export async function handleFriendRequest(
 
   // Check friend limit
   const friendCount = await repo.getFriendCountAsync(playerId);
-  if (friendCount >= SOCIAL_CONSTANTS.MAX_FRIENDS) {
+  if (friendCount >= getMaxFriends()) {
     sendSocialError(
       socket,
       "friend_limit_reached",
@@ -457,7 +459,7 @@ export async function handleFriendAccept(
 
   // Check friend limit before accepting
   const friendCount = await repo.getFriendCountAsync(playerId);
-  if (friendCount >= SOCIAL_CONSTANTS.MAX_FRIENDS) {
+  if (friendCount >= getMaxFriends()) {
     sendSocialError(
       socket,
       "friend_limit_reached",
@@ -645,7 +647,7 @@ export async function handleIgnoreAdd(
 
   // Check ignore limit
   const ignoreCount = await repo.getIgnoreCountAsync(playerId);
-  if (ignoreCount >= SOCIAL_CONSTANTS.MAX_IGNORE) {
+  if (ignoreCount >= getMaxIgnore()) {
     sendSocialError(
       socket,
       "ignore_limit_reached",

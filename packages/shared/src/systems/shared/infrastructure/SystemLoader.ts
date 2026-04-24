@@ -119,6 +119,16 @@ import { InteractionRouter } from "../../client/interaction";
 import { LootSystem } from "..";
 import { GravestoneLootSystem } from "..";
 import { GroundItemSystem } from "../economy/GroundItemSystem";
+import { createDropConditionDispatcher } from "../economy/DropConditionDispatcher";
+import { installWorldDropConditions } from "../economy/WorldDropConditionEvaluators";
+import { installWorldDialogueConditions } from "../interaction/WorldDialogueConditionEvaluators";
+import { dialogueConditionBindingsProvider } from "../../../data/DialogueConditionBindingsProvider";
+import { lootTablesProvider } from "../../../data/LootTablesProvider";
+import { mobLootTableMappingsProvider } from "../../../data/MobLootTableMappingsProvider";
+import { dialogueProvider } from "../../../data/DialogueProvider";
+import { npcDialogueBindingsProvider } from "../../../data/NpcDialogueBindingsProvider";
+import { localizationProvider } from "../../../data/LocalizationProvider";
+import { LocalizationCatalog } from "../../../localization";
 import { generateKillToken } from "../../../utils/game/KillTokenUtils";
 // Movement now handled by physics in PlayerLocal
 // CameraSystem is ClientCameraSystem
@@ -498,6 +508,80 @@ export async function registerSystems(world: World): Promise<void> {
 
   // New MMO-style Systems
   systems.loot = getSystem(world, "loot") as LootSystem;
+
+  // Wire pluggable DropCondition evaluator to the live world. The
+  // dispatcher is server-authoritative — loot rolls happen on the
+  // server only, so the install is gated on `isServer`. Handlers
+  // re-resolve `getSystem` on every call, so QuestSystem /
+  // InventorySystem / SkillsSystem registered later in init still
+  // get picked up without re-installing.
+  if (world.isServer && systems.loot) {
+    const dropConditionDispatcher = createDropConditionDispatcher();
+    installWorldDropConditions(dropConditionDispatcher, world);
+    systems.loot.setDropConditionEvaluator(dropConditionDispatcher.evaluate);
+
+    // Boot-time seed: install any authored loot-tables manifest that
+    // DataManager already loaded from disk, plus the authored
+    // mob→table mappings. Gated on `isLoaded()` so servers that don't
+    // ship either manifest stay on the legacy `LootTableService` path
+    // for every mob type. Subsequent edits flow through
+    // `PIEEditorSession.updateManifests` → live `LootSystem` write.
+    if (lootTablesProvider.isLoaded()) {
+      systems.loot.setAuthoredLootTables(lootTablesProvider.getManifest());
+    }
+    if (mobLootTableMappingsProvider.isLoaded()) {
+      systems.loot.setMobLootTableMappings(
+        mobLootTableMappingsProvider.getMappings(),
+      );
+    }
+  }
+
+  // Install authored dialogue condition bindings if a manifest was
+  // loaded via DataManager (or an equivalent pre-init hook). Gated on
+  // `isLoaded()` so servers that don't ship a bindings manifest stay
+  // on the empty default — DialogueSystem still treats unknown
+  // predicate names as false, so authored `showIf` strings without a
+  // matching binding safely hide gated choices rather than expose
+  // them. Server-only: dialogue runs on the server-authoritative
+  // world.
+  if (world.isServer && dialogueConditionBindingsProvider.isLoaded()) {
+    const dialogueSystem = world.getSystem("dialogue") as DialogueSystem | null;
+    if (dialogueSystem) {
+      installWorldDialogueConditions(
+        dialogueSystem,
+        world,
+        dialogueConditionBindingsProvider.getBindings(),
+      );
+    }
+  }
+
+  // Boot-time seed: install any authored dialogue manifest +
+  // NPC→tree bindings that DataManager already loaded from disk.
+  // Gated on `isLoaded()` so servers that don't ship either manifest
+  // stay on the legacy `NPCDialogueTree` path for every NPC.
+  // Subsequent edits flow through `PIEEditorSession.updateManifests`
+  // → live `DialogueSystem` write + provider tee.
+  if (world.isServer) {
+    const dialogueSystem = world.getSystem("dialogue") as DialogueSystem | null;
+    if (dialogueSystem) {
+      if (dialogueProvider.isLoaded()) {
+        dialogueSystem.setAuthoredDialogues(dialogueProvider.getManifest());
+      }
+      if (npcDialogueBindingsProvider.isLoaded()) {
+        dialogueSystem.setAuthoredNpcDialogueBindings(
+          npcDialogueBindingsProvider.getBindings(),
+        );
+      }
+      if (localizationProvider.isLoaded()) {
+        const bundle = localizationProvider.getBundle();
+        if (bundle !== null) {
+          dialogueSystem.setLocalizationCatalog(
+            new LocalizationCatalog(bundle),
+          );
+        }
+      }
+    }
+  }
 
   // World Content Systems
   if (world.isServer) {

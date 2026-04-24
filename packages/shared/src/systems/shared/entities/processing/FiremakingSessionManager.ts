@@ -11,7 +11,10 @@
  * @see https://oldschool.runescape.wiki/w/Firemaking
  */
 
-import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import {
+  getFiremakingBaseRollTicks,
+  getProcessingRateLimitMs,
+} from "../../../../data/live/processing-live";
 import type { PlayerID } from "../../../../types/core/identifiers";
 import type { FiremakingSession } from "./types";
 import {
@@ -110,7 +113,7 @@ export class FiremakingSessionManager {
     // Rate limiting
     const now = Date.now();
     const lastRequest = this.rateLimits.get(playerId);
-    if (lastRequest && now - lastRequest < PROCESSING_CONSTANTS.RATE_LIMIT_MS) {
+    if (lastRequest && now - lastRequest < getProcessingRateLimitMs()) {
       return null; // Silently drop (OSRS behavior)
     }
     this.rateLimits.set(playerId, now);
@@ -148,9 +151,7 @@ export class FiremakingSessionManager {
     const session: FiremakingSession = {
       playerId,
       startTick: currentTick,
-      nextAttemptTick:
-        currentTick +
-        PROCESSING_CONSTANTS.SKILL_MECHANICS.firemaking.baseRollTicks,
+      nextAttemptTick: currentTick + getFiremakingBaseRollTicks(),
       attempts: 0,
       cachedLogId: logId,
       cachedLogSlot: logSlot,
@@ -257,9 +258,7 @@ export class FiremakingSessionManager {
         toRemove.push(playerId);
       } else {
         // Failed - retry on next cycle
-        session.nextAttemptTick =
-          currentTick +
-          PROCESSING_CONSTANTS.SKILL_MECHANICS.firemaking.baseRollTicks;
+        session.nextAttemptTick = currentTick + getFiremakingBaseRollTicks();
 
         results.push({
           success: false,

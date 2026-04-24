@@ -12,7 +12,7 @@
  * - Client interpolates visually between tile positions
  */
 
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getMeleeRangeStandard } from "../../../data/live/combat-live";
 import type { EntityID } from "../../../types/core/identifiers";
 import type { IEntityOccupancy } from "./EntityOccupancyMap";
 
@@ -339,7 +339,7 @@ export function tilesWithinMeleeRange(
 
   // Range 1 (standard melee): CARDINAL ONLY - no diagonal attacks
   // This is the core OSRS melee mechanic that makes positioning matter
-  if (meleeRange === COMBAT_CONSTANTS.MELEE_RANGE_STANDARD) {
+  if (meleeRange === getMeleeRangeStandard()) {
     return (dx === 1 && dz === 0) || (dx === 0 && dz === 1);
   }
 
@@ -525,7 +525,7 @@ export function getBestMeleeTile(
   }
 
   // For range 1: CARDINAL ONLY (OSRS melee behavior)
-  if (effectiveRange === COMBAT_CONSTANTS.MELEE_RANGE_STANDARD) {
+  if (effectiveRange === getMeleeRangeStandard()) {
     const cardinalTiles = [
       { x: target.x - 1, z: target.z }, // West
       { x: target.x + 1, z: target.z }, // East
@@ -854,7 +854,7 @@ export function getValidMeleeTiles(
   const effectiveRange = Math.max(1, Math.floor(meleeRange));
   const tiles: TileCoord[] = [];
 
-  if (effectiveRange === COMBAT_CONSTANTS.MELEE_RANGE_STANDARD) {
+  if (effectiveRange === getMeleeRangeStandard()) {
     // Range 1: cardinal only (OSRS melee behavior)
     const cardinals = [
       { x: target.x - 1, z: target.z },
@@ -1074,11 +1074,11 @@ export function getBestUnoccupiedMeleeTile(
 ): TileCoord | null {
   // Get candidate tiles based on range
   const buffer =
-    range === COMBAT_CONSTANTS.MELEE_RANGE_STANDARD
+    range === getMeleeRangeStandard()
       ? _cardinalMeleeTiles
       : _extendedMeleeTiles;
   const tileCount =
-    range === COMBAT_CONSTANTS.MELEE_RANGE_STANDARD
+    range === getMeleeRangeStandard()
       ? getCardinalMeleeTilesInto(targetTile, buffer)
       : getExtendedMeleeTilesInto(targetTile, range, buffer);
 

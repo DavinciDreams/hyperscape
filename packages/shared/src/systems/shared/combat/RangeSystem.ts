@@ -14,6 +14,7 @@ import type { Position3D } from "../../../types";
 import { TILE_SIZE } from "../movement/TileSystem";
 import { Logger } from "../../../utils/Logger";
 import { NPC_SIZES, type NPCSize } from "../../../data/npc-sizes";
+import { npcSizesRegistry } from "../../../npc-sizes";
 
 // Re-export for backwards compatibility
 export type { NPCSize };
@@ -29,7 +30,17 @@ export interface NPCRangeData {
 }
 
 export function getNPCSize(mobType: string): NPCSize {
-  return NPC_SIZES[mobType.toLowerCase()] ?? { width: 1, depth: 1 };
+  // Prefer the runtime npcSizesRegistry (manifest-loaded; honors PIE
+  // hot-reload + authored size overrides) and fall back to the in-tree
+  // NPC_SIZES constant when the registry hasn't been loaded yet
+  // (server boot before DataManager.initialize, isolated unit tests).
+  // The registry's getOrDefault returns {width:1,depth:1} for unknown
+  // ids — same default as the legacy fallback, so semantics line up.
+  const id = mobType.toLowerCase();
+  if (npcSizesRegistry.isLoaded()) {
+    return npcSizesRegistry.getOrDefault(id);
+  }
+  return NPC_SIZES[id] ?? { width: 1, depth: 1 };
 }
 
 /** Pre-allocates tile buffers for zero-GC range checks */

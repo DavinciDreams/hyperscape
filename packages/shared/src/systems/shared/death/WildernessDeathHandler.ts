@@ -19,16 +19,19 @@ import type { InventoryItem } from "../../../types/core/core";
 import type { GroundItemSystem } from "../economy/GroundItemSystem";
 import type { DeathStateManager } from "./DeathStateManager";
 import { ZoneType, type TransactionContext } from "../../../types/death";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getGroundItemDespawnTicks,
+  getLootProtectionTicks,
+} from "../../../data/live/combat-live";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
 
 export class WildernessDeathHandler {
   // Convert tick constants to ms for GroundItemOptions backwards compatibility
   private readonly GROUND_ITEM_DURATION_MS = ticksToMs(
-    COMBAT_CONSTANTS.GROUND_ITEM_DESPAWN_TICKS,
+    getGroundItemDespawnTicks(),
   );
   private readonly LOOT_PROTECTION_DURATION_MS = ticksToMs(
-    COMBAT_CONSTANTS.LOOT_PROTECTION_TICKS,
+    getLootProtectionTicks(),
   );
 
   constructor(

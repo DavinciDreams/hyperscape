@@ -18,7 +18,7 @@ import THREE, {
 } from "../../extras/three/three";
 import type { ShaderNode } from "../../extras/three/three";
 import { World } from "../../core/World";
-import { HOME_TELEPORT_CONSTANTS } from "../../constants/GameConstants";
+import { getHomeTeleportCastTimeMs } from "../../data/live/game-live";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { EventType } from "../../types/events/event-types";
 import { Curve } from "../../extras/animation/Curve";
@@ -453,7 +453,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     return {
       group,
       mode: "burst",
-      channelDurationMs: HOME_TELEPORT_CONSTANTS.CAST_TIME_MS,
+      channelDurationMs: getHomeTeleportCastTimeMs(),
       runeCircle,
       baseGlow,
       innerBeam,
@@ -515,7 +515,7 @@ export class ClientTeleportEffectsSystem extends SystemBase {
     const localPlayerAnchor = this.getLocalPlayerTeleportAnchor();
     if (!localPlayerAnchor) return;
     const channelDurationMs =
-      payload?.castTimeMs ?? HOME_TELEPORT_CONSTANTS.CAST_TIME_MS;
+      payload?.castTimeMs ?? getHomeTeleportCastTimeMs();
 
     if (this.homeTeleportCastEffect) {
       this.homeTeleportCastEffect.life = 0;

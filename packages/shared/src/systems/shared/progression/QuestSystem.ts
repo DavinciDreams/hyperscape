@@ -579,6 +579,57 @@ export class QuestSystem extends SystemBase implements IQuestSystem {
   }
 
   /**
+   * Replace the authored quest definitions with a new manifest
+   * payload. Used by `PIEEditorSession.updateManifests({ quests })`
+   * for editor hot-reload without a Stop → Play cycle.
+   *
+   * Each entry is validated via the existing
+   * `validateQuestDefinition` path; invalid entries are skipped with
+   * a warning log so the live map never falls into an inconsistent
+   * state. Caches for removed quests are cleared. Player quest
+   * progress in `playerStates` is left untouched — the next
+   * `getActiveQuests` call will reflect the new definitions.
+   */
+  public setAuthoredQuests(manifest: Record<string, unknown>): void {
+    this.questDefinitions.clear();
+    this._stageByIdCache.clear();
+    this._stageIndexCache.clear();
+    this._gatherStageCache.clear();
+    this._interactStageCache.clear();
+    this._activeQuestsCache.clear();
+    for (const playerId of this.playerStates.keys()) {
+      this._activeQuestsDirty.add(playerId);
+    }
+
+    let validCount = 0;
+    let invalidCount = 0;
+    for (const [questId, definition] of Object.entries(manifest)) {
+      const validation = validateQuestDefinition(questId, definition);
+      if (!validation.valid) {
+        invalidCount++;
+        for (const error of validation.errors) {
+          this.logger.warn(`Quest validation error: ${error}`);
+        }
+        continue;
+      }
+      this.questDefinitions.set(questId, definition as QuestDefinition);
+      this.buildStageCaches(questId, definition as QuestDefinition);
+      validCount++;
+    }
+
+    this.manifestLoaded = true;
+    if (invalidCount > 0) {
+      this.logger.warn(
+        `setAuthoredQuests: loaded ${validCount} valid quests, skipped ${invalidCount} invalid`,
+      );
+    } else {
+      this.logger.info(
+        `setAuthoredQuests: loaded ${validCount} quest definitions`,
+      );
+    }
+  }
+
+  /**
    * Ensure stage caches are built for a quest definition
    */
   private ensureStageCaches(questId: string): void {

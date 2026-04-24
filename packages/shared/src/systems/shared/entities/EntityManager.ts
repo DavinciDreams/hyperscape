@@ -9,7 +9,7 @@
  */
 
 import { World } from "../../../core/World";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getDefaultNpcLeashRange } from "../../../data/live/combat-live";
 import { Entity, EntityConfig } from "../../../entities/Entity";
 import { ItemEntity } from "../../../entities/world/ItemEntity";
 import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
@@ -75,7 +75,13 @@ import { getItem } from "../../../data/items";
 import { getNPCById } from "../../../data/npcs";
 import { getExternalNPC } from "../../../utils/ExternalAssetUtils";
 import { SpatialEntityRegistry } from "./SpatialEntityRegistry";
-import { DISTANCE_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  getItemRenderDistanceSq,
+  getMobRenderDistanceSq,
+  getNetworkBroadcastDistanceSq,
+  getNpcRenderDistanceSq,
+  getPlayerRenderDistanceSq,
+} from "../../../data/live/distance-live";
 import {
   NetworkingComputeContext,
   isNetworkingComputeAvailable,
@@ -93,9 +99,10 @@ export class EntityManager extends SystemBase {
   /** Type-indexed entity cache for O(1) getEntitiesByType queries */
   private entitiesByType = new Map<string, Set<string>>();
 
-  /** Broadcast distance squared for network filtering */
-  private readonly BROADCAST_DISTANCE_SQ =
-    DISTANCE_CONSTANTS.SIMULATION_SQ.NETWORK_BROADCAST;
+  /** Broadcast distance squared for network filtering (provider-first live read). */
+  private get BROADCAST_DISTANCE_SQ(): number {
+    return getNetworkBroadcastDistanceSq();
+  }
 
   // PERFORMANCE: Progressive entity update system to prevent main thread blocking
   /** Minimum entities to update per frame */
@@ -927,10 +934,10 @@ export class EntityManager extends SystemBase {
     let broadcastDistSq = this.BROADCAST_DISTANCE_SQ;
     if (entityType) {
       const typeDistances: Record<string, number> = {
-        mob: DISTANCE_CONSTANTS.RENDER_SQ.MOB,
-        npc: DISTANCE_CONSTANTS.RENDER_SQ.NPC,
-        player: DISTANCE_CONSTANTS.RENDER_SQ.PLAYER,
-        item: DISTANCE_CONSTANTS.RENDER_SQ.ITEM,
+        mob: getMobRenderDistanceSq(),
+        npc: getNpcRenderDistanceSq(),
+        player: getPlayerRenderDistanceSq(),
+        item: getItemRenderDistanceSq(),
       };
       broadcastDistSq = typeDistances[entityType] ?? this.BROADCAST_DISTANCE_SQ;
     }
@@ -1779,12 +1786,10 @@ export class EntityManager extends SystemBase {
   private getMobLeashRange(mobType: string): number {
     const npcData = getNPCById(mobType);
     if (!npcData) {
-      return COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE; // Extended default: 42 tiles
+      return getDefaultNpcLeashRange(); // Extended default: 42 tiles
     }
     // leashRange from manifest, or fallback to default
-    return (
-      npcData.combat.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE
-    );
+    return npcData.combat.leashRange ?? getDefaultNpcLeashRange();
   }
 
   private getMobXPReward(mobType: string, level: number): number {

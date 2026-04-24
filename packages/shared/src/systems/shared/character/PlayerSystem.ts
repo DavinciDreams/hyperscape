@@ -73,7 +73,10 @@ import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 import * as THREE from "three";
 import { EatDelayManager } from "./EatDelayManager";
 import { BuryDelayManager } from "./BuryDelayManager";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getEatAttackDelayTicks,
+  getMaxHealAmount,
+} from "../../../data/live/combat-live";
 import { Skill } from "./SkillsSystem";
 import type { CombatSystem } from "../combat/CombatSystem";
 
@@ -1162,7 +1165,7 @@ export class PlayerSystem extends SystemBase {
     // === SECURITY: Bounds checking (OWASP) ===
     const healAmount = Math.min(
       Math.max(0, Math.floor(itemData.healAmount)),
-      COMBAT_CONSTANTS.MAX_HEAL_AMOUNT,
+      getMaxHealAmount(),
     );
 
     // === RATE LIMITING: Eat delay check (Anti-Cheat) ===
@@ -1227,10 +1230,7 @@ export class PlayerSystem extends SystemBase {
 
     if (isOnCooldown) {
       // Add eat delay to attack cooldown
-      combatSystem.addAttackDelay?.(
-        playerId,
-        COMBAT_CONSTANTS.EAT_ATTACK_DELAY_TICKS,
-      );
+      combatSystem.addAttackDelay?.(playerId, getEatAttackDelayTicks());
     }
     // If not on cooldown, do nothing (OSRS-accurate behavior)
   }

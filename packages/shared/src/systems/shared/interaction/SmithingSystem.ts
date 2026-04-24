@@ -14,12 +14,12 @@
  */
 
 import {
-  SMITHING_CONSTANTS,
   isLooseInventoryItem,
   getItemQuantity,
   getSmithingLevelSafe,
 } from "../../../constants/SmithingConstants";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
+import { getHammerItemId } from "../../../data/live/smithing-live";
 import { EventType } from "../../../types/events";
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types/index";
@@ -35,9 +35,6 @@ interface SmithingSession {
   /** Tick when current smith action completes (tick-based timing) */
   completionTick: number;
 }
-
-/** Hammer item ID required for smithing (from centralized constants) */
-const HAMMER_ITEM_ID = SMITHING_CONSTANTS.HAMMER_ITEM_ID;
 
 export class SmithingSystem extends SystemBase {
   private readonly activeSessions = new Map<string, SmithingSession>();
@@ -414,7 +411,7 @@ export class SmithingSystem extends SystemBase {
     if (!inventory || !Array.isArray(inventory)) return false;
 
     return inventory.some(
-      (item) => isLooseInventoryItem(item) && item.itemId === HAMMER_ITEM_ID,
+      (item) => isLooseInventoryItem(item) && item.itemId === getHammerItemId(),
     );
   }
 

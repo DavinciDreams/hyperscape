@@ -16,7 +16,7 @@ import { AttackType } from "../../../types/core/core";
 import type { EntityID } from "../../../types/core/identifiers";
 import type { Entity } from "../../../entities/Entity";
 import type { MobEntity } from "../../../entities/npc/MobEntity";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getCombatTimeoutTicks } from "../../../data/live/combat-live";
 import type { CombatStyle } from "../../../utils/game/CombatCalculations";
 import { calculateRetaliationDelay } from "../../../utils/game/CombatCalculations";
 import { createEntityID } from "../../../utils/IdentifierUtils";
@@ -332,8 +332,7 @@ export class CombatTickProcessor {
     }
 
     if (!inRange) {
-      combatState.combatEndTick =
-        tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+      combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
     }
 
     if (!inRange || targetMoved) {
@@ -491,8 +490,7 @@ export class CombatTickProcessor {
         .getCombatStatesMap()
         .get(typedAttackerId);
       if (freshState) {
-        freshState.combatEndTick =
-          tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+        freshState.combatEndTick = tickNumber + getCombatTimeoutTicks();
         freshState.lastAttackTick = tickNumber;
       }
       return;
@@ -674,8 +672,7 @@ export class CombatTickProcessor {
   ): void {
     combatState.lastAttackTick = tickNumber;
     combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
-    combatState.combatEndTick =
-      tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+    combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
     this.ctx.nextAttackTicks.set(typedAttackerId, combatState.nextAttackTick);
   }
 

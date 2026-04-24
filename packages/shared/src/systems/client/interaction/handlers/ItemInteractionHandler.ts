@@ -27,7 +27,7 @@ import {
 } from "../../../shared/movement/TileSystem";
 import type { Entity } from "../../../../entities/Entity";
 import type { GroundItemSystem } from "../../../shared/economy/GroundItemSystem";
-import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
+import { getContextMenuItemColor } from "../../../../data/live/game-live";
 
 export class ItemInteractionHandler extends BaseInteractionHandler {
   /**
@@ -118,7 +118,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
         label: `Take ${pileItem.name}`,
         styledLabel: [
           { text: "Take " },
-          { text: pileItem.name, color: CONTEXT_MENU_COLORS.ITEM },
+          { text: pileItem.name, color: getContextMenuItemColor() },
         ],
         enabled: true,
         priority: priority++,
@@ -139,7 +139,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
         label: `Examine ${pileItem.name}`,
         styledLabel: [
           { text: "Examine " },
-          { text: pileItem.name, color: CONTEXT_MENU_COLORS.ITEM },
+          { text: pileItem.name, color: getContextMenuItemColor() },
         ],
         enabled: true,
         priority: 100 + priority++,

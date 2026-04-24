@@ -10,14 +10,17 @@
  * Works for both human players and AI agent players automatically.
  *
  * @see {@link CombatSystem} for combat state tracking
- * @see {@link COMBAT_CONSTANTS.HEALTH_REGEN_COOLDOWN_TICKS} for cooldown (17 ticks)
- * @see {@link COMBAT_CONSTANTS.HEALTH_REGEN_INTERVAL_TICKS} for regen interval (100 ticks)
+ * @see {@link getHealthRegenCooldownTicks()} for cooldown (17 ticks)
+ * @see {@link getHealthRegenIntervalTicks()} for regen interval (100 ticks)
  */
 
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../core/World";
-import { GAME_CONSTANTS } from "../../../constants/GameConstants";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getHealthRegenCooldownTicks,
+  getHealthRegenIntervalTicks,
+} from "../../../data/live/combat-live";
+import { getHealthRegenRate } from "../../../data/live/game-live";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { PlayerSystem } from "./PlayerSystem";
 import type { Player } from "../../../types/core/core";
@@ -58,8 +61,7 @@ export class HealthRegenSystem extends SystemBase {
     });
 
     // Load regen rate from constants (default: 1 HP per regen tick)
-    this.regenRate =
-      GAME_CONSTANTS.PLAYER.HEALTH_REGEN_RATE ?? DEFAULT_REGEN_RATE;
+    this.regenRate = getHealthRegenRate() ?? DEFAULT_REGEN_RATE;
   }
 
   /**
@@ -88,8 +90,8 @@ export class HealthRegenSystem extends SystemBase {
 
     console.log(
       `[HealthRegenSystem] Started - Rate: ${this.regenRate} HP, ` +
-        `Cooldown: ${COMBAT_CONSTANTS.HEALTH_REGEN_COOLDOWN_TICKS} ticks, ` +
-        `Interval: ${COMBAT_CONSTANTS.HEALTH_REGEN_INTERVAL_TICKS} ticks`,
+        `Cooldown: ${getHealthRegenCooldownTicks()} ticks, ` +
+        `Interval: ${getHealthRegenIntervalTicks()} ticks`,
     );
   }
 
@@ -107,10 +109,7 @@ export class HealthRegenSystem extends SystemBase {
     const currentTick = this.world.currentTick ?? 0;
 
     // Check if 100 ticks have passed since last regen
-    if (
-      currentTick - this.lastRegenTick <
-      COMBAT_CONSTANTS.HEALTH_REGEN_INTERVAL_TICKS
-    ) {
+    if (currentTick - this.lastRegenTick < getHealthRegenIntervalTicks()) {
       return;
     }
 
@@ -165,8 +164,7 @@ export class HealthRegenSystem extends SystemBase {
     // Cooldown: 17 ticks (10.2 seconds) after taking damage
     const cooldownExpired =
       lastDamageTick === null ||
-      currentTick - lastDamageTick >=
-        COMBAT_CONSTANTS.HEALTH_REGEN_COOLDOWN_TICKS;
+      currentTick - lastDamageTick >= getHealthRegenCooldownTicks();
 
     return {
       shouldRegen: alive && !healthFull && !inCombat && cooldownExpired,
@@ -221,8 +219,8 @@ export class HealthRegenSystem extends SystemBase {
   } {
     return {
       regenRate: this.regenRate,
-      regenCooldownTicks: COMBAT_CONSTANTS.HEALTH_REGEN_COOLDOWN_TICKS,
-      regenIntervalTicks: COMBAT_CONSTANTS.HEALTH_REGEN_INTERVAL_TICKS,
+      regenCooldownTicks: getHealthRegenCooldownTicks(),
+      regenIntervalTicks: getHealthRegenIntervalTicks(),
       lastRegenTick: this.lastRegenTick,
     };
   }

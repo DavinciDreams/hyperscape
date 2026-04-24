@@ -4,7 +4,7 @@ import type {
   BankDepositEvent,
   BankWithdrawEvent,
 } from "../../../types/events";
-import { BANKING_CONSTANTS } from "../../../constants/BankingConstants";
+import { getMaxBankSlots } from "../../../data/live/banking-live";
 import { BankData, InventoryItem } from "../../../types/core/core";
 import { BankID, PlayerID } from "../../../types/core/identifiers";
 import { calculateDistance } from "../../../utils/game/EntityUtils";
@@ -32,7 +32,16 @@ export class BankingSystem extends SystemBase {
     { items: InventoryItem[]; coins: number }
   >(); // Cache for reactive pattern
   // Logger is inherited from SystemBase, no need to override
-  private readonly MAX_BANK_SLOTS = BANKING_CONSTANTS.MAX_BANK_SLOTS;
+  /**
+   * Live-read of the current bank-slot cap. Prefers the PIE-hotreloadable
+   * `bankingProvider` manifest when loaded; falls back to boot-captured
+   * `BANKING_CONSTANTS.MAX_BANK_SLOTS` otherwise. Implemented in
+   * `data/live/banking-live.ts` so additional banking consumers can share
+   * the same provider-first accessor.
+   */
+  private get MAX_BANK_SLOTS(): number {
+    return getMaxBankSlots();
+  }
   private readonly STARTER_TOWN_BANKS = [
     { id: "bank_town_0", name: "Central Bank", position: { x: 0, y: 0, z: 5 } }, // Y will be grounded to terrain
     {

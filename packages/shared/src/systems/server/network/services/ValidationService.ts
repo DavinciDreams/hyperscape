@@ -11,10 +11,8 @@
  * 3. Player is within Chebyshev distance of target NPC
  */
 
-import {
-  SessionType,
-  INTERACTION_DISTANCE,
-} from "../../../../constants/interaction";
+import { SessionType } from "../../../../constants/interaction";
+import { getInteractionDistanceFor } from "../../../../data/live/interaction-live";
 import { chebyshevDistance, type Position2D } from "../../../../utils/distance";
 import type {
   ISessionReader,
@@ -77,7 +75,7 @@ export class ValidationService implements ITransactionValidator {
 
     // 5. Check distance (Chebyshev/OSRS-style)
     const distance = chebyshevDistance(player.position, target.position);
-    const maxDistance = INTERACTION_DISTANCE[requiredType];
+    const maxDistance = getInteractionDistanceFor(requiredType);
 
     if (distance > maxDistance) {
       return { allowed: false, error: "Too far away" };

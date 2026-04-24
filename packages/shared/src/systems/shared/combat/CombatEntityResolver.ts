@@ -9,7 +9,7 @@ import type { World } from "../../../core/World";
 import type { EntityID } from "../../../types/core/identifiers";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { Entity } from "../../../entities/Entity";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import { getDefaultAttackSpeedTicks } from "../../../data/live/combat-live";
 import { getItem } from "../../../data/items";
 import { isMobEntity } from "../../../utils/typeGuards";
 
@@ -216,7 +216,7 @@ export class CombatEntityResolver {
         }
       }
 
-      return COMBAT_CONSTANTS.DEFAULT_ATTACK_SPEED_TICKS;
+      return getDefaultAttackSpeedTicks();
     }
 
     const entity = this.resolve(String(entityId), entityType);
@@ -229,7 +229,7 @@ export class CombatEntityResolver {
       }
     }
 
-    return COMBAT_CONSTANTS.DEFAULT_ATTACK_SPEED_TICKS;
+    return getDefaultAttackSpeedTicks();
   }
 
   /**

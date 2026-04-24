@@ -21,8 +21,8 @@
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE, TIMING, MESSAGE_TYPES } from "../constants";
-import { getExternalResource } from "../../../../utils/ExternalAssetUtils";
-import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
+import { gatheringResources } from "../../../../gathering/index";
+import { getContextMenuObjectColor } from "../../../../data/live/game-live";
 
 /**
  * Fishing method definition for multi-action fishing spots.
@@ -83,7 +83,7 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
         label: `Mine ${rockName}`,
         styledLabel: [
           { text: "Mine " },
-          { text: rockName, color: CONTEXT_MENU_COLORS.OBJECT },
+          { text: rockName, color: getContextMenuObjectColor() },
         ],
         enabled: true,
         priority: 1,
@@ -101,7 +101,7 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
           label: `${method.action} Fishing spot`,
           styledLabel: [
             { text: `${method.action} ` },
-            { text: "Fishing spot", color: CONTEXT_MENU_COLORS.OBJECT },
+            { text: "Fishing spot", color: getContextMenuObjectColor() },
           ],
           enabled: true,
           priority: 1,
@@ -116,7 +116,7 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
         label: `Chop down ${treeName}`,
         styledLabel: [
           { text: "Chop down " },
-          { text: treeName, color: CONTEXT_MENU_COLORS.OBJECT },
+          { text: treeName, color: getContextMenuObjectColor() },
         ],
         enabled: true,
         priority: 1,
@@ -252,7 +252,7 @@ export class ResourceInteractionHandler extends BaseInteractionHandler {
 
     // Try to get examine text from resource data
     if (resourceId) {
-      const resourceData = getExternalResource(resourceId);
+      const resourceData = gatheringResources.findResource(resourceId);
       if (resourceData?.examine) {
         return resourceData.examine;
       }

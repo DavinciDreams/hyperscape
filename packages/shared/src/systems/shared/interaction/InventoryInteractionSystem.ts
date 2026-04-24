@@ -29,7 +29,7 @@ import { Logger } from "../../../utils/Logger";
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
 import { getTargetValidator } from "./TargetValidator";
 import { MESSAGE_TYPES } from "../../client/interaction/constants";
-import { INPUT_LIMITS } from "../../../constants/interaction";
+import { getMaxInventorySlotsInputLimit } from "../../../data/live/interaction-live";
 import type { ClientNetwork } from "../../client/ClientNetwork";
 
 /**
@@ -1152,7 +1152,7 @@ export class InventoryInteractionSystem extends SystemBase {
       callback: (playerId: string, itemId: string, slot: number | null) => {
         // Validate slot is within bounds (OWASP: Input Validation)
         const validSlot =
-          slot !== null && slot >= 0 && slot < INPUT_LIMITS.MAX_INVENTORY_SLOTS
+          slot !== null && slot >= 0 && slot < getMaxInventorySlotsInputLimit()
             ? slot
             : 0;
 

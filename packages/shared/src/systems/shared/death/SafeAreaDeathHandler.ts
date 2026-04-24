@@ -23,7 +23,10 @@ import type { EntityManager } from "..";
 import { ZoneType, type TransactionContext } from "../../../types/death";
 import { EntityType, InteractionType } from "../../../types/entities";
 import type { HeadstoneEntityConfig } from "../../../types/entities";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getGravestoneTicks,
+  getGroundItemDespawnTicks,
+} from "../../../data/live/combat-live";
 import { ticksToMs } from "../../../utils/game/CombatCalculations";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 import { GRAVESTONE_ID_PREFIX } from "../combat/DeathUtils";
@@ -45,7 +48,7 @@ export class SafeAreaDeathHandler {
 
   // Keep ms values for backwards compatibility with GroundItemOptions
   private readonly GROUND_ITEM_DURATION_MS = ticksToMs(
-    COMBAT_CONSTANTS.GROUND_ITEM_DESPAWN_TICKS,
+    getGroundItemDespawnTicks(),
   );
 
   constructor(
@@ -127,7 +130,7 @@ export class SafeAreaDeathHandler {
     // Track gravestone for tick-based expiration (500 ticks = 5 minutes)
     // Type-safe tick calculation with explicit number type
     const currentTick: number = this.world.currentTick ?? 0;
-    const gravestoneTicks: number = COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+    const gravestoneTicks: number = getGravestoneTicks();
     const expirationTick: number = currentTick + gravestoneTicks;
 
     // Defensive copy of items array to prevent external mutation
@@ -140,7 +143,7 @@ export class SafeAreaDeathHandler {
     });
 
     console.log(
-      `[SafeAreaDeathHandler] Gravestone ${gravestoneId} will expire at tick ${expirationTick} (${COMBAT_CONSTANTS.GRAVESTONE_TICKS} ticks = ${(ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS) / 1000).toFixed(1)}s)`,
+      `[SafeAreaDeathHandler] Gravestone ${gravestoneId} will expire at tick ${expirationTick} (${getGravestoneTicks()} ticks = ${(ticksToMs(getGravestoneTicks()) / 1000).toFixed(1)}s)`,
     );
   }
 
@@ -178,8 +181,7 @@ export class SafeAreaDeathHandler {
 
     const gravestoneId = `${GRAVESTONE_ID_PREFIX}${playerId}_${Date.now()}`;
     // Calculate despawnTime in ms for entity config (backwards compatible)
-    const despawnTime =
-      Date.now() + ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS);
+    const despawnTime = Date.now() + ticksToMs(getGravestoneTicks());
 
     // Create gravestone entity
     const gravestoneConfig: HeadstoneEntityConfig = {
@@ -365,7 +367,7 @@ export class SafeAreaDeathHandler {
 
     // Track for tick-based expiration
     const currentTick: number = this.world.currentTick ?? 0;
-    const gravestoneTicks: number = COMBAT_CONSTANTS.GRAVESTONE_TICKS;
+    const gravestoneTicks: number = getGravestoneTicks();
     const expirationTick: number = currentTick + gravestoneTicks;
 
     this.gravestones.set(gravestoneId, {
@@ -377,7 +379,7 @@ export class SafeAreaDeathHandler {
     });
 
     console.log(
-      `[SafeAreaDeathHandler] Gravestone ${gravestoneId} tracked for expiration at tick ${expirationTick} (${COMBAT_CONSTANTS.GRAVESTONE_TICKS} ticks = ${(ticksToMs(COMBAT_CONSTANTS.GRAVESTONE_TICKS) / 1000).toFixed(1)}s)`,
+      `[SafeAreaDeathHandler] Gravestone ${gravestoneId} tracked for expiration at tick ${expirationTick} (${getGravestoneTicks()} ticks = ${(ticksToMs(getGravestoneTicks()) / 1000).toFixed(1)}s)`,
     );
 
     return gravestoneId;

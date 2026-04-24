@@ -6,6 +6,7 @@ import { StoreID } from "../../../types/core/identifiers";
 import { createStoreID } from "../../../utils/IdentifierUtils";
 import { SystemBase } from "../infrastructure/SystemBase";
 import { GENERAL_STORES } from "../../../data/banks-stores";
+import { storesRegistry } from "../../../stores";
 
 /**
  * Store System
@@ -31,23 +32,48 @@ export class StoreSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
-    // Initialize all stores from loaded JSON data
-    for (const storeData of Object.values(GENERAL_STORES)) {
-      // Convert StoreData to Store format
-      // Note: position is optional - it will be set when NPC registers via STORE_REGISTER_NPC
-      const store: Store = {
-        id: storeData.id,
-        name: storeData.name,
-        // Position comes from the NPC entity, not the store definition
-        // It gets set when the shopkeeper NPC registers via STORE_REGISTER_NPC
-        position: storeData.location?.position,
-        items: storeData.items,
-        npcName:
-          storeData.name.replace("General Store", "").trim() || "Shopkeeper",
-        buyback: storeData.buyback,
-        buybackRate: storeData.buybackRate,
-      };
-      this.stores.set(createStoreID(store.id), store);
+    // Initialize all stores from authored data. Prefers the runtime
+    // storesRegistry (manifest-loaded; honors PIE hot-reload + authored
+    // store edits) and falls back to the in-tree GENERAL_STORES
+    // constant when the registry hasn't been loaded yet (server boot
+    // before DataManager.initialize, isolated unit tests).
+    //
+    // Position is intentionally undefined in both paths — it gets set
+    // later when the shopkeeper NPC registers via STORE_REGISTER_NPC.
+    if (storesRegistry.isLoaded()) {
+      for (const s of storesRegistry.all()) {
+        const store: Store = {
+          id: s.id,
+          name: s.name,
+          position: undefined,
+          // Schema StoreItem leaves description/category optional; the
+          // in-tree literal type narrows them to required. Schema-level
+          // validation gates authored data at editor save time, so the
+          // cast just bridges the type universes at the boundary.
+          items: s.items as unknown as Store["items"],
+          npcName: s.name.replace("General Store", "").trim() || "Shopkeeper",
+          buyback: s.buyback,
+          // In-tree Store requires `buybackRate: number`; schema makes
+          // it optional. Default to 0 (matches "no buyback discount" —
+          // safe because `buyback: false` already disables the path).
+          buybackRate: s.buybackRate ?? 0,
+        };
+        this.stores.set(createStoreID(store.id), store);
+      }
+    } else {
+      for (const storeData of Object.values(GENERAL_STORES)) {
+        const store: Store = {
+          id: storeData.id,
+          name: storeData.name,
+          position: storeData.location?.position,
+          items: storeData.items,
+          npcName:
+            storeData.name.replace("General Store", "").trim() || "Shopkeeper",
+          buyback: storeData.buyback,
+          buybackRate: storeData.buybackRate,
+        };
+        this.stores.set(createStoreID(store.id), store);
+      }
     }
 
     // Set up type-safe event subscriptions for store mechanics

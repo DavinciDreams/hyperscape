@@ -13,6 +13,7 @@ import {
   type ZoneData,
 } from "../../../data/world-structure";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import type { ZoneType, ZoneProperties } from "../../../types/death";
 import { ZoneType as ZoneTypeEnum } from "../../../types/death";
 import type { WorldArea } from "../../../types/core/core";
@@ -64,7 +65,7 @@ export class ZoneDetectionSystem extends SystemBase {
   private buildBoundariesList(): void {
     this.zoneBoundaries = [];
 
-    for (const area of Object.values(ALL_WORLD_AREAS) as WorldArea[]) {
+    for (const area of getEffectiveWorldAreas() as unknown as WorldArea[]) {
       if (area.bounds) {
         this.zoneBoundaries.push({
           minX: area.bounds.minX,
@@ -182,7 +183,7 @@ export class ZoneDetectionSystem extends SystemBase {
   }): ZoneProperties {
     // Find all matching zones and select the smallest one (most specific)
     let bestMatch: { area: WorldArea; size: number } | null = null;
-    const allAreas = Object.values(ALL_WORLD_AREAS) as WorldArea[];
+    const allAreas = getEffectiveWorldAreas() as unknown as WorldArea[];
 
     // Debug: log all available zones
     console.log(
@@ -340,7 +341,7 @@ export class ZoneDetectionSystem extends SystemBase {
    */
   private prewarmCache(): void {
     // Cache starter area and known towns
-    for (const area of Object.values(ALL_WORLD_AREAS) as WorldArea[]) {
+    for (const area of getEffectiveWorldAreas() as unknown as WorldArea[]) {
       if (area.safeZone && area.bounds) {
         const centerX = (area.bounds.minX + area.bounds.maxX) / 2;
         const centerZ = (area.bounds.minZ + area.bounds.maxZ) / 2;

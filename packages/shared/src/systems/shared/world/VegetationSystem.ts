@@ -1248,13 +1248,18 @@ export class VegetationSystem extends System {
       return biomeData?.vegetation ?? null;
     }
 
-    // Fallback: try to get from global BIOMES using dynamic import
+    // Fallback: registry-prefer; falls back to in-tree BIOMES.
+    // Replaced a dynamic import (`await import(...)`) with the
+    // resolveBiomeOrFallback helper — same fallback semantics, but
+    // synchronous and additionally honors PIE hot-reload of the
+    // biomes manifest at runtime.
     try {
-      const worldStructure = await import("../../../data/world-structure");
-      const biome = worldStructure.BIOMES[biomeId];
-      return biome?.vegetation ?? null;
+      const { resolveBiomeOrFallback } = await import("../../../biomes");
+      const biome = resolveBiomeOrFallback(biomeId);
+      const vegetation = (biome as { vegetation?: BiomeVegetationConfig })
+        ?.vegetation;
+      return vegetation ?? null;
     } catch (err) {
-      // Log error for debugging - this could indicate missing world-structure module
       console.warn(
         `[VegetationSystem] Failed to load biome vegetation config for ${biomeId}:`,
         err,

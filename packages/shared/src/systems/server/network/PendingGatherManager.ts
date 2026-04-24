@@ -7,7 +7,7 @@
  * SERVER-AUTHORITATIVE FLOW:
  * 1. Player clicks resource → client sends resourceInteract with resourceId
  * 2. Server looks up resource's TRUE position from ResourceSystem
- * 3. Server calculates best cardinal tile using GATHERING_CONSTANTS.GATHERING_RANGE
+ * 3. Server calculates best cardinal tile using getGatheringRange()
  * 4. Server paths player to that tile via movePlayerToward()
  * 5. Every tick, server checks if player arrived at cardinal tile
  * 6. When arrived, server sets face target via FaceDirectionManager and starts gathering
@@ -32,8 +32,8 @@ import {
   type TileCoord,
   type ResourceFootprint,
   FOOTPRINT_SIZES,
-  GATHERING_CONSTANTS,
 } from "../../../index";
+import { getGatheringRange } from "../../../data/live/gathering-live";
 import type { ITileMovementManager } from "./interfaces";
 
 /**
@@ -386,7 +386,7 @@ export class PendingGatherManager {
       playerId,
       resource.position,
       isRunning,
-      GATHERING_CONSTANTS.GATHERING_RANGE,
+      getGatheringRange(),
     );
 
     // Store pending gather (non-fishing only, fishing returns early)
@@ -567,7 +567,7 @@ export class PendingGatherManager {
           tilesWithinMeleeRange(
             playerTile,
             this._tempFootprintTile,
-            GATHERING_CONSTANTS.GATHERING_RANGE,
+            getGatheringRange(),
           )
         ) {
           return true;

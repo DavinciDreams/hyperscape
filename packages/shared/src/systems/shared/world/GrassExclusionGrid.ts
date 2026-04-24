@@ -27,6 +27,7 @@ import type { CollisionMatrix } from "../movement/CollisionMatrix";
 import { CollisionFlag, CollisionMask } from "../movement/CollisionFlags";
 import { BiomeType } from "./TerrainBiomeTypes";
 import { BIOMES } from "../../../data/world-structure";
+import { isBiomesDataAvailable, resolveBiomeOrFallback } from "../../../biomes";
 import { setGridExclusionTexture } from "./ProceduralGrass";
 import type { TownSystem } from "./TownSystem";
 
@@ -142,7 +143,7 @@ export class GrassExclusionGrid {
     this.exclusionTextureNode = texture(this.exclusionTexture);
 
     // Check if BIOMES data is available
-    this.biomesAvailable = Object.keys(BIOMES).length > 0;
+    this.biomesAvailable = isBiomesDataAvailable();
     if (!this.biomesAvailable) {
       console.warn(
         "[GrassExclusionGrid] BIOMES data not yet loaded - biome checks will be skipped until refresh",
@@ -180,7 +181,7 @@ export class GrassExclusionGrid {
       GRID_CONFIG.RECENTER_THRESHOLD * GRID_CONFIG.RECENTER_THRESHOLD;
 
     // Also refresh if BIOMES became available since last update
-    const biomesNowAvailable = Object.keys(BIOMES).length > 0;
+    const biomesNowAvailable = isBiomesDataAvailable();
     const biomesJustLoaded = !this.biomesAvailable && biomesNowAvailable;
 
     if (distSq < thresholdSq && !biomesJustLoaded) {
@@ -203,7 +204,7 @@ export class GrassExclusionGrid {
    */
   forceRefresh(): void {
     if (!this.initialized) return;
-    this.biomesAvailable = Object.keys(BIOMES).length > 0;
+    this.biomesAvailable = isBiomesDataAvailable();
     this.regenerateTexture();
   }
 
@@ -434,12 +435,19 @@ export class GrassExclusionGrid {
         const biomeId = terrainWithBiome.getBiomeAtPosition(worldX, worldZ);
 
         // First try to get biome data from TerrainSystem (authoritative)
+        // Registry-prefer; falls back to in-tree BIOMES at the
+        // resolveBiomeOrFallback boundary.
         const biomeData =
-          terrainWithBiome.getBiomeData?.(biomeId) ?? BIOMES[biomeId];
+          terrainWithBiome.getBiomeData?.(biomeId) ??
+          resolveBiomeOrFallback(biomeId);
 
         if (biomeData) {
-          // Check explicit grass config first
-          if (biomeData.grass !== undefined && !biomeData.grass.enabled) {
+          // Check explicit grass config first. Schema-derived Biome
+          // surfaces `grass` as unknown via passthrough; cast at the
+          // access boundary (legacy BiomeData has the literal type).
+          const grass = (biomeData as { grass?: { enabled?: boolean } | null })
+            .grass;
+          if (grass != null && grass.enabled === false) {
             return { excluded: true, isBuilding: false }; // Grass explicitly disabled
           }
 

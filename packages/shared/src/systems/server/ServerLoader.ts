@@ -1,4 +1,3 @@
-import fs from "fs-extra";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 // import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js.js'
 import { GLTFLoader } from "../../libs/gltfloader/GLTFLoader";
@@ -9,6 +8,17 @@ import { createNode } from "../../extras/three/createNode";
 import { glbToNodes } from "../../extras/three/glbToNodes";
 import type { GLBData, HSNode as INode, World } from "../../types";
 import { System } from "../shared";
+
+/**
+ * Lazy-loads fs-extra only when a non-HTTP URL is fetched. The string
+ * indirection keeps Vite/esbuild from statically resolving `fs-extra` in
+ * browser bundles (PIE's loopback server runs in the browser and only ever
+ * hits HTTP URLs, so this never evaluates there).
+ */
+async function loadNodeFs(): Promise<typeof import("fs-extra")> {
+  const moduleName = "fs-extra";
+  return await import(/* @vite-ignore */ moduleName);
+}
 
 /**
  * Node.js Filesystem-Based Asset Loader
@@ -99,6 +109,7 @@ export class ServerLoader extends System {
       const arrayBuffer = await response.arrayBuffer();
       return arrayBuffer;
     } else {
+      const fs = await loadNodeFs();
       const buffer = await fs.readFile(url);
       const arrayBuffer = buffer.buffer.slice(
         buffer.byteOffset,
@@ -115,6 +126,7 @@ export class ServerLoader extends System {
       const text = await response.text();
       return text;
     } else {
+      const fs = await loadNodeFs();
       const text = await fs.readFile(url, { encoding: "utf8" });
       return text;
     }

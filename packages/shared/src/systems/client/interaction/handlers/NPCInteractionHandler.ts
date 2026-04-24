@@ -29,7 +29,7 @@ import { BaseInteractionHandler } from "./BaseInteractionHandler";
 import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE, MESSAGE_TYPES } from "../constants";
 import { getNPCById } from "../../../../data/npcs";
-import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
+import { getContextMenuNpcColor } from "../../../../data/live/game-live";
 
 /**
  * NPC entity config interface for type safety
@@ -78,7 +78,7 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
       label: `Talk-to ${npcName}`,
       styledLabel: [
         { text: "Talk-to " },
-        { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+        { text: npcName, color: getContextMenuNpcColor() },
       ],
       enabled: true,
       priority: 1,
@@ -92,7 +92,7 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
         label: `Bank ${npcName}`,
         styledLabel: [
           { text: "Bank " },
-          { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+          { text: npcName, color: getContextMenuNpcColor() },
         ],
         enabled: true,
         priority: 2,
@@ -105,7 +105,7 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
         label: `Collect ${npcName}`,
         styledLabel: [
           { text: "Collect " },
-          { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+          { text: npcName, color: getContextMenuNpcColor() },
         ],
         enabled: true,
         priority: 3,
@@ -120,7 +120,7 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
         label: `Trade ${npcName}`,
         styledLabel: [
           { text: "Trade " },
-          { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+          { text: npcName, color: getContextMenuNpcColor() },
         ],
         enabled: true,
         priority: 2,
@@ -138,7 +138,7 @@ export class NPCInteractionHandler extends BaseInteractionHandler {
       label: `Examine ${npcName}`,
       styledLabel: [
         { text: "Examine " },
-        { text: npcName, color: CONTEXT_MENU_COLORS.NPC },
+        { text: npcName, color: getContextMenuNpcColor() },
       ],
       enabled: true,
       priority: 100,

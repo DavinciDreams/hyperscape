@@ -7,7 +7,15 @@
  * These replace the duplicate validation functions in store.ts and bank.ts.
  */
 
-import { INPUT_LIMITS } from "../../../../constants/interaction";
+import {
+  getMaxClockSkewMs,
+  getMaxInventorySlotsInputLimit,
+  getMaxItemIdLength,
+  getMaxQuantity,
+  getMaxRequestAgeMs,
+  getMaxStoreIdLength,
+} from "../../../../data/live/interaction-live";
+import { getMaxBankSlots } from "../../../../data/live/banking-live";
 
 const CONTROL_CHAR_REGEX = /[\x00-\x1f]/;
 
@@ -19,7 +27,7 @@ export function isValidItemId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= INPUT_LIMITS.MAX_ITEM_ID_LENGTH &&
+    value.length <= getMaxItemIdLength() &&
     !CONTROL_CHAR_REGEX.test(value)
   );
 }
@@ -32,7 +40,7 @@ export function isValidStoreId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= INPUT_LIMITS.MAX_STORE_ID_LENGTH &&
+    value.length <= getMaxStoreIdLength() &&
     !CONTROL_CHAR_REGEX.test(value)
   );
 }
@@ -45,7 +53,7 @@ export function isValidQuantity(value: unknown): value is number {
     typeof value === "number" &&
     Number.isInteger(value) &&
     value > 0 &&
-    value <= INPUT_LIMITS.MAX_QUANTITY
+    value <= getMaxQuantity()
   );
 }
 
@@ -53,7 +61,7 @@ export function isValidQuantity(value: unknown): value is number {
  * Check if adding quantities would overflow the max quantity limit
  */
 export function wouldOverflow(current: number, add: number): boolean {
-  return current > INPUT_LIMITS.MAX_QUANTITY - add;
+  return current > getMaxQuantity() - add;
 }
 
 /**
@@ -64,7 +72,7 @@ export function isValidInventorySlot(value: unknown): value is number {
     typeof value === "number" &&
     Number.isInteger(value) &&
     value >= 0 &&
-    value < INPUT_LIMITS.MAX_INVENTORY_SLOTS
+    value < getMaxInventorySlotsInputLimit()
   );
 }
 
@@ -76,7 +84,7 @@ export function isValidBankSlot(value: unknown): value is number {
     typeof value === "number" &&
     Number.isInteger(value) &&
     value >= 0 &&
-    value < INPUT_LIMITS.MAX_BANK_SLOTS
+    value < getMaxBankSlots()
   );
 }
 
@@ -123,7 +131,7 @@ export function isValidNpcId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= INPUT_LIMITS.MAX_ITEM_ID_LENGTH &&
+    value.length <= getMaxItemIdLength() &&
     !CONTROL_CHAR_REGEX.test(value)
   );
 }
@@ -165,15 +173,15 @@ export function validateRequestTimestamp(
   const age = serverTime - timestamp;
 
   // Check if timestamp is too old (stale request / replay attack)
-  if (age > INPUT_LIMITS.MAX_REQUEST_AGE_MS) {
+  if (age > getMaxRequestAgeMs()) {
     return {
       valid: false,
-      reason: `Request timestamp too old (${age}ms > ${INPUT_LIMITS.MAX_REQUEST_AGE_MS}ms)`,
+      reason: `Request timestamp too old (${age}ms > ${getMaxRequestAgeMs()}ms)`,
     };
   }
 
   // Check if timestamp is too far in the future (clock manipulation)
-  if (age < -INPUT_LIMITS.MAX_CLOCK_SKEW_MS) {
+  if (age < -getMaxClockSkewMs()) {
     return {
       valid: false,
       reason: `Request timestamp in future (${-age}ms ahead)`,

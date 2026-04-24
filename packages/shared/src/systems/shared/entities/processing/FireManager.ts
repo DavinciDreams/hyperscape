@@ -7,7 +7,10 @@
  * @see https://oldschool.runescape.wiki/w/Firemaking
  */
 
-import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import {
+  getFireWalkPriority,
+  getMaxFiresPerPlayer,
+} from "../../../../data/live/processing-live";
 import type { PlayerID } from "../../../../types/core/identifiers";
 import type { TileCoord } from "../../movement/TileSystem";
 import type { Fire } from "./types";
@@ -74,10 +77,7 @@ export class FireManager {
 
     // Check player fire limit
     const playerFires = this.firesByPlayer.get(playerId);
-    if (
-      playerFires &&
-      playerFires.size >= PROCESSING_CONSTANTS.FIRE.maxFiresPerPlayer
-    ) {
+    if (playerFires && playerFires.size >= getMaxFiresPerPlayer()) {
       // Remove oldest fire to make room
       const oldestFireId = playerFires.values().next().value;
       if (oldestFireId) {
@@ -289,7 +289,7 @@ export class FireManager {
     playerTile: TileCoord,
     isWalkable: (tile: TileCoord) => boolean,
   ): TileCoord | null {
-    for (const direction of PROCESSING_CONSTANTS.FIRE_WALK_PRIORITY) {
+    for (const direction of getFireWalkPriority()) {
       const offset = DIRECTION_OFFSETS[direction];
       const targetTile: TileCoord = {
         x: playerTile.x + offset.x,

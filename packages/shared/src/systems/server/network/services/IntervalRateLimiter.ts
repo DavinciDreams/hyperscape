@@ -14,7 +14,7 @@
  * DIP: Implements IRateLimiter interface from shared.
  */
 
-import { TRANSACTION_RATE_LIMIT_MS } from "../../../../constants/interaction";
+import { getTransactionRateLimitMs } from "../../../../data/live/interaction-live";
 import type { IRateLimiter } from "../../../../types/interaction";
 
 /** @deprecated Use IntervalRateLimiter - kept for backwards compatibility */
@@ -23,7 +23,16 @@ export { IntervalRateLimiter as RateLimitService };
 export class IntervalRateLimiter implements IRateLimiter {
   private lastOperation = new Map<string, number>();
 
-  constructor(private readonly limitMs = TRANSACTION_RATE_LIMIT_MS) {}
+  /**
+   * Optional explicit override. When `undefined`, the limiter reads the
+   * live `interaction.transactionRateLimitMs` through the provider on every
+   * `isAllowed()` check so PIE manifest edits apply without restart.
+   */
+  constructor(private readonly limitMsOverride?: number) {}
+
+  private get limitMs(): number {
+    return this.limitMsOverride ?? getTransactionRateLimitMs();
+  }
 
   isAllowed(playerId: string): boolean {
     const now = Date.now();

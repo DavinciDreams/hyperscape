@@ -22,7 +22,10 @@ import {
 import type { PrayerBonuses } from "../../../types/game/prayer-types";
 import { getGameRng, SeededRandom } from "../../../utils/SeededRandom";
 import { calculateHitChance } from "../../../utils/game/CombatCalculations";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getDamageBaseConstant,
+  getEffectiveLevelConstant,
+} from "../../../data/live/combat-live";
 
 /**
  * Parameters for magic damage calculation
@@ -83,12 +86,10 @@ function calculateMagicAttackRoll(
   // Effective level = floor(magicLevel * prayerMultiplier) + styleBonus + EFFECTIVE_LEVEL_CONSTANT
   const boostedLevel = Math.floor(magicLevel * prayerMultiplier);
   const effectiveLevel =
-    boostedLevel +
-    styleBonus.attackBonus +
-    COMBAT_CONSTANTS.EFFECTIVE_LEVEL_CONSTANT;
+    boostedLevel + styleBonus.attackBonus + getEffectiveLevelConstant();
 
   // Attack roll = effectiveLevel * (equipmentBonus + BASE_CONSTANT)
-  return effectiveLevel * (magicAttackBonus + COMBAT_CONSTANTS.BASE_CONSTANT);
+  return effectiveLevel * (magicAttackBonus + getDamageBaseConstant());
 }
 
 /**
@@ -120,10 +121,7 @@ function calculatePlayerMagicDefenseRoll(
   );
 
   // Defense roll = effectiveDefense * (magicDefenseBonus + BASE_CONSTANT)
-  return (
-    effectiveDefense *
-    (targetMagicDefenseBonus + COMBAT_CONSTANTS.BASE_CONSTANT)
-  );
+  return effectiveDefense * (targetMagicDefenseBonus + getDamageBaseConstant());
 }
 
 /**
@@ -138,10 +136,7 @@ function calculateNpcMagicDefenseRoll(
   const effectiveDefense = targetMagicLevel + 9;
 
   // Defense roll = effectiveDefense * (magicDefenseBonus + BASE_CONSTANT)
-  return (
-    effectiveDefense *
-    (targetMagicDefenseBonus + COMBAT_CONSTANTS.BASE_CONSTANT)
-  );
+  return effectiveDefense * (targetMagicDefenseBonus + getDamageBaseConstant());
 }
 
 /**

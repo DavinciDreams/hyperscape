@@ -18,7 +18,7 @@
  * @see https://oldschool.runescape.wiki/w/Firemaking
  */
 
-import { PROCESSING_CONSTANTS } from "../../../../constants/ProcessingConstants";
+import { getProcessingRateLimitMs } from "../../../../data/live/processing-live";
 import type { PlayerID } from "../../../../types/core/identifiers";
 import type { TileCoord } from "../../movement/TileSystem";
 import { FireManager } from "./FireManager";
@@ -158,7 +158,7 @@ export class PendingFiremakingManager {
     // Rate limiting (anti-spam)
     const now = Date.now();
     const lastRequest = this.rateLimits.get(playerId);
-    if (lastRequest && now - lastRequest < PROCESSING_CONSTANTS.RATE_LIMIT_MS) {
+    if (lastRequest && now - lastRequest < getProcessingRateLimitMs()) {
       return; // Silently drop
     }
     this.rateLimits.set(playerId, now);

@@ -41,7 +41,12 @@ import {
   getStatsComponent,
   requireStatsComponent,
 } from "../../../utils/game/ComponentUtils";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getCombatXpPerDamage,
+  getControlledXpPerDamage,
+  getHitpointsXpPerDamage,
+} from "../../../data/live/combat-live";
+import { xpCurveRegistry } from "../../../progression/index.js";
 
 /** Skill name constants for type-safe skill references */
 export const Skill = {
@@ -294,6 +299,32 @@ export class SkillsSystem extends SystemBase {
     if (level > SkillsSystem.MAX_LEVEL)
       return this.xpTable[SkillsSystem.MAX_LEVEL];
     return this.xpTable[level];
+  }
+
+  /**
+   * Registry-backed XP lookup (opt-in consumer).
+   *
+   * Reads the authored `xp-curves.json` manifest via the canonical
+   * `xpCurveRegistry` (populated at boot by DataManager and live-mutated
+   * by PIEEditorSession). Falls back to the legacy hardcoded `xpTable`
+   * when the registry is unloaded or the curve id is unknown.
+   *
+   * This is intentionally a separate accessor rather than a swap of
+   * `getXPForLevel` — the legacy table is bit-identical to the
+   * `XPTable.sol` Solidity contract's 99 hardcoded values, and a silent
+   * swap would break that parity chain. New callers that want
+   * editor-hot-reloadable XP thresholds should use this method; legacy
+   * callers that must stay in lockstep with the contract keep using
+   * `getXPForLevel`.
+   */
+  public getXPForLevelFromRegistry(level: number, curveId: string): number {
+    if (level < 1) return 0;
+    if (xpCurveRegistry.isLoaded() && xpCurveRegistry.has(curveId)) {
+      const maxLevel = xpCurveRegistry.maxLevel(curveId);
+      const clamped = level > maxLevel ? maxLevel : level;
+      return xpCurveRegistry.xpForLevel(curveId, clamped);
+    }
+    return this.getXPForLevel(level);
   }
 
   /**
@@ -723,10 +754,8 @@ export class SkillsSystem extends SystemBase {
     // Use damageDealt (total damage by this player) or fallback to mob's max HP
     const totalDamage =
       damageDealt > 0 ? damageDealt : (targetStats.health?.max ?? 10);
-    const combatSkillXP =
-      totalDamage * COMBAT_CONSTANTS.XP.COMBAT_XP_PER_DAMAGE;
-    const hitpointsXP =
-      totalDamage * COMBAT_CONSTANTS.XP.HITPOINTS_XP_PER_DAMAGE;
+    const combatSkillXP = totalDamage * getCombatXpPerDamage();
+    const hitpointsXP = totalDamage * getHitpointsXpPerDamage();
 
     // Grant combat skill XP based on attack style
     // Each style trains ONE skill exclusively (except controlled)
@@ -761,8 +790,7 @@ export class SkillsSystem extends SystemBase {
       case "controlled": {
         // OSRS: Controlled gives 1.33 XP per damage to each of 4 skills
         // Total: 5.32 XP per damage (vs 5.33 for focused styles)
-        const controlledXP =
-          totalDamage * COMBAT_CONSTANTS.XP.CONTROLLED_XP_PER_DAMAGE;
+        const controlledXP = totalDamage * getControlledXpPerDamage();
         this.emitTypedEvent(EventType.SKILLS_XP_GAINED, {
           playerId: attackerId,
           skill: Skill.ATTACK,

@@ -29,15 +29,27 @@ import {
   FOOTPRINT_SIZES,
   type ResourceFootprint,
 } from "../../../types/game/resource-processing-types";
-import {
-  getExternalResource,
-  getExternalToolsForSkill,
-} from "../../../utils/ExternalAssetUtils";
+import { getExternalToolsForSkill } from "../../../utils/ExternalAssetUtils";
+import { gatheringResources } from "../../../gathering/index";
 import type { GatheringToolData } from "../../../data/DataManager";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
-import { GATHERING_CONSTANTS } from "../../../constants/GatheringConstants";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  getDefaultInteractionRange,
+  getFishingSpotMove,
+  getGatheringRateLimitMs,
+  getGatheringSkillMechanics,
+  getMaxResourceIdLength,
+  getPositionEpsilon,
+  getProximitySearchRadius,
+  getRateLimitCleanupIntervalMs,
+  getStaleRateLimitMs,
+  getTimerRegenPerTick,
+  getTreeDespawnTicks,
+  getValidResourceIdPattern,
+} from "../../../data/live/gathering-live";
+import { getWaterThreshold } from "../../../data/live/game-live";
 import { findFishingSpotTiles, shuffleArray } from "../../../utils/ShoreUtils";
 import type { WorldArea } from "../../../types/world/world-types";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
@@ -602,11 +614,11 @@ export class ResourceSystem extends SystemBase {
       this.createInterval(() => {
         const now = Date.now();
         for (const [playerId, timestamp] of this.gatherRateLimits) {
-          if (now - timestamp > GATHERING_CONSTANTS.STALE_RATE_LIMIT_MS) {
+          if (now - timestamp > getStaleRateLimitMs()) {
             this.gatherRateLimits.delete(playerId);
           }
         }
-      }, GATHERING_CONSTANTS.RATE_LIMIT_CLEANUP_INTERVAL_MS);
+      }, getRateLimitCleanupIntervalMs());
     }
   }
 
@@ -626,13 +638,15 @@ export class ResourceSystem extends SystemBase {
       ore: "ore",
     };
 
+    const effectiveAreas = getEffectiveWorldAreas();
     if (DEBUG_GATHERING) {
       console.log(
-        `[ResourceSystem] initializeWorldAreaResources() called. ALL_WORLD_AREAS keys: ${Object.keys(ALL_WORLD_AREAS).join(", ")}`,
+        `[ResourceSystem] initializeWorldAreaResources() called. world-area keys: ${effectiveAreas.map((a) => a.id).join(", ")}`,
       );
     }
 
-    for (const [areaId, area] of Object.entries(ALL_WORLD_AREAS)) {
+    for (const area of effectiveAreas) {
+      const areaId = area.id;
       const hasResources = area.resources && area.resources.length > 0;
       const hasFishing = area.fishing?.enabled;
       if (!hasResources && !hasFishing) continue;
@@ -644,12 +658,12 @@ export class ResourceSystem extends SystemBase {
 
       const spawnPoints: TerrainResourceSpawnPoint[] = [];
 
-      for (const r of area.resources) {
+      for (const r of area.resources ?? []) {
         // Look up resource in manifest to get authoritative type
-        const resourceData = getExternalResource(r.resourceId);
+        const resourceData = gatheringResources.findResource(r.resourceId);
         if (DEBUG_GATHERING) {
           console.log(
-            `[ResourceSystem] getExternalResource("${r.resourceId}") returned: ${resourceData ? resourceData.type : "null"}`,
+            `[ResourceSystem] gatheringResources.findResource("${r.resourceId}") returned: ${resourceData ? resourceData.type : "null"}`,
           );
         }
         if (!resourceData) {
@@ -699,7 +713,7 @@ export class ResourceSystem extends SystemBase {
 
       // Spawn dynamic fishing spots if configured for this area
       if (area.fishing?.enabled) {
-        this.spawnDynamicFishingSpots(areaId, area);
+        this.spawnDynamicFishingSpots(areaId, area as unknown as WorldArea);
       }
     }
   }
@@ -744,8 +758,8 @@ export class ResourceSystem extends SystemBase {
           lowestPoint = { x, z, h };
         }
         if (h > maxHeight) maxHeight = h;
-        if (h < TERRAIN_CONSTANTS.WATER_THRESHOLD) waterCount++;
-        if (h >= TERRAIN_CONSTANTS.WATER_THRESHOLD && h <= 20.0) shoreCount++;
+        if (h < getWaterThreshold()) waterCount++;
+        if (h >= getWaterThreshold() && h <= 20.0) shoreCount++;
       }
     }
 
@@ -759,7 +773,7 @@ export class ResourceSystem extends SystemBase {
         `[ResourceSystem] 🎣 Lowest point: (${lowestPoint.x},${lowestPoint.z})=${lowestPoint.h.toFixed(2)}m`,
       );
       console.log(
-        `[ResourceSystem] 🎣 Looking for: water < ${TERRAIN_CONSTANTS.WATER_THRESHOLD}m adjacent to shore ${TERRAIN_CONSTANTS.WATER_THRESHOLD}-20.0m`,
+        `[ResourceSystem] 🎣 Looking for: water < ${getWaterThreshold()}m adjacent to shore ${getWaterThreshold()}-20.0m`,
       );
     }
 
@@ -1188,7 +1202,7 @@ export class ResourceSystem extends SystemBase {
   private getModelPathForResource(type: string, subType?: string): string {
     // Build resource ID to look up in manifest
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       console.warn(
@@ -1211,7 +1225,7 @@ export class ResourceSystem extends SystemBase {
     subType?: string,
   ): string | null {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       console.warn(
@@ -1229,7 +1243,7 @@ export class ResourceSystem extends SystemBase {
    */
   private getScaleForResource(type: string, subType?: string): number {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       console.warn(
@@ -1250,7 +1264,7 @@ export class ResourceSystem extends SystemBase {
     subType?: string,
   ): string | null {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       console.warn(
@@ -1271,7 +1285,7 @@ export class ResourceSystem extends SystemBase {
     subType?: string,
   ): string | null {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       throw new Error(
@@ -1289,7 +1303,7 @@ export class ResourceSystem extends SystemBase {
    */
   private getDepletedScaleForResource(type: string, subType?: string): number {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       console.warn(
@@ -1310,7 +1324,7 @@ export class ResourceSystem extends SystemBase {
     subType?: string,
   ): string | undefined {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       // Don't throw - procgen is optional
@@ -1329,7 +1343,7 @@ export class ResourceSystem extends SystemBase {
     subType?: string,
   ): string[] | undefined {
     const variantKey = subType ? `${type}_${subType}` : `${type}_normal`;
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
     if (!manifestData?.modelVariants?.length) return undefined;
     return manifestData.modelVariants;
   }
@@ -1339,7 +1353,7 @@ export class ResourceSystem extends SystemBase {
    * Fails fast if manifest data not found
    */
   private getDropsFromManifest(variantKey: string): ResourceDrop[] {
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       console.warn(
@@ -1396,7 +1410,7 @@ export class ResourceSystem extends SystemBase {
 
     // Get manifest data - skip gracefully if not found (unknown species
     // from World Studio shouldn't kill the entire tile batch)
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
     if (!manifestData) {
       console.warn(
         `[ResourceSystem] No manifest entry for '${variantKey}', skipping resource at (${position.x.toFixed(0)}, ${position.z.toFixed(0)})`,
@@ -1531,7 +1545,7 @@ export class ResourceSystem extends SystemBase {
     // This allows normal spam clicking without punishment
     const now = Date.now();
     const lastAttempt = this.gatherRateLimits.get(playerId);
-    if (lastAttempt && now - lastAttempt < GATHERING_CONSTANTS.RATE_LIMIT_MS) {
+    if (lastAttempt && now - lastAttempt < getGatheringRateLimitMs()) {
       // Silently drop rapid requests (OSRS behavior - no punishment for spam clicking)
       return;
     }
@@ -1571,10 +1585,7 @@ export class ResourceSystem extends SystemBase {
           nearest = r;
         }
       }
-      if (
-        nearest &&
-        nearestDist < GATHERING_CONSTANTS.PROXIMITY_SEARCH_RADIUS
-      ) {
+      if (nearest && nearestDist < getProximitySearchRadius()) {
         console.warn(
           "[ResourceSystem] Matched nearest resource",
           nearest.id,
@@ -1932,10 +1943,9 @@ export class ResourceSystem extends SystemBase {
 
     // DEBUG: Log session start with OSRS mechanics details
     if (DEBUG_GATHERING) {
+      const skillMechanics = getGatheringSkillMechanics();
       const mechanics =
-        GATHERING_CONSTANTS.SKILL_MECHANICS[
-          resource.skillRequired as keyof typeof GATHERING_CONSTANTS.SKILL_MECHANICS
-        ];
+        skillMechanics[resource.skillRequired as keyof typeof skillMechanics];
       console.log(
         `[Gathering DEBUG] ═══════════════════════════════════════════════════════`,
       );
@@ -2229,8 +2239,7 @@ export class ResourceSystem extends SystemBase {
         const oldTicks = timer.currentTicks;
         timer.currentTicks = Math.max(
           0,
-          timer.currentTicks -
-            ticksDelta * GATHERING_CONSTANTS.TIMER_REGEN_PER_TICK,
+          timer.currentTicks - ticksDelta * getTimerRegenPerTick(),
         );
         if (oldTicks !== timer.currentTicks) {
           if (DEBUG_GATHERING) {
@@ -2248,8 +2257,7 @@ export class ResourceSystem extends SystemBase {
         const oldTicks = timer.currentTicks;
         timer.currentTicks = Math.min(
           timer.maxTicks,
-          timer.currentTicks +
-            ticksDelta * GATHERING_CONSTANTS.TIMER_REGEN_PER_TICK,
+          timer.currentTicks + ticksDelta * getTimerRegenPerTick(),
         );
 
         if (oldTicks !== timer.currentTicks) {
@@ -2464,7 +2472,7 @@ export class ResourceSystem extends SystemBase {
     position: { x: number; y: number; z: number },
   ): void {
     const currentTick = this.world.currentTick || 0;
-    const { baseTicks, varianceTicks } = GATHERING_CONSTANTS.FISHING_SPOT_MOVE;
+    const { baseTicks, varianceTicks } = getFishingSpotMove();
 
     // Random delay: baseTicks ± varianceTicks
     const randomVariance =
@@ -2708,7 +2716,7 @@ export class ResourceSystem extends SystemBase {
 
       // Check if player moved from their starting position (OSRS: any movement cancels)
       const startPos = session.cachedStartPosition;
-      const epsilon = GATHERING_CONSTANTS.POSITION_EPSILON;
+      const epsilon = getPositionEpsilon();
       const movedX = Math.abs(playerPos.x - startPos.x) > epsilon;
       const movedZ = Math.abs(playerPos.z - startPos.z) > epsilon;
 
@@ -2731,7 +2739,7 @@ export class ResourceSystem extends SystemBase {
       // Secondary check: still within interaction range (safety net)
       if (
         calculateDistance(playerPos, resource.position) >
-        GATHERING_CONSTANTS.DEFAULT_INTERACTION_RANGE
+        getDefaultInteractionRange()
       ) {
         this.emitTypedEvent(EventType.RESOURCE_GATHERING_STOPPED, {
           playerId: playerId,
@@ -2991,7 +2999,7 @@ export class ResourceSystem extends SystemBase {
     respawnTicks: number; // Respawn time in ticks
   } {
     // Load from manifest - fail fast if not found
-    const manifestData = getExternalResource(variantKey);
+    const manifestData = gatheringResources.findResource(variantKey);
 
     if (!manifestData) {
       throw new Error(
@@ -3090,11 +3098,11 @@ export class ResourceSystem extends SystemBase {
     if (!resourceId || typeof resourceId !== "string") {
       return false;
     }
-    if (resourceId.length > GATHERING_CONSTANTS.MAX_RESOURCE_ID_LENGTH) {
+    if (resourceId.length > getMaxResourceIdLength()) {
       return false;
     }
     // Only allow alphanumeric, underscores, hyphens, and periods
-    if (!GATHERING_CONSTANTS.VALID_RESOURCE_ID_PATTERN.test(resourceId)) {
+    if (!getValidResourceIdPattern().test(resourceId)) {
       return false;
     }
     return true;
@@ -3211,8 +3219,8 @@ export class ResourceSystem extends SystemBase {
     // Map subType to TREE_DESPAWN_TICKS key
     const treeType = subType === "normal" ? "tree" : subType;
     const despawnTicks =
-      GATHERING_CONSTANTS.TREE_DESPAWN_TICKS[
-        treeType as keyof typeof GATHERING_CONSTANTS.TREE_DESPAWN_TICKS
+      getTreeDespawnTicks()[
+        treeType as keyof ReturnType<typeof getTreeDespawnTicks>
       ];
 
     return despawnTicks ?? 0;

@@ -1,5 +1,6 @@
 import { ALL_NPCS, getNPCById } from "../../../data/npcs";
 import { ALL_WORLD_AREAS } from "../../../data/world-areas";
+import { getEffectiveWorldAreas } from "../../../world-areas";
 import { DataManager } from "../../../data/DataManager";
 import type { WorldJsonMobSpawn } from "../../../data/world-structure";
 import type {
@@ -17,7 +18,10 @@ import { EntityManager } from "./EntityManager";
 import { TerrainSystem } from "../world/TerrainSystem";
 import type { TownSystem } from "../world/TownSystem";
 import { MobEntity } from "../../../entities/npc/MobEntity";
-import { MOB_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  getMaxBanditMobsWorld,
+  isBanditMobForGlobalCap,
+} from "../../../data/live/game-live";
 
 // Types are now imported from shared type files
 
@@ -56,10 +60,6 @@ export class MobNPCSpawnerSystem extends SystemBase {
   private lastSpawnTime = 0;
   private readonly SPAWN_COOLDOWN = 5000; // 5 seconds between spawns
   private readonly BIOME_SPAWNS_PER_TILE = 3;
-
-  private static readonly banditCapIds = new Set<string>(
-    MOB_CONSTANTS.BANDIT_MOB_IDS_FOR_GLOBAL_CAP,
-  );
 
   constructor(world: World) {
     super(world, {
@@ -138,7 +138,8 @@ export class MobNPCSpawnerSystem extends SystemBase {
 
     const terrainSystem = this.terrainSystem;
 
-    for (const area of Object.values(ALL_WORLD_AREAS)) {
+    // Registry-prefer; falls back to in-tree ALL_WORLD_AREAS.
+    for (const area of getEffectiveWorldAreas()) {
       if (!area.npcs || area.npcs.length === 0) continue;
 
       for (const npc of area.npcs) {
@@ -430,7 +431,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
       if (entity.isDead()) {
         continue;
       }
-      if (MobNPCSpawnerSystem.banditCapIds.has(entity.getMobData().type)) {
+      if (isBanditMobForGlobalCap(entity.getMobData().type)) {
         count += 1;
       }
     }
@@ -461,10 +462,8 @@ export class MobNPCSpawnerSystem extends SystemBase {
       return;
     }
 
-    if (MobNPCSpawnerSystem.banditCapIds.has(mobData.id)) {
-      if (
-        this.countLiveBanditsWorldwide() >= MOB_CONSTANTS.MAX_BANDIT_MOBS_WORLD
-      ) {
+    if (isBanditMobForGlobalCap(mobData.id)) {
+      if (this.countLiveBanditsWorldwide() >= getMaxBanditMobsWorld()) {
         return;
       }
     }
@@ -726,11 +725,14 @@ export class MobNPCSpawnerSystem extends SystemBase {
       maxZ: (tileData.tileZ + 1) * TILE_SIZE,
     };
 
-    // Find which world areas overlap with this new tile
+    // Find which world areas overlap with this new tile.
+    // Registry-prefer; falls back to in-tree ALL_WORLD_AREAS.
     const overlappingAreas: Array<
       (typeof ALL_WORLD_AREAS)[keyof typeof ALL_WORLD_AREAS]
     > = [];
-    for (const area of Object.values(ALL_WORLD_AREAS)) {
+    for (const area of getEffectiveWorldAreas() as unknown as Array<
+      (typeof ALL_WORLD_AREAS)[keyof typeof ALL_WORLD_AREAS]
+    >) {
       const areaBounds = area.bounds;
       // Simple bounding box overlap check
       if (

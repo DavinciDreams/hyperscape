@@ -9,6 +9,7 @@ export * from "./InventoryInteractionSystem";
 export * from "./ProcessingSystem";
 export * from "./Physics";
 export * from "./DialogueSystem";
+export * from "./WorldDialogueConditionEvaluators";
 
 // Item Targeting System (for "Use X on Y" interactions)
 export * from "./ItemTargetingSystem";

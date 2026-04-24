@@ -9,6 +9,10 @@ import { SHOP_ITEMS, getItem } from "../../../data/items";
 import type { NPCLocation } from "../../../data/world-areas";
 import { ALL_WORLD_AREAS, STARTER_TOWNS } from "../../../data/world-areas";
 import {
+  getEffectiveWorldAreas,
+  worldAreasRegistry,
+} from "../../../world-areas";
+import {
   BankTransaction,
   PlayerBankStorage,
   Position3D,
@@ -543,7 +547,12 @@ export class NPCSystem extends SystemBase {
     const overlappingAreas: Array<
       (typeof ALL_WORLD_AREAS)[keyof typeof ALL_WORLD_AREAS]
     > = [];
-    for (const area of Object.values(ALL_WORLD_AREAS)) {
+    // Iterate registry-prefer; falls back to in-tree ALL_WORLD_AREAS.
+    // Cast bridges schema-derived WorldArea back to the in-tree
+    // type alias used by overlappingAreas / generateContentForTile.
+    for (const area of getEffectiveWorldAreas() as unknown as Array<
+      (typeof ALL_WORLD_AREAS)[keyof typeof ALL_WORLD_AREAS]
+    >) {
       const areaBounds = area.bounds;
       // Simple bounding box overlap check
       if (
@@ -611,7 +620,16 @@ export class NPCSystem extends SystemBase {
    * Get starter town configurations from world areas
    */
   private getStarterTownConfigs(): Town[] {
-    return Object.values(STARTER_TOWNS).map((area) => ({
+    // Registry-prefer; falls back to in-tree STARTER_TOWNS (today
+    // empty, so today the unloaded path returns []). When the
+    // registry is loaded, byCategory("starterTowns") returns the
+    // authored starter-town subset of the manifest.
+    const towns = worldAreasRegistry.isLoaded()
+      ? worldAreasRegistry.byCategory("starterTowns")
+      : (Object.values(STARTER_TOWNS) as unknown as ReturnType<
+          typeof worldAreasRegistry.byCategory
+        >);
+    return towns.map((area) => ({
       id: area.id,
       name: area.name,
       position: {
@@ -623,8 +641,8 @@ export class NPCSystem extends SystemBase {
         (area.bounds.maxX - area.bounds.minX) / 2,
         (area.bounds.maxZ - area.bounds.minZ) / 2,
       ),
-      hasBank: area.npcs.some((npc) => npc.type === "bank"),
-      hasStore: area.npcs.some((npc) => npc.type.includes("store")),
+      hasBank: (area.npcs ?? []).some((npc) => npc.type === "bank"),
+      hasStore: (area.npcs ?? []).some((npc) => npc.type.includes("store")),
       isRespawnPoint: area.safeZone || false,
     }));
   }

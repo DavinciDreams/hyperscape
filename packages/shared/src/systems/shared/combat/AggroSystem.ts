@@ -9,7 +9,10 @@
 
 import { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getDefaultNpcAggroRange,
+  getDefaultNpcLeashRange,
+} from "../../../data/live/combat-live";
 import { AggroTarget, Position3D, MobAIStateData } from "../../../types";
 import { calculateDistance } from "../../../utils/game/EntityUtils";
 import {
@@ -310,9 +313,8 @@ export class AggroSystem extends SystemBase {
     // Use manifest values with OSRS-accurate DEFAULTS as fallback
     // This replaces the legacy MOB_BEHAVIORS lookup pattern
     const detectionRange =
-      mobData.combat?.aggroRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.AGGRO_RANGE;
-    const leashRange =
-      mobData.combat?.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
+      mobData.combat?.aggroRange ?? getDefaultNpcAggroRange();
+    const leashRange = mobData.combat?.leashRange ?? getDefaultNpcLeashRange();
     const isAggressive = mobData.combat?.aggressive ?? false;
     const levelIgnoreThreshold = mobData.combat?.levelIgnoreThreshold ?? 10;
 

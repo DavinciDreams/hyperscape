@@ -21,6 +21,7 @@ import * as THREE from "../../extras/three/three";
 import { System } from "../shared/infrastructure/System";
 import { EventType } from "../../types/events";
 import { SKILL_ICONS } from "../../data/skill-icons";
+import { getEffectiveSkillIcon } from "../../skill-icons";
 import type { World } from "../../core/World";
 import type { WorldOptions } from "../../types/index";
 
@@ -176,7 +177,8 @@ export class XPDropSystem extends System {
     this.roundRect(context, 10, 80, 236, 96, 12);
     context.stroke();
 
-    const icon = SKILL_ICONS[skill.toLowerCase()] || "⭐";
+    // Registry-prefer; falls back to in-tree SKILL_ICONS / fallbackIcon.
+    const icon = getEffectiveSkillIcon(skill);
     context.fillStyle = textColor;
     context.font = "bold 48px Arial";
     context.textAlign = "center";

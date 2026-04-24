@@ -5,10 +5,20 @@
 import { EventType } from "../../../types/events";
 import type { World } from "../../../core/World";
 import {
-  COMBAT_CONSTANTS,
   WEAPON_DEFAULT_ATTACK_STYLE,
   type MeleeAttackStyle,
 } from "../../../constants/CombatConstants";
+import {
+  getAfkDisableRetaliateTicks,
+  getArrowLaunchDelayMs,
+  getCombatTimeoutTicks,
+  getDefaultMagicRange,
+  getDefaultNpcAttackSpeedTicks,
+  getDefaultRangedRange,
+  getHitDelayConfig,
+  getSpellLaunchDelayMs,
+  getTickDurationMs,
+} from "../../../data/live/combat-live";
 import { AttackType } from "../../../types/core/core";
 import { EntityID } from "../../../types/core/identifiers";
 import { MobEntity } from "../../../entities/npc/MobEntity";
@@ -1093,7 +1103,7 @@ export class CombatSystem extends SystemBase {
 
       const attackRange = Math.max(
         1,
-        Math.floor(npcData.combat.combatRange ?? COMBAT_CONSTANTS.RANGED_RANGE),
+        Math.floor(npcData.combat.combatRange ?? getDefaultRangedRange()),
       );
       const attackerPos = getEntityPosition(attacker);
       const targetPos = getEntityPosition(target);
@@ -1117,8 +1127,7 @@ export class CombatSystem extends SystemBase {
 
       const attackSpeedTicks = Math.max(
         1,
-        npcData.combat.attackSpeedTicks ??
-          COMBAT_CONSTANTS.DEFAULTS.NPC.ATTACK_SPEED_TICKS,
+        npcData.combat.attackSpeedTicks ?? getDefaultNpcAttackSpeedTicks(),
       );
 
       this.rotationManager.rotateTowardsTarget(
@@ -1156,7 +1165,8 @@ export class CombatSystem extends SystemBase {
 
       this.projectileService.createProjectile(projectileParams);
 
-      const { HIT_DELAY, TICK_DURATION_MS } = COMBAT_CONSTANTS;
+      const HIT_DELAY = getHitDelayConfig();
+      const TICK_DURATION_MS = getTickDurationMs();
       const rangedHitDelayTicks = Math.min(
         HIT_DELAY.MAX_HIT_DELAY,
         HIT_DELAY.RANGED_BASE +
@@ -1165,7 +1175,7 @@ export class CombatSystem extends SystemBase {
               HIT_DELAY.RANGED_DISTANCE_DIVISOR,
           ),
       );
-      const arrowLaunchDelayMs = COMBAT_CONSTANTS.ARROW_LAUNCH_DELAY_MS;
+      const arrowLaunchDelayMs = getArrowLaunchDelayMs();
       const travelDurationMs = Math.max(
         200,
         rangedHitDelayTicks * TICK_DURATION_MS - arrowLaunchDelayMs,
@@ -1387,7 +1397,7 @@ export class CombatSystem extends SystemBase {
 
       const attackRange = Math.max(
         1,
-        Math.floor(npcData.combat.combatRange ?? COMBAT_CONSTANTS.MAGIC_RANGE),
+        Math.floor(npcData.combat.combatRange ?? getDefaultMagicRange()),
       );
       const attackerPos = getEntityPosition(attacker);
       const targetPos = getEntityPosition(target);
@@ -1449,7 +1459,8 @@ export class CombatSystem extends SystemBase {
 
       this.projectileService.createProjectile(projectileParams);
 
-      const { HIT_DELAY, TICK_DURATION_MS } = COMBAT_CONSTANTS;
+      const HIT_DELAY = getHitDelayConfig();
+      const TICK_DURATION_MS = getTickDurationMs();
       const magicHitDelayTicks = Math.min(
         HIT_DELAY.MAX_HIT_DELAY,
         HIT_DELAY.MAGIC_BASE +
@@ -1458,7 +1469,7 @@ export class CombatSystem extends SystemBase {
               HIT_DELAY.MAGIC_DISTANCE_DIVISOR,
           ),
       );
-      const spellLaunchDelayMs = COMBAT_CONSTANTS.SPELL_LAUNCH_DELAY_MS;
+      const spellLaunchDelayMs = getSpellLaunchDelayMs();
       const travelDurationMs = Math.max(
         200,
         magicHitDelayTicks * TICK_DURATION_MS - spellLaunchDelayMs,
@@ -3011,9 +3022,7 @@ export class CombatSystem extends SystemBase {
    */
   public isAFKTooLong(playerId: string, currentTick: number): boolean {
     const lastInput = this.lastInputTick.get(playerId) ?? currentTick;
-    return (
-      currentTick - lastInput >= COMBAT_CONSTANTS.AFK_DISABLE_RETALIATE_TICKS
-    );
+    return currentTick - lastInput >= getAfkDisableRetaliateTicks();
   }
 
   /**
@@ -3414,8 +3423,7 @@ export class CombatSystem extends SystemBase {
 
     if (!inRange) {
       // Out of range - follow the target and extend combat timeout while pursuing
-      combatState.combatEndTick =
-        tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+      combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
 
       this.emitFollowTarget(
         attackerId,
@@ -3603,8 +3611,7 @@ export class CombatSystem extends SystemBase {
   ): void {
     combatState.lastAttackTick = tickNumber;
     combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
-    combatState.combatEndTick =
-      tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+    combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
     this.nextAttackTicks.set(typedAttackerId, combatState.nextAttackTick);
   }
 
@@ -3819,8 +3826,7 @@ export class CombatSystem extends SystemBase {
         .getCombatStatesMap()
         .get(typedAttackerId);
       if (freshState) {
-        freshState.combatEndTick =
-          tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
+        freshState.combatEndTick = tickNumber + getCombatTimeoutTicks();
         freshState.lastAttackTick = tickNumber;
       }
       return;

@@ -37,7 +37,10 @@ import { groundToTerrain } from "../../../utils/game/EntityUtils";
 import { getItem } from "../../../data/items";
 import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 import { msToTicks, ticksToMs } from "../../../utils/game/CombatCalculations";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  getGroundItemDespawnTicks,
+  getUntradeableDespawnTicks,
+} from "../../../data/live/combat-live";
 import { worldToTile, tileToWorld } from "../movement/TileSystem";
 import { SystemBase } from "../infrastructure/SystemBase";
 
@@ -194,7 +197,7 @@ export class GroundItemSystem extends SystemBase {
     // This overrides caller's despawnTime for untradeable items (OSRS-accurate behavior)
     const despawnTicks =
       item.tradeable === false
-        ? COMBAT_CONSTANTS.UNTRADEABLE_DESPAWN_TICKS // 300 ticks = 3 min (forced)
+        ? getUntradeableDespawnTicks() // 300 ticks = 3 min (forced)
         : msToTicks(options.despawnTime); // Use caller's value
 
     const lootProtectionTicks = options.lootProtection
@@ -521,8 +524,7 @@ export class GroundItemSystem extends SystemBase {
     if (!itemData) return;
 
     const ticksExisted =
-      currentTick -
-      (itemData.despawnTick - COMBAT_CONSTANTS.GROUND_ITEM_DESPAWN_TICKS);
+      currentTick - (itemData.despawnTick - getGroundItemDespawnTicks());
 
     console.log(
       `[GroundItemSystem] Item ${itemId} (${itemData.itemId}) despawning after ${ticksExisted} ticks (${(ticksToMs(ticksExisted) / 1000).toFixed(1)}s)`,

@@ -3,10 +3,12 @@
  * 64m grid, hysteresis for boundary stability, cached active chunks.
  */
 
+import { getWorldChunkSize } from "../../../data/live/game-live";
 import {
-  WORLD_CONSTANTS,
-  DISTANCE_CONSTANTS,
-} from "../../../constants/GameConstants";
+  getChunkActiveDistance,
+  getChunkActiveDistanceSq,
+  getChunkHysteresis,
+} from "../../../data/live/distance-live";
 
 type ChunkKey = string;
 
@@ -34,13 +36,18 @@ export interface ChunkStats {
 }
 
 export class SpatialEntityRegistry {
-  private readonly CHUNK_SIZE = WORLD_CONSTANTS.CHUNK_SIZE;
-  private readonly HYSTERESIS = DISTANCE_CONSTANTS.SIMULATION.CHUNK_HYSTERESIS;
-  private readonly ACTIVE_RADIUS_SQ =
-    DISTANCE_CONSTANTS.SIMULATION_SQ.CHUNK_ACTIVE;
-  private readonly ACTIVE_RADIUS = Math.sqrt(
-    DISTANCE_CONSTANTS.SIMULATION_SQ.CHUNK_ACTIVE,
-  );
+  private get CHUNK_SIZE(): number {
+    return getWorldChunkSize();
+  }
+  private get HYSTERESIS(): number {
+    return getChunkHysteresis();
+  }
+  private get ACTIVE_RADIUS_SQ(): number {
+    return getChunkActiveDistanceSq();
+  }
+  private get ACTIVE_RADIUS(): number {
+    return getChunkActiveDistance();
+  }
 
   private entityChunks = new Map<ChunkKey, Set<string>>();
   private entities = new Map<string, EntityRegistration>();

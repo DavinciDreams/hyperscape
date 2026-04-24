@@ -26,7 +26,12 @@ import { v4 as uuidv4 } from "uuid";
 import type { World } from "../../../core/World";
 import { EventType } from "../../../types/events";
 import {
-  TRADE_CONSTANTS,
+  getActivityTimeoutMs,
+  getMaxTradeSlots,
+  getRequestCooldownMs,
+  getRequestTimeoutMs,
+} from "../../../data/live/trading-live";
+import {
   type TradeSession,
   type TradeParticipant,
   type TradeOfferItem,
@@ -235,10 +240,7 @@ export class TradingSystem {
     const cooldownKey = `${initiatorId}:${recipientId}`;
     const lastRequest = this.requestCooldowns.get(cooldownKey);
     const now = Date.now();
-    if (
-      lastRequest &&
-      now - lastRequest < TRADE_CONSTANTS.REQUEST_COOLDOWN_MS
-    ) {
+    if (lastRequest && now - lastRequest < getRequestCooldownMs()) {
       return {
         success: false,
         error: "Please wait before requesting again",
@@ -266,7 +268,7 @@ export class TradingSystem {
         accepted: false,
       },
       createdAt: now,
-      expiresAt: now + TRADE_CONSTANTS.REQUEST_TIMEOUT_MS,
+      expiresAt: now + getRequestTimeoutMs(),
       lastActivityAt: now,
     };
 
@@ -369,7 +371,7 @@ export class TradingSystem {
     session.recipient.playerName = recipientName;
     session.recipient.socketId = recipientSocketId;
     session.lastActivityAt = Date.now();
-    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+    session.expiresAt = Date.now() + getActivityTimeoutMs();
 
     // Map recipient to this trade
     this.playerTrades.set(createPlayerID(recipientId), tradeId);
@@ -457,7 +459,7 @@ export class TradingSystem {
       participant.offeredItems[existingIndex].quantity = quantity;
     } else {
       // Check trade slot limit
-      if (participant.offeredItems.length >= TRADE_CONSTANTS.MAX_TRADE_SLOTS) {
+      if (participant.offeredItems.length >= getMaxTradeSlots()) {
         return {
           success: false,
           error: "Trade offer is full",
@@ -470,10 +472,7 @@ export class TradingSystem {
         participant.offeredItems.map((i) => i.tradeSlot),
       );
       let tradeSlot = 0;
-      while (
-        usedSlots.has(tradeSlot) &&
-        tradeSlot < TRADE_CONSTANTS.MAX_TRADE_SLOTS
-      ) {
+      while (usedSlots.has(tradeSlot) && tradeSlot < getMaxTradeSlots()) {
         tradeSlot++;
       }
 
@@ -491,7 +490,7 @@ export class TradingSystem {
 
     // Update activity timestamp
     session.lastActivityAt = Date.now();
-    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+    session.expiresAt = Date.now() + getActivityTimeoutMs();
 
     // Audit log
     this.logTradeAudit("ADD_ITEM", tradeId, {
@@ -553,7 +552,7 @@ export class TradingSystem {
 
     // Update activity timestamp
     session.lastActivityAt = Date.now();
-    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+    session.expiresAt = Date.now() + getActivityTimeoutMs();
 
     // Audit log
     this.logTradeAudit("REMOVE_ITEM", tradeId, {
@@ -608,7 +607,7 @@ export class TradingSystem {
 
     // Update activity timestamp
     session.lastActivityAt = Date.now();
-    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+    session.expiresAt = Date.now() + getActivityTimeoutMs();
 
     // Check if both players have accepted
     const bothAccepted =
@@ -652,7 +651,7 @@ export class TradingSystem {
 
     // Update activity timestamp
     session.lastActivityAt = Date.now();
-    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+    session.expiresAt = Date.now() + getActivityTimeoutMs();
 
     return { success: true };
   }
@@ -681,7 +680,7 @@ export class TradingSystem {
 
     // Update activity timestamp
     session.lastActivityAt = Date.now();
-    session.expiresAt = Date.now() + TRADE_CONSTANTS.ACTIVITY_TIMEOUT_MS;
+    session.expiresAt = Date.now() + getActivityTimeoutMs();
 
     return { success: true };
   }
