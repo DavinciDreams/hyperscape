@@ -23,6 +23,8 @@ import {
   type AmmunitionManifest,
 } from "@hyperforge/manifest-schema";
 
+import { ammunitionRegistry } from "../ammunition/index.js";
+
 import ammunitionManifestJson from "./ammunition.json" with { type: "json" };
 
 export interface ArrowData {
@@ -65,6 +67,13 @@ function rebuildAmmunition(manifest: AmmunitionManifest): void {
       requiredBowTier: entry.requiredBowTier,
     };
   }
+  // Mirror into the runtime ammunitionRegistry so future ranged-combat
+  // consumers (shot-gate dispatcher, arrow-tier UI) hit the registry-
+  // prefer branch in production. No system reads through the registry
+  // yet (greenfield consumer queue), but landing the boot-load
+  // alongside the legacy maps means the wiring is ready when consumers
+  // arrive — no follow-up DataManager change required.
+  ammunitionRegistry.load(manifest);
 }
 
 // Initial load — module-level parse + rebuild. Happens once on import.

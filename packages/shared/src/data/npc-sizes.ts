@@ -22,6 +22,8 @@ import {
   type NPCSizesManifest,
 } from "@hyperforge/manifest-schema";
 
+import { npcSizesRegistry } from "../npc-sizes/index.js";
+
 import npcSizesManifestJson from "./npc-sizes.json" with { type: "json" };
 
 export interface NPCSize {
@@ -39,6 +41,10 @@ function rebuildNPCSizes(manifest: NPCSizesManifest): void {
   for (const [npcId, size] of Object.entries(manifest.sizes)) {
     NPC_SIZES[npcId] = { width: size.width, depth: size.depth };
   }
+  // Mirror into the runtime npcSizesRegistry so RangeSystem.getNPCSize
+  // and LargeNPCSupport.getNPCSize hit the registry-prefer branch in
+  // production — not just after a PIE edit.
+  npcSizesRegistry.load(manifest);
 }
 
 // Initial load — module-level parse + rebuild. Happens once on import.
