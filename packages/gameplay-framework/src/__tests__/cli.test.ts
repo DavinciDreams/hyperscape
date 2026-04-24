@@ -1886,3 +1886,304 @@ describe("runCli — publish subcommand", () => {
     expect(out.startsWith("{")).toBe(true);
   });
 });
+
+describe("runCli — install subcommand", () => {
+  function validBundle(id: string, version: string) {
+    return {
+      manifest: {
+        id,
+        name: id,
+        version,
+        description: "test plugin",
+        entry: "./dist/index.js",
+        author: { name: "test" },
+        hyperforgeApi: "0.1.0",
+        dependencies: [],
+        loadAfter: [],
+        enabledByDefault: false,
+        contributions: {
+          systems: [],
+          entities: [],
+          widgets: [],
+          manifestSchemas: [],
+          paletteCategories: [],
+          toolbarTools: [],
+          commands: [],
+        },
+        tags: [],
+      },
+      manifestHash: "a".repeat(64),
+      files: [{ path: "index.js", size: 10, sha256: "b".repeat(64) }],
+      totalSize: 10,
+      bundleHash: "c".repeat(64),
+    };
+  }
+
+  function registryResponse(opts: {
+    id: string;
+    version: string;
+    bundleOverrides?: Partial<ReturnType<typeof validBundle>>;
+  }) {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        registryId: "reg_x",
+        id: opts.id,
+        version: opts.version,
+        publishedAt: "2026-04-24T10:00:00.000Z",
+        bundle: {
+          ...validBundle(opts.id, opts.version),
+          ...opts.bundleOverrides,
+        },
+      }),
+      {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+      },
+    );
+  }
+
+  it("install with no spec → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["install"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("missing <id>@<version> argument");
+  });
+
+  it("install with spec missing @ → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(
+      ["install", "no-at-here", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(2);
+    expect(stderr()).toContain("must be <id>@<version>");
+  });
+
+  it("install with no --registry → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(["install", "com.x@1.0.0"], io);
+    expect(code).toBe(2);
+    expect(stderr()).toContain("--registry <url> is required");
+  });
+
+  it("install with unknown flag → exit 2", async () => {
+    const { io, stderr } = mkIO();
+    const code = await runCli(
+      ["install", "com.x@1.0.0", "--registry", "http://r", "--gibberish"],
+      io,
+    );
+    expect(code).toBe(2);
+    expect(stderr()).toContain("Unknown flag: --gibberish");
+  });
+
+  it("install fetches the right URL with optional auth", async () => {
+    const requests: Array<{ url: string; headers: Record<string, string> }> =
+      [];
+    const { io } = mkIO({
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          headers: (init?.headers as Record<string, string>) ?? {},
+        });
+        return registryResponse({ id: "com.test.x", version: "1.0.0" });
+      },
+    });
+    const code = await runCli(
+      [
+        "install",
+        "com.test.x@1.0.0",
+        "--registry",
+        "https://r.example.com",
+        "--token",
+        "tok-abc",
+      ],
+      io,
+    );
+    expect(code).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe(
+      "https://r.example.com/api/plugins/registry/com.test.x/1.0.0",
+    );
+    expect(requests[0]!.headers.authorization).toBe("Bearer tok-abc");
+  });
+
+  it("install with successful 200 → prints verified bundle as JSON", async () => {
+    const { io, stdout } = mkIO({
+      fetch: async () =>
+        registryResponse({ id: "com.test.x", version: "1.0.0" }),
+    });
+    const code = await runCli(
+      ["install", "com.test.x@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout()) as {
+      manifest: { id: string };
+      manifestHash: string;
+      bundleHash: string;
+    };
+    expect(parsed.manifest.id).toBe("com.test.x");
+    expect(parsed.manifestHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(parsed.bundleHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("install with --out writes plugin.json + bundle.json to <out>/<id>-<version>/", async () => {
+    const { io, stdout, writes, mkdirs } = mkIO({
+      fetch: async () =>
+        registryResponse({ id: "com.test.x", version: "1.0.0" }),
+    });
+    const code = await runCli(
+      [
+        "install",
+        "com.test.x@1.0.0",
+        "--registry",
+        "http://r",
+        "--out",
+        "/installed",
+      ],
+      io,
+    );
+    expect(code).toBe(0);
+    expect(stdout()).toContain("✓ Installed com.test.x@1.0.0");
+    expect(stdout()).toContain("manifestHash:");
+    expect(stdout()).toContain("bundleHash:");
+    expect(stdout()).toContain("File bytes NOT downloaded");
+    expect(mkdirs()).toContain("/installed/com.test.x-1.0.0");
+    const pluginJsonContent = writes().get(
+      "/installed/com.test.x-1.0.0/plugin.json",
+    );
+    expect(pluginJsonContent).toBeDefined();
+    const parsedManifest = JSON.parse(pluginJsonContent!) as { id: string };
+    expect(parsedManifest.id).toBe("com.test.x");
+    const bundleJsonContent = writes().get(
+      "/installed/com.test.x-1.0.0/bundle.json",
+    );
+    expect(bundleJsonContent).toBeDefined();
+  });
+
+  it("install rejects registry returning the wrong record (id mismatch)", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async () =>
+        registryResponse({ id: "com.evil.swapped", version: "1.0.0" }),
+    });
+    const code = await runCli(
+      ["install", "com.test.x@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain(
+      "registry returned com.evil.swapped@1.0.0, requested com.test.x@1.0.0",
+    );
+  });
+
+  it("install rejects bundle missing required fields", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            registryId: "reg",
+            bundle: { manifest: { id: "x" } },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    const code = await runCli(
+      ["install", "x@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("missing required field");
+  });
+
+  it("install rejects bundle with manifest that fails schema validation", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            bundle: {
+              manifest: { id: "no-version" },
+              manifestHash: "x",
+              files: [],
+              totalSize: 0,
+              bundleHash: "y",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    const code = await runCli(
+      ["install", "no-version@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("failed PluginManifestSchema validation");
+  });
+
+  it("install with 404 → exit 1 with helpful stderr", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async () =>
+        new Response(JSON.stringify({ ok: false, error: "not in registry" }), {
+          status: 404,
+          statusText: "Not Found",
+        }),
+    });
+    const code = await runCli(
+      ["install", "com.test.x@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("returned 404");
+  });
+
+  it("install with network error → exit 1 with stderr", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async () => {
+        throw new Error("ECONNREFUSED 127.0.0.1:9999");
+      },
+    });
+    const code = await runCli(
+      ["install", "com.test.x@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("network error");
+    expect(stderr()).toContain("ECONNREFUSED");
+  });
+
+  it("install with non-JSON response → exit 1", async () => {
+    const { io, stderr } = mkIO({
+      fetch: async () =>
+        new Response("not json", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        }),
+    });
+    const code = await runCli(
+      ["install", "com.test.x@1.0.0", "--registry", "http://r"],
+      io,
+    );
+    expect(code).toBe(1);
+    expect(stderr()).toContain("not valid JSON");
+  });
+
+  it("trailing slash on --registry is normalized", async () => {
+    const requests: Array<{ url: string }> = [];
+    const { io } = mkIO({
+      fetch: async (input) => {
+        requests.push({ url: String(input) });
+        return registryResponse({ id: "com.test.x", version: "1.0.0" });
+      },
+    });
+    await runCli(
+      ["install", "com.test.x@1.0.0", "--registry", "http://r.example.com/"],
+      io,
+    );
+    expect(requests[0]!.url).toBe(
+      "http://r.example.com/api/plugins/registry/com.test.x/1.0.0",
+    );
+  });
+});

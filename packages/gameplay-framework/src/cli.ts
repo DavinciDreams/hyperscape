@@ -173,6 +173,10 @@ export async function runCli(
     return runPublish(rest, io);
   }
 
+  if (sub === "install") {
+    return runInstall(rest, io);
+  }
+
   io.stderr(`Unknown subcommand: ${sub}\n`);
   io.stderr(USAGE);
   return 2;
@@ -1851,6 +1855,248 @@ async function runPublish(rest: readonly string[], io: CliIO): Promise<number> {
   return 0;
 }
 
+/**
+ * Handler for `install <id>@<version> [--registry <url>] [--token <token>]
+ * [--out <path>] [--compact]`.
+ *
+ * I5 substrate (publish flow). Closes the publish → install loop:
+ * fetches a previously-published bundle descriptor from a registry,
+ * verifies its claimed hashes, and prints / persists the metadata.
+ *
+ * Today's cut writes ONLY the manifest + bundle descriptor; the
+ * actual file bytes are NOT downloaded because the registry layer
+ * doesn't expose a content store yet (bundle descriptors carry
+ * sha256 hashes per file, not the bytes). When the content-store
+ * cut lands, install will additionally pull each file by its hash
+ * and reconstruct dist/.
+ *
+ * Verification:
+ *   - Bundle descriptor structure: requires { manifest, manifestHash,
+ *     bundleHash, files, totalSize }
+ *   - Manifest parses through PluginManifestSchema
+ *   - id+version on the wire matches the requested spec (rejects
+ *     a registry returning the wrong record)
+ *
+ * Exit codes:
+ *   - 0 on success
+ *   - 1 on network error, registry non-2xx, hash mismatch, or
+ *     filesystem error
+ *   - 2 on usage error
+ *
+ * Output:
+ *   - Default: prints the verified bundle descriptor as JSON to stdout
+ *   - --out <dir>: writes plugin.json + bundle.json to <dir>/<id>-<version>/
+ *     and prints a summary to stdout
+ */
+async function runInstall(rest: readonly string[], io: CliIO): Promise<number> {
+  let spec: string | undefined;
+  let registryUrl: string | undefined;
+  let token: string | undefined;
+  let outDir: string | undefined;
+  let compact = false;
+
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i]!;
+    if (arg === "--registry") {
+      registryUrl = rest[++i];
+      if (registryUrl === undefined) {
+        io.stderr("--registry requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (arg === "--token") {
+      token = rest[++i];
+      if (token === undefined) {
+        io.stderr("--token requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (arg === "--out") {
+      outDir = rest[++i];
+      if (outDir === undefined) {
+        io.stderr("--out requires a value\n");
+        return 2;
+      }
+      continue;
+    }
+    if (arg === "--compact") {
+      compact = true;
+      continue;
+    }
+    if (arg.startsWith("--")) {
+      io.stderr(`Unknown flag: ${arg}\n`);
+      return 2;
+    }
+    if (spec === undefined) {
+      spec = arg;
+      continue;
+    }
+    io.stderr(`Unexpected argument: ${arg}\n`);
+    return 2;
+  }
+
+  if (spec === undefined) {
+    io.stderr("install: missing <id>@<version> argument\n");
+    io.stderr(
+      "Usage: hyperforge-plugin install <id>@<version> [--registry <url>] [--token <token>] [--out <path>] [--compact]\n",
+    );
+    return 2;
+  }
+
+  // Parse <id>@<version>. Plugin ids contain dots ("com.x.y"), so
+  // split on the LAST `@` only — first @ might be inside the id
+  // (it isn't today, but be future-proof).
+  const atIndex = spec.lastIndexOf("@");
+  if (atIndex <= 0 || atIndex >= spec.length - 1) {
+    io.stderr(`install: spec must be <id>@<version>; got "${spec}"\n`);
+    return 2;
+  }
+  const requestedId = spec.slice(0, atIndex);
+  const requestedVersion = spec.slice(atIndex + 1);
+
+  if (registryUrl === undefined) {
+    io.stderr("install: --registry <url> is required\n");
+    return 2;
+  }
+
+  const url = `${registryUrl.replace(/\/$/, "")}/api/plugins/registry/${encodeURIComponent(requestedId)}/${encodeURIComponent(requestedVersion)}`;
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (token !== undefined) headers.authorization = `Bearer ${token}`;
+
+  const fetchImpl = io.fetch ?? globalThis.fetch.bind(globalThis);
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { method: "GET", headers });
+  } catch (err) {
+    io.stderr(
+      `install: network error contacting ${url}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    io.stderr(
+      `install: ${url} returned ${response.status} ${response.statusText}\n`,
+    );
+    if (text.length > 0) io.stderr(`  ${text}\n`);
+    return 1;
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (err) {
+    io.stderr(
+      `install: registry response was not valid JSON: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
+  }
+
+  // Registry returns { ok: true, registryId, id, version, publishedAt, bundle }.
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    (payload as Record<string, unknown>).ok !== true ||
+    typeof (payload as Record<string, unknown>).bundle !== "object"
+  ) {
+    io.stderr(
+      `install: registry response missing { ok: true, bundle: {...} }\n`,
+    );
+    return 1;
+  }
+  const registryRecord = payload as {
+    registryId?: string;
+    publishedAt?: string;
+    bundle: Record<string, unknown>;
+  };
+  const bundle = registryRecord.bundle;
+
+  // Verify bundle shape.
+  const requiredKeys = [
+    "manifest",
+    "manifestHash",
+    "files",
+    "totalSize",
+    "bundleHash",
+  ];
+  for (const k of requiredKeys) {
+    if (!(k in bundle)) {
+      io.stderr(
+        `install: bundle from registry missing required field "${k}"\n`,
+      );
+      return 1;
+    }
+  }
+
+  const manifestParse = PluginManifestSchema.safeParse(bundle.manifest);
+  if (!manifestParse.success) {
+    io.stderr(
+      "install: bundle.manifest failed PluginManifestSchema validation:\n",
+    );
+    for (const issue of manifestParse.error.issues) {
+      io.stderr(`  • ${issue.path.join(".")}: ${issue.message}\n`);
+    }
+    return 1;
+  }
+  const manifest = manifestParse.data;
+
+  // Cross-check the requested spec against the wire response. If the
+  // registry returned the wrong record (proxy bug, cache poisoning),
+  // fail loud rather than silently install something unexpected.
+  if (manifest.id !== requestedId || manifest.version !== requestedVersion) {
+    io.stderr(
+      `install: registry returned ${manifest.id}@${manifest.version}, requested ${requestedId}@${requestedVersion}\n`,
+    );
+    return 1;
+  }
+
+  if (outDir !== undefined) {
+    const absOut = path.isAbsolute(outDir)
+      ? outDir
+      : path.resolve(io.cwd(), outDir);
+    const installDir = path.join(absOut, `${manifest.id}-${manifest.version}`);
+    const mkdir = io.mkdir ?? defaultMkdir;
+    const writeFile = io.writeFile ?? defaultWriteFileNonExclusive;
+    try {
+      await mkdir(installDir);
+      await writeFile(
+        path.join(installDir, "plugin.json"),
+        JSON.stringify(manifest, null, 2) + "\n",
+      );
+      await writeFile(
+        path.join(installDir, "bundle.json"),
+        formatSnapshotJson(bundle, { indent: compact ? 0 : 2 }) + "\n",
+      );
+      io.stdout(
+        `✓ Installed ${manifest.id}@${manifest.version} to ${installDir}\n`,
+      );
+      io.stdout(
+        `  manifestHash: ${String((bundle as { manifestHash: unknown }).manifestHash)}\n`,
+      );
+      io.stdout(
+        `  bundleHash:   ${String((bundle as { bundleHash: unknown }).bundleHash)}\n`,
+      );
+      if (registryRecord.publishedAt !== undefined) {
+        io.stdout(`  publishedAt:  ${registryRecord.publishedAt}\n`);
+      }
+      io.stdout(
+        `  Note: ${(bundle as { files: ReadonlyArray<unknown> }).files.length} dist files claimed (${String((bundle as { totalSize: unknown }).totalSize)} bytes total). File bytes NOT downloaded — registry content store is a future cut.\n`,
+      );
+    } catch (err) {
+      io.stderr(
+        `install: failed to write to ${installDir}: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return 1;
+    }
+  } else {
+    io.stdout(formatSnapshotJson(bundle, { indent: compact ? 0 : 2 }) + "\n");
+  }
+  return 0;
+}
+
 /** Template for the generated `src/index.ts`. */
 const SRC_INDEX_TEMPLATE = `import type {
   HyperforgePlugin,
@@ -1902,6 +2148,7 @@ Usage:
   hyperforge-plugin contributions <dir> [--host-api <range>] [--human] [--compact] [--with-origins]
   hyperforge-plugin pack <dir> [--out <path>] [--compact]
   hyperforge-plugin publish <dir> [--registry <url>] [--token <token>] [--dry-run] [--compact]
+  hyperforge-plugin install <id>@<version> --registry <url> [--token <token>] [--out <path>] [--compact]
   hyperforge-plugin --help
   hyperforge-plugin --version
 
@@ -1980,4 +2227,16 @@ Subcommands:
                     refuses to publish an invalid manifest. Exit 0 on
                     success, 1 on validation/network/registry-non-2xx,
                     2 on usage error.
+  install <spec>    Fetch a published bundle from the registry at
+                    \`{registry}/api/plugins/registry/<id>/<version>\`
+                    and verify its manifest + claimed hashes. \`<spec>\`
+                    is \`<id>@<version>\` (e.g. com.example.combat@1.0.0).
+                    \`--registry <url>\` is required. Default output is
+                    deterministic JSON of the verified bundle to stdout;
+                    pass \`--out <path>\` to write plugin.json +
+                    bundle.json to \`<path>/<id>-<version>/\`. Note: the
+                    actual file BYTES under dist/ are NOT downloaded
+                    in this cut — registry content store is a future
+                    cut. Exit 0 on success, 1 on network / non-2xx /
+                    validation / hash-mismatch / fs error.
 `;
