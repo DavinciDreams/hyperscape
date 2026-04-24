@@ -101,6 +101,19 @@ describe("client plugin boot — bilateral system registration", () => {
   });
 });
 
+describe("resolveGamePluginSetIdFromEnv — fallback order", () => {
+  it("returns default 'hyperscape' when env var is unset and no localStorage preference exists", async () => {
+    const { resolveGamePluginSetIdFromEnv } =
+      await import("../../src/startup/plugins");
+    // The Vite env var is not set in tests, and the test environment
+    // doesn't expose a real localStorage — so the function's
+    // `typeof window`/`try-catch` guards kick in and we get the
+    // default "hyperscape" string. Proves no-crash when neither
+    // input source is available.
+    expect(resolveGamePluginSetIdFromEnv()).toBe("hyperscape");
+  });
+});
+
 describe("client plugin boot — alternate game id (shooter-demo)", () => {
   it('bootClientPlugins(world, "shooter-demo") loads combat + shooter-demo only', async () => {
     const world = createRecordingWorld({ isServer: false });

@@ -77,20 +77,48 @@ function getSkillsService(): SkillsService {
  */
 export type GamePluginSetId = "hyperscape" | "shooter-demo";
 
+/** localStorage key the editor's game selector writes to. */
+export const GAME_PLUGIN_LOCAL_STORAGE_KEY = "hyperscape:game-plugin";
+
+function isKnownGamePluginSetId(raw: unknown): raw is GamePluginSetId {
+  return raw === "hyperscape" || raw === "shooter-demo";
+}
+
 /**
- * Resolve which game plugin set the client should boot. Reads
- * `VITE_HYPERSCAPE_GAME_PLUGIN` at runtime; defaults to
- * "hyperscape". The `VITE_` prefix is required for the variable
- * to be exposed in the browser bundle.
+ * Resolve which game plugin set the client should boot. Lookup
+ * order (first match wins):
+ *
+ *   1. `VITE_HYPERSCAPE_GAME_PLUGIN` env var (build-time flag,
+ *      good for CI / preview deploys).
+ *   2. `localStorage["hyperscape:game-plugin"]` (runtime preference
+ *      — what the editor's in-toolbar GameSelector writes to).
+ *   3. Default: `"hyperscape"`.
+ *
+ * Unknown / malformed values at any level fall through to the
+ * next check so a bad env var can't brick the client boot.
  */
 export function resolveGamePluginSetIdFromEnv(): GamePluginSetId {
-  const raw =
+  // 1. Env var (build-time — Vite exposes VITE_* in the bundle).
+  const envRaw =
     typeof import.meta.env === "object"
       ? (import.meta.env as Record<string, string | undefined>)[
           "VITE_HYPERSCAPE_GAME_PLUGIN"
         ]
       : undefined;
-  if (raw === "shooter-demo") return "shooter-demo";
+  if (isKnownGamePluginSetId(envRaw)) return envRaw;
+
+  // 2. localStorage (runtime, editor-set). Guarded for SSR / non-
+  //    browser contexts where `window` might not exist.
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const lsRaw = window.localStorage.getItem(GAME_PLUGIN_LOCAL_STORAGE_KEY);
+      if (isKnownGamePluginSetId(lsRaw)) return lsRaw;
+    }
+  } catch {
+    // localStorage access can throw when cookies/storage are
+    // disabled. Fall through to default silently.
+  }
+
   return "hyperscape";
 }
 

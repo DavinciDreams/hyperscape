@@ -38,6 +38,7 @@ import React, { useState, useEffect } from "react";
 
 import { commandHistory } from "../../../editor/commands";
 import { useWorldStudio, type StudioToolMode } from "../WorldStudioContext";
+import { GameSelector } from "./GameSelector";
 import { useZoneAutoGen } from "../hooks/useZoneAutoGen";
 import {
   GenerationWizardDialog,
@@ -378,6 +379,12 @@ export function MainToolbar({
             </button>
           </div>
         )}
+
+        {/* Game plugin selector — picks which plugin set the next
+            Play-In-Editor session will boot (hyperscape / shooter-demo).
+            Hidden while PIE is active because switching mid-session
+            would be confusing; Stop first, then change. */}
+        {!state.pie.active && <GameSelector />}
 
         {/* Play-In-Editor button */}
         {state.pie.active ? (
