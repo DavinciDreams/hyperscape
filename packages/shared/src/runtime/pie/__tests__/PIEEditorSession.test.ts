@@ -5151,4 +5151,64 @@ describe("PIEEditorSession", () => {
       );
     },
   );
+
+  it(
+    "updateManifests({ npcDefinitions }) hot-reloads npcDefinitionsRegistry without Stop/Play",
+    { timeout: LONG_TIMEOUT_MS },
+    async () => {
+      const { npcDefinitionsRegistry } =
+        await import("../../../npc-definitions");
+      const { getNPCById } = await import("../../../data/npcs");
+
+      session = new PIEEditorSession();
+      await session.start({});
+
+      // Reset registry to baseline so we're not piggy-backing on
+      // whatever DataManager loaded during start().
+      npcDefinitionsRegistry._unloadForTests();
+      expect(npcDefinitionsRegistry.isLoaded()).toBe(false);
+
+      // Push an authored NPC catalog through PIE.
+      session.updateManifests({
+        npcDefinitions: [
+          {
+            id: "tee-npc",
+            name: "Tee NPC",
+            category: "mob",
+            faction: "monster",
+            stats: {
+              level: 5,
+              health: 10,
+              attack: 3,
+              strength: 3,
+              defense: 3,
+              defenseBonus: 0,
+              ranged: 1,
+              magic: 1,
+            },
+            combat: {
+              attackable: true,
+              aggressive: true,
+              attackSpeedTicks: 4,
+            },
+          },
+        ],
+      });
+
+      // Registry now loaded with authored data.
+      expect(npcDefinitionsRegistry.isLoaded()).toBe(true);
+      expect(npcDefinitionsRegistry.size).toBe(1);
+      expect(npcDefinitionsRegistry.find("tee-npc")?.name).toBe("Tee NPC");
+
+      // Critical end-to-end proof: getNPCById (the consumer-facing
+      // wrapper used by ~10 systems) routes through the registry
+      // when loaded.
+      const fromConsumer = getNPCById("tee-npc");
+      expect(fromConsumer).not.toBeNull();
+      expect(fromConsumer?.name).toBe("Tee NPC");
+
+      // Cleanup: restore baseline so other tests aren't affected.
+      npcDefinitionsRegistry._unloadForTests();
+    },
+  );
 });

@@ -298,6 +298,7 @@ import { lodSettingsProvider } from "../../data/LODSettingsProvider";
 import { lodSettingsRegistry } from "../../lod-settings";
 import { npcSizesProvider } from "../../data/NPCSizesProvider";
 import { npcSizesRegistry } from "../../npc-sizes";
+import { npcDefinitionsRegistry } from "../../npc-definitions";
 import { duelProvider } from "../../data/DuelProvider";
 import { duelRulesRegistry } from "../../duel";
 import { storesProvider } from "../../data/StoresProvider";
@@ -355,6 +356,7 @@ import type {
   FishingManifest,
   SkillUnlocksManifest,
   NPCSizesManifest,
+  NpcDefinitionsManifest,
   AmmunitionManifest,
   LootTablesManifest,
   DialogueManifest,
@@ -1129,6 +1131,7 @@ export class PIEEditorSession {
     fishing?: FishingManifest;
     skillUnlocks?: SkillUnlocksManifest;
     npcSizes?: NPCSizesManifest;
+    npcDefinitions?: NpcDefinitionsManifest;
     ammunition?: AmmunitionManifest;
     stores?: StoreData[];
     lootTables?: LootTablesManifest;
@@ -1304,6 +1307,26 @@ export class PIEEditorSession {
       // through `getUnlocksForSkill(skill)` which reads through to the
       // mutated map so the hot-reload takes effect on the next query.
       loadSkillUnlocks(partial.skillUnlocks);
+    }
+    if (partial.npcDefinitions) {
+      // Live-dispatch: refresh the module-level `npcDefinitionsRegistry`
+      // so the registry-prefer branch in `getNPCById` honors authored
+      // edits on the next call. Consumers (CombatSystem,
+      // MobNPCSpawnerSystem, LootTableService, DialogueSystem, …)
+      // pick up the new NPC catalog without a Stop → Play cycle.
+      //
+      // No persistence tee yet — when an NpcDefinitionsProvider lands
+      // alongside the schema, append `npcDefinitionsProvider.hotReload`
+      // here. Until then, edits are runtime-only and forgotten on
+      // server restart (intentional — saves the editor user surprise
+      // about a not-yet-persistent edit path).
+      //
+      // ALL_NPCS map is intentionally NOT cleared — it's the
+      // boot-load fallback for when the registry is unloaded
+      // (isolated unit tests, server boot before DataManager).
+      // The registry-prefer-fallback contract handles the
+      // staleness gracefully: registry wins when loaded.
+      npcDefinitionsRegistry.load(partial.npcDefinitions);
     }
     if (partial.npcSizes) {
       // `hotReloadNPCSizes` Zod-validates then clears+rebuilds the
