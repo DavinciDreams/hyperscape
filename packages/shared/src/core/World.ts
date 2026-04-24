@@ -1058,6 +1058,58 @@ export class World extends EventEmitter {
   }
 
   /**
+   * Inverse of `register()` / `addSystem()`.
+   *
+   * Removes a system from the world by its registered key:
+   *   1. Calls `system.destroy?.()` so the system can clean up
+   *      timers, subscriptions, and any allocated resources.
+   *   2. Removes it from the `systemsByName` Map so
+   *      `getSystem(key)` stops resolving it.
+   *   3. Removes it from the `systems[]` array so tick/update
+   *      loops stop invoking it.
+   *   4. Deletes the dynamic property (`world.physics`, etc.) the
+   *      matching `addSystem` call attached.
+   *
+   * Idempotent: unregistering a key that isn't present is a no-op
+   * and doesn't throw. Callers use this to tear down plugin-
+   * registered systems when a plugin session stops — see
+   * `@hyperforge/hyperscape`'s `onEnable` scope disposers.
+   *
+   * Destroy-side errors are caught + logged so one failing system
+   * can't block the rest of the teardown cascade.
+   *
+   * @param key - The key the system was registered under.
+   */
+  unregister(key: string): void {
+    const system = this.systemsByName.get(key);
+    if (!system) return;
+
+    try {
+      const destroyable = system as unknown as { destroy?: () => void };
+      destroyable.destroy?.();
+    } catch (err) {
+      console.warn(
+        `[World.unregister] system "${key}" destroy() threw:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+
+    this.systemsByName.delete(key);
+    const idx = this.systems.indexOf(system);
+    if (idx >= 0) this.systems.splice(idx, 1);
+
+    // Property was defined via `Object.defineProperty(..., { configurable: true })`
+    // in `addSystem()`, so `delete` is allowed here.
+    try {
+      delete (this as Record<string, unknown>)[key];
+    } catch {
+      // Property may be non-configurable in edge cases (re-register
+      // path, custom prototypes); swallow silently — the Map + array
+      // removals above are the authoritative signal.
+    }
+  }
+
+  /**
    * Add an already-instantiated system to the world.
    *
    * @param key - Name to register system under

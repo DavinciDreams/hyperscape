@@ -115,7 +115,7 @@ describe("bootServerPlugins — integration against real createServerWorld()", (
   );
 
   it(
-    "session.stop() runs to completion against a real world instance",
+    "session.stop() unregisters migrated systems from the real world",
     { timeout: 30_000 },
     async () => {
       world = await createServerWorld();
@@ -123,25 +123,50 @@ describe("bootServerPlugins — integration against real createServerWorld()", (
 
       expect(world.getSystem("mob-death")).toBeTruthy();
       expect(world.getSystem("tanning")).toBeTruthy();
+      expect(world.getSystem("smithing")).toBeTruthy();
 
-      // The meta-plugin's scope disposers call
-      // `world.unregister?.(name)` — but `World` doesn't currently
-      // expose an `unregister` method, so the optional-chain no-ops
-      // at runtime. That's a real gap we're documenting, not a test
-      // failure: the registration side works, the unregistration
-      // side is idempotent/lossy against the current World class.
-      //
-      // Adding World.unregister is its own slice (touches core ECS
-      // lifecycle + every system's destroy() contract). Once it
-      // lands, this test upgrades to assert `getSystem` returns null
-      // post-stop.
-      //
-      // For now: prove session.stop() doesn't throw against a real
-      // world. The combat/skills SERVICE-level unregister DOES work
-      // (abilities/skills get removed from their Maps) — that part
-      // is proven by the stub-based test in plugins.test.ts.
-      await expect(session.stop()).resolves.not.toThrow();
+      await session.stop();
       session = null;
+
+      // The meta-plugin's scope disposers call `world.unregister(name)`,
+      // which now exists on the World class (added in the same commit
+      // this test upgrades for). Post-stop, plugin-registered systems
+      // must no longer resolve through getSystem.
+      expect(world.getSystem("mob-death")).toBeFalsy();
+      expect(world.getSystem("tanning")).toBeFalsy();
+      expect(world.getSystem("smithing")).toBeFalsy();
+    },
+  );
+
+  it(
+    "World.unregister is idempotent and safe against unknown keys",
+    { timeout: 30_000 },
+    async () => {
+      world = await createServerWorld();
+
+      // Unknown key — no-op, no throw.
+      expect(() =>
+        (world as unknown as { unregister: (k: string) => void }).unregister(
+          "never-registered-key",
+        ),
+      ).not.toThrow();
+
+      // Register via plugin, unregister twice in a row (first by
+      // session.stop's scope disposer, second by a direct call).
+      session = await bootServerPlugins(world, "hyperscape");
+      expect(world.getSystem("mob-death")).toBeTruthy();
+
+      await session.stop();
+      session = null;
+
+      expect(world.getSystem("mob-death")).toBeFalsy();
+      // Second unregister of the same key — still a no-op.
+      expect(() =>
+        (world as unknown as { unregister: (k: string) => void }).unregister(
+          "mob-death",
+        ),
+      ).not.toThrow();
+      expect(world.getSystem("mob-death")).toBeFalsy();
     },
   );
 });
