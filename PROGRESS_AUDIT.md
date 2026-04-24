@@ -1,245 +1,212 @@
-# Hyperscape Progress Audit — 2026-04-24
+# Hyperscape Progress Audit — 2026-04-24 (REVISED)
 
-**Brutally honest, evidence-based assessment of where we actually are
-toward the goal stated in `PLAN_WORLD_STUDIO_AAA_COMPLETION.md`.**
+**This doc supersedes the first cut. The first audit was massively
+incomplete — it missed entire packages, the entire cross-chain layer,
+the entire AI integration scope, the entire World Studio editor
+backend, the streaming infrastructure, the mobile app, the website,
+and the runtime gameMode + ScriptingSystem + BehaviorTree
+interpreters that are already shipped.**
 
-Produced by 4 parallel deep-dive audits + cross-cutting synthesis.
-All numbers are grep counts, file counts, or direct file inspection.
-
-## Overall verdict
-
-**~35–45% of the way to "truly AAA, truly done."**
-
-The substrate is largely built. The consumers and the
-engine/game separation are not. The plugin system is built but
-not yet running in production.
-
-| Layer | Completeness | Confidence |
-|---|---|---|
-| Schemas + Providers + Registries (substrate) | **~85%** | high |
-| UI framework + widget catalog (substrate) | **~80%** | high |
-| Plugin framework + CLI + content store (substrate) | **~88%** | high |
-| Editor (PIE + Layout Editor + Property panels) | **~70%** | medium |
-| Consumer wiring (substrate → real game code) | **~10–15%** | high |
-| Hyperscape RPG → plugin extraction | **~5%** | high |
-| Engine/game separation in `packages/shared/` | **~5%** | high |
-| Hygiene (logger, decomposition, skipped tests) | **~10%** | high |
+Produced by 7 deep-dive audits + branch diff inspection
+(534,692 additions / 42,533 deletions across 2,994 files since main).
 
 ---
 
-## Phase-by-phase honest status
+## Headline correction
 
-| Phase | Plan name | Audited % | Headline |
+**~50–60% of the way to "truly AAA, truly done"** — not 35–45%.
+Plus we shipped a **substantial amount of work that isn't in the
+master plan at all** (cross-chain on-chain layer, streaming
+pipeline, AI playtest swarm, mobile shells, website, gold-betting
+demo, sim-engine).
+
+Branch composition by additions:
+
+| Area | LOC additions | Share |
+|---|---:|---:|
+| `packages/asset-forge/` (editor) | 241,094 | 45% |
+| `packages/shared/` (runtime) | 202,374 | 38% |
+| `packages/manifest-schema/` | 49,614 | 9% |
+| `packages/gameplay-framework/` | 12,169 | 2% |
+| `packages/ui-framework/` | 6,969 | 1% |
+| `packages/client/` | 6,650 | 1% |
+| `packages/server/` | 4,065 (-25,709) | net negative — code moved to shared |
+| `packages/ui-widgets/` | 3,005 | <1% |
+| Other (procgen, contracts, oracles, gold-betting-demo, sim-engine, decimation, impostors, web3, website, app, vast-keeper, rtmp-muxer, plugin-*) | ~12,500 | 2% |
+
+The branch is **~45% editor, 38% runtime, 17% framework + everything else**.
+
+---
+
+## What I missed in the first audit (top 12 items)
+
+| # | Item | What it is | Status |
 |---|---|---|---|
-| 0 | Foundation | 100% | Done. |
-| A | Constants → manifests | **30%** | A1+A2 done. ~6 data tiers + 10 live-files NOT extracted. |
-| B | Manifest editors | ~35% | Many "Editor UI still pending" notes. |
-| C | Property panel schema refactor | ~50% | `SchemaPropertyEditor` exists; widget property inspector uses `UI_PROP_FIELD_TYPES`. Not blocker for D. |
-| D | UI/HUD framework | **78%** | D1–D5 + U0–U11 done. D6.c (per-widget migration), D7 (plugin contrib), D8 (DataSourceRegistry), D9 (ui-pack), D10 (exit gate) NOT done. |
-| E | Audio/VFX/Anim/Input | ~30% | Substrate registries shipped (SFX/VFX/Animations/CameraProfiles/etc.). Almost no runtime consumers. |
-| F | Progression/Economy/Loc/Render | ~40% | xp-curves + skill-icons + combat-spells now have React consumers (this session). The other ~30 still unwired. |
-| G | Missing systems | **5%** | Substrate registries shipped (auction-house, housing, group-finder, respawn, crash-reporter, talent-trees, transmog…). Zero runtime systems exist. |
-| H | AI behavior as data | **0%** | Not started. Schemas unblock it. |
-| I | Plugin architecture | **88%** | I1–I4 done. I5 ~95% (only Plugin Browser UI + prod wiring left). **Plugin system not yet wired into server/client startup.** |
-| J | Editor UX (UE5 parity) | ~10% | Undo/redo, multi-select bulk edit, snap systems, keybind UI mostly NOT started. |
-| K | Hygiene | **~10%** | 2,267 console.*, 4,019-line CombatSystem, 3,208-line Entity.ts, 4,309 skipped tests, 90 `as unknown as`. |
+| 1 | `packages/asset-forge/src/components/WorldStudio/` | Full UE5-style world editor with 21 panels, 18 property editors, 6 procgen pipeline algorithms, 35K LOC | Production |
+| 2 | `packages/asset-forge/src/components/WorldBuilder/` | Distinct second editor — terrain painter w/ live game integration, foliage, water shader, procedural arenas/bridges. 35K LOC | Production |
+| 3 | 32 asset-forge server routes + 36 services (~37K LOC) | Full backend: AI generation, asset pipeline (LOD/impostor/VAT/decimation), playtester swarm, deployments, world projects, UI layouts | Production |
+| 4 | **6 AI services + 3 ElevenLabs integrations + GPT-5 Vision + PlaytesterSwarm** | Phase H is **NOT 0%** — six Claude/OpenAI services, ElevenLabs music/voice/SFX, GPT-5 Vision weapon detection, multi-agent automated playtest orchestrator | Production (no test coverage) |
+| 5 | `packages/shared/src/scripting/` (8 files) | ScriptingSystem + ScriptGraphInterpreter + 23 trigger types + **PIE script execution shipped** (Phase 10) | Production |
+| 6 | `packages/shared/src/gameMode/` (21 files) | Runtime game-rules system: GameMode, GameModeRegistry, HyperiaGameMode, AlternateGameModes — **the runtime piece that makes "new game in Studio" possible** | Production |
+| 7 | `packages/shared/src/ai/` (5 files) | BehaviorTreeInterpreter + CombatTuningRegistry — Phase H runtime layer | Production |
+| 8 | Cross-chain duel system | EVM oracle deployed on Base mainnet (`0x6fabf21b...`), BSC, Avax + Solana Anchor program (`6Tx7s2UG...` devnet) — **fully operational, not in plan** | Production (devnet) + EVM mainnet |
+| 9 | `packages/contracts/` (15,931 Solidity LOC) | MUD framework: Player, Gold, Inventory, Shop, Bank, Combat, Item tokens, Equipment, Duel, Trade systems. **Deployed to Base mainnet** | Production |
+| 10 | `packages/procgen/` (128 files, 64K LOC) | Weber & Penn tree algorithm, vegetation, rocks, buildings, terrain, instanced rendering, vertex AO, LOD presets | Production |
+| 11 | `packages/decimation/` + `packages/impostors/` | Production-grade mesh decimation (SIMD, WebGPU, parallel workers) + octahedral impostors for distant LOD | Production |
+| 12 | `packages/sim-engine/`, `packages/gold-betting-demo/`, `packages/vast-keeper/`, `packages/rtmp-muxer/`, `packages/website/`, `packages/app/`, `packages/plugin-hyperia/` | Sim engine for economic attack scenarios, standalone Solana betting demo, GPU streaming infra (Vast.ai), marketing site (live on Vercel), Tauri+Capacitor mobile shells, ElizaOS agent integration | Mix: shipped/WIP/experimental |
 
 ---
 
-## Substrate audit (manifest schemas + providers + registries)
+## Phase-by-phase REVISED status
 
-**Shipped:**
-- **128 manifest schemas** in `packages/manifest-schema/src/` (Zod, fully validated)
-- **128 providers** in `packages/shared/src/data/*Provider.ts`
-- **104 module-level registries** with `isLoaded(): boolean` markers
-- **91 of 128 providers boot-load** through `DataManager.ts` (37 dead weight)
-- **PIE `updateManifests()` covers ~87 manifest kinds** with hot-reload
+| Phase | Plan name | First-audit % | **REVISED %** | Why the change |
+|---|---|---:|---:|---|
+| 0 | Foundation | 100 | **100** | unchanged |
+| A | Constants → manifests | 30 | **40** | More extracted than I saw; live-files are pre-reload hooks not "not started" |
+| B | Manifest editors | 35 | **20** | Only 8 dedicated manifest editors of 129 schemas, BUT WorldStudio's 18 property editors + PropertyControls.tsx (57K LOC) cover *world entities* comprehensively. Manifest-level editors are sparse. |
+| C | Property panel schema refactor | 50 | **65** | Generic PropertyControls + WidgetPropertyInspector + UI_PROP_FIELD_TYPES already cover most paths |
+| D | UI/HUD framework | 78 | **78** | Confirmed — D1-D5 + U0-U11 done; D6.c + D7-D10 left |
+| E | Audio/VFX/Anim/Input | 30 | **45** | ElevenLabs music/voice/SFX integrated; particle-graph registry shipped |
+| F | Progression/Economy/Loc/Render | 40 | **45** | xp-curves, skill-icons, combat-spells now have React consumers |
+| G | Missing systems | 5 | **35** | WorldStudio editor, procgen pipeline, ScriptingSystem+PIE, BehaviorTree, cross-chain oracle, streaming, asset pipeline (LOD/VAT/impostor/decimation) all real systems |
+| H | AI behavior as data | 0 | **35** | **6 Claude/OpenAI services + 3 ElevenLabs + GPT-5 Vision + PlaytesterSwarm + BehaviorTreeInterpreter all shipped** |
+| I | Plugin architecture | 88 | **88** | Confirmed — I1-I4 done, I5 ~80% (Plugin Browser UI missing, prod wiring missing) |
+| J | Editor UX (UE5 parity) | 10 | **30** | World Studio has bulk-select via outliner, snap, alignment guides, deployment panel, property inspector. Undo/redo + keybind UI still missing. |
+| K | Hygiene | 10 | **15** | Marginally better; CombatSystem + Entity.ts still oversized; logger/skipped tests still bad |
 
-**Hollow:**
-- **Only 10 registries have `onReloaded()` listener API** (all 10 added this session: xpCurve, worldAreas, damageType, runes, combatSpells, npcDefinitions, skillIcons, npcSizes, treeCatalog, mount).
-- **94 registries are receive-only** — `DataManager` populates them at boot, PIE may dispatch updates, but the registries themselves have no notification mechanism for consumers to subscribe to.
-- **Only 5 registries are exported from `packages/shared/src/index.ts`** (the top-level barrel). The other 99 require relative-path imports — fragmented public API.
-- **Estimated 5–10 registries have any runtime consumer** at all. Of the 104 registries, the majority is dead substrate.
-- **3 React HUD consumers exist** (all wired this session): xp-orb, level-up popup, spellbook.
+**Plus: substantial work outside the master plan**
 
-**Honest aggregate**: 128 schemas + 128 providers shipped (~85% substrate complete), but only ~10–15% of those are actually consumed by runtime code or UI. The Apr 23 audit's "5% consumer ratio" claim is corroborated.
-
----
-
-## Plugin architecture audit (Phase I)
-
-**I1 — `@hyperforge/gameplay-framework`** ✅ **100% DONE**
-- 13 CLI subcommands (init/validate/lint/list/show/graph/snapshot/diff/contributions/pack/publish/install)
-- 6,537 LOC of tests across 16 test files
-- All lifecycle types, context scope, dependency resolver, contribution aggregator shipped
-
-**I2 — Reference plugins** ✅ **100% DONE**
-- `@hyperforge/combat`, `@hyperforge/skills`, `@hyperforge/plugin-hello-reference`, `@hyperforge/plugin-hyperia`
-- All have manifests, lifecycle, contributions, and tests
-
-**I3 — Editor plugin API** ✅ **100% DONE**
-- 7 asset-forge server routes (`packages/asset-forge/server/routes/plugins.ts`, 518 LOC)
-- 17 integration tests (`packages/asset-forge/server/routes/__tests__/plugins.integration.test.ts`)
-- Routes: contributions, snapshot, content POST/GET, registry POST/GET/GET-by-id
-
-**I4 — `@hyperforge/hyperscape` meta-plugin** ✅ **100% DONE**
-- 103 LOC composing combat + skills via dependency graph
-- 159 LOC of tests
-
-**I5 — CLI + content store + community registry + Plugin Browser** ⚠️ **~80% DONE**
-- ✅ CLI: all 13 subcommands work
-- ✅ Server routes: full lifecycle (publish→registry→install with sha-verified content) — proven in 17 integration tests
-- ❌ **Plugin Browser UI: NOT STARTED.** The `packages/shared/src/plugin/` directory has 107 `PluginBrowser*` TypeScript types (snapshot/view/sort/search/filter/grouping/scroll-memory/deep-link/undo-stack/bulk-selection) but **no React component** in `packages/asset-forge/src/components/` actually renders them.
-
-**Critical gap not in original phase definition:**
-- ❌ **Production wiring: NEITHER server NOR client boots a plugin via the gameplay-framework today.** The plugin system is fully built and tested but exists in isolation. No `loadPlugin`, `startPluginsInOrder`, or `HyperforgePlugin` call exists in `packages/server/` or `packages/client/`. Once production wiring lands, every Hyperscape registry/system can be wrapped as a plugin and the engine/game separation begins.
-
----
-
-## UI framework audit (Phase D)
-
-**Confirmed "~80% complete" claim from PLAN_PHASE_D.md.**
-
-**Shipped (D1–D5 + U0–U11):**
-- `@hyperforge/ui-framework` (15 source files, 3,727 LOC, 3,183 LOC of tests)
-- `@hyperforge/ui-widgets` — 15 widget schemas + React components (HpBar, ActionBar, Chat, Inventory, Bank, Equipment, Friends, Minimap, Prayer, Quests, Settings, Skills, Spells, Stats, Tooltip — 2,731 LOC)
-- `ManifestHud` mounted in `packages/client/src/game/interface/InterfaceManager.tsx:477` (default-on, opt-out via `VITE_DISABLE_MANIFEST_HUD`)
-- `UILayoutEditorPage` in asset-forge with 11 component files (palette, outliner, canvas with snap+guides, anchor picker, viewport switcher, property inspector, validation, library)
-- Theme system, input rebinding, per-player overrides, viewport variants, visibility rules
-- All U0–U11 substrate from `PLAN_UI_PACK_AAA.md` shipped
-
-**Migration status:**
-- **24 HUD files** in `packages/client/src/game/hud/`: only **5 widgets exist** for them (Minimap, ActionBar, HpBar, Chat, Tooltip). **19 still hand-coded** with no widget.
-- **102 panel files** in `packages/client/src/game/panels/`: **~15 widget schemas exist** but every panel still mounts via the legacy `windowStore`. **~50+ panels have no widget at all**.
-- **Plugin contribution surface (D7)**: NOT shipped. `PluginContextBase` has no `widgets` field — plugins cannot ship UI yet.
-- **DataSourceRegistry (D8)**: NOT shipped. `dataContext.ts` is hand-rolled per-binding projection.
-- **`ui-pack.json` (D9)**: NOT shipped. No schema, no consumer.
-- **Exit gate (D10)**: blocked on every per-widget migration (D6.c) being complete.
-
-**Concrete first PR identified** (per `PLAN_PHASE_D.md`): D7 (plugin contrib surface) + D6.c.1 (XP orb migration) together, ~28 files across 4 packages, 1–2 sessions.
-
----
-
-## Engine/game separation audit (Phase A + master criterion #2)
-
-**This is the single biggest gap.** Master plan success criterion #2:
-*"`packages/shared/` contains zero Hyperscape-specific identifiers."*
-
-**Reality:**
-- **1,044 Hyperscape-specific identifiers** in `packages/shared/src/` (lumbridge, goblin, varrock, falador, edgeville, scimitar, OSRS, rs-classic, bandit, etc.)
-- **343 game-specific system files** in `packages/shared/src/systems/`. Combat (64), character (5), economy (5), interaction (7), and 200+ more — none extracted to plugins.
-- **20 game-specific entity classes** in `packages/shared/src/entities/` (PlayerEntity, MobEntity, ItemEntity, ResourceEntity…) — none migrated to plugins.
-- **Hardcoded game data files** still in `packages/shared/src/data/` (NOT manifests, NOT providers, just raw exports):
-  - `world-structure.ts` (419 LOC) — world zones, buildings
-  - `duel-manifest.ts` (427 LOC) — duel rules
-  - `world-areas.ts` (203 LOC) — area definitions
-  - `npcs.ts` (279 LOC) — NPC definitions (façade over registry, but still hardcodes the fallback)
-  - `items.ts` (196 LOC) — item definitions
-  - `banks-stores.ts` (167 LOC) — bank/store layouts
-  - `combat-spells.ts`, `runes.ts`, `smithing-recipes.ts`, `avatars.ts` (~600 LOC combined)
-  - **10 `*-live.ts` files** in `data/live/` (~6,000 LOC) using in-place Map hot-reload, not manifest-backed
-- **CombatSystem.ts**: **4,019 lines** (target <2,000). Handlers extracted but the core is still oversized.
-- **Entity.ts**: **3,208 lines** (target <1,500). Some manager-delegation but still monolithic.
-- **2,267 `console.*` calls** in `packages/shared/src/` (target <500). No unified logger module shipped.
-- **90 files with `as unknown as`** (no `@ts-ignore` though — that part is clean).
-- **4,309 skipped/.todo tests** across the monorepo. Critical testing debt.
-- **Only 2 real end-to-end integration tests** in the entire repo (xp-curves + loot-tables substrate-integration). The Apr 23 audit's "0 end-to-end integration tests" claim is essentially still true.
-
-**ServerNetwork migration**: ✅ **DONE.** Steps 1–9 complete. `PIEEditorSession` runs the real `ServerNetwork`+`ClientNetwork` loopback in-process. Re-export shims removed.
-
----
-
-## Top 10 highest-leverage remaining work (ranked)
-
-| # | Item | Phase | Effort | Impact | Why |
-|---|---|---|---|---|---|
-| 1 | **Wire plugin system into server/client startup** | I (post-I5) | M | **CRITICAL** | Unlocks every Hyperscape system being a plugin. Today the framework is unused in prod. |
-| 2 | **Move Hyperscape RPG content to `@hyperforge/hyperscape-plugin`** | I + A | XL | **CRITICAL** | Closes engine/game separation. ~343 system files + 1,044 identifiers + game data. |
-| 3 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | HIGH | Closes HUD framework. Per-PR deletes one hand-coded mount. |
-| 4 | **D7 plugin widget contribution surface + D6.c.1 XP orb** (one PR) | D | S | HIGH | Establishes the pattern. 1–2 sessions. |
-| 5 | **Plugin Browser UI** (consumes existing routes + 107 types) | I5 | M | HIGH | Closes Phase I. UI work, needs browser session. |
-| 6 | **Game data JSON extraction** (NPCs/items/world/duel/banks/spells/runes ~2k LOC) | A | M-L | HIGH | Real prerequisite for separation. |
-| 7 | **D8 DataSourceRegistry** | D | M | MEDIUM | Lets plugins contribute data sources to widgets. Decouples client from hand-rolled context. |
-| 8 | **Live-file → manifest migration** (10 `*-live.ts` files, ~6k LOC) | A | M | MEDIUM | Unifies hot-reload story across boot-load and PIE paths. |
-| 9 | **CombatSystem decomposition (4,019 → <2,000)** | K4 | L | MEDIUM | Maintenance + plugin-extractability. |
-| 10 | **Consumer-wire the long tail of registries** (~90 unwired) | F/G | M (per slice) | LOW-MEDIUM each | Each closes one substrate→consumer loop. Big footprint cumulatively. |
-
----
-
-## Realistic remaining effort
-
-If the goal is **all 7 success criteria from the master plan**, including:
-- ✅ Every Gap Matrix row green
-- ✅ Zero Hyperscape identifiers in `packages/shared/`
-- ✅ Hyperscape runs entirely from manifests + plugins
-- ✅ A new game ("Top-Down Shooter") buildable in World Studio
-- ✅ Plugin Browser ships
-- ✅ `/super-audit` clean
-- ✅ AI layer can target every manifest kind
-
-**Honest estimate: 8–14 focused 2-hour sessions of work**, distributed roughly:
-- 3–4 sessions: Plugin system wired into prod + Hyperscape→plugin migration (steps 1–2 above)
-- 2–3 sessions: D6.c HUD/panel migrations to widgets
-- 1 session: D7 + D6.c.1 (the catalytic pattern)
-- 1 session: Plugin Browser UI
-- 1–2 sessions: Game data JSON extraction
-- 1–2 sessions: Hygiene (Logger migration, CombatSystem split, skipped tests pass)
-- 1 session: D8 + D9 + D10 close-out
-
-The **biggest unknown** is item #2 (Hyperscape→plugin extraction). Could be 1 session or 8 depending on how deeply game logic is interleaved with engine logic. Given 343 system files and 1,044 identifiers, the realistic floor is 3–4 sessions of careful migration with continuous test verification.
-
----
-
-## Recommended path forward (ranked)
-
-The 5-step sequence that closes the most criteria fastest:
-
-1. **Wire plugin system into the server boot path.** Smallest possible PR: `packages/server/src/server.ts` (or wherever world boots) calls `loadPluginsFromBundle(...)` after the world is created but before `world.init()`. Use `@hyperforge/hyperscape` meta-plugin as the bootstrap. **No-op behavior change** if the plugin's onLoad is no-op. This unlocks every subsequent step.
-2. **Ship D7 + D6.c.1 as one PR.** Plugin contribution surface for widgets + migrate the XP orb. Establishes the pattern. 28 files, 1–2 sessions.
-3. **Plugin Browser UI.** Consume the 7 server routes + the 107 PluginBrowser* types. UI session, browser-testable.
-4. **Migrate Hyperscape content to the meta-plugin in waves.** One system at a time. Each PR moves a system from `packages/shared/src/systems/` to `packages/hyperscape-plugin/src/systems/`, deletes the shared copy, and confirms the plugin's `onLoad` registers it. Continuous test runs verify no regression.
-5. **D6.c HUD/panel migration loop.** Per HUD/panel, define widget schema + adapter + layout entry, delete hand-coded mount. Run the existing widget tests + visual smoke after each.
-
-Steps 1, 2, 3 are independent; do them in parallel sessions if possible.
-
----
-
-## What this audit corrects in earlier estimates
-
-| Earlier claim | Corrected |
+| Area | Status |
 |---|---|
-| Phase D ~15% | **~78%** (substrate massive, only D6.c migration + D7-D10 left) |
-| Phase I ~90% | **88% confirmed** but production wiring (not in original I1-I5 spec) is missing |
-| Substrate ~25% | **~85% complete** for schemas/providers/registries; **~10–15% complete** for consumers |
-| Engine/game separation in progress | **~5%** — 1,044 identifiers + 343 systems still in shared |
-| "5% have runtime consumers" (Apr 23) | **Still essentially true.** This session added 3 React consumers and 10 onReloaded hooks; the long tail remains. |
+| Cross-chain duel oracle (EVM + Solana) | ~80% (deployed mainnet+devnet) |
+| Streaming pipeline (vast-keeper + rtmp-muxer) | ~50% (operational, integration thin) |
+| Mobile (Tauri + Capacitor) | ~40% (shells exist, not fully shipped) |
+| Marketing website | 100% (live on Vercel) |
+| ElizaOS agent integration | ~70% (plugin-hyperia operational) |
+| Sim-engine (economic attack simulation) | ~80% (research tool, not gameplay) |
+| Gold-betting demo (Solana) | ~80% (devnet hackathon scope) |
 
 ---
 
-## Confidence in this audit
+## The big honest picture
 
-| Area | Confidence | Notes |
+### What's actually shipped (substrate + tooling)
+
+- **129 manifest schemas** with full Zod validation
+- **128 providers** boot-loaded through DataManager
+- **104 module-level registries** (10 with `onReloaded` listener, all from this session)
+- **Full plugin framework**: gameplay-framework + 4 reference plugins + 13-subcommand CLI + content store + community registry
+- **Full UI framework**: ui-framework + ui-widgets (15 widgets) + UILayoutEditor + ManifestHud + theme system + input rebinding + per-player overrides + viewport variants
+- **Full World Studio editor**: 21 panels, 18 property editors, 6 procgen pipeline algorithms, deployment workflow
+- **Full WorldBuilder editor**: terrain painter, foliage, water shader, procedural assets
+- **Asset pipeline**: GLB decimation, LOD baking, impostor baking, VAT baking, vertex color baking
+- **AI generation pipeline**: 6 Claude/OpenAI services, 3 ElevenLabs services, GPT-5 Vision, PlaytesterSwarm
+- **Runtime**: gameMode + ScriptingSystem + ScriptGraphInterpreter (with PIE) + BehaviorTreeInterpreter
+- **PIE editor session** with ServerNetwork loopback, hot-reload, `updateManifests()` covering 87+ manifest kinds
+- **Cross-chain on-chain layer**: MUD contracts on Base mainnet/BSC/Avax + Solana Anchor program (devnet)
+- **Streaming GPU infra**: Vast.ai keeper + RTMP muxer
+- **Marketing site** + **mobile app shells** + **ElizaOS plugin**
+
+### What's actually NOT done (real gaps)
+
+1. **Engine/game separation** — 1,044 Hyperscape identifiers + 343 game-system files still in `packages/shared/`. Master criterion #2 fails badly.
+2. **Plugin system not wired into prod** — gameplay-framework exists but neither server nor client boots a plugin via it.
+3. **Per-widget HUD migration** — only 5 of ~24 HUD elements migrated to widgets; ~50 panels have no widget.
+4. **Plugin Browser UI** — 107 TypeScript types shipped, zero React components rendering them.
+5. **Consumer wiring of registries** — 10 of 104 registries have `onReloaded`; ~3 React UI consumers actually subscribe.
+6. **Game data extraction** — NPCs, items, world structure, duel rules, banks, spells, runes still hardcoded in `packages/shared/src/data/*.ts`.
+7. **ManifestEditors UI breadth** — only 8 of 129 manifest schemas have dedicated editor UIs (PropertyControls covers world entities, not arbitrary manifest authoring).
+8. **Hygiene** — 4,019-line CombatSystem (target <2,000), 3,208-line Entity.ts (target <1,500), 2,267 console.* calls, 4,309 skipped tests, 90 `as unknown as`.
+9. **DataSourceRegistry (D8)** + **ui-pack.json (D9)** + **D10 exit gate** in Phase D.
+10. **AI services have zero test coverage** — 10 AI integrations operational but untested.
+
+### What's NOT in the master plan but exists
+
+- Cross-chain duel oracle (EVM + Solana) — ~80% (mainnet deployed)
+- Streaming GPU pipeline (Vast.ai)
+- Mobile app (Tauri + Capacitor)
+- Marketing website (live)
+- Sim-engine (economic attack simulation)
+- Gold-betting demo
+- ElizaOS agent integration (plugin-hyperia)
+
+---
+
+## Top 10 highest-leverage REMAINING work (revised)
+
+| # | Item | Phase | Effort | Why now |
+|---|---|---|---|---|
+| 1 | **Wire plugin system into server/client startup** | post-I | S | No-op behavior change, unlocks every Hyperscape→plugin migration |
+| 2 | **Migrate Hyperscape RPG to `@hyperforge/hyperscape-plugin`** | I + A | XL | Closes engine/game separation (master criterion #2). Biggest unknown by far. |
+| 3 | **D7 plugin widget contribution + D6.c.1 (XP orb)** as one PR | D | S | Establishes the per-widget migration pattern |
+| 4 | **Plugin Browser UI** (consumes 7 routes + 107 types already shipped) | I5 | M | Closes Phase I |
+| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |
+| 6 | **Game-data JSON extraction** (NPCs/items/world/duel/banks ~2k LOC) | A | M | Real prerequisite for separation |
+| 7 | **AI service test coverage** (10 services, 0 tests today) | H | M | Production-shipped without tests is a real risk |
+| 8 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | Closes UI framework story |
+| 9 | **CombatSystem decomposition (4,019 → <2,000)** | K4 | L | Maintenance + plugin extractability |
+| 10 | **Long-tail registry consumer-wiring (~90 still unwired)** | F/G | M each | Each closes one substrate→consumer loop |
+
+---
+
+## Realistic remaining effort (revised)
+
+If "done" = master plan's 7 success criteria all green:
+
+**8–14 focused 2-hour sessions** — same range as before, but the
+content shifts:
+- 1 session: wire plugin system into prod (item 1)
+- 3–6 sessions: Hyperscape→plugin extraction (item 2 — the big unknown, could be more)
+- 1–2 sessions: D7 + D6.c.1 + Plugin Browser UI (items 3, 4)
+- 2–3 sessions: D6.c per-widget migrations (item 5)
+- 1 session: game-data JSON extraction (item 6)
+- 1 session: AI test coverage (item 7)
+- 1–2 sessions: D8/D9/D10 close-out (item 8)
+- ongoing: hygiene + consumer wiring (items 9, 10) — happens alongside
+
+If "done" = also includes the non-plan work that's been started:
+- Cross-chain mainnet hardening: 1–2 sessions
+- Streaming pipeline integration: 2–3 sessions
+- Mobile app polish: 2–3 sessions
+- AI service hardening: 1–2 sessions
+
+So **realistically 12–20 sessions** to get the whole branch to a
+shippable state, depending on how the Hyperscape→plugin extraction
+goes.
+
+---
+
+## Confidence in this revised audit
+
+| Claim | Confidence | Evidence |
 |---|---|---|
-| Schema/provider/registry counts | high | direct file counts |
-| Plugin architecture status | high | direct read of all 4 plugin packages + tests + routes |
-| UI framework status | high | direct file inventory of 3 packages + asset-forge editor |
-| Engine separation contamination | high | grep counts of identifiers; line counts of files |
-| Hygiene metrics | high | grep counts of console.*, .skip, as unknown as |
-| Phase % estimates | medium | depends on how phases are weighted; substrate vs. consumer split is the swing factor |
-| Effort estimates (sessions remaining) | low-medium | item #2 (Hyperscape→plugin) is the biggest unknown |
+| Phase D ~78% | high | direct file inventory of ui-framework + ui-widgets + asset-forge editor |
+| Phase H ~35% (was 0%) | high | direct file inventory of 9 AI services + PlaytesterSwarm + BehaviorTreeInterpreter |
+| Phase G ~35% (was 5%) | high | WorldStudio + procgen + asset pipeline + cross-chain + streaming all shipped |
+| Phase I ~88% | high | confirmed by direct read of all 4 plugin packages |
+| Engine/game separation ~5% | high | grep counts of 1,044 identifiers + 343 system files |
+| Cross-chain layer ~80% | medium | mainnet addresses confirmed; consumer wiring not deeply traced |
+| Mobile/streaming/website status | medium | top-level inspection; not deep verification |
+| Overall ~50-60% | medium | depends heavily on phase-weighting |
 
 ---
 
-## TL;DR
+## Final TL;DR
 
-We have built **most of the substrate** (schemas, providers, registries,
-plugin framework, UI framework, editor). We have wired **almost
-none of the consumers**. The plugin system that's supposed to make
-Hyperscape "a plugin" is fully built but **not yet running anywhere** —
-that's the single biggest leverage point. Once it's wired into prod
-and Hyperscape content is migrated to the meta-plugin, every other
-phase becomes easier and the engine/game separation criterion starts
-making real progress.
+**The work done on this branch is far larger than the master plan
+described.** Roughly:
+- The plan's substrate phases (A/D/E/F/I) are mostly built (60–90% each).
+- Phase H (AI as data) was claimed 0% but is actually ~35% — six Claude/OpenAI services, ElevenLabs integration, multi-agent playtest swarm, BehaviorTreeInterpreter all production.
+- Phase G (Missing systems) was claimed 5% but is actually ~35% — World Studio editor, procgen pipeline, asset pipeline, ScriptingSystem, gameMode, cross-chain, streaming all shipped.
+- Engine/game separation (master criterion #2) is the **single biggest remaining gap** at ~5% — 1,044 Hyperscape identifiers + 343 game systems still in shared/.
+- The plugin system that's supposed to make Hyperscape "a plugin" is fully built but **not yet wired into prod** — that's the single biggest leverage point.
+- Phase B (Manifest editors) is sparse — only 8 of 129 schemas have dedicated UIs (the philosophy shifted to generic PropertyControls + registry pattern).
+- Hygiene (Phase K) is barely started — CombatSystem still 4,019 lines, Entity.ts still 3,208 lines, 2,267 console.* calls, 4,309 skipped tests.
 
-**~35–45% to AAA-done. ~8–14 focused sessions remaining if executed
-in the recommended order.**
+**~50–60% to AAA-done by the master plan's bar. ~12–20 focused
+sessions remaining if executed in the order in section above.**
+
+The branch represents probably **6+ months of full-time engineering
+work** by volume (534k LOC additions across 2,994 files, 105 commits).
+Almost all of the substrate, tooling, and editor exists — the
+remaining work is wiring, extraction, and migration.
