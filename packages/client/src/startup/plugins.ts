@@ -178,6 +178,13 @@ export interface UIWidgetRegistryLike {
   register(
     reg: WidgetRegistration<Record<string, unknown>, UIWidgetComponent>,
   ): void;
+  /**
+   * Optional — present on `WidgetRegistry` (ui-framework) but may be
+   * absent on older/custom registries. When present, `bootClientPlugins`
+   * wires it into the plugin's scope disposer so `session.stop()`
+   * removes plugin-contributed widgets.
+   */
+  unregister?(id: string): boolean;
 }
 
 export async function bootClientPlugins(
@@ -241,13 +248,14 @@ export async function bootClientPlugins(
                       UIWidgetComponent
                     >;
                     uiWidgetRegistry.register(reg);
+                    const widgetId = reg.widget.manifest.id;
                     scope.register(() => {
-                      // ui-framework's WidgetRegistry does not yet
-                      // expose unregister — this disposer is a
-                      // placeholder so the plugin-lifecycle contract
-                      // is honored. When the registry grows an
-                      // unregister method we drop the no-op.
-                      void reg;
+                      // WidgetRegistry.unregister shipped alongside
+                      // this — drop the plugin-contributed widget
+                      // from the host registry so session.stop()
+                      // actually tears down everything onEnable
+                      // added. Idempotent; safe on absent-id.
+                      uiWidgetRegistry.unregister?.(widgetId);
                     });
                   },
                 }

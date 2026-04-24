@@ -183,3 +183,55 @@ describe("individual builtin widget schemas", () => {
     ).toThrow();
   });
 });
+
+describe("WidgetRegistry.unregister", () => {
+  const makeTestWidget = (id: string) => ({
+    manifest: {
+      id,
+      name: id,
+      category: "hud" as const,
+      defaultSize: { width: 1, height: 1 },
+    },
+    propsSchema: actionBarWidget.propsSchema,
+    defaultProps: actionBarWidget.defaultProps,
+  });
+
+  it("removes a registered widget by id and returns true", () => {
+    const reg = new WidgetRegistry<() => string>();
+    const w = makeTestWidget("test.unregister.basic");
+    reg.register({ widget: w, Component: () => "x" });
+
+    expect(reg.hasWidget(w.manifest.id)).toBe(true);
+    expect(reg.hasComponent(w.manifest.id)).toBe(true);
+
+    const removed = reg.unregister(w.manifest.id);
+    expect(removed).toBe(true);
+    expect(reg.hasWidget(w.manifest.id)).toBe(false);
+    expect(reg.hasComponent(w.manifest.id)).toBe(false);
+    expect(reg.getWidget(w.manifest.id)).toBeUndefined();
+  });
+
+  it("is idempotent — unknown id returns false and does not throw", () => {
+    const reg = new WidgetRegistry<() => string>();
+    expect(reg.unregister("never-registered")).toBe(false);
+
+    const w = makeTestWidget("test.unregister.idem");
+    reg.register({ widget: w, Component: () => "x" });
+    expect(reg.unregister(w.manifest.id)).toBe(true);
+    // Second call against the same id.
+    expect(reg.unregister(w.manifest.id)).toBe(false);
+  });
+
+  it("allows re-register after unregister (plugin hot-reload pattern)", () => {
+    const reg = new WidgetRegistry<() => string>();
+    const w = makeTestWidget("test.unregister.re-register");
+    reg.register({ widget: w, Component: () => "v1" });
+    reg.unregister(w.manifest.id);
+    // Re-registering under the same id no longer throws
+    // "already defined" — unregister cleared the slot.
+    expect(() =>
+      reg.register({ widget: w, Component: () => "v2" }),
+    ).not.toThrow();
+    expect(reg.getComponent(w.manifest.id)()).toBe("v2");
+  });
+});

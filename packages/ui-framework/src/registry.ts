@@ -83,6 +83,22 @@ export class WidgetRegistry<C = unknown> {
   }
 
   /**
+   * Inverse of `register()` / `defineWidget()`. Removes the widget
+   * (and its bound component) from the registry by id.
+   *
+   * Idempotent: unknown ids return without throwing. Callers use
+   * this in plugin-scope disposers so `session.stop()` cleanly tears
+   * down every widget a plugin contributed via
+   * `ctx.widgets?.register(...)` during its `onEnable`.
+   *
+   * @param id - The widget manifest id the registration was keyed under.
+   * @returns `true` if an entry was removed, `false` if the id wasn't present.
+   */
+  unregister(id: string): boolean {
+    return this.entries.delete(id);
+  }
+
+  /**
    * Returns the Widget schema for the given id, or undefined.
    */
   getWidget(id: string): Widget<Record<string, unknown>> | undefined {
