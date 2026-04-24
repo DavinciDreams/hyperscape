@@ -36,6 +36,7 @@ import { securityHeaders } from "./middleware/securityHeaders";
 
 // Routes
 import { healthRoutes } from "./routes/health";
+import { pluginRoutes } from "./routes/plugins";
 import { createMaterialRoutes } from "./routes/materials";
 import { createRetextureRoutes } from "./routes/retexture";
 import { createGenerationRoutes } from "./routes/generation";
@@ -428,6 +429,7 @@ const app = new Elysia()
 
   // Routes
   .use(healthRoutes)
+  .use(pluginRoutes)
   .use(promptRoutes)
   .use(aiVisionRoutes)
   .use(createAssetRoutes(ROOT_DIR, assetService))
