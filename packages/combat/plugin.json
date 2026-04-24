@@ -1,0 +1,25 @@
+{
+  "id": "com.hyperforge.combat",
+  "name": "Combat",
+  "version": "0.1.0",
+  "description": "Reference combat plugin. Registers a small starter pack of attack abilities (slash, stab, fire bolt) on a caller-supplied CombatAbilityService. Used to prove the @hyperforge/gameplay-framework author surface end-to-end across all three lifecycle hooks.",
+  "entry": "./dist/index.js",
+  "author": {
+    "name": "Hyperforge"
+  },
+  "license": "GPL-3.0",
+  "hyperforgeApi": "0.1.0",
+  "dependencies": [],
+  "loadAfter": [],
+  "enabledByDefault": false,
+  "contributions": {
+    "systems": [],
+    "entities": [],
+    "widgets": [],
+    "manifestSchemas": [],
+    "paletteCategories": [],
+    "toolbarTools": [],
+    "commands": []
+  },
+  "tags": ["reference", "combat"]
+}

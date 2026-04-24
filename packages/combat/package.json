@@ -1,0 +1,44 @@
+{
+  "name": "@hyperforge/combat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference combat plugin built on @hyperforge/gameplay-framework. Ships a small starter pack of attack abilities (slash, stab, fire bolt), registers them on a caller-supplied CombatAbilityService during onEnable, and unwinds via scope drain on disable. Demonstrates the full author surface — onLoad validation, onEnable registration, scope-tracked teardown — without depending on @hyperforge/shared internals.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "plugin.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hyperforge/gameplay-framework": "*",
+    "@hyperforge/manifest-schema": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}
