@@ -34,6 +34,8 @@ import {
   CLICK_TO_WALK_CONTROLLER_ID,
 } from "@hyperforge/shared/runtime";
 import type { ScriptGraph } from "../../../scripting/types";
+import { createPIEPluginHooks } from "../../../pie/pluginBoot";
+import { resolveGamePluginSetId } from "../toolbar/gamePluginResolver";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type {
@@ -732,6 +734,7 @@ export function usePIESession({
       debugSink: (entry: PIEDebugEntry) => onDebugRef.current?.(entry),
       gameMode: manifest,
       mode: pieMode === "play" ? "play" : "simulate",
+      plugins: createPIEPluginHooks(resolveGamePluginSetId()),
       ...(pieMode === "play"
         ? {
             viewport: refs.container,

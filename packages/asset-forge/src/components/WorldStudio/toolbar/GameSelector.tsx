@@ -25,36 +25,23 @@
 import { Gamepad2 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 
-/**
- * Must match `GamePluginSetId` in
- * `packages/client/src/startup/plugins.ts`. Kept as a plain string
- * literal list here so this UI component doesn't have to import
- * from `@hyperforge/client` (asset-forge only imports from shared
- * + its own server routes, not from client).
- */
-type GameId = "hyperscape" | "shooter-demo";
+import {
+  GAME_PLUGIN_LOCAL_STORAGE_KEY,
+  isKnownGamePluginSetId,
+  resolveGamePluginSetId,
+  type GamePluginSetId,
+} from "./gamePluginResolver";
 
-const STORAGE_KEY = "hyperscape:game-plugin";
-const DEFAULT: GameId = "hyperscape";
+type GameId = GamePluginSetId;
 
 const OPTIONS: ReadonlyArray<{ id: GameId; label: string }> = [
   { id: "hyperscape", label: "Hyperscape" },
   { id: "shooter-demo", label: "Shooter Demo" },
 ];
 
-function readStoredGame(): GameId {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === "hyperscape" || raw === "shooter-demo") return raw;
-  } catch {
-    // localStorage may be blocked; fall through.
-  }
-  return DEFAULT;
-}
-
 function writeStoredGame(id: GameId): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, id);
+    window.localStorage.setItem(GAME_PLUGIN_LOCAL_STORAGE_KEY, id);
   } catch {
     // Silent fail — the dropdown still shows the choice even if
     // we can't persist it.
@@ -62,19 +49,20 @@ function writeStoredGame(id: GameId): void {
 }
 
 export function GameSelector(): React.ReactElement {
-  const [gameId, setGameId] = useState<GameId>(DEFAULT);
+  const [gameId, setGameId] = useState<GameId>("hyperscape");
 
   // Read the persisted value once on mount. Done in an effect (not
   // useState initializer) because `window` may not be available
   // during SSR / test-environment imports.
   useEffect(() => {
-    setGameId(readStoredGame());
+    setGameId(resolveGamePluginSetId());
   }, []);
 
   const onChange = useCallback((evt: React.ChangeEvent<HTMLSelectElement>) => {
-    const next = evt.target.value as GameId;
-    setGameId(next);
-    writeStoredGame(next);
+    const raw = evt.target.value;
+    if (!isKnownGamePluginSetId(raw)) return;
+    setGameId(raw);
+    writeStoredGame(raw);
   }, []);
 
   return (
