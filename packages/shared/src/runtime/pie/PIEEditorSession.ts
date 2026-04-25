@@ -129,6 +129,19 @@ interface DialogueSystem {
   ): void;
   setAuthoredNpcDialogueBindings(bindings: Record<string, string> | null): void;
   setLocalizationCatalog(catalog: LocalizationCatalogType | null): void;
+  // Condition-evaluator surface — needed because PIE passes the
+  // dialogue system to `createManagedDialogueConditionInstall`,
+  // which takes the WorldDialogueConditionEvaluators DialogueSystem
+  // shape (register/unregister condition methods).
+  registerConditionEvaluator(
+    name: string,
+    evaluator: (args: {
+      readonly playerId: string;
+      readonly npcId: string;
+      readonly npcEntityId?: string;
+    }) => boolean,
+  ): void;
+  unregisterConditionEvaluator(name: string): void;
 }
 import {
   createManagedDialogueConditionInstall,
@@ -1561,8 +1574,9 @@ export class PIEEditorSession {
       // free-form `showIf`/`condition` registry. See
       // `WorldDialogueConditionEvaluators.ts` for the bridge to live
       // QuestSystem / InventorySystem / SkillsSystem reads.
-      const dialogueSystem =
-        this._server?.world.getSystem<DialogueSystem>("dialogue") ?? null;
+      const dialogueSystem = this._server?.world.getSystem(
+        "dialogue",
+      ) as unknown as DialogueSystem | null;
       if (dialogueSystem && this._server) {
         const managed =
           this._managedDialogueConditions ??
@@ -1593,8 +1607,9 @@ export class PIEEditorSession {
       // `NPCDialogueTree` data loaded from `npcs.json` is untouched;
       // authored trees coexist and are resolved by id via the
       // NPC → authored-tree-id binding table set below.
-      const dialogueSystem =
-        this._server?.world.getSystem<DialogueSystem>("dialogue") ?? null;
+      const dialogueSystem = this._server?.world.getSystem(
+        "dialogue",
+      ) as unknown as DialogueSystem | null;
       if (dialogueSystem) {
         if (partial.dialogue !== undefined) {
           dialogueSystem.setAuthoredDialogues(partial.dialogue);
@@ -1621,8 +1636,9 @@ export class PIEEditorSession {
       // `DialogueSystem`. Authored dialogue textKeys resolve through
       // the catalog on the next emit; when `null`, the catalog is
       // detached and dialogue text reverts to raw textKey echo.
-      const dialogueSystem =
-        this._server?.world.getSystem<DialogueSystem>("dialogue") ?? null;
+      const dialogueSystem = this._server?.world.getSystem(
+        "dialogue",
+      ) as unknown as DialogueSystem | null;
       if (dialogueSystem) {
         if (partial.localization === null) {
           dialogueSystem.setLocalizationCatalog(null);
@@ -1664,10 +1680,12 @@ export class PIEEditorSession {
       // from the manifest. Player quest progress is preserved;
       // stale cached active-quest lists are invalidated so the
       // next `getActiveQuests` query reflects the new definitions.
+      // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25);
+      // PIE only needs to call its `setAuthoredQuests` setter.
       const questSystem =
-        this._server?.world.getSystem<
-          import("../../systems/shared/progression/QuestSystem").QuestSystem
-        >("quest") ?? null;
+        (this._server?.world.getSystem("quest") as unknown as
+          | { setAuthoredQuests(manifest: Record<string, unknown>): void }
+          | undefined) ?? null;
       questSystem?.setAuthoredQuests(partial.quests);
       questsProvider.hotReload(partial.quests);
     }

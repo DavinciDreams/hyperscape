@@ -139,7 +139,28 @@ import { generateKillToken } from "../../../utils/game/KillTokenUtils";
 
 // World Content Systems
 import { NPCSystem } from "..";
-// DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Local duck-typed shape for the surface SystemLoader's boot-time
+// seeding code uses (3 setter methods + the
+// `installWorldDialogueConditions` adapter signature).
+import type { DialogueManifest } from "@hyperforge/manifest-schema";
+interface DialogueSystem {
+  setAuthoredDialogues(
+    manifest: DialogueManifest | null,
+    opts?: { preserveOpenSessionsByTreeId?: boolean },
+  ): void;
+  setAuthoredNpcDialogueBindings(bindings: Record<string, string> | null): void;
+  setLocalizationCatalog(catalog: LocalizationCatalog | null): void;
+  registerConditionEvaluator(
+    name: string,
+    evaluator: (args: {
+      readonly playerId: string;
+      readonly npcId: string;
+      readonly npcEntityId?: string;
+    }) => boolean,
+  ): void;
+  unregisterConditionEvaluator(name: string): void;
+}
 // — registered by the plugin's onEnable cross-cutting branch.
 import { ScriptingSystem } from "../scripting/ScriptingSystem";
 
@@ -166,7 +187,8 @@ import { SkillsSystem } from "..";
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
-import { QuestSystem } from "..";
+// QuestSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 
 /** Minimal contract for the client-side movement system (physics-based in PlayerLocal) */
 interface MovementSystemLike {
@@ -183,10 +205,13 @@ export interface Systems {
   inventory?: InventorySystem;
   combat?: CombatSystem;
   skills?: SkillsSystem;
-  banking?: BankingSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown` so
+  // SystemLoader's bookkeeping object still compiles.
+  banking?: unknown;
   interaction?: InteractionRouter;
   mobNpc?: MobNPCSystem;
-  store?: StoreSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  store?: unknown;
   resource?: ResourceSystem;
   aggro?: AggroSystem;
   equipment?: EquipmentSystem;
@@ -456,7 +481,8 @@ export async function registerSystems(world: World): Promise<void> {
   // Note: world.isServer isn't reliable here because ServerNetwork registers later
   // Use Node.js environment check instead (isServerEnvironment defined above)
   if (isServerEnvironment) {
-    world.register("quest", QuestSystem);
+    // "quest" registered by @hyperforge/hyperscape plugin onEnable
+    // cross-cutting branch (migrated 2026-04-25).
     console.log("[SystemLoader] ✅ QuestSystem registered (server-only)");
   }
 
@@ -482,8 +508,8 @@ export async function registerSystems(world: World): Promise<void> {
   systems.inventory = getSystem(world, "inventory") as InventorySystem;
   systems.skills = getSystem(world, "skills") as SkillsSystem;
   systems.mobNpc = getSystem(world, "mob-npc") as MobNPCSystem;
-  systems.banking = getSystem(world, "banking") as BankingSystem;
-  systems.store = getSystem(world, "store") as StoreSystem;
+  systems.banking = getSystem(world, "banking");
+  systems.store = getSystem(world, "store");
   systems.resource = getSystem(world, "resource") as ResourceSystem;
 
   systems.aggro = getSystem(world, "aggro") as AggroSystem;
@@ -545,7 +571,9 @@ export async function registerSystems(world: World): Promise<void> {
   // them. Server-only: dialogue runs on the server-authoritative
   // world.
   if (world.isServer && dialogueConditionBindingsProvider.isLoaded()) {
-    const dialogueSystem = world.getSystem("dialogue") as DialogueSystem | null;
+    const dialogueSystem = world.getSystem(
+      "dialogue",
+    ) as unknown as DialogueSystem | null;
     if (dialogueSystem) {
       installWorldDialogueConditions(
         dialogueSystem,
@@ -562,7 +590,9 @@ export async function registerSystems(world: World): Promise<void> {
   // Subsequent edits flow through `PIEEditorSession.updateManifests`
   // → live `DialogueSystem` write + provider tee.
   if (world.isServer) {
-    const dialogueSystem = world.getSystem("dialogue") as DialogueSystem | null;
+    const dialogueSystem = world.getSystem(
+      "dialogue",
+    ) as unknown as DialogueSystem | null;
     if (dialogueSystem) {
       if (dialogueProvider.isLoaded()) {
         dialogueSystem.setAuthoredDialogues(dialogueProvider.getManifest());
@@ -826,10 +856,21 @@ function setupAPI(world: World, systems: Systems): void {
       0,
     getTotalItemCountInBanks: (_playerId: string, _itemId: number) => 0,
 
-    // Store API
-    getStore: (storeId: string) => systems.store?.getStore(storeId),
-    getAllStores: () => systems.store?.getAllStores(),
-    getStoreLocations: () => systems.store?.getStoreLocations(),
+    // Store API — `systems.store` is `unknown` since StoreSystem
+    // migrated to @hyperforge/hyperscape; cast to the surface this
+    // adapter calls.
+    getStore: (storeId: string) =>
+      (
+        systems.store as { getStore?(id: string): unknown } | undefined
+      )?.getStore?.(storeId),
+    getAllStores: () =>
+      (
+        systems.store as { getAllStores?(): unknown } | undefined
+      )?.getAllStores?.(),
+    getStoreLocations: () =>
+      (
+        systems.store as { getStoreLocations?(): unknown } | undefined
+      )?.getStoreLocations?.(),
     getItemPrice: (_storeId: string, _itemId: number) => 0, // Store system doesn't expose this method
     isItemAvailable: (_storeId: string, _itemId: number, _quantity?: number) =>
       false, // Store system doesn't expose this method

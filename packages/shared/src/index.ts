@@ -671,7 +671,7 @@ export { LootSystem } from "./systems/shared/economy/LootSystem";
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
-export { QuestSystem } from "./systems/shared/progression/QuestSystem";
+// QuestSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
 // xp-curves runtime registry — shared module-level singleton.
 // Populated at boot by DataManager and live-mutated by PIEEditorSession.
@@ -873,6 +873,23 @@ export type {
   NPCDialogueTree,
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
+
+// QuestSystem deps — needed by the migrated QuestSystem in
+// @hyperforge/hyperscape.
+export { validateQuestDefinition } from "./types/game/quest-types";
+export type {
+  QuestDefinition,
+  QuestStatus,
+  QuestDbStatus,
+  QuestStage,
+  StageProgress,
+  QuestProgress,
+  PlayerQuestState,
+  QuestManifest,
+} from "./types/game/quest-types";
+export type { NPCDiedPayload } from "./types/events/event-payloads";
+export { validateKillToken } from "./utils/game/KillTokenUtils";
+export type { IQuestSystem } from "./types/game/quest-interfaces";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

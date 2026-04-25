@@ -14,14 +14,13 @@ import type { World } from "../../core/World";
 import type { MobEntityConfig } from "../../types/entities";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local shapes (mirrors `nodes/HealthBar.ts` pattern).
-import type * as THREE from "three";
 interface HealthBarHandle {
   entityId: string;
   move: (newMatrix: THREE.Matrix4) => void;
   setHealth: (current: number, max: number) => void;
   show: (timeoutMs?: number) => void;
   hide: () => void;
-  destroy?: () => void;
+  destroy: () => void;
 }
 interface HealthBarsSystem {
   add: (

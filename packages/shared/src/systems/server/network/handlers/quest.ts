@@ -7,7 +7,24 @@
  */
 
 import type { World } from "../../../../index";
-import type { QuestSystem } from "../../../../index";
+// QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed local interface; this server handler calls 9 methods
+// on the system. Returns are typed against shared's quest-types.
+import type {
+  QuestDefinition,
+  QuestStatus,
+  QuestProgress,
+} from "../../../../types/game/quest-types";
+interface QuestSystem {
+  getAllQuestDefinitions(): QuestDefinition[];
+  getActiveQuests(playerId: string): QuestProgress[];
+  getQuestStatus(playerId: string, questId: string): QuestStatus;
+  getQuestPoints(playerId: string): number;
+  getQuestDefinition(questId: string): QuestDefinition | undefined;
+  startQuest(playerId: string, questId: string): Promise<boolean>;
+  abandonQuest(playerId: string, questId: string): Promise<boolean>;
+  completeQuest(playerId: string, questId: string): Promise<boolean>;
+}
 import { SystemLogger, isValidQuestId } from "../../../../index";
 import type { ServerSocket } from "../server-types";
 import { sendToSocket, getPlayerId } from "./common";

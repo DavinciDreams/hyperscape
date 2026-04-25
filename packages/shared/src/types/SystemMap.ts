@@ -38,7 +38,7 @@ import type { PlayerDeathSystem } from "../systems/shared";
 import type { PlayerSystem } from "../systems/shared";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { ProcessingSystem } from "../systems/shared";
-import type { QuestSystem } from "../systems/shared";
+// QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { ResourceSystem } from "../systems/shared";
 import type { SkillsSystem } from "../systems/shared";
 // SmeltingSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -137,7 +137,7 @@ export interface SystemMap {
   // World content
   npc: NPCSystem;
   dialogue: unknown;
-  quest: QuestSystem;
+  quest: unknown;
   "mob-npc-spawner": MobNPCSpawnerSystem;
   "station-spawner": StationSpawnerSystem;
   "item-spawner": ItemSpawnerSystem;

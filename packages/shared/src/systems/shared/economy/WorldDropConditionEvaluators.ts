@@ -27,7 +27,13 @@ import type { DropCondition } from "@hyperforge/manifest-schema";
 
 import type { World } from "../../../types/index";
 import type { Skills } from "../../../types/entities/entity-types";
-import type { QuestSystem } from "../progression/QuestSystem";
+// QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed locally — only 2 methods are called.
+import type { QuestProgress } from "../../../types/game/quest-types";
+interface QuestSystem {
+  getActiveQuests(playerId: string): QuestProgress[];
+  hasCompletedQuest(playerId: string, questId: string): boolean;
+}
 import type { InventorySystem } from "../character/InventorySystem";
 import type { SkillsSystem } from "../character/SkillsSystem";
 import { SystemLogger } from "../../../utils/Logger";
@@ -81,7 +87,8 @@ export function createQuestActiveHandler(
     if (!ctx.killerId) return false;
     const questId = stringParam(params, "questId");
     if (!questId) return false;
-    const quests = world.getSystem<QuestSystem>("quest") ?? null;
+    const quests =
+      (world.getSystem("quest") as unknown as QuestSystem | null) ?? null;
     if (!quests) return false;
     const active = quests.getActiveQuests(ctx.killerId);
     return active.some(
@@ -98,7 +105,8 @@ export function createQuestCompletedHandler(
     if (!ctx.killerId) return false;
     const questId = stringParam(params, "questId");
     if (!questId) return false;
-    const quests = world.getSystem<QuestSystem>("quest") ?? null;
+    const quests =
+      (world.getSystem("quest") as unknown as QuestSystem | null) ?? null;
     if (!quests) return false;
     return quests.hasCompletedQuest(ctx.killerId, questId);
   };

@@ -1134,3 +1134,20 @@ export type {
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
 export { isValidQuestId } from "./types/game/quest-types";
+
+// QuestSystem (cross-cutting server-side) — re-exported here for the
+// client bundle.
+export { validateQuestDefinition } from "./types/game/quest-types";
+export type {
+  QuestDefinition,
+  QuestStatus,
+  QuestDbStatus,
+  QuestStage,
+  StageProgress,
+  QuestProgress,
+  PlayerQuestState,
+  QuestManifest,
+} from "./types/game/quest-types";
+export type { NPCDiedPayload } from "./types/events/event-payloads";
+export { validateKillToken } from "./utils/game/KillTokenUtils";
+export type { IQuestSystem } from "./types/game/quest-interfaces";

@@ -78,6 +78,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "banking",
   "store",
   "dialogue",
+  "quest",
   "tanning",
   "smithing",
   "smelting",

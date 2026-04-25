@@ -37,6 +37,8 @@ interface CoinPouchSystemLike {
   addCoins(playerId: string, amount: number, silent?: boolean): Promise<number>;
   removeCoins(playerId: string, amount: number): Promise<number>;
   getCoins(playerId: string): number;
+  hasCoins(playerId: string, amount: number): boolean;
+  isPlayerInitialized(playerId: string): boolean;
   persistCoinsImmediate(playerId: string): Promise<void>;
 }
 import { DeathState } from "../../../types/entities";
@@ -1488,7 +1490,11 @@ export class InventorySystem extends SystemBase {
    * Get CoinPouchSystem reference (lazy loaded)
    */
   private getCoinPouchSystem(): CoinPouchSystemLike | null {
-    return this.world.getSystem<CoinPouchSystemLike>("coin-pouch") || null;
+    return (
+      (this.world.getSystem("coin-pouch") as unknown as
+        | CoinPouchSystemLike
+        | undefined) ?? null
+    );
   }
 
   /**

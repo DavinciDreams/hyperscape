@@ -21,7 +21,13 @@
  */
 import type { World } from "../../../types/index";
 import type { Skills } from "../../../types/entities/entity-types";
-import type { QuestSystem } from "../progression/QuestSystem";
+// QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed locally — `getActiveQuests` + `hasCompletedQuest`.
+import type { QuestProgress } from "../../../types/game/quest-types";
+interface QuestSystem {
+  getActiveQuests(playerId: string): QuestProgress[];
+  hasCompletedQuest(playerId: string, questId: string): boolean;
+}
 import type { InventorySystem } from "../character/InventorySystem";
 import type { SkillsSystem } from "../character/SkillsSystem";
 import { SystemLogger } from "../../../utils/Logger";
@@ -102,7 +108,8 @@ export function buildDialoguePredicate(
   switch (binding.kind) {
     case "quest-active":
       return (args) => {
-        const quests = world.getSystem<QuestSystem>("quest") ?? null;
+        const quests =
+          (world.getSystem("quest") as unknown as QuestSystem | null) ?? null;
         if (!quests) return false;
         const active = quests.getActiveQuests(args.playerId);
         return active.some(
@@ -111,7 +118,8 @@ export function buildDialoguePredicate(
       };
     case "quest-completed":
       return (args) => {
-        const quests = world.getSystem<QuestSystem>("quest") ?? null;
+        const quests =
+          (world.getSystem("quest") as unknown as QuestSystem | null) ?? null;
         if (!quests) return false;
         return quests.hasCompletedQuest(args.playerId, binding.questId);
       };

@@ -487,7 +487,8 @@ export class CombatSystem extends SystemBase {
 
     // OPTIMIZATION: Cache other systems used in hot paths (damage calc, PvP zone checks)
     this.prayerSystem =
-      this.world.getSystem<PrayerSystemLike>("prayer") ?? null;
+      (this.world.getSystem("prayer") as unknown as PrayerSystemLike | null) ??
+      null;
     this.zoneDetectionSystem =
       this.world.getSystem<ZoneDetectionSystem>("zone-detection") ?? null;
     this._systemsCached = true;
@@ -1873,7 +1874,7 @@ export class CombatSystem extends SystemBase {
     // Get prayer bonuses
     const prayerSystem = this.world.getSystem(
       "prayer",
-    ) as PrayerSystemLike | null;
+    ) as unknown as PrayerSystemLike | null;
     const attackerPrayer = prayerSystem?.getCombinedBonuses(attackerId);
     const defenderPrayer =
       targetType === "player"
@@ -1983,7 +1984,7 @@ export class CombatSystem extends SystemBase {
     // Get prayer bonuses
     const prayerSystem = this.world.getSystem(
       "prayer",
-    ) as PrayerSystemLike | null;
+    ) as unknown as PrayerSystemLike | null;
     const attackerPrayer = prayerSystem?.getCombinedBonuses(attackerId);
     const defenderPrayer =
       targetType === "player"

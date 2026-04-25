@@ -50,6 +50,7 @@ import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
+import { QuestSystem } from "./systems/QuestSystem.js";
 import { ResourceTileDebugSystem } from "./systems/ResourceTileDebugSystem.js";
 import { StoreSystem } from "./systems/StoreSystem.js";
 import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
@@ -166,6 +167,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // PIE + WorldDialogueConditionEvaluators (in shared) duck-type
       // the surface they need.
       register("dialogue", DialogueSystem);
+
+      // Quests — manifest-driven quest tracking with kill objectives,
+      // stage progression, item rewards. PIE + dialogue + drop-condition
+      // evaluators + the server quest handler all duck-type the surface
+      // they need from this system.
+      register("quest", QuestSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

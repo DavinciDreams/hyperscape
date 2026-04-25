@@ -4,7 +4,7 @@
  * Manages player quest progression, tracking, and rewards.
  * Quests are defined in quests.json manifest and loaded at runtime.
  *
- * **Features:**
+ * Features:
  * - Manifest-driven quest definitions
  * - Kill tracking for combat objectives
  * - Stage-based quest progression
@@ -12,33 +12,43 @@
  * - Quest points tracking
  * - Integration with DialogueSystem for quest-aware dialogue
  *
- * **Event Flow:**
+ * Event Flow:
  * 1. DialogueSystem effect "startQuest:quest_id" triggers quest start
  * 2. QuestSystem tracks progress (kills, etc.)
  * 3. When objective complete, status becomes "ready_to_complete"
  * 4. DialogueSystem effect "completeQuest:quest_id" triggers completion
  * 5. Rewards distributed, QUEST_COMPLETED event emitted
  *
- * **Runs on:** Server only (client receives state via network messages)
+ * Runs on: Server only (client receives state via network messages)
  */
 
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type {
-  QuestDefinition,
-  QuestStatus,
-  QuestDbStatus,
-  QuestStage,
-  StageProgress,
-  QuestProgress,
-  PlayerQuestState,
-  QuestManifest,
-} from "../../../types/game/quest-types";
-import { validateQuestDefinition } from "../../../types/game/quest-types";
-import type { NPCDiedPayload } from "../../../types/events/event-payloads";
-import { validateKillToken } from "../../../utils/game/KillTokenUtils";
-import type { IQuestSystem } from "../../../types/game/quest-interfaces";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/progression/`
+// into `@hyperforge/hyperscape` (18th system migration; 6th
+// cross-cutting server-side system after CoinPouch + Prayer + Banking
+// + Store + Dialogue). 1424 LOC. Manifest-driven quest tracking with
+// kill objectives + stage progression + item rewards.
+//
+// In-shared consumers (`PIEEditorSession`,
+// `WorldDialogueConditionEvaluators`, `WorldDropConditionEvaluators`,
+// the server `quest.ts` handler) all duck-type the surface they need
+// via local `QuestSystemLike` interfaces.
+import {
+  EventType,
+  type IQuestSystem,
+  type NPCDiedPayload,
+  type PlayerQuestState,
+  type QuestDbStatus,
+  type QuestDefinition,
+  type QuestManifest,
+  type QuestProgress,
+  type QuestStage,
+  type QuestStatus,
+  type StageProgress,
+  SystemBase,
+  validateKillToken,
+  validateQuestDefinition,
+  type World,
+} from "@hyperforge/shared";
 
 /**
  * QuestSystem - Handles quest progression and rewards
