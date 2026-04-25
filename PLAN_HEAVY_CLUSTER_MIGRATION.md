@@ -150,7 +150,9 @@ Attempted Wave 1 (ResourceSystem) at end of 2026-04-25 session. Migration reache
 - Drop-table tagged-union narrowing (`levelRequired`, `catchLow`, `catchHigh` access on the `always-rolled` arm)
 - `gathering-live` getters needed by the gathering/ subdirectory not yet barrel-exported (`getDefaultSuccessRate`, `getFishingSuccessRates`, `getMinimumCycleTicks`, `getMiningSuccessRates`, `getWoodcuttingSuccessRates`)
 
-**Root cause**: `@hyperforge/hyperscape/tsconfig.json` has stricter checks than `@hyperforge/shared/tsconfig.json`. Files that pass shared's tsc fail plugin's tsc when migrated. Per-package builds in shared masked these issues until the file moved.
+**Root cause** (refined): Not actually tsconfig strictness — shared and plugin both have `"strict": true`, and shared's tsc passes cleanly on ResourceSystem in-place. The errors arise when the *migrated* plugin file imports types like `TerrainResourceSpawnPoint` (which has `subType?: ResourceSubType` where `ResourceSubType = TreeSubType | OreSubType`) through `@hyperforge/shared`. The shared barrel re-exports through d.ts boundaries; in some cases the transitive `ResourceSubType` type definition does not flow identically across package boundaries, and the plugin's tsc infers different (numeric? unknown?) types for fields it shouldn't. **This is a cross-package d.ts inference issue, not strictness.**
+
+Diagnosing this thoroughly requires investigation: dump the d.ts shapes both ends see, check whether barrel re-exports preserve type literal narrowing, possibly add explicit type-only re-exports for transitive aliases (`ResourceSubType`, `TreeSubType`, `OreSubType`).
 
 **Implication for Wave 1 (ResourceSystem)**: needs ~half-session of dedicated type-error fixing before the migration can land. The errors are real (not refactoring artifacts) — the file has been silently failing strict checks. Recommend either:
   1. Tighten shared's tsconfig first to surface + fix these issues in-place, then migrate cleanly
