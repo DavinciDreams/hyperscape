@@ -1109,10 +1109,12 @@ export type {
 // through that earlier re-export.
 
 // HealthRegen live-getters consumed by HealthRegenSystem in plugin.
+// (`getHealthRegenRate` is in game-live; the tick-interval helpers
+// are in combat-live.)
 export {
   getHealthRegenIntervalTicks,
   getHealthRegenCooldownTicks,
-} from "./data/live/game-live";
+} from "./data/live/combat-live";
 
 // `toTHREEVector3` already re-exported earlier in this file; HealthBars
 // resolves through that.
