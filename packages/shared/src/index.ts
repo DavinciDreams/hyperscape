@@ -874,6 +874,22 @@ export type {
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
 
+// AggroSystem deps — needed by the migrated AggroSystem in
+// @hyperforge/hyperscape.
+export type {
+  AggroTarget,
+  MobAIStateData,
+} from "./types/entities/npc-mob-types";
+export {
+  getDefaultNpcAggroRange,
+  getDefaultNpcLeashRange,
+} from "./data/live/combat-live";
+export {
+  calculateCombatLevel,
+  normalizeCombatSkills,
+  shouldMobIgnorePlayer,
+} from "./utils/game/CombatLevelCalculator";
+
 // QuestSystem deps — needed by the migrated QuestSystem in
 // @hyperforge/hyperscape.
 export { validateQuestDefinition } from "./types/game/quest-types";

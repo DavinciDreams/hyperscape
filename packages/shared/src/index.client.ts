@@ -1135,6 +1135,21 @@ export type {
 } from "./types/entities/npc-mob-types";
 export { isValidQuestId } from "./types/game/quest-types";
 
+// AggroSystem deps — re-exported for the client bundle.
+export type {
+  AggroTarget,
+  MobAIStateData,
+} from "./types/entities/npc-mob-types";
+export {
+  getDefaultNpcAggroRange,
+  getDefaultNpcLeashRange,
+} from "./data/live/combat-live";
+export {
+  calculateCombatLevel,
+  normalizeCombatSkills,
+  shouldMobIgnorePlayer,
+} from "./utils/game/CombatLevelCalculator";
+
 // QuestSystem (cross-cutting server-side) — re-exported here for the
 // client bundle.
 export { validateQuestDefinition } from "./types/game/quest-types";

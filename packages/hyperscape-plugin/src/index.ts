@@ -33,6 +33,7 @@ import type {
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
 
+import { AggroSystem } from "./systems/AggroSystem.js";
 import { BankingSystem } from "./systems/BankingSystem.js";
 import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
 import { ClientTeleportEffectsSystem } from "./systems/ClientTeleportEffectsSystem.js";
@@ -173,6 +174,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // evaluators + the server quest handler all duck-type the surface
       // they need from this system.
       register("quest", QuestSystem);
+
+      // Aggro — mob aggression detection + chase + tile-based 21x21
+      // region spatial index. Only MobEntity touches it directly (via
+      // a duck-typed `getPlayersInNearbyRegions` call).
+      register("aggro", AggroSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

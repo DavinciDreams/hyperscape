@@ -11,7 +11,7 @@
  */
 
 import type { ActionRegistry } from "../systems/shared";
-import type { AggroSystem } from "../systems/shared";
+// AggroSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // BankingSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown` — same pattern as
@@ -113,7 +113,7 @@ export interface SystemMap {
   skills: SkillsSystem;
   prayer: unknown;
   // "health-regen" registered by @hyperforge/hyperscape plugin onEnable
-  aggro: AggroSystem;
+  aggro: unknown;
 
   // Economy
   banking: unknown;

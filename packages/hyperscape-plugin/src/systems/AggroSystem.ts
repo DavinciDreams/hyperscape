@@ -1,39 +1,44 @@
 /**
  * Aggression System
- * Handles mob AI, aggression detection, and chase mechanics per GDD specifications
- * - Mob aggression based on player level and mob type
- * - Detection ranges and line-of-sight
- * - Chase mechanics with leashing
- * - Different mob behaviors (passive, aggressive, special cases)
+ *
+ * Mob AI aggression detection + chase mechanics:
+ * - Aggression based on player level + mob type
+ * - Detection range + line-of-sight checks
+ * - Chase mechanics with leash distance
+ * - Behavior variants (passive, aggressive, special)
  */
 
-import { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/combat/`
+// into `@hyperforge/hyperscape` (19th system migration; 7th
+// cross-cutting server-side after CoinPouch + Prayer + Banking +
+// Store + Dialogue + Quest). 1347 LOC. Tile-based aggression range
+// + tolerance window + 21x21 region spatial index.
+//
+// In-shared consumers: only `MobEntity` calls
+// `getPlayersInNearbyRegions` (duck-typed locally there).
 import {
+  type AggroTarget,
+  calculateCombatLevel,
+  calculateDistance,
+  type Entity,
+  EventType,
   getDefaultNpcAggroRange,
   getDefaultNpcLeashRange,
-} from "../../../data/live/combat-live";
-import { AggroTarget, Position3D, MobAIStateData } from "../../../types";
-import { calculateDistance } from "../../../utils/game/EntityUtils";
-import {
-  calculateCombatLevel,
-  normalizeCombatSkills,
-  shouldMobIgnorePlayer,
-} from "../../../utils/game/CombatLevelCalculator";
-import { SystemBase } from "../infrastructure/SystemBase";
-import {
-  TICK_DURATION_MS,
-  worldToTile,
-  type TileCoord,
-} from "../movement/TileSystem";
-import type { Entity } from "../../../entities/Entity";
-import {
-  NetworkingComputeContext,
-  isNetworkingComputeAvailable,
   type GPUMobData,
   type GPUPlayerPosition,
-} from "../../../utils/compute";
-import type { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
+  isNetworkingComputeAvailable,
+  type MobAIStateData,
+  NetworkingComputeContext,
+  normalizeCombatSkills,
+  type Position3D,
+  shouldMobIgnorePlayer,
+  SystemBase,
+  TICK_DURATION_MS,
+  type TileCoord,
+  World,
+  worldToTile,
+  ZoneDetectionSystem,
+} from "@hyperforge/shared";
 
 /**
  * Tolerance state for a player in a region
@@ -94,7 +99,19 @@ export class AggroSystem extends SystemBase {
   private combatLevelCache = new Map<string, number>();
 
   /** EntityManager for spatial queries */
-  private entityManager?: import("../entities/EntityManager").EntityManager;
+  // EntityManager lives in shared/. Duck-typed locally — only the
+  // `getSpatialRegistry().getEntitiesInRange(x, z, range, kind)`
+  // chain is called.
+  private entityManager?: {
+    getSpatialRegistry(): {
+      getEntitiesInRange(
+        x: number,
+        z: number,
+        range: number,
+        kind: string,
+      ): Array<{ entityId: string; position?: Position3D }>;
+    };
+  };
 
   /** GPU compute context for batch aggro checks (server-side) */
   private networkingCompute: NetworkingComputeContext | null = null;
@@ -129,10 +146,9 @@ export class AggroSystem extends SystemBase {
 
   async init(): Promise<void> {
     // Cache EntityManager for spatial queries (avoid getSystem() in hot paths)
-    this.entityManager =
-      this.world.getSystem<import("../entities/EntityManager").EntityManager>(
-        "entity-manager",
-      );
+    this.entityManager = this.world.getSystem("entity-manager") as
+      | NonNullable<AggroSystem["entityManager"]>
+      | undefined;
 
     // Cache ZoneDetectionSystem for safe zone checks
     this.zoneDetectionSystem =

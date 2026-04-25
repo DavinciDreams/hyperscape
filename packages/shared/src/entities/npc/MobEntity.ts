@@ -145,7 +145,17 @@ import {
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
 import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
-import type { AggroSystem } from "../../systems/shared/combat/AggroSystem";
+// AggroSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed locally — only `getPlayersInNearbyRegions` is called.
+// Returns objects shaped to feed into `aggroManager.findNearbyPlayer`,
+// which reads `id`, optional `position`, and optional `node.position`.
+interface AggroSystem {
+  getPlayersInNearbyRegions(position: Position3D): Array<{
+    id: string;
+    position?: Position3D;
+    node?: { position?: Position3D };
+  }>;
+}
 
 // Polyfill ProgressEvent for Node.js server environment
 

@@ -91,7 +91,8 @@ function isTruthy(value: string | undefined): boolean {
 }
 
 // Import systems
-import { AggroSystem } from "..";
+// AggroSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 // BankingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -213,7 +214,8 @@ export interface Systems {
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   store?: unknown;
   resource?: ResourceSystem;
-  aggro?: AggroSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  aggro?: unknown;
   equipment?: EquipmentSystem;
   processing?: ProcessingSystem;
   entityManager?: EntityManager;
@@ -425,7 +427,8 @@ export async function registerSystems(world: World): Promise<void> {
   //  Hyperscape→meta-plugin extraction.)
 
   // 21. Aggro system - AI aggression management (depends on mob & combat systems)
-  world.register("aggro", AggroSystem);
+  // "aggro" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // Duel Arena visual system - procedural arena geometry and physics collision
   const duelArenaVisualsEnabled =
@@ -512,7 +515,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.store = getSystem(world, "store");
   systems.resource = getSystem(world, "resource") as ResourceSystem;
 
-  systems.aggro = getSystem(world, "aggro") as AggroSystem;
+  systems.aggro = getSystem(world, "aggro");
   systems.equipment = getSystem(world, "equipment") as EquipmentSystem;
   systems.processing = getSystem(world, "processing") as ProcessingSystem;
   // healthRegen registration moved to @hyperforge/hyperscape plugin —
