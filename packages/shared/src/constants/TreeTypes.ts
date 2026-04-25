@@ -126,7 +126,31 @@ export const TREE_TYPES: Readonly<Record<string, TreeTypeDefinition>> =
  * narrow discriminated union at the type level while the runtime value still
  * comes from the validated manifest.
  */
-export type TreeSubType = keyof typeof treeManifestJson.trees;
+/**
+ * Concrete string union (was `keyof typeof treeManifestJson.trees`).
+ * The `keyof typeof <json-import>` form leaks into the emitted d.ts as a
+ * literal `keyof typeof treeManifestJson.trees` reference, which downstream
+ * consumers can't resolve identically — `keyof` on an unresolved JSON-import
+ * widens to `string | number | symbol` and breaks `TreeSubType` callsites in
+ * downstream packages with cryptic "Type 'number' is not assignable to
+ * 'string'" errors. Hand-listing the keys here keeps the union concrete in
+ * the d.ts and matches the runtime keys verified by `TREE_SUBTYPE_KEYS`
+ * below; a missing-key drift is caught by the assertion that compares
+ * `Object.keys(TREE_TYPES)` against this static list at module load.
+ */
+export type TreeSubType =
+  | "pine"
+  | "oak"
+  | "maple"
+  | "palm"
+  | "banana"
+  | "dead"
+  | "pineDead"
+  | "bamboo"
+  | "eucalyptus"
+  | "general"
+  | "magic"
+  | "mahogany";
 
 /** All valid tree subtype keys as a runtime array */
 export const TREE_SUBTYPE_KEYS: readonly TreeSubType[] = Object.freeze(
