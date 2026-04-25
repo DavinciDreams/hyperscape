@@ -943,6 +943,21 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// POISystem deps — needed by the migrated POISystem in
+// @hyperforge/hyperscape. Configuration + biome / noise helpers
+// used to procedurally place points of interest.
+export type {
+  PointOfInterest,
+  POICategory,
+  POIConfig,
+} from "./types/world/world-types";
+export { NoiseGenerator } from "./utils/NoiseGenerator";
+export {
+  BiomeType,
+  DEFAULT_BIOME,
+} from "./systems/shared/world/TerrainBiomeTypes";
+export { dist2D } from "./utils/MathUtils";
+
 // ProceduralDocks deps — needed by the migrated ProceduralDocks in
 // @hyperforge/hyperscape. Static dock data + dual-wall helper used
 // to drive procedural deck collision + geometry.
@@ -1470,7 +1485,7 @@ export {
 
 // Export town, POI, and road systems
 export { TownSystem } from "./systems/shared";
-export { POISystem } from "./systems/shared";
+// POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { RoadNetworkSystem } from "./systems/shared";
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
 

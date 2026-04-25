@@ -9,23 +9,27 @@
  * IMPORTANT: DataManager.loadManifests*() must be called BEFORE POISystem.init()
  */
 
-import { System } from "../infrastructure/System";
-import type { World } from "../../../core/World";
-import type {
-  PointOfInterest,
-  POICategory,
-  POIConfig,
-} from "../../../types/world/world-types";
-import { NoiseGenerator } from "../../../utils/NoiseGenerator";
-import { Logger } from "../../../utils/Logger";
-import { BiomeType, DEFAULT_BIOME } from "./TerrainBiomeTypes";
-import { DataManager } from "../../../data/DataManager";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (31st system migration; 17th
+// cross-cutting). 701 LOC. Sole external consumer
+// (`RoadNetworkSystem` still in shared) calls one method
+// (`poiSystem.getConfig()`) — duck-typed at the callsite.
 import {
+  BiomeType,
+  DataManager,
+  DEFAULT_BIOME,
+  dist2D,
   getTerrainTileSize,
   getWaterThreshold,
-} from "../../../data/live/game-live";
-import { dist2D } from "../../../utils/MathUtils";
-import type { TownSystem } from "./TownSystem";
+  Logger,
+  NoiseGenerator,
+  type POICategory,
+  type POIConfig,
+  type PointOfInterest,
+  SystemClass as System,
+  type TownSystem,
+  type World,
+} from "@hyperforge/shared";
 
 // Default configuration values
 const DEFAULTS: POIConfig = {

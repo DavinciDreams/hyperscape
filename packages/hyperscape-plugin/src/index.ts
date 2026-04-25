@@ -53,6 +53,7 @@ import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { BridgeSystem } from "./systems/BridgeSystem.js";
+import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
 import { LootSystem } from "./systems/LootSystem.js";
 import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem.js";
@@ -229,6 +230,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // deck/fence). Server computes walkable dock tiles +
       // WATER overrides; client adds the procedural mesh.
       register("docks", ProceduralDocks);
+
+      // POIs — procedural points-of-interest (dungeons, shrines,
+      // landmarks). Read by RoadNetworkSystem (still in shared)
+      // via duck-typed `getConfig()` lookup.
+      register("pois", POISystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

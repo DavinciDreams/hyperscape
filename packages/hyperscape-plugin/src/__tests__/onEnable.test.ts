@@ -88,6 +88,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "loot",
   "bridges",
   "docks",
+  "pois",
   "tanning",
   "smithing",
   "smelting",

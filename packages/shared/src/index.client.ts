@@ -1052,7 +1052,8 @@ export { getRandomSpawnPoint } from "./data/world-areas";
 // already imported at the top of this file, re-listed here for clarity)
 // BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
-export { TownSystem, POISystem, RoadNetworkSystem } from "./systems/shared";
+// POISystem migrated to @hyperforge/hyperscape (2026-04-25)
+export { TownSystem, RoadNetworkSystem } from "./systems/shared";
 
 // Combat + Player system class refs — Hyperscape plugins like
 // HealthRegenSystem do `getSystem<CombatSystem>("combat")`.
@@ -1202,6 +1203,21 @@ export {
   ISLAND_BRIDGES,
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
+
+// POISystem (cross-cutting) — re-exported here for the client
+// bundle so the migrated plugin POISystem resolves its imports.
+// (Mirrors index.ts.)
+export type {
+  PointOfInterest,
+  POICategory,
+  POIConfig,
+} from "./types/world/world-types";
+export { NoiseGenerator } from "./utils/NoiseGenerator";
+export {
+  BiomeType,
+  DEFAULT_BIOME,
+} from "./systems/shared/world/TerrainBiomeTypes";
+export { dist2D } from "./utils/MathUtils";
 
 // ProceduralDocks (cross-cutting) — re-exported here for the
 // client bundle so the migrated plugin ProceduralDocks resolves

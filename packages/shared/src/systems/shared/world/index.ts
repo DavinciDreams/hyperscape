@@ -20,7 +20,7 @@ export * from "./StandaloneGrass";
 export * from "./ProceduralFlowers";
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./TownSystem";
-export * from "./POISystem";
+// POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./RoadNetworkSystem";
 export * from "./BuildingRenderingSystem";
 export * from "./ProceduralTownLandmarks";

@@ -45,7 +45,7 @@ import { ServerLoader } from "../systems/server/ServerLoader";
 
 import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
-import { POISystem } from "../systems/shared";
+// POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { RoadNetworkSystem } from "../systems/shared";
 // BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
@@ -99,7 +99,8 @@ export async function createServerWorld(): Promise<World> {
   // Road network connects towns using A* pathfinding with terrain costs
 
   world.register("towns", TownSystem);
-  world.register("pois", POISystem);
+  // "pois" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
   // world.register("roads", RoadNetworkSystem);
 
   // ============================================================================

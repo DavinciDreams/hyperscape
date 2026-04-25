@@ -28,7 +28,19 @@ import type {
 } from "../../../types/world/world-types";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
 import type { TownSystem } from "./TownSystem";
-import type { POISystem } from "./POISystem";
+// POISystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed inline below — only the surface this system uses.
+// (`PointOfInterest` already imported above from world-types.)
+interface POISystem {
+  getConfig(): { maxRoadExtensionDistance: number };
+  getImportantPOIs(): PointOfInterest[];
+  getPOIs(): PointOfInterest[];
+  calculateEntryPoint(
+    poi: PointOfInterest,
+    townX: number,
+    townZ: number,
+  ): { x: number; z: number; angle: number };
+}
 import { EventType } from "../../../types/events";
 import { Logger } from "../../../utils/Logger";
 import { DataManager } from "../../../data/DataManager";
@@ -238,7 +250,9 @@ export class RoadNetworkSystem extends System {
         }
       | undefined;
     this.townSystem = this.world.getSystem("towns") as TownSystem | undefined;
-    this.poiSystem = this.world.getSystem("pois") as POISystem | undefined;
+    this.poiSystem = this.world.getSystem("pois") as unknown as
+      | POISystem
+      | undefined;
 
     if (DataManager.getWorldConfig()?.roads) {
       Logger.system(

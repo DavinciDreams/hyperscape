@@ -71,7 +71,7 @@ import * as THREE from "../extras/three/three";
 // Terrain, vegetation, grass, towns, roads, POIs, buildings, and physics
 import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
-import { POISystem } from "../systems/shared";
+// POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { RoadNetworkSystem } from "../systems/shared";
 import { VegetationSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
@@ -321,7 +321,8 @@ export function createClientWorld() {
   // that VegetationSystem receives to regenerate grass at correct heights
 
   world.register("towns", TownSystem);
-  world.register("pois", POISystem);
+  // "pois" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
   // world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
