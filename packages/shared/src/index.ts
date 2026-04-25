@@ -943,6 +943,15 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralDocks deps — needed by the migrated ProceduralDocks in
+// @hyperforge/hyperscape. Static dock data + dual-wall helper used
+// to drive procedural deck collision + geometry.
+export {
+  ISLAND_DOCKS,
+  type DockDefinition,
+} from "./systems/shared/world/DockDefinition";
+export { getOppositeWallFlag } from "./systems/shared/movement/CollisionFlags";
+
 // InventoryInteractionSystem deps — needed by the migrated
 // InventoryInteractionSystem in @hyperforge/hyperscape.
 export type { DragData, DropTarget } from "./types/game/inventory-types";

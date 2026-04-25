@@ -76,7 +76,7 @@ import { RoadNetworkSystem } from "../systems/shared";
 import { VegetationSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
 import { ProceduralFlowerSystem } from "../systems/shared";
-import { ProceduralDocks } from "../systems/shared";
+// ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 import { BuildingRenderingSystem } from "../systems/shared";
 import { ProceduralTownLandmarksSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
@@ -377,7 +377,8 @@ export function createClientWorld() {
   // ============================================================================
   // DOCK SYSTEM
   // ============================================================================
-  world.register("docks", ProceduralDocks);
+  // "docks" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // ============================================================================
   // THREE.JS SETUP

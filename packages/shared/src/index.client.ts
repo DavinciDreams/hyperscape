@@ -1203,6 +1203,15 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralDocks (cross-cutting) — re-exported here for the
+// client bundle so the migrated plugin ProceduralDocks resolves
+// its imports. (Mirrors index.ts.)
+export {
+  ISLAND_DOCKS,
+  type DockDefinition,
+} from "./systems/shared/world/DockDefinition";
+export { getOppositeWallFlag } from "./systems/shared/movement/CollisionFlags";
+
 // InventoryInteractionSystem (cross-cutting server-side) —
 // re-exported here for the client bundle so the migrated plugin
 // system resolves its imports when loaded on the client world.

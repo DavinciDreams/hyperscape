@@ -87,6 +87,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "item-spawner",
   "loot",
   "bridges",
+  "docks",
   "tanning",
   "smithing",
   "smelting",

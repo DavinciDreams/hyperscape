@@ -4,7 +4,7 @@
  * Generates procedural docks on water bodies.
  * Follows the BridgeSystem pattern for collision registration:
  * - Walkable tiles: remove WATER flag, add DOCK flag
- * - Edge blocking: OSRS dual-tile wall flags on dock perimeter
+ * - Edge blocking: dual-tile wall flags on dock perimeter
  * - Deck height tracking: per-tile Y override for player positioning
  *
  * Works on both client (mesh + collision) and server (collision only).
@@ -12,10 +12,23 @@
  * @module ProceduralDocks
  */
 
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (30th system migration; 16th
+// cross-cutting). 1230 LOC. Same recipe as BridgeSystem — sole
+// external consumers (`tile-movement.ts`, `TerrainSystem.ts` x2)
+// already used duck-typed `world.getSystem("docks")` accessors,
+// so no consumer rewiring. `DockDefinition` + `ISLAND_DOCKS` stay
+// in shared and are re-exported through the shared barrel.
 import * as THREE from "three";
-import { System } from "../infrastructure/System";
-import type { World } from "../../../types";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import {
+  CollisionFlag,
+  getOppositeWallFlag,
+  ISLAND_DOCKS,
+  type DockDefinition,
+  SystemClass as System,
+  TERRAIN_CONSTANTS,
+  type World,
+} from "@hyperforge/shared";
 import type {
   ShorelinePoint,
   WaterBody,
@@ -27,8 +40,6 @@ import {
   type GeneratedDock,
   type DockRecipe,
 } from "@hyperforge/procgen/items/dock";
-import { ISLAND_DOCKS, type DockDefinition } from "./DockDefinition";
-import { CollisionFlag, getOppositeWallFlag } from "../movement/CollisionFlags";
 
 // TSL imports for dock material (client-only, same pattern as BridgeSystem)
 import { MeshStandardNodeMaterial } from "three/webgpu";
@@ -347,7 +358,7 @@ export class ProceduralDocks extends System {
       tileSet.add(key);
     }
 
-    // Pass 2: Cardinal wall flags from blockedEdges (OSRS dual-tile pattern)
+    // Pass 2: Cardinal wall flags from blockedEdges (dual-tile pattern)
     for (const edge of dock.collision.blockedEdges) {
       let wallFlag: number;
       let ndx: number;

@@ -53,6 +53,7 @@ import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { BridgeSystem } from "./systems/BridgeSystem.js";
+import { ProceduralDocks } from "./systems/ProceduralDocks.js";
 import { LootSystem } from "./systems/LootSystem.js";
 import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem.js";
 import { MusicSystem } from "./systems/MusicSystem.js";
@@ -223,6 +224,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // walkable bridge tiles + WATER overrides; client adds the
       // procedural mesh.
       register("bridges", BridgeSystem);
+
+      // Docks — same shape as bridges (collision + procedural
+      // deck/fence). Server computes walkable dock tiles +
+      // WATER overrides; client adds the procedural mesh.
+      register("docks", ProceduralDocks);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.
