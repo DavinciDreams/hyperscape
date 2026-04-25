@@ -111,7 +111,8 @@ import { PersistenceSystem } from "../../server/PersistenceSystem";
 import { PlayerSystem } from "..";
 import { ProcessingSystem } from "..";
 import { ResourceSystem } from "..";
-import { StoreSystem } from "..";
+// StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 
 // New MMO-style Systems
 // NOTE: Import directly from specific files to avoid circular dependency through barrel file
@@ -370,7 +371,8 @@ export async function registerSystems(world: World): Promise<void> {
   // cross-cutting branch (migrated 2026-04-25).
 
   // 14. Store system - Item trading (depends on inventory system)
-  world.register("store", StoreSystem);
+  // "store" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // 15. Resource system - Gathering mechanics (depends on inventory system)
   world.register("resource", ResourceSystem);

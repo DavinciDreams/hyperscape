@@ -47,7 +47,7 @@ import type { SkillsSystem } from "../systems/shared";
 // FletchingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { StationSpawnerSystem } from "../systems/shared";
-import type { StoreSystem } from "../systems/shared";
+// StoreSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { GroundItemSystem } from "../systems/shared/economy/GroundItemSystem";
 import type { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
@@ -117,7 +117,7 @@ export interface SystemMap {
 
   // Economy
   banking: unknown;
-  store: StoreSystem;
+  store: unknown;
   resource: ResourceSystem;
   "ground-items": GroundItemSystem;
   loot: LootSystem;

@@ -1,12 +1,20 @@
-import type { World } from "../../../types";
-import { Store } from "../../../types/core/core";
-import type { StoreCloseEvent, StoreOpenEvent } from "../../../types/events";
-import { EventType } from "../../../types/events";
-import { StoreID } from "../../../types/core/identifiers";
-import { createStoreID } from "../../../utils/IdentifierUtils";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { GENERAL_STORES } from "../../../data/banks-stores";
-import { storesRegistry } from "../../../stores";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/economy/`
+// into `@hyperforge/hyperscape` (16th migration; 4th cross-cutting
+// server-side system after CoinPouch + Prayer + Banking). OSRS-style
+// general stores — interaction handler that opens/closes per-player
+// store sessions. Server-authoritative.
+import {
+  createStoreID,
+  EventType,
+  GENERAL_STORES,
+  type Store,
+  type StoreCloseEvent,
+  type StoreID,
+  type StoreOpenEvent,
+  storesRegistry,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 /**
  * Store System

@@ -668,7 +668,7 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // `Player` type already exported from the shared types block above
 // (line ~157) — no duplicate export needed here.
 export { LootSystem } from "./systems/shared/economy/LootSystem";
-export { StoreSystem } from "./systems/shared/economy/StoreSystem";
+// StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
 export { QuestSystem } from "./systems/shared/progression/QuestSystem";
@@ -853,6 +853,12 @@ export type { PlayerJoinedPayload } from "./types/events/event-payloads";
 // BankData — needed by the migrated BankingSystem in
 // @hyperforge/hyperscape.
 export type { BankData } from "./types/game/inventory-types";
+
+// Store catalog data + storesRegistry singleton — needed by the
+// migrated StoreSystem in @hyperforge/hyperscape.
+export type { Store } from "./types/game/item-types";
+export { GENERAL_STORES } from "./data/banks-stores";
+export { storesRegistry } from "./stores";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

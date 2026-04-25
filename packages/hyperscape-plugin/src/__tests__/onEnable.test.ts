@@ -76,6 +76,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "coin-pouch",
   "prayer",
   "banking",
+  "store",
   "tanning",
   "smithing",
   "smelting",

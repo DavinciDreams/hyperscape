@@ -50,6 +50,7 @@ import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
 import { ResourceTileDebugSystem } from "./systems/ResourceTileDebugSystem.js";
+import { StoreSystem } from "./systems/StoreSystem.js";
 import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
 import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
@@ -155,6 +156,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // drag-to-store interface. No in-shared callers reference the
       // class type; SystemMap downgraded to `unknown`.
       register("banking", BankingSystem);
+
+      // Stores — OSRS general stores. Per-player open/close session
+      // handler; reads catalog from `storesRegistry` + `GENERAL_STORES`.
+      register("store", StoreSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.
