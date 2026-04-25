@@ -7,9 +7,11 @@
  * No gameplay impact — purely visual.
  */
 
-import type { World } from "../../types";
-import { SystemBase } from "../shared/infrastructure/SystemBase";
-import THREE from "../../extras/three/three";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (continued client-only system
+// migration). TSL-shaded vertical quad strip + spray; Hyperscape-
+// specific rendering for procedural rivers. Self-gates init/start
+// on `world.isServer === false`.
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
   Fn,
@@ -24,7 +26,12 @@ import {
   fract,
   abs,
 } from "three/tsl";
-import type { WaterfallDefinition } from "../shared/world/WaterfallDefinition";
+import {
+  SystemBase,
+  THREE,
+  type WaterfallDefinition,
+  type World,
+} from "@hyperforge/shared";
 
 interface WaterfallMeshHandle {
   mesh: THREE.Mesh;

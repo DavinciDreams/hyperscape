@@ -101,6 +101,9 @@ export {
   type GrassTerrainSampler,
   type GrassTerrainSample,
 } from "./systems/shared/world/StandaloneGrass";
+// Waterfall — type re-exported for the hyperscape-plugin's
+// WaterfallVisualsSystem (migrated out of `shared/systems/client/`).
+export { type WaterfallDefinition } from "./systems/shared/world/WaterfallDefinition";
 export {
   WATER,
   WAVES,

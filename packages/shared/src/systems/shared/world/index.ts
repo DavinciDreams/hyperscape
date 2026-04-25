@@ -41,3 +41,7 @@ export * from "./TeleportSystem";
 export * from "./TreeLODSystem";
 export * from "./TreeLODMaterials";
 export * from "./TreeLODIntegration";
+
+// Waterfall geometry/positioning helper. Type re-exported for the
+// hyperscape-plugin's WaterfallVisualsSystem.
+export * from "./WaterfallDefinition";

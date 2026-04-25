@@ -47,6 +47,7 @@ import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
+import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 
 // Re-export combat surface so callers have one import path.
 export {
@@ -153,6 +154,9 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         register("damage-splat", DamageSplatSystem);
         register("duel-countdown-splat", DuelCountdownSplatSystem);
         register("projectile-renderer", ProjectileRenderer);
+        // Procedural-river TSL waterfall renderer — purely visual,
+        // self-no-op when there are no river-derived definitions.
+        register("waterfall-visuals", WaterfallVisualsSystem);
         // Debug overlays — toggled via F5 panel keys (B / W).
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);

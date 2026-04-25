@@ -126,7 +126,7 @@ import { LODs } from "../systems/shared";
 import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
-import { WaterfallVisualsSystem } from "../systems/client/WaterfallVisualsSystem";
+// WaterfallVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
 // ResourceTileDebugSystem available for debugging: import { ResourceTileDebugSystem } from "../systems/client/ResourceTileDebugSystem";
 import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
@@ -348,7 +348,7 @@ export function createClientWorld() {
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
   world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings
-  world.register("waterfall-visuals", WaterfallVisualsSystem); // River waterfall rendering
+  // "waterfall-visuals" registered by @hyperforge/hyperscape onEnable (client branch).
   // TEMPORARILY DISABLED - debugging terrain rendering
   // world.register("resource-tile-debug", ResourceTileDebugSystem); // Debug: shows resource tile occupancy
   world.register("particles", Particles); // Particle effects system
