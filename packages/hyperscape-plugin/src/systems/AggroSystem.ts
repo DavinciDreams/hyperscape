@@ -41,10 +41,9 @@ import {
 } from "@hyperforge/shared";
 
 /**
- * Tolerance state for a player in a region
- * In OSRS, aggressive mobs stop attacking after player has been in a 21x21 region for 10 minutes
- *
- * @see https://oldschool.runescape.wiki/w/Aggression#Tolerance
+ * Tolerance state for a player in a region.
+ * Aggressive mobs stop attacking after a player has been in a
+ * 21x21 tile region for 10 minutes (1000 600ms ticks).
  */
 interface ToleranceState {
   /** Region identifier (21x21 tile zone) */
@@ -58,17 +57,17 @@ interface ToleranceState {
 /** Tolerance timer duration: 1000 ticks = 10 minutes at 600ms/tick */
 const TOLERANCE_TICKS = 1000;
 
-/** Tolerance region size in tiles (OSRS uses 21x21 regions) */
+/** Tolerance region size in tiles (21x21 grid). */
 const TOLERANCE_REGION_SIZE = 21;
 
 /**
- * Aggression System - GDD Compliant
- * Implements mob AI and aggression mechanics per GDD specifications:
+ * Aggression System - GDD compliant.
+ * Tile-based mob AI + aggression mechanics:
  * - Level-based aggression (low-level aggressive mobs ignore high-level players)
- * - Special cases (Dark Warriors always aggressive regardless of level)
- * - Detection ranges and chase mechanics
- * - Leashing to prevent mobs from going too far from spawn
- * - Multiple target management
+ * - Per-mob behavior overrides (always-aggressive flag in mob data)
+ * - Detection range + chase mechanics
+ * - Leashing to prevent mobs from straying too far from spawn
+ * - Multi-target tracking
  */
 export class AggroSystem extends SystemBase {
   private mobStates = new Map<string, MobAIStateData>();
@@ -299,7 +298,7 @@ export class AggroSystem extends SystemBase {
       }
     }
 
-    // Start AI update loop aligned to server tick (OSRS-accurate)
+    // Start AI update loop aligned to server tick
     this.createInterval(() => {
       this.updateMobAI();
     }, TICK_DURATION_MS); // 600ms - aligned to server tick
@@ -326,7 +325,7 @@ export class AggroSystem extends SystemBase {
 
     const mobType = mobData.type.toLowerCase();
 
-    // Use manifest values with OSRS-accurate DEFAULTS as fallback
+    // Use manifest values with classic-MMORPG DEFAULTS as fallback
     // This replaces the legacy MOB_BEHAVIORS lookup pattern
     const detectionRange =
       mobData.combat?.aggroRange ?? getDefaultNpcAggroRange();
@@ -584,14 +583,14 @@ export class AggroSystem extends SystemBase {
   /**
    * Check if mob should aggro a player based on level and behavior
    *
-   * OSRS Rule: Mobs ignore players whose combat level is MORE THAN DOUBLE the mob's level.
+   * Rule: Mobs ignore players whose combat level is MORE THAN DOUBLE the mob's level.
    *
    * Examples:
    * - Level 2 goblin ignores level 5+ players (5 > 2*2 = 4)
    * - Level 10 guard ignores level 21+ players (21 > 10*2 = 20)
    * - Bosses (toleranceImmune) never ignore based on level
    *
-   * @see https://oldschool.runescape.wiki/w/Aggression
+   *
    */
   private shouldMobAggroPlayer(
     mobState: MobAIStateData,
@@ -613,7 +612,7 @@ export class AggroSystem extends SystemBase {
       }
     }
 
-    // Get player combat level using OSRS formula
+    // Get player combat level
     const playerCombatLevel = this.getPlayerCombatLevel(playerId);
 
     // Get mob's combat level from the entity
@@ -625,7 +624,7 @@ export class AggroSystem extends SystemBase {
     // They always aggro regardless of player level
     const toleranceImmune = mobState.levelIgnore >= 999;
 
-    // OSRS double-level aggro rule
+    // Double-level aggro rule
     // Player level > (mob level * 2) = mob ignores player
     if (shouldMobIgnorePlayer(playerCombatLevel, mobLevel, toleranceImmune)) {
       return false;
@@ -686,12 +685,12 @@ export class AggroSystem extends SystemBase {
     return combatLevel;
   }
 
-  /** Default skills for fresh character (OSRS level 3) */
+  /** Default skills for fresh character */
   private static readonly DEFAULT_SKILLS = {
     attack: 1,
     strength: 1,
     defense: 1,
-    constitution: 10, // Hitpoints starts at 10 in OSRS
+    constitution: 10, // Hitpoints starts at 10
     ranged: 1,
     magic: 1,
     prayer: 1,
@@ -724,7 +723,7 @@ export class AggroSystem extends SystemBase {
 
   /**
    * Update tolerance state - after 10 min in a 21x21 region, mobs stop aggro
-   * @see https://oldschool.runescape.wiki/w/Aggression#Tolerance
+   *
    */
   private updatePlayerTolerance(
     playerId: string,
@@ -780,7 +779,7 @@ export class AggroSystem extends SystemBase {
 
   /**
    * Get tolerance region ID for a tile position
-   * OSRS divides the world into 21x21 tile regions for tolerance purposes
+   * The world is divided into 21x21 tile regions for tolerance purposes
    *
    * @param tile - Tile coordinates
    * @returns Region identifier string "x:z"
@@ -845,7 +844,7 @@ export class AggroSystem extends SystemBase {
 
   /**
    * Get the tolerance region ID for a world position
-   * Regions are 21x21 tiles (OSRS-accurate)
+   * Regions are 21x21 tiles
    *
    * @param position - World position (x, z coordinates)
    * @returns Region identifier string "x:z"
