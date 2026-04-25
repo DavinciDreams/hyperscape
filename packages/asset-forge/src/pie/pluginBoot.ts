@@ -20,9 +20,13 @@ import {
   type PluginContextBase,
   type PluginContextFactory,
   type PluginSession,
+  type WidgetContribution,
+  type WidgetContributionRegistry,
   startPluginSessionFromModules,
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
+import type { WidgetRegistration } from "@hyperforge/ui-framework";
+import type { UIWidgetComponent } from "@hyperforge/ui-widgets";
 
 import {
   combatPluginFactory,
@@ -50,6 +54,24 @@ import {
 } from "@hyperforge/plugin-shooter-demo";
 
 import type { GamePluginSetId } from "../components/WorldStudio/toolbar/gamePluginResolver";
+
+/**
+ * Minimal shape `pluginBoot` needs from a host's UI widget registry.
+ * Mirrors `UIWidgetRegistryLike` in `@hyperforge/client/startup/plugins.ts`
+ * — the editor's PIE viewport overlay creates a session-scoped
+ * `WidgetRegistry<UIWidgetComponent>` and passes it through here so
+ * shooter-demo's crosshair (and any other plugin-contributed widget)
+ * lands in the registry the overlay's `<ManifestRenderer />` reads from.
+ *
+ * `unregister?` lets `session.stop()` cleanly tear down plugin-
+ * contributed widgets when the user clicks Stop in PIE.
+ */
+export interface PIEUIWidgetRegistryLike {
+  register(
+    reg: WidgetRegistration<Record<string, unknown>, UIWidgetComponent>,
+  ): void;
+  unregister?(id: string): boolean;
+}
 
 function getPluginModules(
   gameId: GamePluginSetId,
@@ -88,15 +110,46 @@ function buildContextFactory(
   world: World,
   combatService: CombatAbilityService,
   skillsService: SkillsService,
+  uiWidgetRegistry: PIEUIWidgetRegistryLike | undefined,
 ): PluginContextFactory<PluginContextBase> {
   return ({ pluginId, scope }) => {
     switch (pluginId) {
-      case combatManifest.id:
-      case shooterDemoManifest.id: {
-        // Both share the combat-ability-service shape.
+      case combatManifest.id: {
         const ctx: CombatContext = {
           pluginId,
           scope,
+          registerAbility(ability) {
+            combatService.registerAbility(ability);
+            scope.register(() => combatService.unregisterAbility(ability.id));
+          },
+        };
+        return ctx as PluginContextBase;
+      }
+      case shooterDemoManifest.id: {
+        // Shooter-demo contributes BOTH combat abilities AND (when the
+        // PIE overlay supplied a widget registry) a crosshair widget.
+        // The `widgets` field is undefined on test runs / overlay-less
+        // sessions; the plugin's onEnable optional-chains over it so
+        // that's a no-op.
+        const widgets: WidgetContributionRegistry | undefined = uiWidgetRegistry
+          ? {
+              register(contribution: WidgetContribution) {
+                const reg = contribution as unknown as WidgetRegistration<
+                  Record<string, unknown>,
+                  UIWidgetComponent
+                >;
+                uiWidgetRegistry.register(reg);
+                const widgetId = reg.widget.manifest.id;
+                scope.register(() => {
+                  uiWidgetRegistry.unregister?.(widgetId);
+                });
+              },
+            }
+          : undefined;
+        const ctx: CombatContext & PluginContextBase = {
+          pluginId,
+          scope,
+          widgets,
           registerAbility(ability) {
             combatService.registerAbility(ability);
             scope.register(() => combatService.unregisterAbility(ability.id));
@@ -133,6 +186,7 @@ async function bootPluginsFor(
   world: World,
   gameId: GamePluginSetId,
   label: "server" | "client",
+  uiWidgetRegistry: PIEUIWidgetRegistryLike | undefined,
 ): Promise<PluginSession<PluginContextBase>> {
   const modules = getPluginModules(gameId);
   const combatService = createCombatAbilityService();
@@ -141,7 +195,15 @@ async function bootPluginsFor(
     `[pie-plugin-boot:${label}] game=${gameId} — ${modules.length} plugin(s) in set`,
   );
   const session = await startPluginSessionFromModules(modules, {
-    contextFactory: buildContextFactory(world, combatService, skillsService),
+    contextFactory: buildContextFactory(
+      world,
+      combatService,
+      skillsService,
+      // Widget contributions only land via the client-side boot — that's
+      // where the PIE viewport's React tree is. Server-side hooks pass
+      // undefined so the plugin's onEnable widget call no-ops there.
+      label === "client" ? uiWidgetRegistry : undefined,
+    ),
   });
   if (session.unresolvable.length > 0) {
     for (const entry of session.unresolvable) {
@@ -168,8 +230,18 @@ async function bootPluginsFor(
  * Fresh services per `createPIEPluginHooks()` call so starting a new
  * Play session doesn't inherit ability/skill registrations from a
  * previous one.
+ *
+ * `uiWidgetRegistry` (optional) plumbs through to the client-side
+ * boot's contextFactory so plugin widget contributions (e.g.
+ * shooter-demo's crosshair) land in the registry the PIE viewport's
+ * `<ManifestRenderer />` reads. Caller (typically `usePIESession`)
+ * owns the registry's lifecycle — instantiate before start, dispose
+ * on stop.
  */
-export function createPIEPluginHooks(gameId: GamePluginSetId): {
+export function createPIEPluginHooks(
+  gameId: GamePluginSetId,
+  uiWidgetRegistry?: PIEUIWidgetRegistryLike,
+): {
   bootServerPlugins: (
     serverWorld: World,
   ) => Promise<PluginSession<PluginContextBase>>;
@@ -179,8 +251,8 @@ export function createPIEPluginHooks(gameId: GamePluginSetId): {
 } {
   return {
     bootServerPlugins: (serverWorld) =>
-      bootPluginsFor(serverWorld, gameId, "server"),
+      bootPluginsFor(serverWorld, gameId, "server", uiWidgetRegistry),
     bootClientPlugins: (clientWorld) =>
-      bootPluginsFor(clientWorld, gameId, "client"),
+      bootPluginsFor(clientWorld, gameId, "client", uiWidgetRegistry),
   };
 }

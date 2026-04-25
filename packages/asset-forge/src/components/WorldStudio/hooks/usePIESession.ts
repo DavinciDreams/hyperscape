@@ -36,6 +36,12 @@ import {
 import type { ScriptGraph } from "../../../scripting/types";
 import { createPIEPluginHooks } from "../../../pie/pluginBoot";
 import { resolveGamePluginSetId } from "../toolbar/gamePluginResolver";
+import type { WidgetRegistry } from "@hyperforge/ui-framework";
+import {
+  bindAllWidgets,
+  createUIWidgetRegistry,
+  type UIWidgetComponent,
+} from "@hyperforge/ui-widgets";
 
 import type { TerrainSceneRefs } from "../../WorldBuilder/TileBasedTerrain";
 import type {
@@ -538,6 +544,13 @@ interface PIESessionState {
    * visual feedback (player marker, etc.) can be attached.
    */
   playerObject: THREE.Object3D | null;
+  /**
+   * Session-scoped UI widget registry, owned by this hook. Created
+   * before plugin boot so widget contributions (e.g. shooter-demo's
+   * crosshair) land in the same registry that `<PIEHudOverlay />`
+   * reads from. Null while PIE is stopped.
+   */
+  widgetRegistry: WidgetRegistry<UIWidgetComponent> | null;
 }
 
 interface UsePIESessionOptions {
@@ -571,6 +584,7 @@ export function usePIESession({
     animationId: null,
     lastTime: 0,
     playerObject: null,
+    widgetRegistry: null,
   });
 
   // Track the onExit callback in a ref to avoid stale closures
@@ -725,6 +739,13 @@ export function usePIESession({
       refs.scene.add(playerObject);
     }
 
+    // Create + populate a session-scoped widget registry BEFORE the
+    // plugin hooks fire so plugin onEnable widget contributions land
+    // in the same instance the PIE HUD overlay reads from.
+    const widgetRegistry = createUIWidgetRegistry();
+    bindAllWidgets(widgetRegistry);
+    session.widgetRegistry = widgetRegistry;
+
     const startOptions: PIEEditorSessionOptions = {
       mobSpawns,
       npcs,
@@ -734,7 +755,7 @@ export function usePIESession({
       debugSink: (entry: PIEDebugEntry) => onDebugRef.current?.(entry),
       gameMode: manifest,
       mode: pieMode === "play" ? "play" : "simulate",
-      plugins: createPIEPluginHooks(resolveGamePluginSetId()),
+      plugins: createPIEPluginHooks(resolveGamePluginSetId(), widgetRegistry),
       ...(pieMode === "play"
         ? {
             viewport: refs.container,
@@ -1154,7 +1175,21 @@ export function usePIESession({
     };
   }, []);
 
-  return { startPIE, stopPIE, interactAtCenter };
+  /**
+   * Read-only accessor for the session-scoped widget registry. Returns
+   * the same instance the plugin contributions populated during start();
+   * `null` when PIE is stopped.
+   *
+   * Returned as a callback (not a state value) because the registry
+   * lives on the mutable `sessionRef` — exposing it through React state
+   * would require an extra re-render pass on every start/stop. The
+   * `<PIEHudOverlay>` consumer reads it once per render, which is fine.
+   */
+  const getWidgetRegistry = useCallback(() => {
+    return sessionRef.current.widgetRegistry;
+  }, []);
+
+  return { startPIE, stopPIE, interactAtCenter, getWidgetRegistry };
 }
 
 // ---------------------------------------------------------------------------
@@ -1195,6 +1230,11 @@ async function stopPIEInternal(
     refs.scene.remove(session.playerObject);
     session.playerObject = null;
   }
+
+  // Plugin scope disposers already unregistered every contributed
+  // widget during `world.stop()`. Drop our reference to the registry
+  // so the next start() rebuilds a fresh one with no stale entries.
+  session.widgetRegistry = null;
 
   // Exit player mode (simulate) and restore orbit camera (play).
   if (refs.isPlayerMode()) {

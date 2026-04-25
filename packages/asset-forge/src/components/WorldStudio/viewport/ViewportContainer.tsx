@@ -61,6 +61,8 @@ import { ViewportOverlayBar } from "../toolbar/ViewportOverlayBar";
 import { ViewportOverlay } from "./ViewportOverlay";
 import { PIEConsolePanel } from "./PIEConsolePanel";
 import { usePIESession } from "../hooks/usePIESession";
+import { PIEHudOverlay } from "./PIEHudOverlay";
+import { resolveGamePluginSetId } from "../toolbar/gamePluginResolver";
 import { usePIEDebugStore } from "../../../editor/stores/usePIEDebugStore";
 import { GenerateTownDialog } from "../panels/GenerateTownDialog";
 import {
@@ -303,12 +305,13 @@ export function ViewportContainer() {
   // Forward every PIE script-runtime debug entry into the global debug store
   // so the PIE Console panel can render them live.
   const appendDebugEntry = usePIEDebugStore((s) => s.append);
-  const { startPIE, stopPIE, interactAtCenter } = usePIESession({
-    sceneRefs: sceneRefsRef.current,
-    state,
-    onExit: () => actions.pieStop(),
-    onDebug: appendDebugEntry,
-  });
+  const { startPIE, stopPIE, interactAtCenter, getWidgetRegistry } =
+    usePIESession({
+      sceneRefs: sceneRefsRef.current,
+      state,
+      onExit: () => actions.pieStop(),
+      onDebug: appendDebugEntry,
+    });
 
   // React to PIE state changes from toolbar
   const prevPieRef = useRef(state.pie);
@@ -2133,6 +2136,16 @@ export function ViewportContainer() {
           onGenerated={() => setTownDialogPosition(null)}
         />
       )}
+
+      {/* PIE HUD overlay — manifest-driven widgets contributed by the
+          active game's plugins (e.g. shooter-demo's crosshair). Only
+          renders while PIE is in play mode; static layout per game id. */}
+      {state.pie.active && state.pie.mode === "play" ? (
+        <PIEHudOverlay
+          registry={getWidgetRegistry()}
+          gameId={resolveGamePluginSetId()}
+        />
+      ) : null}
     </div>
   );
 }
