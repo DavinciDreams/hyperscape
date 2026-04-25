@@ -40,6 +40,7 @@ import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js"
 import { EquipmentVisualSystem } from "./systems/EquipmentVisualSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
+import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
@@ -174,9 +175,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // ZoneDetectionSystem live from world (which still lives
         // in shared because combat consumes it).
         register("zone-visuals", ZoneVisualsSystem);
-        // Debug overlays — toggled via F5 panel keys (B / W).
+        // Debug overlays — toggled via F5 panel keys (B / W) and 'P'.
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);
+        // Building-pathfinding debug overlay (P key). Opt-in via
+        // world.pathfindingDebug.setEnabled(true).
+        register("pathfindingDebug", PathfindingDebugSystem);
         // Resource tile occupancy debug — opt-in via
         // world.resourceTileDebug.setEnabled(true).
         register("resource-tile-debug", ResourceTileDebugSystem);

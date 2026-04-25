@@ -93,6 +93,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "zone-visuals",
   "bfsPathDebug",
   "walkableDebug",
+  "pathfindingDebug",
   "resource-tile-debug",
 ];
 

@@ -24,13 +24,30 @@
  * PERFORMANCE: Uses InstancedMesh for efficient rendering of many tiles.
  */
 
-import * as THREE from "three";
+// Migrated 2026-04-25 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (11th client-only system migration).
+// Building-pathfinding debug overlay (P key). Shares the same
+// duck-typed `interaction` lookup pattern as ZoneVisualsSystem to
+// avoid pulling RaycastService onto the shared barrel for a single
+// 1-method consumer.
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { System } from "../shared/infrastructure/System";
-import type { World } from "../../core/World";
-import type { TownSystem } from "../shared/world/TownSystem";
-import type { BuildingCollisionService } from "../shared/world/BuildingCollisionService";
-import type { RaycastService } from "./interaction/services/RaycastService";
+import {
+  BuildingCollisionService,
+  SystemClass as System,
+  THREE,
+  TownSystem,
+  type World,
+} from "@hyperforge/shared";
+
+// Duck-typed surface for the interaction system's RaycastService —
+// only this one method is called.
+interface RaycastServiceLike {
+  getTerrainPosition: (
+    clientX: number,
+    clientY: number,
+    canvas: HTMLCanvasElement,
+  ) => THREE.Vector3 | null;
+}
 
 // Debug visualization colors
 const COLORS = {
@@ -924,7 +941,7 @@ export class PathfindingDebugSystem extends System {
 
       // Get interaction system and its raycast service
       const interaction = this.world.getSystem("interaction") as {
-        getRaycastService?: () => RaycastService;
+        getRaycastService?: () => RaycastServiceLike;
       } | null;
       if (!interaction?.getRaycastService) {
         console.log("[PathfindingDebugSystem] No interaction system");

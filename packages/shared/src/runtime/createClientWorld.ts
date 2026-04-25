@@ -52,7 +52,7 @@ import { ClientActions } from "../systems/client/ClientActions";
 import { ClientAudio } from "../systems/client/ClientAudio";
 import { ClientCameraSystem } from "../systems/client/ClientCameraSystem";
 import { DevStats } from "../systems/client/DevStats";
-import { PathfindingDebugSystem } from "../systems/client/PathfindingDebugSystem";
+// PathfindingDebugSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // BFSPathDebugSystem + WalkableTileDebugSystem migrated to
 // @hyperforge/hyperscape (2026-04-24).
 import { Environment } from "../systems/shared";
@@ -255,7 +255,7 @@ export function createClientWorld() {
 
   // Dev tools (only active in dev mode)
   world.register("devStats", DevStats); // FPS counter and performance telemetry
-  world.register("pathfindingDebug", PathfindingDebugSystem); // Press 'P' to toggle
+  // "pathfindingDebug" registered by @hyperforge/hyperscape onEnable (client branch).
   // bfsPathDebug + walkableDebug registered by @hyperforge/hyperscape
   // plugin onEnable (client-only branch). Migrated 2026-04-24.
 
