@@ -1054,7 +1054,7 @@ export { getRandomSpawnPoint } from "./data/world-areas";
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export { TownSystem } from "./systems/shared";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
 // Combat + Player system class refs — Hyperscape plugins like
 // HealthRegenSystem do `getSystem<CombatSystem>("combat")`.
@@ -1230,6 +1230,32 @@ export {
   getCharacterInfluenceManager,
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
+
+// TownSystem deps — mirror to client bundle.
+export type {
+  TownSize,
+  TownBuildingType,
+  ManifestTown,
+  ManifestTownSize,
+  TownEntryPoint,
+  TownInternalRoad,
+  TownPath,
+  TownLandmark,
+  TownPlaza,
+} from "./types/world/world-types";
+export type { BuildingLayoutInput } from "./types/world/building-collision-types";
+// cellToWorldTile already exported above (building collision utilities).
+export { tileKey } from "./types/world/building-collision-types";
+export type {
+  FlatZone,
+  FlatZoneTile,
+  FlatZoneTileBounds,
+} from "./types/world/terrain";
+export {
+  extractBuildingNPC,
+  BUILDING_NPC_TYPES,
+  type BuildingNPCSpawn,
+} from "./utils/world/townPopulation";
 
 // ResourceSystem deps — mirror to client bundle.
 export { ResourceEntity } from "./entities/world/ResourceEntity";

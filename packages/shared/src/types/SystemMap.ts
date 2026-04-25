@@ -59,7 +59,8 @@ import type { GroundItemSystem } from "../systems/shared/economy/GroundItemSyste
 import type { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import type { PersistenceSystem } from "../systems/server/PersistenceSystem";
 import type { TerrainSystem } from "../systems/shared/world/TerrainSystem";
-import type { TownSystem } from "../systems/shared/world/TownSystem";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entries below typed as `unknown`.
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown`.
 import type { DatabaseSystem } from "./systems/system-interfaces";
@@ -152,7 +153,7 @@ export interface SystemMap {
 
   // Terrain & world
   terrain: TerrainSystem;
-  towns: TownSystem;
+  towns: unknown;
   roads: unknown;
 
   // Database (server)
@@ -184,7 +185,8 @@ export interface SystemMap {
   buildingCollision: BuildingCollisionService;
 
   // Alias: "town" → TownSystem (some code uses "town" instead of "towns")
-  town: TownSystem;
+  // TownSystem migrated to @hyperforge/hyperscape (2026-04-25).
+  town: unknown;
 }
 
 export type SystemKey = keyof SystemMap;

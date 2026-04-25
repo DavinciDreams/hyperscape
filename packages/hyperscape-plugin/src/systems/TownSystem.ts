@@ -16,24 +16,40 @@
  * otherwise default configuration values will be used.
  */
 
-import { System } from "../infrastructure/System";
-import type { World } from "../../../core/World";
-import type {
-  ProceduralTown,
-  TownBuilding,
-  TownSize,
-  TownBuildingType,
-  ManifestTown,
-  ManifestTownSize,
-  TownEntryPoint,
-  TownInternalRoad,
-  TownPath,
-  TownLandmark,
-  TownPlaza,
-} from "../../../types/world/world-types";
-import type { BuildingLayoutInput } from "../../../types/world/building-collision-types";
-import { Logger } from "../../../utils/Logger";
-import { DataManager } from "../../../data/DataManager";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (Wave 2 of heavy-cluster plan,
+// 43rd system migration). 2907 LOC.
+import {
+  BFSPathfinder,
+  type BuildingCollisionData,
+  BUILDING_NPC_TYPES as SHARED_BUILDING_NPC_TYPES,
+  type BuildingLayoutInput,
+  type BuildingNPCSpawn as SharedBuildingNPCSpawn,
+  BuildingCollisionService,
+  cellToWorldTile,
+  DataManager,
+  DEFAULT_BIOME,
+  extractBuildingNPC,
+  buildingTileKey as tileKey,
+  type FlatZone,
+  type FlatZoneTile,
+  type FlatZoneTileBounds,
+  Logger,
+  type ManifestTown,
+  type ManifestTownSize,
+  type ProceduralTown,
+  SystemClass as System,
+  TERRAIN_CONSTANTS,
+  type TownBuilding,
+  type TownBuildingType,
+  type TownEntryPoint,
+  type TownInternalRoad,
+  type TownLandmark,
+  type TownPath,
+  type TownPlaza,
+  type TownSize,
+  type World,
+} from "@hyperforge/shared";
 import {
   TownGenerator,
   type TownGeneratorConfig,
@@ -57,24 +73,6 @@ import {
   getCellCenter,
   getSideVector,
 } from "@hyperforge/procgen/building";
-import { BuildingCollisionService } from "./BuildingCollisionService";
-import {
-  extractBuildingNPC,
-  BUILDING_NPC_TYPES as SHARED_BUILDING_NPC_TYPES,
-  type BuildingNPCSpawn as SharedBuildingNPCSpawn,
-} from "../../../utils/world/townPopulation";
-import type {
-  FlatZone,
-  FlatZoneTile,
-  FlatZoneTileBounds,
-} from "../../../types/world/terrain";
-import {
-  cellToWorldTile,
-  tileKey,
-} from "../../../types/world/building-collision-types";
-import { BFSPathfinder } from "../movement/BFSPathfinder";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import { DEFAULT_BIOME } from "./TerrainBiomeTypes";
 
 // Default configuration values
 // IMPORTANT: waterThreshold must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
@@ -1626,7 +1624,7 @@ export class TownSystem extends System {
    * THROWS if pathfinding fails - this is a critical error.
    */
   private validateBuildingPathfinding(
-    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+    allBuildings: BuildingCollisionData[],
   ): void {
     // Import BFSPathfinder for testing (lazy import to avoid circular deps)
     const pathfinder = new BFSPathfinder();
@@ -1844,7 +1842,7 @@ export class TownSystem extends System {
    * 3. Building floor tiles are WALKABLE
    */
   private validateBuildingTileBlocking(
-    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+    allBuildings: BuildingCollisionData[],
   ): void {
     let tilesChecked = 0;
     let errors = 0;
@@ -1988,7 +1986,7 @@ export class TownSystem extends System {
    * This catches issues where tiles are registered but unreachable due to internal walls.
    */
   private validateBuildingReachability(
-    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+    allBuildings: BuildingCollisionData[],
   ): void {
     let totalUnreachable = 0;
     const failedBuildings: string[] = [];
@@ -2060,7 +2058,7 @@ export class TownSystem extends System {
    * This catches edge cases where specific approach angles might bypass walls.
    */
   private validatePerimeterNavigation(
-    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+    allBuildings: BuildingCollisionData[],
   ): void {
     const pathfinder = new BFSPathfinder();
 
@@ -2327,7 +2325,7 @@ export class TownSystem extends System {
    * THROWS IMMEDIATELY if any violation found - this is a critical security issue.
    */
   private validateNoFootprintEntryExceptDoor(
-    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+    allBuildings: BuildingCollisionData[],
   ): void {
     let totalStepsTested = 0;
     let violations = 0;

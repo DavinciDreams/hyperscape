@@ -35,9 +35,9 @@ import {
   BuildingCollisionService,
   SystemClass as System,
   THREE,
-  TownSystem,
   type World,
 } from "@hyperforge/shared";
+import { TownSystem } from "./TownSystem.js";
 
 // Duck-typed surface for the interaction system's RaycastService —
 // only this one method is called.

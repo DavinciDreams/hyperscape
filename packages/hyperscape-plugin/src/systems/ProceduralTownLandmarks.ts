@@ -29,9 +29,9 @@ import {
   type SystemDependencies,
   THREE,
   type TownLandmarkType,
-  type TownSystem,
   type World,
 } from "@hyperforge/shared";
+import type { TownSystem } from "./TownSystem.js";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import { float, mul, uniform, vec3 } from "three/tsl";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";

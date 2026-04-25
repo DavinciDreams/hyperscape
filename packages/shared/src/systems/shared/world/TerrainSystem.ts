@@ -155,7 +155,17 @@ interface RoadNetworkSystem {
   getRoads(): _ProceduralRoad[];
   isOnRoad(x: number, z: number): boolean;
 }
-import type { TownSystem } from "./TownSystem";
+import type { ProceduralTown } from "../../../types/world/world-types";
+
+/**
+ * Duck-typed TownSystem surface used by TerrainSystem.
+ * TownSystem migrated to @hyperforge/hyperscape (2026-04-25);
+ * we look it up via world.getSystem("towns") so shared no longer
+ * depends on the concrete class.
+ */
+interface TownSystemDuck {
+  getTowns(): ProceduralTown[];
+}
 import {
   getTerrainTileSize,
   getWaterThreshold,
@@ -310,7 +320,7 @@ export class TerrainSystem extends System {
   private _cachedRoadTileX = Number.NaN;
   private _cachedRoadTileZ = Number.NaN;
   private _cachedRoadSegments: ReadonlyArray<RoadTileSegment> = [];
-  private townSystem: TownSystem | null = null;
+  private townSystem: TownSystemDuck | null = null;
   /** Cached vegetation exclusion data (built once when towns/roads are ready) */
   private vegetationExclusions: PrecomputedExclusions | null = null;
   /** True after ROADS_GENERATED fires — tree generation is deferred until then */
@@ -1726,7 +1736,9 @@ export class TerrainSystem extends System {
     this.waterBodyRegistry = new WaterBodyRegistry(this.CONFIG.WATER_THRESHOLD);
 
     // Cache optional TownSystem for difficulty falloff and boss placement
-    this.townSystem = this.world.getSystem<TownSystem>("towns") ?? null;
+    this.townSystem =
+      (this.world.getSystem("towns") as unknown as TownSystemDuck | null) ??
+      null;
 
     // Precompute boss hotspots for this world seed
     this.generateBossHotspots();

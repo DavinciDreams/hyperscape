@@ -58,6 +58,7 @@ import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
 import { ProceduralGrassSystem } from "./systems/ProceduralGrass.js";
 import { ResourceSystem } from "./systems/ResourceSystem.js";
+import { TownSystem } from "./systems/TownSystem.js";
 import { VegetationSystem } from "./systems/VegetationSystem.js";
 import { ScriptingSystem } from "./systems/ScriptingSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
@@ -229,6 +230,13 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // spots). Wave 1 of the heavy-cluster migration; the
       // gathering/ subdirectory co-migrated.
       register("resource", ResourceSystem);
+
+      // Town system — procedural town generation, building layout,
+      // safe-zone resolution, and building collision. Wave 2 of
+      // the heavy-cluster migration. Cross-cutting: TerrainSystem,
+      // GrassExclusionGrid, ZoneDetectionSystem, and mob tile
+      // movement all duck-type-lookup `world.getSystem("towns")`.
+      register("towns", TownSystem);
 
       // Bridges — collision + procedural deck/fence geometry.
       // Both client and server register it: server computes

@@ -18,7 +18,16 @@ import type { ZoneType, ZoneProperties } from "../../../types/death";
 import { ZoneType as ZoneTypeEnum } from "../../../types/death";
 import type { WorldArea } from "../../../types/core/core";
 import type { WildernessBoundary } from "../../../types/world/world-types";
-import type { TownSystem } from "../world/TownSystem";
+
+/**
+ * Duck-typed TownSystem surface used by ZoneDetectionSystem.
+ * TownSystem migrated to @hyperforge/hyperscape (2026-04-25);
+ * we look it up via world.getSystem("towns") so shared no longer
+ * depends on the concrete class.
+ */
+interface TownSystemDuck {
+  getTownAtPosition(x: number, z: number): { id: string; name: string } | null;
+}
 
 export class ZoneDetectionSystem extends SystemBase {
   // Cache zone lookups (key: "x,z", value: ZoneProperties)
@@ -34,7 +43,7 @@ export class ZoneDetectionSystem extends SystemBase {
     maxZ: number;
   }> = [];
   // Reference to procedural town system
-  private townSystem?: TownSystem;
+  private townSystem?: TownSystemDuck;
   // Optional wilderness boundary polyline for PvP detection
   private wildernessBoundary: WildernessBoundary | null = null;
 
@@ -51,7 +60,9 @@ export class ZoneDetectionSystem extends SystemBase {
 
   async init(): Promise<void> {
     // Get town system reference for procedural safe zones
-    this.townSystem = this.world.getSystem("towns") as TownSystem | undefined;
+    this.townSystem = this.world.getSystem("towns") as unknown as
+      | TownSystemDuck
+      | undefined;
 
     // Build zone boundaries list for cache invalidation
     this.buildBoundariesList();

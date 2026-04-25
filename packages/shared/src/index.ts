@@ -972,6 +972,32 @@ export {
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
 
+// TownSystem deps — needed by the migrated TownSystem in
+// @hyperforge/hyperscape (Wave 2 of heavy-cluster plan). Most of
+// these are types from world-types + building-collision-types
+// that the migrated class threads through its public API.
+export type {
+  TownSize,
+  TownBuildingType,
+  ManifestTown,
+  ManifestTownSize,
+  TownEntryPoint,
+  TownInternalRoad,
+  TownPath,
+  TownLandmark,
+  TownPlaza,
+} from "./types/world/world-types";
+// BuildingLayoutInput, cellToWorldTile, tileKey already exported
+// further down (building-collision-types section). BUILDING_NPC_TYPES,
+// extractBuildingNPC, BuildingNPCSpawn already exported from
+// world-generation utilities section. tileKey already exported from
+// utils/compute (tile movement system).
+export type {
+  FlatZone,
+  FlatZoneTile,
+  FlatZoneTileBounds,
+} from "./types/world/terrain";
+
 // ResourceSystem deps — needed by the migrated ResourceSystem in
 // @hyperforge/hyperscape (Wave 1 of heavy-cluster plan).
 export { ResourceEntity } from "./entities/world/ResourceEntity";
@@ -1728,7 +1754,7 @@ export {
 } from "./data/spell-visuals";
 
 // Export town, POI, and road systems
-export { TownSystem } from "./systems/shared";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";

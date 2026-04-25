@@ -15,7 +15,9 @@ import { Wind } from "../systems/shared/world/Wind";
 
 // World generation systems
 import { TerrainSystem } from "../systems/shared/world/TerrainSystem";
-import { TownSystem } from "../systems/shared/world/TownSystem";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25). Editor
+// no longer registers it directly — load the plugin into the
+// editor world if you need towns in editor mode.
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25). Editor
 // no longer registers it directly — load the plugin into the
 // editor world if you need POIs in editor mode.
@@ -108,13 +110,14 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   if (cfg.enableTerrain) world.register("terrain", TerrainSystem);
   // "vegetation" migrated to @hyperforge/hyperscape (2026-04-25).
   // Editor mode no longer registers it by default.
-  if (cfg.enableTowns) {
-    world.register("towns", TownSystem);
-    // "pois" migrated to @hyperforge/hyperscape (2026-04-25). Editor
-    // mode no longer registers POIs by default — to use them in
-    // editor, load the plugin or import POISystem from
-    // @hyperforge/hyperscape and register it manually.
-  }
+  // "towns" migrated to @hyperforge/hyperscape (2026-04-25). Editor
+  // mode no longer registers towns by default — to use them in
+  // editor, load the plugin or import TownSystem from
+  // @hyperforge/hyperscape and register it manually.
+  // "pois" migrated to @hyperforge/hyperscape (2026-04-25). Editor
+  // mode no longer registers POIs by default — to use them in
+  // editor, load the plugin or import POISystem from
+  // @hyperforge/hyperscape and register it manually.
   // "roads" migrated to @hyperforge/hyperscape (2026-04-25). Editor
   // mode no longer registers it by default.
   // "building-rendering" migrated to @hyperforge/hyperscape

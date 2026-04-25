@@ -32,7 +32,24 @@ import { isBiomesDataAvailable, resolveBiomeOrFallback } from "../../../biomes";
 // `GrassSharedRegistry` so this in-shared module no longer depends
 // on ProceduralGrass (which is migrating to the plugin).
 import { setGridExclusionTexture } from "./GrassSharedRegistry";
-import type { TownSystem } from "./TownSystem";
+/**
+ * Duck-typed TownSystem surface used by GrassExclusionGrid.
+ * TownSystem migrated to @hyperforge/hyperscape (2026-04-25);
+ * we look it up via world.getSystem("towns") so shared no longer
+ * depends on the concrete class.
+ */
+interface TownSystemDuck {
+  getCollisionService(): {
+    isTileInBuildingAnyFloor(
+      tileX: number,
+      tileZ: number,
+    ): { buildingId: string } | null;
+    isTileInBuildingBoundingBox(
+      tileX: number,
+      tileZ: number,
+    ): { buildingId: string } | null;
+  } | null;
+}
 
 // ============================================================================
 // CONFIGURATION
@@ -106,7 +123,7 @@ export class GrassExclusionGrid {
   private biomesAvailable = false;
 
   // Cached system references for performance
-  private townSystem: TownSystem | null = null;
+  private townSystem: TownSystemDuck | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -300,7 +317,9 @@ export class GrassExclusionGrid {
 
     // Get TownSystem for building footprint checks (lazy init, cached)
     if (!this.townSystem) {
-      this.townSystem = this.world.getSystem("towns") as TownSystem | null;
+      this.townSystem = this.world.getSystem(
+        "towns",
+      ) as unknown as TownSystemDuck | null;
     }
 
     // Log warning once if collision is not available

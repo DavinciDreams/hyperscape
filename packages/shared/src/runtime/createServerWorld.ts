@@ -44,7 +44,7 @@ import { ServerLoader } from "../systems/server/ServerLoader";
 // import { ServerNetwork } from './systems/ServerNetwork'
 
 import { TerrainSystem } from "../systems/shared";
-import { TownSystem } from "../systems/shared";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -98,7 +98,8 @@ export async function createServerWorld(): Promise<World> {
   // Procedural town generation with flatness-based placement
   // Road network connects towns using A* pathfinding with terrain costs
 
-  world.register("towns", TownSystem);
+  // "towns" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
   // "pois" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
   // RoadNetworkSystem migrated 2026-04-25; was already commented

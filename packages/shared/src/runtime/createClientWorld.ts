@@ -70,7 +70,7 @@ import * as THREE from "../extras/three/three";
 
 // Terrain, vegetation, grass, towns, roads, POIs, buildings, and physics
 import { TerrainSystem } from "../systems/shared";
-import { TownSystem } from "../systems/shared";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // VegetationSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -321,7 +321,8 @@ export function createClientWorld() {
   // NOTE: Towns register flat zones which emit TERRAIN_TILE_REGENERATED events
   // that VegetationSystem receives to regenerate grass at correct heights
 
-  world.register("towns", TownSystem);
+  // "towns" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
   // "pois" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
   // RoadNetworkSystem migrated 2026-04-25; was already commented

@@ -19,7 +19,7 @@ export * from "./GrassMaterialCore";
 export * from "./StandaloneGrass";
 // ProceduralFlowers migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./TownSystem";
+// TownSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // BuildingRenderingSystem migrated to @hyperforge/hyperscape (2026-04-25)

@@ -42,9 +42,9 @@ import {
   SystemClass as System,
   TERRAIN_CONSTANTS,
   type TileEdge,
-  type TownSystem,
   type World,
 } from "@hyperforge/shared";
+import type { TownSystem } from "./TownSystem.js";
 
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed inline — only the 4 methods this system uses.

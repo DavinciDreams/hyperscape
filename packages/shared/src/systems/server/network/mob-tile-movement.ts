@@ -21,7 +21,6 @@
 import {
   THREE,
   TerrainSystem,
-  TownSystem,
   World,
   TILES_PER_TICK_WALK,
   worldToTile,
@@ -93,12 +92,43 @@ function createMobTileState(
 }
 
 /**
- * Tile-based movement manager for mobs (RuneScape-style)
+ * Tile-based movement manager for mobs.
  *
  * IMPORTANT: Mobs use greedy/direct pathfinding (chaseStep), NOT BFS.
- * This is authentic OSRS behavior - mobs walk directly toward their target
- * and get stuck behind obstacles (enabling safespotting gameplay).
+ * Mobs walk directly toward their target and get stuck behind
+ * obstacles (enabling safespotting gameplay).
  */
+
+/**
+ * Duck-typed TownSystem surface used by mob tile movement.
+ * Real implementation lives in @hyperforge/hyperscape (migrated 2026-04-25);
+ * we look it up via world.getSystem("towns") so shared no longer
+ * depends on the concrete class.
+ */
+interface TownSystemDuck {
+  getCollisionService(): {
+    getBuildingCount(): number;
+    getBuildingAtTile(tileX: number, tileZ: number): string | null;
+    getFloorElevation(
+      tileX: number,
+      tileZ: number,
+      floorIndex: number,
+    ): number | null;
+    queryCollision(
+      tileX: number,
+      tileZ: number,
+      floorIndex: number,
+    ): { isInsideBuilding: boolean; isWalkable: boolean };
+  };
+  isBuildingWallBlocked(
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    floorIndex: number,
+  ): boolean;
+}
+
 export class MobTileMovementManager {
   private mobStates: Map<string, MobTileState> = new Map();
   // Y-axis for stable yaw rotation calculation
@@ -108,7 +138,7 @@ export class MobTileMovementManager {
   private readonly DEBUG_MODE = false;
 
   // Cached reference to TownSystem for building collision
-  private _townSystem: InstanceType<typeof TownSystem> | null = null;
+  private _townSystem: TownSystemDuck | null = null;
   private _townSystemChecked = false;
 
   // ============================================================================
@@ -192,15 +222,15 @@ export class MobTileMovementManager {
    * Get TownSystem for building collision (cached lazy lookup)
    * Re-checks if no buildings are registered to handle async initialization
    */
-  private get townSystem(): InstanceType<typeof TownSystem> | null {
+  private get townSystem(): TownSystemDuck | null {
     if (
       !this._townSystemChecked ||
       (this._townSystem &&
         this._townSystem.getCollisionService().getBuildingCount() === 0)
     ) {
-      this._townSystem = this.world.getSystem?.("towns") as InstanceType<
-        typeof TownSystem
-      > | null;
+      this._townSystem =
+        (this.world.getSystem?.("towns") as unknown as TownSystemDuck | null) ??
+        null;
 
       if (this._townSystem) {
         const buildingCount = this._townSystem

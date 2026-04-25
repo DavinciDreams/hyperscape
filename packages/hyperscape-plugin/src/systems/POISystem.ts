@@ -27,9 +27,9 @@ import {
   type POIConfig,
   type PointOfInterest,
   SystemClass as System,
-  type TownSystem,
   type World,
 } from "@hyperforge/shared";
+import type { TownSystem } from "./TownSystem.js";
 
 // Default configuration values
 const DEFAULTS: POIConfig = {
