@@ -874,6 +874,24 @@ export type {
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
 
+// NPCSystem deps — needed by the migrated NPCSystem in
+// @hyperforge/hyperscape.
+export type { NPCLocation } from "./data/world-areas";
+export { worldAreasRegistry } from "./world-areas";
+export { SHOP_ITEMS } from "./data/items";
+export {
+  getEntitiesSystem,
+  getSystem as getSystemUtil,
+} from "./utils/SystemUtils";
+export type {
+  BankTransaction,
+  PlayerBankStorage,
+  StoreTransaction,
+  Town,
+} from "./types/core/core";
+export type { NPCSystemInfo } from "./types/systems/system-interfaces";
+export { groundToTerrain } from "./utils/game/EntityUtils";
+
 // ProcessingSystem deps — needed by the migrated ProcessingSystem
 // in @hyperforge/hyperscape.
 export { ITEM_IDS } from "./constants/GameConstants";

@@ -33,7 +33,7 @@ import type { LootSystem } from "../systems/shared";
 // dead `systems.mobDeath = ...` lookup in SystemLoader (no reads).
 import type { MobNPCSpawnerSystem } from "../systems/shared";
 import type { MobNPCSystem } from "../systems/shared";
-import type { NPCSystem } from "../systems/shared";
+// NPCSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { PlayerDeathSystem } from "../systems/shared";
 import type { PlayerSystem } from "../systems/shared";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -135,7 +135,7 @@ export interface SystemMap {
   // "mob-death" registered by @hyperforge/hyperscape plugin onEnable
 
   // World content
-  npc: NPCSystem;
+  npc: unknown;
   dialogue: unknown;
   quest: unknown;
   "mob-npc-spawner": MobNPCSpawnerSystem;

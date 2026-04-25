@@ -1,32 +1,44 @@
 /**
  * NPC System
- * Handles NPC interactions, banking, and store transactions
+ * Handles NPC interactions, banking, and store transactions.
  */
 
-import type { Entity, World } from "../../../types/index";
-import { getEntitiesSystem, getSystem } from "../../../utils/SystemUtils";
-import { SHOP_ITEMS, getItem } from "../../../data/items";
-import type { NPCLocation } from "../../../data/world-areas";
-import { ALL_WORLD_AREAS, STARTER_TOWNS } from "../../../data/world-areas";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/entities/`
+// into `@hyperforge/hyperscape` (21st system migration; 9th
+// cross-cutting server-side). Town NPC interaction handlers
+// (banker, shopkeeper). 751 LOC. No in-shared consumers reference
+// the class type directly — only SystemMap had the import.
 import {
+  ALL_WORLD_AREAS,
+  type BankTransaction,
+  type Entity,
+  EventType,
   getEffectiveWorldAreas,
+  getEntitiesSystem,
+  getItem,
+  getSystemUtil as getSystem,
+  groundToTerrain,
+  type NPCLocation,
+  type NPCSystemInfo as SystemInfo,
+  type PlayerBankStorage,
+  type Position3D,
+  SHOP_ITEMS,
+  STARTER_TOWNS,
+  type StoreTransaction,
+  SystemBase,
+  type Town,
+  type World,
   worldAreasRegistry,
-} from "../../../world-areas";
-import {
-  BankTransaction,
-  PlayerBankStorage,
-  Position3D,
-  StoreTransaction,
-  Town,
-} from "../../../types/core/core";
-import { NPCSystemInfo as SystemInfo } from "../../../types/systems/system-interfaces";
-import { SystemBase } from "../infrastructure/SystemBase";
-// NOTE: Import directly to avoid circular dependency through barrel file
-import { InventorySystem } from "../character/InventorySystem";
-import { EventType } from "../../../types/events";
-// NOTE: Import directly to avoid circular dependency through barrel file
-import { TerrainSystem } from "../world/TerrainSystem";
-import { groundToTerrain } from "../../../utils/game/EntityUtils";
+} from "@hyperforge/shared";
+
+// InventorySystem + TerrainSystem still live in shared/. Duck-typed
+// locally — only `isFull(playerId)` and `getTileSize()` are called.
+interface InventorySystem {
+  isFull(playerId: string): boolean;
+}
+interface TerrainSystem {
+  getTileSize(): number;
+}
 
 export class NPCSystem extends SystemBase {
   private bankStorage: Map<string, PlayerBankStorage> = new Map();
@@ -53,7 +65,9 @@ export class NPCSystem extends SystemBase {
 
   async init(): Promise<void> {
     // Get terrain system reference
-    this.terrainSystem = this.world.getSystem("terrain")!;
+    this.terrainSystem = this.world.getSystem(
+      "terrain",
+    ) as unknown as TerrainSystem;
 
     // Subscribe to NPC interaction events using type-safe event system
     this.subscribe(
@@ -363,7 +377,9 @@ export class NPCSystem extends SystemBase {
     }
 
     // Check if player has inventory space
-    const inventorySystem = getSystem<InventorySystem>(this.world, "inventory");
+    const inventorySystem = this.world.getSystem("inventory") as
+      | InventorySystem
+      | undefined;
     if (inventorySystem?.isFull(playerId)) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,

@@ -51,6 +51,7 @@ import { ProcessingSystem } from "./systems/ProcessingSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
+import { NPCSystem } from "./systems/NPCSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
 import { QuestSystem } from "./systems/QuestSystem.js";
 import { ResourceTileDebugSystem } from "./systems/ResourceTileDebugSystem.js";
@@ -184,6 +185,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Processing — firemaking + cooking interaction handler.
       // Per-skill processing systems already registered above.
       register("processing", ProcessingSystem);
+
+      // NPC interactions — banker + shopkeeper handlers. Server-only
+      // logically (it answers PLAYER_INTERACT events) but registered
+      // cross-cutting so client-side `getSystem("npc")` lookups don't
+      // null-out in the legacy code paths still expecting it.
+      register("npc", NPCSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

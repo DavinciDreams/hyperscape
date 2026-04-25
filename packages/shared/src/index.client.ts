@@ -1135,6 +1135,23 @@ export type {
 } from "./types/entities/npc-mob-types";
 export { isValidQuestId } from "./types/game/quest-types";
 
+// NPCSystem deps — re-exported for the client bundle.
+export type { NPCLocation } from "./data/world-areas";
+export { worldAreasRegistry } from "./world-areas";
+export { SHOP_ITEMS } from "./data/items";
+export {
+  getEntitiesSystem,
+  getSystem as getSystemUtil,
+} from "./utils/SystemUtils";
+export type {
+  BankTransaction,
+  PlayerBankStorage,
+  StoreTransaction,
+  Town,
+} from "./types/core/core";
+export type { NPCSystemInfo } from "./types/systems/system-interfaces";
+export { groundToTerrain } from "./utils/game/EntityUtils";
+
 // ProcessingSystem deps — re-exported for the client bundle.
 export { ITEM_IDS } from "./constants/GameConstants";
 export type { ProcessingAction } from "./types/game/resource-processing-types";

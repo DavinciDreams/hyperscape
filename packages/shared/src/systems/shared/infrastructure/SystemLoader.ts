@@ -140,7 +140,8 @@ import { generateKillToken } from "../../../utils/game/KillTokenUtils";
 // UI components are React-based in the client package
 
 // World Content Systems
-import { NPCSystem } from "..";
+// NPCSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Local duck-typed shape for the surface SystemLoader's boot-time
 // seeding code uses (3 setter methods + the
@@ -228,7 +229,8 @@ export interface Systems {
   loot?: LootSystem;
   cameraSystem?: CameraSystemInterface;
   movementSystem?: MovementSystemLike;
-  npc?: NPCSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  npc?: unknown;
   mobNpcSpawner?: MobNPCSpawnerSystem;
   stationSpawner?: StationSpawnerSystem;
   itemSpawner?: ItemSpawnerSystem;
@@ -472,7 +474,8 @@ export async function registerSystems(world: World): Promise<void> {
 
   // World Content Systems (server only for world management)
   if (world.isServer) {
-    world.register("npc", NPCSystem);
+    // "npc" registered by @hyperforge/hyperscape plugin onEnable
+    // cross-cutting branch (migrated 2026-04-25).
   }
 
   // Dialogue system - handles NPC dialogue trees
@@ -621,7 +624,7 @@ export async function registerSystems(world: World): Promise<void> {
 
   // World Content Systems
   if (world.isServer) {
-    systems.npc = getSystem(world, "npc") as NPCSystem;
+    systems.npc = getSystem(world, "npc");
   }
 
   // Scripting system
@@ -1073,13 +1076,29 @@ function setupAPI(world: World, systems: Systems): void {
     // World Content API (Server only)
     getWorldAreas: () => [], // World content system doesn't expose getAllWorldAreas method
 
-    // NPC API (Server only)
+    // NPC API (Server only) — `systems.npc` is `unknown` since
+    // NPCSystem migrated to @hyperforge/hyperscape; cast at each
+    // callsite to the surface this adapter calls.
     getPlayerBankContents: (playerId: string) =>
-      systems.npc?.getPlayerBankContents(playerId),
-    getStoreInventory: () => systems.npc?.getStoreInventory(),
+      (
+        systems.npc as
+          | { getPlayerBankContents?(id: string): unknown }
+          | undefined
+      )?.getPlayerBankContents?.(playerId),
+    getStoreInventory: () =>
+      (
+        systems.npc as { getStoreInventory?(): unknown } | undefined
+      )?.getStoreInventory?.(),
     getTransactionHistory: (playerId?: string) =>
-      systems.npc?.getTransactionHistory(playerId),
-    getNPCSystemInfo: () => systems.npc?.getSystemInfo(),
+      (
+        systems.npc as
+          | { getTransactionHistory?(id?: string): unknown }
+          | undefined
+      )?.getTransactionHistory?.(playerId),
+    getNPCSystemInfo: () =>
+      (
+        systems.npc as { getSystemInfo?(): unknown } | undefined
+      )?.getSystemInfo?.(),
 
     // System references for advanced usage - convert to Record format
     rpgSystems: Object.entries(systems).reduce(

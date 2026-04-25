@@ -81,6 +81,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "quest",
   "aggro",
   "processing",
+  "npc",
   "tanning",
   "smithing",
   "smelting",
