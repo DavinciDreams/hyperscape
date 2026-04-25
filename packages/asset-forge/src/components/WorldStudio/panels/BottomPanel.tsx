@@ -25,6 +25,7 @@ import {
   Copy,
   Mountain,
   Paintbrush,
+  Package,
   Wrench,
   Circle,
 } from "lucide-react";
@@ -43,6 +44,7 @@ import {
   type ManifestValidationIssue,
 } from "../hooks/useManifestValidation";
 import { ContentBrowser } from "./ContentBrowser";
+import { PluginBrowserPanel } from "./PluginBrowserPanel";
 import { UILayoutLibraryTab } from "./UILayoutLibraryTab";
 
 // ============== CONSTANTS ==============
@@ -60,7 +62,13 @@ const MIN_HEIGHT = 100;
 const MAX_HEIGHT = 720;
 const TAB_BAR_HEIGHT = 24;
 
-type TabId = "content" | "uiLayouts" | "validation" | "console" | "history";
+type TabId =
+  | "content"
+  | "uiLayouts"
+  | "plugins"
+  | "validation"
+  | "console"
+  | "history";
 
 interface TabDef {
   id: TabId;
@@ -73,6 +81,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: "content", label: "Content", icon: Book },
   { id: "uiLayouts", label: "UI Layouts", icon: LayoutPanelTop },
+  { id: "plugins", label: "Plugins", icon: Package },
   { id: "validation", label: "Validation", icon: AlertTriangle },
   { id: "console", label: "Console", icon: Terminal },
   { id: "history", label: "History", icon: History },
@@ -522,6 +531,7 @@ export const BottomPanel = React.memo(function BottomPanel() {
     loadString(STORAGE_KEY_TAB, "content", [
       "content",
       "uiLayouts",
+      "plugins",
       "validation",
       "console",
       "history",
@@ -703,6 +713,7 @@ export const BottomPanel = React.memo(function BottomPanel() {
         >
           {activeTab === "content" && <ContentBrowser />}
           {activeTab === "uiLayouts" && <UILayoutLibraryTab />}
+          {activeTab === "plugins" && <PluginBrowserPanel />}
           {activeTab === "validation" && <ValidationTab />}
           {activeTab === "console" && <ConsoleTab />}
           {activeTab === "history" && <HistoryTab />}
