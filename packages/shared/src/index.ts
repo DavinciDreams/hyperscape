@@ -933,6 +933,16 @@ export {
   shouldMobIgnorePlayer,
 } from "./utils/game/CombatLevelCalculator";
 
+// BridgeSystem deps — needed by the migrated BridgeSystem in
+// @hyperforge/hyperscape. Static bridge data drives procedural
+// deck/fence geometry. (`BridgeStyle` is already re-exported via
+// the procgen barrel block below — same string-union shape, kept
+// authoritative there to avoid duplicate-identifier errors.)
+export {
+  ISLAND_BRIDGES,
+  type BridgeDefinition,
+} from "./systems/shared/world/BridgeDefinition";
+
 // InventoryInteractionSystem deps — needed by the migrated
 // InventoryInteractionSystem in @hyperforge/hyperscape.
 export type { DragData, DropTarget } from "./types/game/inventory-types";
@@ -1438,7 +1448,7 @@ export { CircularSpawnArea } from "./utils/physics/CircularSpawnArea";
 
 // Export terrain system
 export { TerrainSystem } from "./systems/shared";
-export { BridgeSystem } from "./systems/shared/world/BridgeSystem";
+// BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
 // Spell + arrow visual configs — consumed by ProjectileRenderer
 // in @hyperforge/hyperscape (migrated 2026-04-24).

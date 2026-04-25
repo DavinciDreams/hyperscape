@@ -16,8 +16,8 @@
 // overlay — gameplay-specific (Hyperscape's BFS path display).
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
+import { BridgeSystem } from "./BridgeSystem.js";
 import {
-  type BridgeSystem,
   SystemClass as System,
   type TerrainSystem,
   type TileCoord,

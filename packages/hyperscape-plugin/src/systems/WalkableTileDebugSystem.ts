@@ -24,8 +24,8 @@
 // walkability visualization).
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
+import { BridgeSystem } from "./BridgeSystem.js";
 import {
-  type BridgeSystem,
   CollisionFlag,
   CollisionMask,
   SystemClass as System,

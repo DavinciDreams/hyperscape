@@ -1,5 +1,5 @@
 /**
- * BridgeSystem — shared system for bridge collision and geometry.
+ * BridgeSystem — bridge collision + procedural deck/fence geometry.
  *
  * Server: computes walkable bridge tiles, overrides WATER flags, sets deck heights.
  * Client: also creates procedural bridge geometry with TSL materials.
@@ -11,12 +11,22 @@
  * matching the duel arena fencing style but with a warm wood plank material.
  */
 
-import type { World } from "../../../types";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { ISLAND_BRIDGES, type BridgeDefinition } from "./BridgeDefinition";
-import { CollisionFlag } from "../movement/CollisionFlags";
-import type { TerrainSystem } from "./TerrainSystem";
-import THREE from "../../../extras/three/three";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (29th system migration; 15th
+// cross-cutting). 1538 LOC. Sole external consumer
+// (`tile-movement.ts`) already used a duck-typed
+// `world.getSystem("bridges")` accessor — no consumer rewiring.
+// `BridgeDefinition` + `ISLAND_BRIDGES` stay in shared and are
+// re-exported through the shared barrel.
+import {
+  CollisionFlag,
+  ISLAND_BRIDGES,
+  type BridgeDefinition,
+  SystemBase,
+  type TerrainSystem,
+  THREE,
+  type World,
+} from "@hyperforge/shared";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
   Fn,
@@ -601,7 +611,7 @@ export class BridgeSystem extends SystemBase {
       const isEndpoint = tile.minS === 0 || tile.maxS === steps;
 
       // Cardinal walls — at endpoints, skip walls in bridge direction.
-      // OSRS dual-tile pattern: set wall on bridge tile AND opposite wall on neighbor.
+      // Dual-tile pattern: set wall on bridge tile AND opposite wall on neighbor.
       // This ensures both isBlocked() check directions catch the wall.
       if (this.getDeckHeightAt(tile.x + 1, tile.z) === null) {
         if (!isEndpoint || Math.abs(normDirX) < 0.5) {

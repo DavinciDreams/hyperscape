@@ -86,6 +86,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "mob-npc-spawner",
   "item-spawner",
   "loot",
+  "bridges",
   "tanning",
   "smithing",
   "smelting",

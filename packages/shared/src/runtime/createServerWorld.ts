@@ -47,7 +47,7 @@ import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
 import { POISystem } from "../systems/shared";
 import { RoadNetworkSystem } from "../systems/shared";
-import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
+// BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { ProceduralDocks } from "../systems/shared/world/ProceduralDocks";
 
 // RPG systems are registered via SystemLoader to keep them modular
@@ -89,7 +89,8 @@ export async function createServerWorld(): Promise<World> {
   // Server generates terrain data that clients can request
 
   world.register("terrain", TerrainSystem);
-  world.register("bridges", BridgeSystem);
+  // "bridges" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
   world.register("docks", ProceduralDocks);
 
   // ============================================================================

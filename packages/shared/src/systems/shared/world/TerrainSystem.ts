@@ -31,7 +31,17 @@ import {
 import type { ShorelineConfig, BiomeNoiseSet } from "./TerrainHeightParams";
 import { BiomeType, DEFAULT_BIOME, BIOME_LIST } from "./TerrainBiomeTypes";
 import { WaterBodyRegistry } from "./WaterBodyRegistry";
-import type { BridgeSystem } from "./BridgeSystem";
+// BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed inline below — only `registerBridgeCollision` is
+// called from this module.
+interface BridgeSystem {
+  registerBridgeCollision(
+    terrainTileX: number,
+    terrainTileZ: number,
+    tileSize: number,
+    terrain: unknown,
+  ): void;
+}
 // Import terrain generator from procgen package
 import {
   TerrainGenerator,
@@ -7083,7 +7093,10 @@ export class TerrainSystem extends System {
     }
 
     // ---- PASS 3: Bridge collision (overrides WATER → walkable) ----
-    const bridgeSystem = this.world.getSystem("bridges") as BridgeSystem | null;
+    const bridgeSystem =
+      (this.world.getSystem("bridges") as unknown as
+        | BridgeSystem
+        | undefined) ?? null;
     if (bridgeSystem) {
       bridgeSystem.registerBridgeCollision(
         terrainTileX,

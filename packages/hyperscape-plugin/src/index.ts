@@ -52,6 +52,7 @@ import { StationSpawnerSystem } from "./systems/StationSpawnerSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
+import { BridgeSystem } from "./systems/BridgeSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
 import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem.js";
 import { MusicSystem } from "./systems/MusicSystem.js";
@@ -216,6 +217,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
       // + authored manifest seed remains in `SystemLoader.init()`.
       register("loot", LootSystem);
+
+      // Bridges — collision + procedural deck/fence geometry.
+      // Both client and server register it: server computes
+      // walkable bridge tiles + WATER overrides; client adds the
+      // procedural mesh.
+      register("bridges", BridgeSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

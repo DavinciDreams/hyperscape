@@ -1050,7 +1050,7 @@ export { getRandomSpawnPoint } from "./data/world-areas";
 
 // World systems consumed by migrated systems via `getSystem` (some
 // already imported at the top of this file, re-listed here for clarity)
-export { BridgeSystem } from "./systems/shared/world/BridgeSystem";
+// BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
 export { TownSystem, POISystem, RoadNetworkSystem } from "./systems/shared";
 
@@ -1194,6 +1194,14 @@ export {
   normalizeCombatSkills,
   shouldMobIgnorePlayer,
 } from "./utils/game/CombatLevelCalculator";
+
+// BridgeSystem (cross-cutting) — re-exported here for the client
+// bundle so the migrated plugin BridgeSystem resolves its imports
+// when loaded on the client world. (Mirrors index.ts.)
+export {
+  ISLAND_BRIDGES,
+  type BridgeDefinition,
+} from "./systems/shared/world/BridgeDefinition";
 
 // InventoryInteractionSystem (cross-cutting server-side) —
 // re-exported here for the client bundle so the migrated plugin

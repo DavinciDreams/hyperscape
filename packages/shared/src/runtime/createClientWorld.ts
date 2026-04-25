@@ -127,7 +127,7 @@ import { LODs } from "../systems/shared";
 // EquipmentVisualSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // ZoneVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // WaterfallVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
-import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
+// BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ResourceTileDebugSystem migrated to @hyperforge/hyperscape (2026-04-24).
 import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import { InteractionRouter } from "../systems/client/interaction";
@@ -298,7 +298,8 @@ export function createClientWorld() {
   // Renders heightmap-based terrain with LOD
 
   world.register("terrain", TerrainSystem);
-  world.register("bridges", BridgeSystem);
+  // "bridges" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // ============================================================================
   // VEGETATION SYSTEM
