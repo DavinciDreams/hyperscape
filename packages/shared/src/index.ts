@@ -831,6 +831,11 @@ export { getEffectiveWorldAreas } from "./world-areas";
 // EquipmentVisualSystem in @hyperforge/hyperscape (and any other
 // consumer that needs the canonical OSRS slot iteration order).
 export { EQUIPMENT_SLOT_NAMES } from "./constants/EquipmentConstants";
+
+// Player-id coercion helper + DatabaseSystem interface — needed by
+// the migrated CoinPouchSystem in @hyperforge/hyperscape.
+export { toPlayerID } from "./utils/IdentifierUtils";
+export type { DatabaseSystem } from "./types/systems/system-interfaces";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

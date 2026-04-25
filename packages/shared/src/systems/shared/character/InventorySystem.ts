@@ -28,7 +28,17 @@ import { SystemBase } from "../infrastructure/SystemBase";
 import { Logger } from "../../../utils/Logger";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 import type { GroundItemSystem } from "../economy/GroundItemSystem";
-import type { CoinPouchSystem } from "./CoinPouchSystem";
+// CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed local interface so InventorySystem doesn't need to import
+// from the plugin (which would create a forward dep). Mirrors the
+// HealthBars consumer pattern. Lazy `getSystem("coin-pouch")` returns
+// the plugin-registered instance at runtime.
+interface CoinPouchSystemLike {
+  addCoins(playerId: string, amount: number, silent?: boolean): Promise<number>;
+  removeCoins(playerId: string, amount: number): Promise<number>;
+  getCoins(playerId: string): number;
+  persistCoinsImmediate(playerId: string): Promise<void>;
+}
 import { DeathState } from "../../../types/entities";
 
 export class InventorySystem extends SystemBase {
@@ -1477,8 +1487,8 @@ export class InventorySystem extends SystemBase {
   /**
    * Get CoinPouchSystem reference (lazy loaded)
    */
-  private getCoinPouchSystem(): CoinPouchSystem | null {
-    return this.world.getSystem<CoinPouchSystem>("coin-pouch") || null;
+  private getCoinPouchSystem(): CoinPouchSystemLike | null {
+    return this.world.getSystem<CoinPouchSystemLike>("coin-pouch") || null;
   }
 
   /**

@@ -35,6 +35,7 @@ import type { World } from "@hyperforge/shared";
 
 import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
 import { ClientTeleportEffectsSystem } from "./systems/ClientTeleportEffectsSystem.js";
+import { CoinPouchSystem } from "./systems/CoinPouchSystem.js";
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
@@ -135,6 +136,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Cross-cutting systems that run on both server + client.
       register("mob-death", MobDeathSystem);
       register("gravestone-loot", GravestoneLootSystem);
+
+      // Coin pouch — OSRS-style separate-from-inventory currency.
+      // Lazy-looked-up by InventorySystem (in shared) at
+      // PLAYER_REGISTERED time, so plugin onEnable's later
+      // registration order is fine.
+      register("coin-pouch", CoinPouchSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

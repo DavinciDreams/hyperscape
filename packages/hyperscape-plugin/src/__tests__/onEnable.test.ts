@@ -73,6 +73,7 @@ function buildContext(world: FakeWorld, scope: FakeScope): HyperscapeContext {
 const CROSS_CUTTING_REGISTRATIONS = [
   "mob-death",
   "gravestone-loot",
+  "coin-pouch",
   "tanning",
   "smithing",
   "smelting",

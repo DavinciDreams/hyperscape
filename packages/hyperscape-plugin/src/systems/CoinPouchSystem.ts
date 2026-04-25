@@ -17,17 +17,26 @@
  * @see {@link BankingSystem} for deposits
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
-import { Logger } from "../../../utils/Logger";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/character/`
+// into `@hyperforge/hyperscape` (1st cross-cutting server-side system
+// migration). OSRS-style separate-from-inventory currency. The lone
+// in-shared consumer (`InventorySystem`) duck-types the surface it
+// needs via a local `CoinPouchSystemLike` interface; SystemLoader's
+// registration is removed and the plugin's onEnable cross-cutting
+// branch handles it instead. Lazy `getSystem("coin-pouch")` lookups
+// in InventorySystem.ts run at PLAYER_REGISTERED handling time, well
+// after both systems have registered.
 import {
   createPlayerID,
+  type DatabaseSystem,
+  EventType,
   isValidPlayerID,
+  Logger,
+  type PlayerID,
+  SystemBase,
   toPlayerID,
-} from "../../../utils/IdentifierUtils";
-import type { PlayerID } from "../../../types/core/identifiers";
-import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
+  type World,
+} from "@hyperforge/shared";
 
 /** Default starting coins for new players */
 const DEFAULT_STARTING_COINS = 100;

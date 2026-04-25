@@ -8,5 +8,5 @@ export * from "./EquipmentSystem";
 export * from "./InventorySystem";
 export * from "./SkillsSystem";
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
-export * from "./CoinPouchSystem";
+// CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./PrayerSystem";

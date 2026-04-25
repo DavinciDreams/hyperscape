@@ -13,7 +13,9 @@
 import type { ActionRegistry } from "../systems/shared";
 import type { AggroSystem } from "../systems/shared";
 import type { BankingSystem } from "../systems/shared";
-import type { CoinPouchSystem } from "../systems/shared";
+// CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entry below typed as `unknown` — same pattern as
+// HealthBars; consumers locally duck-type the surface they need.
 import type { CombatSystem } from "../systems/shared";
 import type { DialogueSystem } from "../systems/shared";
 import type { EntityManager } from "../systems/shared";
@@ -105,7 +107,7 @@ export interface SystemMap {
 
   // Combat & interaction
   combat: CombatSystem;
-  "coin-pouch": CoinPouchSystem;
+  "coin-pouch": unknown;
   inventory: InventorySystem;
   equipment: EquipmentSystem;
   skills: SkillsSystem;
