@@ -4,7 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hyperia is a RuneScape-style MMORPG built on a custom 3D multiplayer engine. The project features a real-time 3D metaverse engine (Hyperia) in a persistent world.
+Hyperia is a tile-based MMORPG built on a custom 3D multiplayer engine. The project features a real-time 3D metaverse engine (Hyperia) in a persistent world.
+
+## CRITICAL: Naming rules
+
+**Top-level / framework**: `HyperForge` (npm scope `@hyperforge/...`). **Game**: `Hyperia` (NOT `Hyperscape` — that's the deprecated name still littering the codebase from a prior rename; do not propagate it in new code).
+
+**Do not reference OSRS, Old School RuneScape, RuneScape, or Jagex** anywhere — code, comments, docstrings, JSDoc, test names, fixture data, commit messages, PR titles/bodies, documentation, schema descriptions (Zod `.describe()`, JSON `description`), or file/directory names. We don't want any of their IP or names in our codebase.
+
+When describing mechanics inspired by classic tile-based MMORPGs, use neutral framing:
+- `tile-based 600ms-tick movement` (not "OSRS-style movement")
+- `tick-based combat` (not "OSRS-accurate combat")
+- `drain-effect / drain-resistance prayer formula` (not "OSRS prayer drain")
+- `money pouch — separate-from-inventory currency` (not "OSRS-style coin pouch")
+- `classic MMORPG feel` / `tile-based MMORPG` (not "RuneScape feel")
+
+Item names in content data (`shrimp`, `lobster`, `swordfish`, etc.) are fine — only the franchise/publisher names trigger the rule.
+
+When you encounter existing references in code you're modifying, clean them in the same diff.
 
 ## CRITICAL: Secrets and Private Keys
 
