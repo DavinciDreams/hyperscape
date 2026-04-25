@@ -53,6 +53,7 @@ import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
+import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem.js";
 import { MusicSystem } from "./systems/MusicSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { MobNPCSpawnerSystem } from "./systems/MobNPCSpawnerSystem.js";
@@ -271,6 +272,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // Background music with combat-aware crossfade. Web Audio
         // API + ClientAudio + ClientLoader — strictly client-side.
         register("music", MusicSystem);
+        // Drag-and-drop + right-click context menus. Originally
+        // registered inside `if (world.isClient)` in SystemLoader.
+        // Stats reader (`getSystemInfo`) is duck-typed at the
+        // SystemLoader callsite.
+        register("inventory-interaction", InventoryInteractionSystem);
       }
     },
     onDisable(_ctx) {

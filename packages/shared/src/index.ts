@@ -933,6 +933,13 @@ export {
   shouldMobIgnorePlayer,
 } from "./utils/game/CombatLevelCalculator";
 
+// InventoryInteractionSystem deps — needed by the migrated
+// InventoryInteractionSystem in @hyperforge/hyperscape.
+export type { DragData, DropTarget } from "./types/game/inventory-types";
+export type { ItemAction, ItemContextMenu } from "./types/game/item-types";
+export { dataManager } from "./data/DataManager";
+export { MESSAGE_TYPES } from "./systems/client/interaction/constants";
+
 // LootSystem deps — needed by the migrated LootSystem in
 // @hyperforge/hyperscape (and by its co-located tests, which import
 // the dispatcher helpers from the shared barrel).

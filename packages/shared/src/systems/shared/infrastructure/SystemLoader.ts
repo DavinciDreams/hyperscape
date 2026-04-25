@@ -102,7 +102,9 @@ import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 import { PlayerDeathSystem } from "..";
 import { EntityManager } from "..";
 import { EquipmentSystem } from "..";
-import { InventoryInteractionSystem } from "..";
+// InventoryInteractionSystem migrated to @hyperforge/hyperscape
+// (2026-04-25). The lone external touchpoint is the
+// `getSystemInfo()` stats reader below — duck-typed inline.
 import { InventorySystem } from "..";
 // ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
@@ -230,7 +232,8 @@ export interface Systems {
   entityManager?: EntityManager;
   playerDeath?: PlayerDeathSystem;
   // mobDeath: registered by @hyperforge/hyperscape plugin (2026-04-24)
-  inventoryInteraction?: InventoryInteractionSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  inventoryInteraction?: unknown;
   groundItems?: GroundItemSystem;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`. Boot-time
   // dispatcher install + manifest seed below uses a local duck-type
@@ -470,8 +473,8 @@ export async function registerSystems(world: World): Promise<void> {
     // DamageSplatSystem + DuelCountdownSplatSystem + ProjectileRenderer
     // registered by @hyperforge/hyperscape plugin (client-side onEnable,
     // gated on !world.isServer). Migrated 2026-04-24.
-    world.register("inventory-interaction", InventoryInteractionSystem);
-
+    // "inventory-interaction" registered by @hyperforge/hyperscape
+    // plugin onEnable cross-cutting branch (migrated 2026-04-25).
     // XP Drop System - 3D version disabled, using 2D screen-space drops in XPProgressOrb
     // The 2D approach is more like RS3 where XP floats up the screen toward the orb
     // Keep XPDropSystem.ts for potential future use or alternative mode
@@ -547,10 +550,9 @@ export async function registerSystems(world: World): Promise<void> {
 
   // Client-only systems
   if (world.isClient) {
-    systems.inventoryInteraction = getSystem(
-      world,
-      "inventory-interaction",
-    ) as InventoryInteractionSystem;
+    // InventoryInteractionSystem migrated — `unknown` field, duck-
+    // typed at the stats-reader callsite below.
+    systems.inventoryInteraction = getSystem(world, "inventory-interaction");
   }
 
   // Ground Item System
@@ -1034,11 +1036,21 @@ function setupAPI(world: World, systems: Systems): void {
     // Item Actions API
     // registerItemAction removed - ItemActionSystem not available
 
-    // Inventory Interaction API (client only)
+    // Inventory Interaction API (client only) — migrated to
+    // @hyperforge/hyperscape; duck-typed on the `getSystemInfo()`
+    // shape this caller actually reads.
     isDragging: () =>
-      systems.inventoryInteraction?.getSystemInfo()?.isDragging || false,
+      (
+        systems.inventoryInteraction as
+          | { getSystemInfo?(): { isDragging?: boolean } | undefined }
+          | undefined
+      )?.getSystemInfo?.()?.isDragging || false,
     getDropTargetsCount: () =>
-      systems.inventoryInteraction?.getSystemInfo()?.dropTargetsCount || 0,
+      (
+        systems.inventoryInteraction as
+          | { getSystemInfo?(): { dropTargetsCount?: number } | undefined }
+          | undefined
+      )?.getSystemInfo?.()?.dropTargetsCount || 0,
 
     // Processing API
     // Processing API — `systems.processing` is `unknown` since

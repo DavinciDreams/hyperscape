@@ -4,33 +4,38 @@
  * Handles both:
  * - Drag-and-drop for inventory/equipment management
  * - Item right-click context menus (Wear, Drop, Eat, Use, etc.)
- * Provides complete RuneScape-style inventory interactions.
+ * Provides full classic-MMORPG inventory interactions.
  */
 
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/interaction/`
+// into `@hyperforge/hyperscape` (28th system migration; 14th
+// cross-cutting server-side). 1835 LOC. Sole external consumer was
+// SystemLoader's stats reader (`systems.inventoryInteraction
+// ?.getSystemInfo()` for `isDragging` + `dropTargetsCount`) — that
+// callsite has been duck-typed on the inline shape.
 import {
-  DragData,
-  DropTarget,
-  ItemType,
-  Item,
+  type ClientNetwork,
+  dataManager,
+  type DragData,
+  type DropTarget,
   EquipmentSlotName,
-  ItemAction,
-  ItemContextMenu,
-} from "../../../types/core/core";
-import { ItemRarity } from "../../../types/entities";
-import { dataManager } from "../../../data/DataManager";
+  EventType,
+  getMaxInventorySlotsInputLimit,
+  getTargetValidator,
+  type Item,
+  type ItemAction,
+  type ItemContextMenu,
+  ItemRarity,
+  ItemType,
+  Logger,
+  MESSAGE_TYPES,
+  processingDataProvider,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 // Re-export for backward compatibility
 export type { DragData, DropTarget };
-
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { Logger } from "../../../utils/Logger";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import { getTargetValidator } from "./TargetValidator";
-import { MESSAGE_TYPES } from "../../client/interaction/constants";
-import { getMaxInventorySlotsInputLimit } from "../../../data/live/interaction-live";
-import type { ClientNetwork } from "../../client/ClientNetwork";
 
 /**
  * Create a minimal Item with all required properties
@@ -1183,7 +1188,7 @@ export class InventoryInteractionSystem extends SystemBase {
       },
     });
 
-    // === OSRS-STYLE "USE" ACTIONS FOR FIREMAKING/COOKING ===
+    // === "USE" ACTIONS FOR FIREMAKING / COOKING ===
 
     // Tinderbox: Use on logs to light fire
     this.registerAction("processing", {
@@ -1196,7 +1201,7 @@ export class InventoryInteractionSystem extends SystemBase {
       },
     });
 
-    // Logs: Use on tinderbox (reverse direction also works in OSRS)
+    // Logs: Use on tinderbox (reverse direction also works)
     this.registerAction("processing", {
       id: "use",
       label: "Use",
@@ -1568,7 +1573,7 @@ export class InventoryInteractionSystem extends SystemBase {
     return dataManager.getItem(itemId);
   }
 
-  // === TARGETING MODE FOR OSRS-STYLE "USE X ON Y" ===
+  // === TARGETING MODE FOR "USE X ON Y" ===
 
   /**
    * Start targeting mode for "Use X on Y" interactions.

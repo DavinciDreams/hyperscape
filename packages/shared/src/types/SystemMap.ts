@@ -24,7 +24,9 @@ import type { EquipmentSystem } from "../systems/shared";
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // SystemMap entry removed — its only consumer was a dead
 // `systems.healthRegen = ...` lookup in SystemLoader.
-import type { InventoryInteractionSystem } from "../systems/shared";
+// InventoryInteractionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entry below typed as `unknown` — sole consumer pattern
+// (SystemLoader stats reader) duck-types `getSystemInfo()`.
 import type { InventorySystem } from "../systems/shared";
 // ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -167,7 +169,7 @@ export interface SystemMap {
   actions: ClientActions;
   "client-camera-system": ClientCameraSystem;
   interaction: InteractionRouter;
-  "inventory-interaction": InventoryInteractionSystem;
+  "inventory-interaction": unknown;
   // "damage-splat" registered by @hyperforge/hyperscape plugin onEnable
   // "projectile-renderer" registered by @hyperforge/hyperscape plugin onEnable
   // "duel-countdown-splat" registered by @hyperforge/hyperscape plugin onEnable

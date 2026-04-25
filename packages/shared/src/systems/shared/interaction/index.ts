@@ -5,7 +5,7 @@
  * NOTE: The main InteractionRouter is exported from systems/client/interaction/
  */
 
-export * from "./InventoryInteractionSystem";
+// InventoryInteractionSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./Physics";
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25)

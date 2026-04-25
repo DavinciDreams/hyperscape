@@ -1195,6 +1195,15 @@ export {
   shouldMobIgnorePlayer,
 } from "./utils/game/CombatLevelCalculator";
 
+// InventoryInteractionSystem (cross-cutting server-side) —
+// re-exported here for the client bundle so the migrated plugin
+// system resolves its imports when loaded on the client world.
+// (Mirrors index.ts.)
+export type { DragData, DropTarget } from "./types/game/inventory-types";
+export type { ItemAction, ItemContextMenu } from "./types/game/item-types";
+export { dataManager } from "./data/DataManager";
+export { MESSAGE_TYPES } from "./systems/client/interaction/constants";
+
 // LootSystem (cross-cutting server-side) — re-exported here for the
 // client bundle so the migrated plugin LootSystem resolves its
 // imports when the plugin is loaded on the client world. (Mirrors
