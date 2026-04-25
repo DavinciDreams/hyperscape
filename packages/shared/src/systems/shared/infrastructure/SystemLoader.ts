@@ -105,7 +105,8 @@ import { EquipmentSystem } from "..";
 import { InventoryInteractionSystem } from "..";
 import { InventorySystem } from "..";
 import { ItemSpawnerSystem } from "..";
-import { MobNPCSpawnerSystem } from "..";
+// MobNPCSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 // StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 import { MobNPCSystem } from "..";
@@ -232,7 +233,8 @@ export interface Systems {
   movementSystem?: MovementSystemLike;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   npc?: unknown;
-  mobNpcSpawner?: MobNPCSpawnerSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  mobNpcSpawner?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   stationSpawner?: unknown;
   itemSpawner?: ItemSpawnerSystem;
@@ -498,7 +500,8 @@ export async function registerSystems(world: World): Promise<void> {
   }
 
   // DYNAMIC WORLD CONTENT SYSTEMS - FULL THREE.JS ACCESS, NO SANDBOX
-  world.register("mob-npc-spawner", MobNPCSpawnerSystem);
+  // "mob-npc-spawner" registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-25).
   // "station-spawner" registered by @hyperforge/hyperscape plugin
   // onEnable cross-cutting branch (migrated 2026-04-25).
   world.register("item-spawner", ItemSpawnerSystem);
@@ -634,10 +637,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.scripting = getSystem(world, "scripting") as ScriptingSystem;
 
   // DYNAMIC WORLD CONTENT SYSTEMS
-  systems.mobNpcSpawner = getSystem(
-    world,
-    "mob-npc-spawner",
-  ) as MobNPCSpawnerSystem;
+  systems.mobNpcSpawner = getSystem(world, "mob-npc-spawner");
   systems.stationSpawner = getSystem(world, "station-spawner");
   systems.itemSpawner = getSystem(world, "item-spawner") as ItemSpawnerSystem;
 
@@ -923,12 +923,27 @@ function setupAPI(world: World, systems: Systems): void {
     getTerrainStats: () => ({}), // Terrain system doesn't expose this method
     getHeightAtWorldPosition: (_x: number, _z: number) => 0, // Terrain system doesn't expose this method
 
-    // Dynamic World Content API (Full THREE.js Access)
-    getSpawnedMobs: () => systems.mobNpcSpawner?.getSpawnedMobs(),
-    getMobCount: () => systems.mobNpcSpawner?.getMobCount(),
+    // Dynamic World Content API (Full THREE.js Access).
+    // `systems.mobNpcSpawner` is `unknown` since MobNPCSpawnerSystem
+    // migrated to @hyperforge/hyperscape; cast at each callsite.
+    getSpawnedMobs: () =>
+      (
+        systems.mobNpcSpawner as { getSpawnedMobs?(): unknown } | undefined
+      )?.getSpawnedMobs?.(),
+    getMobCount: () =>
+      (
+        systems.mobNpcSpawner as { getMobCount?(): unknown } | undefined
+      )?.getMobCount?.(),
     getMobsByType: (mobType: string) =>
-      systems.mobNpcSpawner?.getMobsByType(mobType),
-    getMobStats: () => systems.mobNpcSpawner?.getMobStats(),
+      (
+        systems.mobNpcSpawner as
+          | { getMobsByType?(t: string): unknown }
+          | undefined
+      )?.getMobsByType?.(mobType),
+    getMobStats: () =>
+      (
+        systems.mobNpcSpawner as { getMobStats?(): unknown } | undefined
+      )?.getMobStats?.(),
     getSpawnedItems: () => systems.itemSpawner?.getSpawnedItems(),
     getItemCount: () => systems.itemSpawner?.getItemCount(),
     getItemsByType: (itemType: string) =>

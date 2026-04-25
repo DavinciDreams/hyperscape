@@ -40,6 +40,7 @@ export type {
 // Export entity classes
 export { Entity } from "./entities/Entity";
 export type { EventCallback } from "./entities/Entity";
+export { MobEntity } from "./entities/npc/MobEntity";
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
 
@@ -736,7 +737,9 @@ export type {
 } from "./types/index";
 
 // Export entity and interaction types
-export type { BaseEntityProperties, InteractionType } from "./types/entities";
+export type { BaseEntityProperties } from "./types/entities";
+// InteractionType is an enum — needs value re-export for migrated systems.
+export { InteractionType } from "./types/entities/entities";
 // EntityType is an enum (value), not just a type — needs `export {}`
 // for runtime use by migrated systems.
 export { EntityType } from "./types/entities/entities";
@@ -1136,6 +1139,17 @@ export { isValidQuestId } from "./types/game/quest-types";
 
 // StationSpawnerSystem deps — re-exported for the client bundle.
 export { stationDataProvider } from "./data/StationDataProvider";
+
+// MobNPCSpawnerSystem deps — re-exported for the client bundle.
+export { ALL_NPCS } from "./data/npcs";
+export type { WorldJsonMobSpawn } from "./data/world-structure";
+export type {
+  LevelRange,
+  NPCData,
+  MobSpawnStats,
+} from "./types/entities/npc-mob-types";
+export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
+// (InteractionType already re-exported earlier in this file as a value)
 
 // NPCSystem deps — re-exported for the client bundle.
 export type { NPCLocation } from "./data/world-areas";

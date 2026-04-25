@@ -878,6 +878,18 @@ export type {
 // StationSpawnerSystem in @hyperforge/hyperscape.
 export { stationDataProvider } from "./data/StationDataProvider";
 
+// MobNPCSpawnerSystem deps — needed by the migrated
+// MobNPCSpawnerSystem in @hyperforge/hyperscape.
+export { ALL_NPCS } from "./data/npcs";
+export type { WorldJsonMobSpawn } from "./data/world-structure";
+export type {
+  LevelRange,
+  NPCData,
+  MobSpawnStats,
+} from "./types/entities/npc-mob-types";
+export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
+export { InteractionType } from "./types/entities/entities";
+
 // NPCSystem deps — needed by the migrated NPCSystem in
 // @hyperforge/hyperscape.
 export type { NPCLocation } from "./data/world-areas";
@@ -1264,7 +1276,8 @@ export type {
 } from "./types/index";
 
 // Export entity and interaction types
-export type { BaseEntityProperties, InteractionType } from "./types/entities";
+export type { BaseEntityProperties } from "./types/entities";
+// InteractionType already exported as a value above (enum re-export).
 // EntityType is an enum (value), not just a type — needs `export {}`.
 export { EntityType } from "./types/entities/entities";
 

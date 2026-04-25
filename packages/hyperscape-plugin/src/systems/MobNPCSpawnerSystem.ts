@@ -1,37 +1,52 @@
-import { ALL_NPCS, getNPCById } from "../../../data/npcs";
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../../world-areas";
-import { DataManager } from "../../../data/DataManager";
-import type { WorldJsonMobSpawn } from "../../../data/world-structure";
-import type {
-  LevelRange,
-  NPCData,
-  MobSpawnStats,
-} from "../../../types/core/core";
-import { EntityType, InteractionType } from "../../../types/entities/entities";
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import type { EntitySpawnedEvent } from "../../../types/systems/system-interfaces";
-import { SystemBase } from "../infrastructure/SystemBase";
-// NOTE: Import directly to avoid circular dependency through barrel file
-import { EntityManager } from "./EntityManager";
-import { TerrainSystem } from "../world/TerrainSystem";
-import type { TownSystem } from "../world/TownSystem";
-import { MobEntity } from "../../../entities/npc/MobEntity";
-import {
-  getMaxBanditMobsWorld,
-  isBanditMobForGlobalCap,
-} from "../../../data/live/game-live";
-
-// Types are now imported from shared type files
-
 /**
- * Mob NPC Spawner System
+ * MobNPCSpawnerSystem - Spawns mob NPCs from world-areas.json
  *
- * Uses EntityManager to spawn mob entities instead of MobApp objects.
- * Creates and manages all combat NPC instances (mobs, bosses, quest enemies)
- * across the world based on GDD specifications.
+ * Reads spawn definitions from world-areas.json (regions, density,
+ * level ranges, behavior) and instantiates MobEntity instances via
+ * EntityManager. Handles initial spawn at world load + respawn
+ * cycles after mob death.
  */
+
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/entities/`
+// into `@hyperforge/hyperscape` (23rd system migration; 11th
+// cross-cutting server-side). Mob NPC spawner — reads
+// world-areas.json, places mobs via EntityManager, respawns after
+// death. 999 LOC. No in-shared consumers reference the class type
+// (only SystemMap had the import).
+import {
+  ALL_NPCS,
+  ALL_WORLD_AREAS,
+  type EntitySpawnedEvent,
+  EntityType,
+  EventType,
+  getEffectiveWorldAreas,
+  getMaxBanditMobsWorld,
+  getNPCById,
+  InteractionType,
+  isBanditMobForGlobalCap,
+  type LevelRange,
+  MobEntity,
+  type MobSpawnStats,
+  type NPCData,
+  SystemBase,
+  type World,
+  type WorldJsonMobSpawn,
+} from "@hyperforge/shared";
+import { DataManager } from "@hyperforge/shared";
+
+// EntityManager + TerrainSystem + TownSystem still live in shared/
+// but their full surfaces are too large to maintain as duck-typed
+// interfaces. Loose-typed (`any`) matches the original under-shared
+// behavior — `getSystem<T>` returned `T = any` by default so the
+// migrated code's call sites are unchanged. Trade-off: no compile-
+// time guard against typos in this file's calls into these systems,
+// but the runtime behavior is identical to pre-migration.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type EntityManager = any;
+type TerrainSystem = any;
+type TownSystem = any;
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 type SpawnedMobDetail = {
   spawnKey: string;
   mobId: string;
@@ -887,7 +902,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
         hotspot.z,
       );
       const levelRange = this.getMobLevelRange(bossData);
-      const bossY = this.terrainSystem.getHeightAt(hotspot.x, hotspot.z);
+      const bossY = this.terrainSystem.getHeightAt(hotspot.x, hotspot.z) ?? 0;
 
       this.spawnedBossHotspots.add(hotspot.id);
       this.spawnMobFromData(
@@ -949,7 +964,7 @@ export class MobNPCSpawnerSystem extends SystemBase {
           // Ground mob spawn to terrain height
           let mobY = spawnPoint.position.y;
           const th = this.terrainSystem.getHeightAt(mobX, mobZ);
-          if (Number.isFinite(th)) mobY = th;
+          if (th !== null && Number.isFinite(th)) mobY = th;
 
           const difficultySample =
             this.terrainSystem.getDifficultyAtWorldPosition(

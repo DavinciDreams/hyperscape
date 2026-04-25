@@ -52,6 +52,7 @@ import { StationSpawnerSystem } from "./systems/StationSpawnerSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
+import { MobNPCSpawnerSystem } from "./systems/MobNPCSpawnerSystem.js";
 import { NPCSystem } from "./systems/NPCSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
 import { QuestSystem } from "./systems/QuestSystem.js";
@@ -196,6 +197,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Station spawner — places banks/furnaces/anvils/altars/ranges
       // from world-areas.json + stations.json. Static spawn at boot.
       register("station-spawner", StationSpawnerSystem);
+
+      // Mob spawner — reads world-areas.json + npcs.json, spawns
+      // MobEntity instances via EntityManager + handles respawn after
+      // death. Cross-cutting registration so client-side `getSystem
+      // ("mob-npc-spawner")` lookups don't null in legacy paths.
+      register("mob-npc-spawner", MobNPCSpawnerSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

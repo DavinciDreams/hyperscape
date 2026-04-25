@@ -7,7 +7,7 @@ export * from "./Entities";
 export * from "./EntityManager";
 // NPCSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./MobNPCSystem";
-export * from "./MobNPCSpawnerSystem";
+// MobNPCSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./ItemSpawnerSystem";
 export * from "./ResourceSystem";

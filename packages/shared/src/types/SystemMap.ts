@@ -31,7 +31,7 @@ import type { LootSystem } from "../systems/shared";
 // MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // "mob-death" SystemMap entry removed — its only consumer was a
 // dead `systems.mobDeath = ...` lookup in SystemLoader (no reads).
-import type { MobNPCSpawnerSystem } from "../systems/shared";
+// MobNPCSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { MobNPCSystem } from "../systems/shared";
 // NPCSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { PlayerDeathSystem } from "../systems/shared";
@@ -138,7 +138,7 @@ export interface SystemMap {
   npc: unknown;
   dialogue: unknown;
   quest: unknown;
-  "mob-npc-spawner": MobNPCSpawnerSystem;
+  "mob-npc-spawner": unknown;
   "station-spawner": unknown;
   "item-spawner": ItemSpawnerSystem;
   "zone-detection": ZoneDetectionSystem;
