@@ -106,7 +106,8 @@ import { InventoryInteractionSystem } from "..";
 import { InventorySystem } from "..";
 import { ItemSpawnerSystem } from "..";
 import { MobNPCSpawnerSystem } from "..";
-import { StationSpawnerSystem } from "..";
+// StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 import { MobNPCSystem } from "..";
 import { PersistenceSystem } from "../../server/PersistenceSystem";
 import { PlayerSystem } from "..";
@@ -232,7 +233,8 @@ export interface Systems {
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   npc?: unknown;
   mobNpcSpawner?: MobNPCSpawnerSystem;
-  stationSpawner?: StationSpawnerSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  stationSpawner?: unknown;
   itemSpawner?: ItemSpawnerSystem;
   // healthRegen: registered by @hyperforge/hyperscape plugin (2026-04-24)
   scripting?: ScriptingSystem;
@@ -497,7 +499,8 @@ export async function registerSystems(world: World): Promise<void> {
 
   // DYNAMIC WORLD CONTENT SYSTEMS - FULL THREE.JS ACCESS, NO SANDBOX
   world.register("mob-npc-spawner", MobNPCSpawnerSystem);
-  world.register("station-spawner", StationSpawnerSystem);
+  // "station-spawner" registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-25).
   world.register("item-spawner", ItemSpawnerSystem);
 
   // Zone Detection System - registered on server only (client registers in createClientWorld.ts)
@@ -635,10 +638,7 @@ export async function registerSystems(world: World): Promise<void> {
     world,
     "mob-npc-spawner",
   ) as MobNPCSpawnerSystem;
-  systems.stationSpawner = getSystem(
-    world,
-    "station-spawner",
-  ) as StationSpawnerSystem;
+  systems.stationSpawner = getSystem(world, "station-spawner");
   systems.itemSpawner = getSystem(world, "item-spawner") as ItemSpawnerSystem;
 
   // Set up API for apps to access functionality

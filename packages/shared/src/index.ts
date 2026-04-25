@@ -874,6 +874,10 @@ export type {
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
 
+// StationSpawnerSystem deps — needed by the migrated
+// StationSpawnerSystem in @hyperforge/hyperscape.
+export { stationDataProvider } from "./data/StationDataProvider";
+
 // NPCSystem deps — needed by the migrated NPCSystem in
 // @hyperforge/hyperscape.
 export type { NPCLocation } from "./data/world-areas";
@@ -1260,11 +1264,9 @@ export type {
 } from "./types/index";
 
 // Export entity and interaction types
-export type {
-  BaseEntityProperties,
-  EntityType,
-  InteractionType,
-} from "./types/entities";
+export type { BaseEntityProperties, InteractionType } from "./types/entities";
+// EntityType is an enum (value), not just a type — needs `export {}`.
+export { EntityType } from "./types/entities/entities";
 
 // Export event payloads namespace
 export * as Payloads from "./types/events";

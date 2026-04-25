@@ -48,6 +48,7 @@ import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
+import { StationSpawnerSystem } from "./systems/StationSpawnerSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
@@ -191,6 +192,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // cross-cutting so client-side `getSystem("npc")` lookups don't
       // null-out in the legacy code paths still expecting it.
       register("npc", NPCSystem);
+
+      // Station spawner — places banks/furnaces/anvils/altars/ranges
+      // from world-areas.json + stations.json. Static spawn at boot.
+      register("station-spawner", StationSpawnerSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

@@ -736,11 +736,10 @@ export type {
 } from "./types/index";
 
 // Export entity and interaction types
-export type {
-  BaseEntityProperties,
-  EntityType,
-  InteractionType,
-} from "./types/entities";
+export type { BaseEntityProperties, InteractionType } from "./types/entities";
+// EntityType is an enum (value), not just a type — needs `export {}`
+// for runtime use by migrated systems.
+export { EntityType } from "./types/entities/entities";
 
 // Export event payloads namespace
 export * as Payloads from "./types/events";
@@ -1134,6 +1133,9 @@ export type {
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
 export { isValidQuestId } from "./types/game/quest-types";
+
+// StationSpawnerSystem deps — re-exported for the client bundle.
+export { stationDataProvider } from "./data/StationDataProvider";
 
 // NPCSystem deps — re-exported for the client bundle.
 export type { NPCLocation } from "./data/world-areas";

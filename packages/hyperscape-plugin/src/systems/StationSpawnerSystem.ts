@@ -3,19 +3,19 @@
  *
  * Spawns permanent stations (banks, furnaces, anvils, altars, ranges)
  * defined in world-areas.json. Uses stations.json for model/config data.
- *
- * Pattern follows MobNPCSpawnerSystem:
- * - Extends SystemBase
- * - Depends on entity-manager and terrain
- * - Spawns at world start (not reactively like mobs)
  */
 
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../../world-areas";
-import { stationDataProvider } from "../../../data/StationDataProvider";
-import type { World } from "../../../types/index";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { EntityType } from "../../../types/entities";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/entities/`
+// into `@hyperforge/hyperscape` (22nd system migration; 10th
+// cross-cutting server-side). Static-station spawner.
+import {
+  ALL_WORLD_AREAS,
+  EntityType,
+  getEffectiveWorldAreas,
+  stationDataProvider,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 export class StationSpawnerSystem extends SystemBase {
   constructor(world: World) {

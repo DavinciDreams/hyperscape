@@ -46,7 +46,7 @@ import type { SkillsSystem } from "../systems/shared";
 // CraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // FletchingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import type { StationSpawnerSystem } from "../systems/shared";
+// StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import type { GroundItemSystem } from "../systems/shared/economy/GroundItemSystem";
@@ -139,7 +139,7 @@ export interface SystemMap {
   dialogue: unknown;
   quest: unknown;
   "mob-npc-spawner": MobNPCSpawnerSystem;
-  "station-spawner": StationSpawnerSystem;
+  "station-spawner": unknown;
   "item-spawner": ItemSpawnerSystem;
   "zone-detection": ZoneDetectionSystem;
 
