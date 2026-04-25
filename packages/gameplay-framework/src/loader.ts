@@ -28,8 +28,31 @@
  *     a concrete demand
  */
 
-import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+// `node:path` lazy-loaded for the same reason as `node:url` below —
+// browser bundles externalize it and accessing methods on the stub
+// throws at parse time.
+type NodePath = typeof import("node:path");
+let _nodePath: NodePath | null = null;
+function getNodePath(): NodePath {
+  if (_nodePath) return _nodePath;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  _nodePath = require("node:path") as NodePath;
+  return _nodePath;
+}
+// `pathToFileURL` is Node-only. Imported lazily inside
+// `resolveEntrySpecifier` so browser bundles (Vite externalizes
+// `node:url`) don't crash at parse time when the loader module is
+// pulled in via the barrel — only the asset-forge / hosted CLI code
+// paths that actually load plugins from disk reach the function.
+type PathToFileURL = (path: string) => URL;
+let _pathToFileURL: PathToFileURL | null = null;
+function getPathToFileURL(): PathToFileURL {
+  if (_pathToFileURL) return _pathToFileURL;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  _pathToFileURL = (require("node:url") as { pathToFileURL: PathToFileURL })
+    .pathToFileURL;
+  return _pathToFileURL;
+}
 
 import type { PluginManifest } from "@hyperforge/manifest-schema";
 
@@ -145,8 +168,8 @@ export async function loadPluginFromManifest<TContext = unknown>(
  * characters correctly — simple string concatenation would not.
  */
 function resolveEntrySpecifier(baseDir: string, entry: string): string {
-  const absolute = path.resolve(baseDir, entry);
-  return pathToFileURL(absolute).href;
+  const absolute = getNodePath().resolve(baseDir, entry);
+  return getPathToFileURL()(absolute).href;
 }
 
 /** Default importer — just delegates to the host runtime's `import()`. */
