@@ -22,5 +22,5 @@ export * from "./CombatAnimationManager";
 export * from "./CombatRotationManager";
 export * from "./CombatAnimationSync";
 export * from "./CombatAntiCheat";
-export * from "./RangeSystem";
+// RangeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./PidManager";

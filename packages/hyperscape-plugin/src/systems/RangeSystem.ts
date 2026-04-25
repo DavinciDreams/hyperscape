@@ -3,18 +3,23 @@
  * Three range types: Hunt (SW tile), Attack (all tiles), Max (leash).
  */
 
-import type { TileCoord } from "../movement/TileSystem";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/combat/`
+// into `@hyperforge/hyperscape` (33rd system migration; third
+// scaffold archetype). 178 LOC. Static utility class — never
+// registered in any world. Pure file move + barrel cleanup.
 import {
-  worldToTile,
+  AttackType,
+  Logger,
+  NPC_SIZES,
+  type NPCSize,
+  npcSizesRegistry,
+  type Position3D,
+  type TileCoord,
+  TILE_SIZE,
   tileChebyshevDistance,
   tilesWithinMeleeRange,
-} from "../movement/TileSystem";
-import { AttackType } from "../../../types/core/core";
-import type { Position3D } from "../../../types";
-import { TILE_SIZE } from "../movement/TileSystem";
-import { Logger } from "../../../utils/Logger";
-import { NPC_SIZES, type NPCSize } from "../../../data/npc-sizes";
-import { npcSizesRegistry } from "../../../npc-sizes";
+  worldToTile,
+} from "@hyperforge/shared";
 
 // Re-export for backwards compatibility
 export type { NPCSize };

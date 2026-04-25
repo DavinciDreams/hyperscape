@@ -1204,6 +1204,12 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// RangeSystem (scaffold) — re-exported here for the client
+// bundle so the migrated plugin RangeSystem resolves its imports.
+// (Mirrors index.ts.)
+export { NPC_SIZES, type NPCSize } from "./data/npc-sizes";
+export { npcSizesRegistry } from "./npc-sizes";
+
 // TeleportSystem (scaffold) — re-exported here for the client
 // bundle so the migrated plugin TeleportSystem resolves its
 // imports. (Mirrors index.ts.)

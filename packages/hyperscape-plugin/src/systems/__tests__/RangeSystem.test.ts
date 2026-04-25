@@ -1,7 +1,7 @@
 /**
  * RangeSystem Unit Tests
  *
- * Tests OSRS-accurate range calculations for NPC aggro and combat.
+ * Tests range calculations for NPC aggro and combat.
  *
  * Key behaviors tested:
  * - Hunt range (SW tile origin)
@@ -9,11 +9,11 @@
  * - Max range from spawn
  * - Large NPC tile occupation
  * - Melee range 1 diagonal exclusion
- *
- * @see https://oldschool.runescape.wiki/w/Aggressiveness
- * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md Phase 2.2
  */
 
+// Migrated 2026-04-25 alongside RangeSystem from
+// `packages/shared/src/systems/shared/combat/__tests__/`. Imports
+// updated to match the new home in `@hyperforge/hyperscape`.
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   RangeSystem,
@@ -22,9 +22,11 @@ import {
   NPC_SIZES,
   type NPCRangeData,
 } from "../RangeSystem";
-import { AttackType } from "../../../../types/core/core";
-import type { Position3D } from "../../../../types";
-import type { TileCoord } from "../../movement/TileSystem";
+import {
+  AttackType,
+  type Position3D,
+  type TileCoord,
+} from "@hyperforge/shared";
 
 describe("RangeSystem", () => {
   let rangeSystem: RangeSystem;
@@ -301,7 +303,7 @@ describe("RangeSystem", () => {
         );
       });
 
-      it("returns false for diagonal adjacent tiles (range 1 - OSRS rule)", () => {
+      it("returns false for diagonal adjacent tiles (range 1 — classic-MMORPG rule)", () => {
         const npc = createNPC(5, 5, 1, AttackType.MELEE);
 
         // NE diagonal

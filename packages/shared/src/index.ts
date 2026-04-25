@@ -943,6 +943,12 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// RangeSystem deps — needed by the migrated RangeSystem in
+// @hyperforge/hyperscape. NPC tile-occupancy data drives hunt /
+// attack / max-range calculations.
+export { NPC_SIZES, type NPCSize } from "./data/npc-sizes";
+export { npcSizesRegistry } from "./npc-sizes";
+
 // TeleportSystem deps — needed by the migrated TeleportSystem in
 // @hyperforge/hyperscape. Schema types come from world-types.
 export type {
