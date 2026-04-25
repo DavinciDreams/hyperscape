@@ -1231,6 +1231,11 @@ export {
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
 
+// ProceduralGrass deferred-import deps — mirror to client bundle.
+export { getGrassExclusionManager } from "./systems/shared/world/GrassExclusionManager";
+export { ProcgenTreeInstancer } from "./systems/shared/world/ProcgenTreeInstancer";
+export { ProcgenRockInstancer } from "./systems/shared/world/ProcgenRockInstancer";
+
 // NPCTickProcessor + SpatialAggroStrategy deps — mirror to client bundle.
 export type {
   IAggroStrategy,

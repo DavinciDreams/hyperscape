@@ -1470,8 +1470,7 @@ export class ProceduralGrassSystem extends System {
 
     // Subscribe to GrassExclusionManager for building/object changes
     // This ensures grass exclusion is updated when buildings are added
-    const { getGrassExclusionManager } =
-      await import("./GrassExclusionManager");
+    const { getGrassExclusionManager } = await import("@hyperforge/shared");
     const exclusionManager = getGrassExclusionManager();
 
     console.log(
@@ -1967,7 +1966,7 @@ export class ProceduralGrassSystem extends System {
     let includedBuildings = 0;
 
     // Get tree instancer via singleton
-    const { ProcgenTreeInstancer } = await import("./ProcgenTreeInstancer");
+    const { ProcgenTreeInstancer } = await import("@hyperforge/shared");
     const treeInstancer = ProcgenTreeInstancer.getInstance(this.world);
 
     if (treeInstancer) {
@@ -1990,7 +1989,7 @@ export class ProceduralGrassSystem extends System {
     }
 
     // Get rock instancer via singleton
-    const { ProcgenRockInstancer } = await import("./ProcgenRockInstancer");
+    const { ProcgenRockInstancer } = await import("@hyperforge/shared");
     const rockInstancer = ProcgenRockInstancer.getInstance(this.world);
 
     if (rockInstancer) {
@@ -2016,8 +2015,7 @@ export class ProceduralGrassSystem extends System {
     }
 
     // Collect building exclusion zones from GrassExclusionManager
-    const { getGrassExclusionManager } =
-      await import("./GrassExclusionManager");
+    const { getGrassExclusionManager } = await import("@hyperforge/shared");
     const exclusionManager = getGrassExclusionManager();
     const rectBlockers = exclusionManager.getRectangularBlockers();
 
@@ -3060,8 +3058,7 @@ export class ProceduralGrassSystem extends System {
     }
 
     // Check GrassExclusionManager
-    const { getGrassExclusionManager } =
-      await import("./GrassExclusionManager");
+    const { getGrassExclusionManager } = await import("@hyperforge/shared");
     const manager = getGrassExclusionManager();
     const rectBlockers = manager.getRectangularBlockers();
     const circBlockers = manager.getCircularBlockers();

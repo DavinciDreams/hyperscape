@@ -972,6 +972,14 @@ export {
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
 
+// ProceduralGrass deferred-import deps — the migrated
+// ProceduralGrass system dynamically imports these via
+// `await import(...)`. Re-exported here so the plugin can resolve
+// them via `@hyperforge/shared`.
+export { getGrassExclusionManager } from "./systems/shared/world/GrassExclusionManager";
+export { ProcgenTreeInstancer } from "./systems/shared/world/ProcgenTreeInstancer";
+export { ProcgenRockInstancer } from "./systems/shared/world/ProcgenRockInstancer";
+
 // NPCTickProcessor + SpatialAggroStrategy deps — needed by the
 // migrated NPC tick utilities in @hyperforge/hyperscape.
 export type {
