@@ -27,8 +27,32 @@ import { PlayerEmotesManifestSchema } from "@hyperforge/manifest-schema";
 
 import playerEmotesManifestJson from "./player-emotes.json" with { type: "json" };
 
-// Preserve narrow key union by typing against the pre-parse import.
-type EmoteKey = keyof typeof playerEmotesManifestJson.emotes;
+// Concrete string union (was `keyof typeof playerEmotesManifestJson.emotes`).
+// Hand-listed to keep the union concrete in the emitted d.ts — see the
+// matching note in `constants/TreeTypes.ts` for why `keyof typeof <json>`
+// breaks downstream consumers across the d.ts boundary. The
+// `PlayerEmotesManifestSchema.parse` call below catches drift between this
+// list and the JSON contents at module load.
+type EmoteKey =
+  | "IDLE"
+  | "WALK"
+  | "RUN"
+  | "FLOAT"
+  | "FALL"
+  | "FLIP"
+  | "TALK"
+  | "COMBAT"
+  | "SWORD_SWING"
+  | "TWO_HAND_IDLE"
+  | "TWO_HAND_SLASH"
+  | "RANGE"
+  | "SPELL_CAST"
+  | "CHOPPING"
+  | "FISHING"
+  | "DEATH"
+  | "SQUAT"
+  | "VICTORY"
+  | "VICTORY_DANCE";
 
 const manifest = PlayerEmotesManifestSchema.parse(playerEmotesManifestJson);
 
