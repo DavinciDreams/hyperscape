@@ -141,6 +141,24 @@ For each wave:
 9. **Update contract test** in `packages/hyperscape-plugin/src/__tests__/onEnable.test.ts`.
 10. **Verify**: `bun run build` in shared (clean d.ts cache first), then plugin build, then `bun test` in plugin (all green), then full workspace `bun run build` (catches dynamic-import resolution issues that per-package tests miss).
 
+## Watch-out: tsconfig strictness divergence (added 2026-04-25 evening)
+
+Attempted Wave 1 (ResourceSystem) at end of 2026-04-25 session. Migration reached the build step cleanly (shared built, all barrel deps wired up, gathering/ subdirectory co-migrated, IP refs cleaned), then hit **~80 type errors** in the plugin's tsc pass that the shared tsc pass was not surfacing. Errors cluster around:
+
+- `ResourceSubType` (a numeric enum) being passed where `string | undefined` is expected
+- `Implicit conversion of a 'symbol' to a 'string' will fail at runtime`
+- Drop-table tagged-union narrowing (`levelRequired`, `catchLow`, `catchHigh` access on the `always-rolled` arm)
+- `gathering-live` getters needed by the gathering/ subdirectory not yet barrel-exported (`getDefaultSuccessRate`, `getFishingSuccessRates`, `getMinimumCycleTicks`, `getMiningSuccessRates`, `getWoodcuttingSuccessRates`)
+
+**Root cause**: `@hyperforge/hyperscape/tsconfig.json` has stricter checks than `@hyperforge/shared/tsconfig.json`. Files that pass shared's tsc fail plugin's tsc when migrated. Per-package builds in shared masked these issues until the file moved.
+
+**Implication for Wave 1 (ResourceSystem)**: needs ~half-session of dedicated type-error fixing before the migration can land. The errors are real (not refactoring artifacts) — the file has been silently failing strict checks. Recommend either:
+  1. Tighten shared's tsconfig first to surface + fix these issues in-place, then migrate cleanly
+  2. Migrate with `// @ts-expect-error` tags + a follow-up cleanup commit
+  3. Loosen plugin's tsconfig for migrated files (worst option — defeats the strictness)
+
+Reverted at `fb8a01b62`. Wave 1 is unblocked but requires more focused attention than session-end velocity allows.
+
 ## Watch-outs (things that bit us this session)
 
 - **Editor-world if-chain bug**: Replacing `world.register(...)` calls under nested `if (cfg.enableX)` branches in `createEditorWorld.ts` with bare comments leaves the outer if dangling onto the next if (silent breakage). Always collapse the outer if and move the next register out as a top-level statement. Hit twice (commits `dbe8b9030`, `ae25e5112`).
