@@ -91,6 +91,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "waterfall-visuals",
   "healthbars",
   "zone-visuals",
+  "teleport-effects",
   "bfsPathDebug",
   "walkableDebug",
   "pathfindingDebug",

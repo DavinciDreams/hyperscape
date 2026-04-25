@@ -133,7 +133,7 @@ import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem
 import { InteractionRouter } from "../systems/client/interaction";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
-import { ClientTeleportEffectsSystem } from "../systems/client/ClientTeleportEffectsSystem";
+// ClientTeleportEffectsSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { SystemConstructor } from "../systems/shared/infrastructure/System";
 import { isStreamingLikeViewport } from "./clientViewportMode";
 
@@ -354,7 +354,7 @@ export function createClientWorld() {
   world.register("particles", Particles); // Particle effects system
   world.register("particle", ParticleSystem); // GPU-instanced glow/fire particles
   world.register("wind", Wind); // Environmental wind effects
-  world.register("teleport-effects", ClientTeleportEffectsSystem); // Teleportation animations
+  // "teleport-effects" registered by @hyperforge/hyperscape onEnable (client branch).
 
   // ============================================================================
   // GRASS SYSTEM

@@ -34,6 +34,7 @@ import type {
 import type { World } from "@hyperforge/shared";
 
 import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
+import { ClientTeleportEffectsSystem } from "./systems/ClientTeleportEffectsSystem.js";
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
@@ -175,6 +176,9 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // ZoneDetectionSystem live from world (which still lives
         // in shared because combat consumes it).
         register("zone-visuals", ZoneVisualsSystem);
+        // Home-teleport blue-helix VFX. Driven by `home_teleport:start`
+        // / `:cancel` events from PlayerSystem. OSRS teleport feel.
+        register("teleport-effects", ClientTeleportEffectsSystem);
         // Debug overlays — toggled via F5 panel keys (B / W) and 'P'.
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);

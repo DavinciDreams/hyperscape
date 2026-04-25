@@ -800,6 +800,7 @@ export { glbToNodes } from "./extras/three/glbToNodes";
 // TSL node type aliases — re-exported for migrated visual systems
 // (HealthBars + future TSL-shaded systems in @hyperforge/hyperscape).
 export type {
+  ShaderNode,
   TSLNodeFloat,
   TSLNodeVec2,
   TSLNodeVec3,

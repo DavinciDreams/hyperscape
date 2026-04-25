@@ -1,28 +1,36 @@
-import THREE, {
-  MeshBasicNodeMaterial,
+// Migrated 2026-04-25 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (12th client-only system migration).
+// Home-teleport blue-helix VFX — TSL-shaded particle pools driven by
+// `home_teleport:start` / `:cancel` events from PlayerSystem.
+// Hyperscape-specific (OSRS home teleport feel).
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  add,
+  float,
+  length,
+  max,
+  mix,
+  mul,
+  positionLocal,
+  pow,
+  sin,
+  sub,
+  time,
   uniform,
   uv,
-  time,
-  float,
-  vec3,
-  sin,
-  mul,
-  add,
-  sub,
-  pow,
-  max,
-  positionLocal,
-  mix,
-  length,
   vec2,
-} from "../../extras/three/three";
-import type { ShaderNode } from "../../extras/three/three";
-import { World } from "../../core/World";
-import { getHomeTeleportCastTimeMs } from "../../data/live/game-live";
-import { SystemBase } from "../shared/infrastructure/SystemBase";
-import { EventType } from "../../types/events/event-types";
-import { Curve } from "../../extras/animation/Curve";
-import type { WorldOptions } from "../../types/index";
+  vec3,
+} from "three/tsl";
+import {
+  Curve,
+  EventType,
+  getHomeTeleportCastTimeMs,
+  type ShaderNode,
+  SystemBase,
+  THREE,
+  World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const EFFECT_DURATION = 2.5;
