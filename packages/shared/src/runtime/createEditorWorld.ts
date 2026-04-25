@@ -111,11 +111,10 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   // mode no longer registers it by default.
   if (cfg.enableBuildings)
     world.register("building-rendering", BuildingRenderingSystem);
-  if (cfg.enableTownLandmarks)
-    if (cfg.enableGrass)
-      // "town-landmarks" migrated to @hyperforge/hyperscape
-      // (2026-04-25). Editor mode no longer registers it by default.
-      world.register("grass", ProceduralGrassSystem);
+  // "town-landmarks" migrated to @hyperforge/hyperscape (2026-04-25).
+  // Editor mode no longer registers it by default — load the plugin
+  // or import ProceduralTownLandmarksSystem and register manually.
+  if (cfg.enableGrass) world.register("grass", ProceduralGrassSystem);
   // "flowers" migrated to @hyperforge/hyperscape (2026-04-25). Editor
   // mode no longer registers it by default.
 
