@@ -26,49 +26,49 @@
  * **Runs on:** Client only (vegetation is purely visual)
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../../extras/three/three";
-import { System } from "../infrastructure/System";
-import type { World, WorldOptions } from "../../../types";
-import type {
-  VegetationAsset,
-  VegetationCategory,
-  VegetationLayer,
-  VegetationInstance,
-  BiomeVegetationConfig,
-} from "../../../types/world/world-types";
-import { EventType } from "../../../types/events";
-import { LoadPriority } from "../../../types";
-import { modelCache } from "../../../utils/rendering/ModelCache";
-import { DataManager } from "../../../data/DataManager";
-import { NoiseGenerator } from "../../../utils/NoiseGenerator";
-import { FrustumQuadtree } from "../../../utils/spatial/FrustumQuadtree";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (38th system migration). 4487 LOC.
+// Client + editor registration. No in-shared concrete-type
+// consumers (all references are register sites + comments).
+// RoadNetworkSystem already migrated; duck-typed inline below.
 import {
-  generateVegetationPlacementsAsync,
-  isVegetationWorkerAvailable,
-  type VegetationLayerInput,
-} from "../../../utils/workers/VegetationWorker";
-import {
+  applyLODSettings,
+  type BiomeVegetationConfig,
   createGPUVegetationMaterial,
-  type GPUVegetationMaterial,
-} from "./GPUMaterials";
-import {
+  csmLevels,
+  DataManager,
+  EventType,
+  FrustumQuadtree,
+  generateVegetationPlacementsAsync,
+  getGlobalCullingManager,
   getLODDistances,
   getLODDistancesScaled,
-  applyLODSettings,
+  type GPUVegetationMaterial,
+  isGPUComputeAvailable,
+  isPositionInsideDuelArenaZone,
+  isVegetationWorkerAvailable,
+  LoadPriority,
   type LODDistancesWithSq,
-} from "./LODConfig";
-import { csmLevels } from "./Environment";
+  modelCache,
+  NoiseGenerator,
+  SystemClass as System,
+  THREE,
+  updateTreeInstances,
+  type VegetationAsset,
+  type VegetationCategory,
+  type VegetationInstance,
+  type VegetationLayer,
+  type VegetationLayerInput,
+  type World,
+  type WorldOptions,
+} from "@hyperforge/shared";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25).
-// Duck-typed inline below — only `isOnRoad` is consumed here.
+// Duck-typed inline — only `isOnRoad` is consumed here.
 interface RoadNetworkSystem {
   isOnRoad(x: number, z: number): boolean;
 }
-import { updateTreeInstances } from "./ProcgenTreeCache";
-import {
-  isGPUComputeAvailable,
-  getGlobalCullingManager,
-} from "../../../utils/compute";
-import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
 // Octahedral impostor for high-quality multi-angle billboard rendering
 import {
   OctahedralImpostor,
@@ -271,7 +271,7 @@ function getAssetLODConfig(category: string, boundingSize?: number) {
 const MAX_VEGETATION_TILE_RADIUS = 5;
 
 /** Water threshold from centralized constants */
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
+import { TERRAIN_CONSTANTS } from "@hyperforge/shared";
 
 /** Water level in world units - from centralized TERRAIN_CONSTANTS */
 const WATER_LEVEL = TERRAIN_CONSTANTS.WATER_THRESHOLD;
@@ -1259,7 +1259,7 @@ export class VegetationSystem extends System {
     // synchronous and additionally honors PIE hot-reload of the
     // biomes manifest at runtime.
     try {
-      const { resolveBiomeOrFallback } = await import("../../../biomes");
+      const { resolveBiomeOrFallback } = await import("@hyperforge/shared");
       const biome = resolveBiomeOrFallback(biomeId);
       const vegetation = (biome as { vegetation?: BiomeVegetationConfig })
         ?.vegetation;

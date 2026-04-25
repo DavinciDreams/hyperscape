@@ -943,6 +943,42 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// VegetationSystem deps — needed by the migrated VegetationSystem
+// in @hyperforge/hyperscape. Vegetation rendering pulls a wide
+// surface of types + utilities from shared (Loader, frustum
+// quadtree, GPU materials, LOD config, vegetation worker,
+// procgen tree cache, GPU compute).
+export type {
+  VegetationAsset,
+  VegetationCategory,
+  VegetationLayer,
+  VegetationInstance,
+  BiomeVegetationConfig,
+} from "./types/world/world-types";
+export { LoadPriority } from "./types/core/misc-types";
+export { FrustumQuadtree } from "./utils/spatial/FrustumQuadtree";
+export {
+  generateVegetationPlacementsAsync,
+  isVegetationWorkerAvailable,
+  type VegetationLayerInput,
+} from "./utils/workers/VegetationWorker";
+export {
+  createGPUVegetationMaterial,
+  type GPUVegetationMaterial,
+} from "./systems/shared/world/GPUMaterials";
+export {
+  getLODDistances,
+  getLODDistancesScaled,
+  applyLODSettings,
+  type LODDistancesWithSq,
+} from "./systems/shared/world/LODConfig";
+export { csmLevels } from "./systems/shared/world/Environment";
+export { updateTreeInstances } from "./systems/shared/world/ProcgenTreeCache";
+// (`getGlobalCullingManager` already exported via the
+// utils/compute block below; only `isGPUComputeAvailable` added.)
+export { isGPUComputeAvailable } from "./utils/compute";
+export { resolveBiomeOrFallback } from "./biomes";
+
 // ProceduralTownLandmarksSystem deps — needed by the migrated
 // ProceduralTownLandmarks in @hyperforge/hyperscape. TownSystem
 // and getGlobalTerrainComputeContext stay in shared so the

@@ -13,7 +13,7 @@ export * from "./WaterSystem";
 export * from "./WaterBodyRegistry";
 export * from "./Wind";
 export * from "./VegetationSsboUtils";
-export * from "./VegetationSystem";
+// VegetationSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./ProceduralGrass";
 export * from "./GrassMaterialCore";
 export * from "./StandaloneGrass";

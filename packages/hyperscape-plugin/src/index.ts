@@ -55,6 +55,7 @@ import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { BridgeSystem } from "./systems/BridgeSystem.js";
 import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
+import { VegetationSystem } from "./systems/VegetationSystem.js";
 import { ScriptingSystem } from "./systems/ScriptingSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
 import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem.js";
@@ -299,6 +300,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // Background music with combat-aware crossfade. Web Audio
         // API + ClientAudio + ClientLoader — strictly client-side.
         register("music", MusicSystem);
+        // GPU-instanced vegetation rendering (trees/bushes/grass/
+        // flowers/rocks). Uses biome vegetation config and listens
+        // to TerrainSystem tile events for generation triggers.
+        // Strictly client-side (purely visual).
+        register("vegetation", VegetationSystem);
         // Drag-and-drop + right-click context menus. Originally
         // registered inside `if (world.isClient)` in SystemLoader.
         // Stats reader (`getSystemInfo`) is duck-typed at the

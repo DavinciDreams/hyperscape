@@ -73,7 +73,7 @@ import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
-import { VegetationSystem } from "../systems/shared";
+// VegetationSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { ProceduralGrassSystem } from "../systems/shared";
 // ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
@@ -309,7 +309,8 @@ export function createClientWorld() {
   // Must be registered BEFORE towns (listens to TERRAIN_TILE_REGENERATED when
   // flat zones modify terrain heights - grass needs to regenerate)
 
-  world.register("vegetation", VegetationSystem);
+  // "vegetation" registered by @hyperforge/hyperscape plugin
+  // onEnable client-only branch (migrated 2026-04-25).
 
   // ============================================================================
   // TOWN AND ROAD SYSTEMS

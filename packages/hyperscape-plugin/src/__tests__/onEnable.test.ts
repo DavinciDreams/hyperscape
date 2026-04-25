@@ -114,6 +114,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "pathfindingDebug",
   "resource-tile-debug",
   "music",
+  "vegetation",
   "inventory-interaction",
 ];
 

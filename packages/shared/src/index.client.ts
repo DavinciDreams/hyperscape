@@ -1205,6 +1205,40 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// VegetationSystem (client + editor) — re-exported here for the
+// client bundle so the migrated plugin VegetationSystem resolves
+// its imports. (Mirrors index.ts.)
+export type {
+  VegetationAsset,
+  VegetationCategory,
+  VegetationLayer,
+  VegetationInstance,
+  BiomeVegetationConfig,
+} from "./types/world/world-types";
+export { LoadPriority } from "./types/core/misc-types";
+export { FrustumQuadtree } from "./utils/spatial/FrustumQuadtree";
+export {
+  generateVegetationPlacementsAsync,
+  isVegetationWorkerAvailable,
+  type VegetationLayerInput,
+} from "./utils/workers/VegetationWorker";
+export {
+  createGPUVegetationMaterial,
+  type GPUVegetationMaterial,
+} from "./systems/shared/world/GPUMaterials";
+export {
+  getLODDistances,
+  getLODDistancesScaled,
+  applyLODSettings,
+  type LODDistancesWithSq,
+} from "./systems/shared/world/LODConfig";
+export { csmLevels } from "./systems/shared/world/Environment";
+export { updateTreeInstances } from "./systems/shared/world/ProcgenTreeCache";
+// (`getGlobalCullingManager` already exported via utils/compute;
+// only `isGPUComputeAvailable` added.)
+export { isGPUComputeAvailable } from "./utils/compute";
+export { resolveBiomeOrFallback } from "./biomes";
+
 // ProceduralTownLandmarksSystem (editor-only) — re-exported here
 // for the client bundle so the migrated plugin
 // ProceduralTownLandmarks resolves its imports. (`applySkyFog`
