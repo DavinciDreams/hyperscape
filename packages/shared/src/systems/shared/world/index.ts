@@ -35,7 +35,7 @@ export * from "./ProcgenTreeInstancer";
 export * from "./AtlasedTreeImpostors";
 
 // Teleport Network
-export * from "./TeleportSystem";
+// TeleportSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
 // Tree LOD System (consolidated tree baking and rendering)
 export * from "./TreeLODSystem";

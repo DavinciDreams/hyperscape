@@ -11,17 +11,22 @@
  * - Cooldown enforced server-side per player
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { SystemConfig } from "../../../types/systems/system-types";
-import type { World } from "../../../core/World";
-import type {
-  TeleportNode,
-  TeleportNetworkConfig,
-} from "../../../types/world/world-types";
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../../world-areas";
-import { DataManager } from "../../../data/DataManager";
-import { dist2D } from "../../../utils/MathUtils";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (32nd system migration; second
+// scaffold archetype). 303 LOC. Never registered in
+// SystemLoader/createServerWorld/createClientWorld — pure file
+// move + barrel cleanup.
+import {
+  ALL_WORLD_AREAS,
+  DataManager,
+  dist2D,
+  getEffectiveWorldAreas,
+  SystemBase,
+  type SystemConfig,
+  type TeleportNetworkConfig,
+  type TeleportNode,
+  type World,
+} from "@hyperforge/shared";
 
 /** Default teleport network config when world-config.json doesn't define one */
 const DEFAULT_TELEPORT_CONFIG: TeleportNetworkConfig = {

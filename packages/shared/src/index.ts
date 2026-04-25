@@ -943,6 +943,13 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// TeleportSystem deps — needed by the migrated TeleportSystem in
+// @hyperforge/hyperscape. Schema types come from world-types.
+export type {
+  TeleportNode,
+  TeleportNetworkConfig,
+} from "./types/world/world-types";
+
 // POISystem deps — needed by the migrated POISystem in
 // @hyperforge/hyperscape. Configuration + biome / noise helpers
 // used to procedurally place points of interest.

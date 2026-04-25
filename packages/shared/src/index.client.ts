@@ -1204,6 +1204,14 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// TeleportSystem (scaffold) — re-exported here for the client
+// bundle so the migrated plugin TeleportSystem resolves its
+// imports. (Mirrors index.ts.)
+export type {
+  TeleportNode,
+  TeleportNetworkConfig,
+} from "./types/world/world-types";
+
 // POISystem (cross-cutting) — re-exported here for the client
 // bundle so the migrated plugin POISystem resolves its imports.
 // (Mirrors index.ts.)
