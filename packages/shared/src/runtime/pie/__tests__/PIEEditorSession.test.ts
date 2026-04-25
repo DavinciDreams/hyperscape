@@ -5211,4 +5211,102 @@ describe("PIEEditorSession", () => {
       npcDefinitionsRegistry._unloadForTests();
     },
   );
+
+  describe("plugin hooks", () => {
+    it(
+      "start() invokes bootServerPlugins + bootClientPlugins with the real worlds; stop() unwinds both in reverse",
+      async () => {
+        session = new PIEEditorSession();
+
+        const callLog: string[] = [];
+        let seenServerWorld: unknown = null;
+        let seenClientWorld: unknown = null;
+
+        await session.start({
+          plugins: {
+            bootServerPlugins: async (serverWorld) => {
+              callLog.push("boot-server");
+              seenServerWorld = serverWorld;
+              return {
+                async stop() {
+                  callLog.push("stop-server");
+                },
+              };
+            },
+            bootClientPlugins: async (clientWorld) => {
+              callLog.push("boot-client");
+              seenClientWorld = clientWorld;
+              return {
+                async stop() {
+                  callLog.push("stop-client");
+                },
+              };
+            },
+          },
+        });
+
+        // Both hooks fired during start.
+        expect(callLog).toEqual(["boot-server", "boot-client"]);
+
+        // Hooks received the real worlds PIE owns — not null shims.
+        expect(seenServerWorld).toBe(session.server?.world);
+        expect(seenClientWorld).not.toBeNull();
+
+        await session.stop();
+        session = null;
+
+        // stop() unwinds client-before-server (matches world teardown
+        // order) so the full log is boot-server → boot-client → stop-client
+        // → stop-server.
+        expect(callLog).toEqual([
+          "boot-server",
+          "boot-client",
+          "stop-client",
+          "stop-server",
+        ]);
+      },
+      LONG_TIMEOUT_MS,
+    );
+
+    it(
+      "start() survives when a plugin hook throws; stop() still succeeds",
+      async () => {
+        session = new PIEEditorSession();
+
+        // Both hooks throw — PIE should log and continue, not reject.
+        await session.start({
+          plugins: {
+            bootServerPlugins: async () => {
+              throw new Error("server boot boom");
+            },
+            bootClientPlugins: async () => {
+              throw new Error("client boot boom");
+            },
+          },
+        });
+
+        // Session is running despite the failed hooks.
+        expect(session.isRunning).toBe(true);
+        expect(session.server).not.toBeNull();
+
+        // Teardown doesn't throw even though no plugin sessions were
+        // ever captured.
+        await expect(session.stop()).resolves.toBeUndefined();
+        session = null;
+      },
+      LONG_TIMEOUT_MS,
+    );
+
+    it(
+      "absence of plugins option is equivalent to legacy behavior (no hook calls, clean teardown)",
+      async () => {
+        session = new PIEEditorSession();
+        await session.start({});
+        expect(session.isRunning).toBe(true);
+        await session.stop();
+        session = null;
+      },
+      LONG_TIMEOUT_MS,
+    );
+  });
 });

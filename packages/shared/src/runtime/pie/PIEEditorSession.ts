@@ -479,6 +479,45 @@ import type {
 // editor migration is a type-level swap only.
 // ---------------------------------------------------------------------------
 
+/**
+ * Disposable returned by a plugin-boot hook. Must expose `stop()` —
+ * PIEEditorSession calls it during teardown. `PluginSession` from
+ * `@hyperforge/gameplay-framework` satisfies this shape directly, so
+ * callers typically return that unchanged.
+ */
+export interface PIEPluginSessionLike {
+  stop(): Promise<void> | void;
+}
+
+/**
+ * Hooks that let a host (asset-forge editor, tests, etc.) boot a
+ * game-specific plugin set against the real server/client worlds PIE
+ * owns. Shared stays plugin-package-agnostic — the host is responsible
+ * for picking modules (hyperscape vs shooter-demo vs custom) and for
+ * building a `PluginContextBase` for each plugin id.
+ *
+ * Semantics:
+ *   - `bootServerPlugins(serverWorld)` runs right after the PIE server
+ *     world has finished `start()` and before editor entities are
+ *     seeded. Returned session's `stop()` fires before the server
+ *     world tears down.
+ *   - `bootClientPlugins(clientWorld)` runs after the client world has
+ *     been constructed and the loopback socket attached. Returned
+ *     session's `stop()` fires before the client `network.destroy()`
+ *     during teardown.
+ *
+ * Both hooks are optional — if absent the session behaves exactly as
+ * before (no plugin boot, no plugin teardown).
+ */
+export interface PIEPluginHooks {
+  bootServerPlugins?: (
+    serverWorld: World,
+  ) => Promise<PIEPluginSessionLike> | PIEPluginSessionLike;
+  bootClientPlugins?: (
+    clientWorld: World,
+  ) => Promise<PIEPluginSessionLike> | PIEPluginSessionLike;
+}
+
 export interface PIEEditorSessionOptions {
   mobSpawns?: Array<{
     id: string;
@@ -517,6 +556,13 @@ export interface PIEEditorSessionOptions {
   camera?: Camera;
   playerObject?: Object3D;
   mode?: "play" | "simulate";
+  /**
+   * Plugin-boot hooks. The host (editor/tests) decides which plugin
+   * set to load based on game selection; PIE just calls them at the
+   * right points in start/stop. Absent = no plugin boot (legacy
+   * behavior before Phase I PIE plugin integration).
+   */
+  plugins?: PIEPluginHooks;
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +607,12 @@ export class PIEEditorSession {
   // mode with no controller attach). Never rendered — controllers write to
   // its position but we ignore it.
   private static readonly _fallbackPawnObject = new Object3D();
+
+  // Plugin sessions booted by host-supplied hooks during start(). Held
+  // here so stop() can unwind them in the right order (client before
+  // server, mirroring world teardown).
+  private _serverPluginSession: PIEPluginSessionLike | null = null;
+  private _clientPluginSession: PIEPluginSessionLike | null = null;
 
   // --- public getters ----------------------------------------------------
 
@@ -692,6 +744,24 @@ export class PIEEditorSession {
     });
     await this._server.start();
 
+    // 1b. Boot server plugins (if the host supplied hooks) before any
+    //     editor entities are seeded — plugins' onEnable register
+    //     systems/entity types that later `server.world.entities.add`
+    //     calls depend on.
+    if (options.plugins?.bootServerPlugins) {
+      try {
+        this._serverPluginSession = await options.plugins.bootServerPlugins(
+          this._server.world,
+        );
+      } catch (err) {
+        console.error(
+          "[PIEEditorSession] server plugin boot failed — continuing without plugins:",
+          err,
+        );
+        this._serverPluginSession = null;
+      }
+    }
+
     // 2. Open a loopback connection. `characterId: "editor-host"` is the
     //    synthetic account id `PIELoopbackConnectionHandler` registers on
     //    `ServerNetwork.sockets` so the session is observable in tests.
@@ -711,6 +781,23 @@ export class PIEEditorSession {
       this._clientAdapter as unknown as WebSocket,
       { lastWsUrl: "pie-editor-session://" },
     );
+
+    // 3b. Boot client plugins (if the host supplied hooks) against the
+    //     real NodeClientWorld. Same rationale as the server side — plugin
+    //     onEnable must register before downstream wiring depends on it.
+    if (options.plugins?.bootClientPlugins) {
+      try {
+        this._clientPluginSession = await options.plugins.bootClientPlugins(
+          this._clientWorld,
+        );
+      } catch (err) {
+        console.error(
+          "[PIEEditorSession] client plugin boot failed — continuing without plugins:",
+          err,
+        );
+        this._clientPluginSession = null;
+      }
+    }
 
     // 4. Resolve GameMode. Same logic PlayTestWorld uses so controllers
     //    resolve identically. `register` is idempotent on duplicate ids.
@@ -1032,6 +1119,17 @@ export class PIEEditorSession {
     this._camera = null;
     this.systems.clear();
 
+    // Stop client plugin session before the client world tears down so
+    // plugin disposers can still reach the world bus / registry.
+    if (this._clientPluginSession) {
+      try {
+        await this._clientPluginSession.stop();
+      } catch (err) {
+        console.warn("[PIEEditorSession] client plugin stop threw:", err);
+      }
+      this._clientPluginSession = null;
+    }
+
     // Tear down the client world first so its close propagates cleanly
     // through the loopback to the server's SocketManager.handleDisconnect.
     if (this._clientWorld) {
@@ -1044,6 +1142,18 @@ export class PIEEditorSession {
       this._clientWorld = null;
     }
     this._clientAdapter = null;
+
+    // Stop server plugin session before the server world tears down —
+    // same reasoning as client side. Stopping after `server.stop()`
+    // would mean plugin disposers run against a dead world.
+    if (this._serverPluginSession) {
+      try {
+        await this._serverPluginSession.stop();
+      } catch (err) {
+        console.warn("[PIEEditorSession] server plugin stop threw:", err);
+      }
+      this._serverPluginSession = null;
+    }
 
     // Now stop the server session.
     if (this._server) {
