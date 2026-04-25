@@ -73,9 +73,8 @@ export class ProcessingSystem extends SystemBase {
   // NOTE: XP values and cooking parameters are now in the item manifest (items.json)
   // and accessed via ProcessingDataProvider at runtime.
 
-  // OSRS firemaking movement priority: West → East → South → North
+  // Firemaking movement priority: West → East → South → North
   // After lighting a fire, player moves to an adjacent tile in this priority order
-  // @see https://oldschool.runescape.wiki/w/Firemaking
   private readonly FIREMAKING_MOVE_PRIORITY = [
     { dx: -1, dz: 0 }, // West (-X)
     { dx: 1, dz: 0 }, // East (+X)
@@ -458,7 +457,7 @@ export class ProcessingSystem extends SystemBase {
       type: "info",
     });
 
-    // OSRS: Player squats/crouches while lighting fire
+    // Player squats/crouches while lighting fire
     this.setProcessingEmote(playerId);
 
     // Cache player start position for movement detection and fire placement
@@ -638,10 +637,10 @@ export class ProcessingSystem extends SystemBase {
 
     this.fireCleanupTimers.set(fireId, cleanupTimer);
 
-    // OSRS: Reset emote when fire is lit (before moving)
+    // Reset emote when fire is lit (before moving)
     this.resetPlayerEmote(playerId);
 
-    // OSRS: Move player to adjacent tile after lighting fire
+    // Move player to adjacent tile after lighting fire
     // Priority: West → East → South → North
     const moveTarget = this.findFiremakingMoveTarget(position);
     if (moveTarget) {
@@ -820,7 +819,7 @@ export class ProcessingSystem extends SystemBase {
 
     this.activeProcessing.set(playerId, processingAction);
 
-    // Show processing message only on first cook (OSRS style)
+    // Show processing message only on first cook
     if (isFirstCook) {
       this.emitTypedEvent(EventType.UI_MESSAGE, {
         playerId,
@@ -829,7 +828,7 @@ export class ProcessingSystem extends SystemBase {
       });
     }
 
-    // OSRS: Player squats/crouches for each cook attempt
+    // Player squats/crouches for each cook attempt
     this.setProcessingEmote(playerId);
 
     // Complete after duration
@@ -890,13 +889,13 @@ export class ProcessingSystem extends SystemBase {
     // Release action back to pool
     this.releaseAction(action);
 
-    // OSRS Auto-cooking: Check if player has more cookable items and continue
+    // Auto-cooking: Check if player has more cookable items and continue
     this.tryAutoCookNext(playerId, sourceId, isRange);
   }
 
   /**
    * Check if player has more cookable items and automatically continue cooking.
-   * This implements OSRS-style auto-cooking where you cook all items until done.
+   * This implements classic-MMORPG auto-cooking where you cook all items until done.
    * @param isRange - If true, cooking on a permanent range (always active).
    */
   private tryAutoCookNext(
@@ -1039,7 +1038,7 @@ export class ProcessingSystem extends SystemBase {
       });
     }
 
-    // Success/failure message (OSRS style) - use generic food name
+    // Success/failure message - use generic food name
     const foodName = rawItemId.replace("raw_", "");
     const message = didBurn
       ? `You accidentally burn the ${foodName}.`
@@ -1066,7 +1065,7 @@ export class ProcessingSystem extends SystemBase {
 
   /**
    * Calculate burn chance based on cooking level and food-specific parameters.
-   * Uses OSRS-accurate linear interpolation.
+   * Uses linear interpolation.
    *
    * @param cookingLevel - Player's cooking level
    * @param requiredLevel - Level required to cook this food
@@ -1356,7 +1355,7 @@ export class ProcessingSystem extends SystemBase {
       fire.mesh = undefined;
     }
 
-    // Spawn ashes at fire position (server-only, OSRS: fires leave ashes when they burn out)
+    // Spawn ashes at fire position (server-only)
     if (this.world.isServer) {
       const groundItems =
         this.world.getSystem<GroundItemSystem>("ground-items");
@@ -1456,13 +1455,12 @@ export class ProcessingSystem extends SystemBase {
     return false;
   }
 
-  // === FIREMAKING MOVEMENT (OSRS-accurate) ===
+  // === FIREMAKING MOVEMENT (classic-MMORPG) ===
 
   /**
-   * Find the tile to move to after lighting a fire (OSRS-accurate)
+   * Find the tile to move to after lighting a fire (classic-MMORPG)
    * Priority: West → East → South → North
    *
-   * @see https://oldschool.runescape.wiki/w/Firemaking
    */
   private findFiremakingMoveTarget(firePosition: {
     x: number;
