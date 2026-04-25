@@ -59,7 +59,8 @@ import type { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionS
 import type { PersistenceSystem } from "../systems/server/PersistenceSystem";
 import type { TerrainSystem } from "../systems/shared/world/TerrainSystem";
 import type { TownSystem } from "../systems/shared/world/TownSystem";
-import type { RoadNetworkSystem } from "../systems/shared/world/RoadNetworkSystem";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entry below typed as `unknown`.
 import type { DatabaseSystem } from "./systems/system-interfaces";
 
 // Client systems
@@ -151,7 +152,7 @@ export interface SystemMap {
   // Terrain & world
   terrain: TerrainSystem;
   towns: TownSystem;
-  roads: RoadNetworkSystem;
+  roads: unknown;
 
   // Database (server)
   database: DatabaseSystem;

@@ -19,7 +19,10 @@ import { TownSystem } from "../systems/shared/world/TownSystem";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25). Editor
 // no longer registers it directly — load the plugin into the
 // editor world if you need POIs in editor mode.
-import { RoadNetworkSystem } from "../systems/shared/world/RoadNetworkSystem";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Editor mode no longer registers roads by default — load the
+// plugin or import RoadNetworkSystem from @hyperforge/hyperscape
+// and register it manually if you need road generation here.
 import { VegetationSystem } from "../systems/shared/world/VegetationSystem";
 import { ProceduralGrassSystem } from "../systems/shared/world/ProceduralGrass";
 import { ProceduralFlowerSystem } from "../systems/shared/world/ProceduralFlowers";
@@ -98,7 +101,8 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
     // editor, load the plugin or import POISystem from
     // @hyperforge/hyperscape and register it manually.
   }
-  if (cfg.enableRoads) world.register("roads", RoadNetworkSystem);
+  // "roads" migrated to @hyperforge/hyperscape (2026-04-25). Editor
+  // mode no longer registers it by default.
   if (cfg.enableBuildings)
     world.register("building-rendering", BuildingRenderingSystem);
   if (cfg.enableTownLandmarks)

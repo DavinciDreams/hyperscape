@@ -1053,7 +1053,8 @@ export { getRandomSpawnPoint } from "./data/world-areas";
 // BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
-export { TownSystem, RoadNetworkSystem } from "./systems/shared";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
+export { TownSystem } from "./systems/shared";
 
 // Combat + Player system class refs — Hyperscape plugins like
 // HealthRegenSystem do `getSystem<CombatSystem>("combat")`.
@@ -1203,6 +1204,23 @@ export {
   ISLAND_BRIDGES,
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
+
+// RoadNetworkSystem (editor-only) — re-exported here for the
+// client bundle so the migrated plugin RoadNetworkSystem resolves
+// its imports. (Mirrors index.ts. `getGlobalTerrainComputeContext`
+// and `GPURoadSegment` resolve via existing utils/compute block.)
+export type {
+  ProceduralRoad,
+  ProceduralTown,
+  RoadPathPoint,
+  RoadTileSegment,
+  RoadNetwork,
+  RoadEndpointType,
+  RoadBoundaryExit,
+  TileEdge,
+} from "./types/world/world-types";
+export { smoothPathAsync, isProcgenWorkerAvailable } from "./utils/workers";
+export { getRoadHeightAtPoint, ROAD_BLEND_WIDTH } from "./world/road-influence";
 
 // ScriptingSystem (cross-cutting server-side) — re-exported here
 // for the client bundle so the migrated plugin ScriptingSystem

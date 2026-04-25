@@ -58,7 +58,11 @@ import {
   type LODDistancesWithSq,
 } from "./LODConfig";
 import { csmLevels } from "./Environment";
-import type { RoadNetworkSystem } from "./RoadNetworkSystem";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed inline below — only `isOnRoad` is consumed here.
+interface RoadNetworkSystem {
+  isOnRoad(x: number, z: number): boolean;
+}
 import { updateTreeInstances } from "./ProcgenTreeCache";
 import {
   isGPUComputeAvailable,
@@ -528,9 +532,10 @@ export class VegetationSystem extends System {
     this.noise = new NoiseGenerator(seed);
 
     // Get road network system for road avoidance
-    this.roadNetworkSystem = this.world.getSystem(
-      "roads",
-    ) as RoadNetworkSystem | null;
+    this.roadNetworkSystem =
+      (this.world.getSystem("roads") as unknown as
+        | RoadNetworkSystem
+        | undefined) ?? null;
 
     // Cache water body registry for elevated water checks in addInstanceToChunk
     const terrainForRegistry = this.world.getSystem("terrain") as

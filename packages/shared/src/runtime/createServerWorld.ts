@@ -46,7 +46,7 @@ import { ServerLoader } from "../systems/server/ServerLoader";
 import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
-import { RoadNetworkSystem } from "../systems/shared";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 
@@ -101,7 +101,8 @@ export async function createServerWorld(): Promise<World> {
   world.register("towns", TownSystem);
   // "pois" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
-  // world.register("roads", RoadNetworkSystem);
+  // RoadNetworkSystem migrated 2026-04-25; was already commented
+  // out here.
 
   // ============================================================================
   // RPG GAME SYSTEMS

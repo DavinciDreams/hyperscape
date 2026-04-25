@@ -21,7 +21,7 @@ export * from "./ProceduralFlowers";
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./TownSystem";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./RoadNetworkSystem";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./BuildingRenderingSystem";
 export * from "./ProceduralTownLandmarks";
 export * from "./BuildingCollisionService";

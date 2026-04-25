@@ -137,7 +137,24 @@ import {
 } from "./TerrainShader";
 import { isLamppostLightTextureReady } from "./LamppostLightMask";
 import { isCsmEnabled } from "./Environment";
-import type { RoadNetworkSystem } from "./RoadNetworkSystem";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed inline below — only the 3 read methods this system
+// uses. (Imports `ProceduralRoad` and `RoadTileSegment` from
+// world-types — already imported elsewhere or not needed at
+// signature level here; we keep them generic.)
+import type {
+  ProceduralRoad as _ProceduralRoad,
+  RoadTileSegment as _RoadTileSegment,
+} from "../../../types/world/world-types";
+interface RoadNetworkSystem {
+  getRoadHeightAtPoint(
+    worldX: number,
+    worldZ: number,
+  ): { height: number; influence: number } | null;
+  getRoadSegmentsForTile(tileX: number, tileZ: number): _RoadTileSegment[];
+  getRoads(): _ProceduralRoad[];
+  isOnRoad(x: number, z: number): boolean;
+}
 import type { TownSystem } from "./TownSystem";
 import {
   getTerrainTileSize,
@@ -1073,7 +1090,7 @@ export class TerrainSystem extends System {
     }
 
     // Road influence, terrain flattening under roads, and biome weights per vertex
-    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
     for (let i = 0; i < positions.count; i++) {
@@ -1891,7 +1908,7 @@ export class TerrainSystem extends System {
         `[TerrainSystem] ROADS_GENERATED event received: ${data.roadCount ?? 0} roads, ${data.townCount ?? 0} towns`,
       );
 
-      this.roadNetworkSystem = this.world.getSystem("roads") as
+      this.roadNetworkSystem = this.world.getSystem("roads") as unknown as
         | RoadNetworkSystem
         | undefined;
 
@@ -2314,7 +2331,7 @@ export class TerrainSystem extends System {
     endZ: number;
     width: number;
   }> {
-    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
     if (!this.roadNetworkSystem) return [];
@@ -3425,7 +3442,7 @@ export class TerrainSystem extends System {
     _tileZ: number, // Terrain tile Z (unused - we compute road tile from world coords)
   ): number {
     // Lazy-load road system reference
-    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
     if (!this.roadNetworkSystem) return 0;
@@ -3590,7 +3607,7 @@ export class TerrainSystem extends System {
     tileZ: number,
   ): Promise<Float32Array | null> {
     // Get road segments
-    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
     if (!this.roadNetworkSystem) return null;
@@ -8699,7 +8716,7 @@ export class TerrainSystem extends System {
     );
 
     // Ensure road system reference is current
-    this.roadNetworkSystem = this.world.getSystem("roads") as
+    this.roadNetworkSystem = this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
 
@@ -8772,7 +8789,7 @@ export class TerrainSystem extends System {
     console.log("[TerrainSystem] Regenerating all terrain tiles...");
 
     // Ensure road system reference is current
-    this.roadNetworkSystem = this.world.getSystem("roads") as
+    this.roadNetworkSystem = this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
 
@@ -8825,7 +8842,7 @@ export class TerrainSystem extends System {
     console.log(`  Terrain tile: (${terrainTileX}, ${terrainTileZ})`);
 
     // Check road system
-    this.roadNetworkSystem ??= this.world.getSystem("roads") as
+    this.roadNetworkSystem ??= this.world.getSystem("roads") as unknown as
       | RoadNetworkSystem
       | undefined;
 

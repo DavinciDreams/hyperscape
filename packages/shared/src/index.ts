@@ -943,6 +943,26 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// RoadNetworkSystem deps — needed by the migrated
+// RoadNetworkSystem in @hyperforge/hyperscape. Procedural road
+// generation reads procgen types + worker helpers + GPU compute
+// context + road-influence height utilities.
+// (`getGlobalTerrainComputeContext` and `GPURoadSegment` are
+// already re-exported in the utils/compute block below; not
+// duplicated here.)
+export type {
+  ProceduralRoad,
+  ProceduralTown,
+  RoadPathPoint,
+  RoadTileSegment,
+  RoadNetwork,
+  RoadEndpointType,
+  RoadBoundaryExit,
+  TileEdge,
+} from "./types/world/world-types";
+export { smoothPathAsync, isProcgenWorkerAvailable } from "./utils/workers";
+export { getRoadHeightAtPoint, ROAD_BLEND_WIDTH } from "./world/road-influence";
+
 // ScriptingSystem deps — needed by the migrated ScriptingSystem in
 // @hyperforge/hyperscape (and by its co-located unit test, which
 // also lives in the plugin). Implementation classes
@@ -1529,7 +1549,7 @@ export {
 // Export town, POI, and road systems
 export { TownSystem } from "./systems/shared";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
-export { RoadNetworkSystem } from "./systems/shared";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
 
 // Building collision types (for navigation systems)

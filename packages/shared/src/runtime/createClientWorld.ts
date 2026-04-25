@@ -72,7 +72,7 @@ import * as THREE from "../extras/three/three";
 import { TerrainSystem } from "../systems/shared";
 import { TownSystem } from "../systems/shared";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
-import { RoadNetworkSystem } from "../systems/shared";
+// RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { VegetationSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
 import { ProceduralFlowerSystem } from "../systems/shared";
@@ -323,7 +323,8 @@ export function createClientWorld() {
   world.register("towns", TownSystem);
   // "pois" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
-  // world.register("roads", RoadNetworkSystem);
+  // RoadNetworkSystem migrated 2026-04-25; was already commented
+  // out here.
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM

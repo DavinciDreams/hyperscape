@@ -12,25 +12,42 @@
  * - Future: Could pre-compute passability grid and move BFS to worker
  */
 
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (35th system migration). 3291 LOC.
+// Editor-only registration (createEditorWorld) — `createServerWorld`
+// + `createClientWorld` had it commented out. POISystem is the
+// only consumer that calls into RoadNetworkSystem; POISystem
+// already migrated, so the 4-method duck-type for POISystem
+// remains here in the plugin file.
 import * as THREE from "three";
-import { System } from "../infrastructure/System";
-import type { World } from "../../../core/World";
-import type {
-  ProceduralRoad,
-  ProceduralTown,
-  RoadPathPoint,
-  RoadTileSegment,
-  RoadNetwork,
-  PointOfInterest,
-  RoadEndpointType,
-  RoadBoundaryExit,
-  TileEdge,
-} from "../../../types/world/world-types";
-import { NoiseGenerator } from "../../../utils/NoiseGenerator";
-import type { TownSystem } from "./TownSystem";
+import {
+  DataManager,
+  EventType,
+  getGlobalTerrainComputeContext,
+  getRoadHeightAtPoint as sharedGetRoadHeightAtPoint,
+  type GPURoadSegment,
+  isProcgenWorkerAvailable,
+  Logger,
+  NoiseGenerator,
+  type PointOfInterest,
+  type ProceduralRoad,
+  type ProceduralTown,
+  ROAD_BLEND_WIDTH,
+  type RoadBoundaryExit,
+  type RoadEndpointType,
+  type RoadNetwork,
+  type RoadPathPoint,
+  type RoadTileSegment,
+  smoothPathAsync,
+  SystemClass as System,
+  TERRAIN_CONSTANTS,
+  type TileEdge,
+  type TownSystem,
+  type World,
+} from "@hyperforge/shared";
+
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25).
-// Duck-typed inline below — only the surface this system uses.
-// (`PointOfInterest` already imported above from world-types.)
+// Duck-typed inline — only the 4 methods this system uses.
 interface POISystem {
   getConfig(): { maxRoadExtensionDistance: number };
   getImportantPOIs(): PointOfInterest[];
@@ -41,18 +58,6 @@ interface POISystem {
     townZ: number,
   ): { x: number; z: number; angle: number };
 }
-import { EventType } from "../../../types/events";
-import { Logger } from "../../../utils/Logger";
-import { DataManager } from "../../../data/DataManager";
-import {
-  smoothPathAsync,
-  isProcgenWorkerAvailable,
-} from "../../../utils/workers";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import {
-  getGlobalTerrainComputeContext,
-  type GPURoadSegment,
-} from "../../../utils/compute";
 
 // Default configuration values
 const DEFAULTS = {
@@ -80,10 +85,9 @@ const DEFAULT_BIOME_COSTS: Record<string, number> = {
   canyon: 2.0,
 };
 
-import {
-  getRoadHeightAtPoint as sharedGetRoadHeightAtPoint,
-  ROAD_BLEND_WIDTH,
-} from "../../../world/road-influence";
+// `sharedGetRoadHeightAtPoint` and `ROAD_BLEND_WIDTH` are imported
+// from the consolidated `@hyperforge/shared` import block at the
+// top of this file (after the migration).
 
 // Road mask generation settings (shared across terrain/grass/flowers)
 const ROAD_MASK_BLEND_WIDTH = ROAD_BLEND_WIDTH; // From shared world module
