@@ -42,7 +42,9 @@ import type { PlayerSystem } from "..";
 import type { PooledTile } from "../../../utils/pools/TilePool";
 import type { SystemLogger } from "../../../utils/Logger";
 import type { World } from "../../../core/World";
-import type { GroundItemSystem } from "../economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Use the duck-typed surface from death-types.
+import type { GroundItemSystemDuck } from "../../../types/death/death-types";
 
 /**
  * The subset of CombatSystem that tick processing needs.
@@ -82,7 +84,7 @@ export interface CombatTickContext extends CombatAttackContext {
   ): void;
 
   // Systems
-  groundItemSystem: GroundItemSystem | null;
+  groundItemSystem: GroundItemSystemDuck | null;
 }
 
 export class CombatTickProcessor {

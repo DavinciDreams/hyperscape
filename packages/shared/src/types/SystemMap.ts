@@ -56,7 +56,9 @@ import type { SkillsSystem } from "../systems/shared";
 // StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import type { GroundItemSystem } from "../systems/shared/economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entry below typed as `unknown`; consumers in shared use
+// the duck-typed `GroundItemSystemDuck` from `types/death/death-types`.
 import type { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import type { PersistenceSystem } from "../systems/server/PersistenceSystem";
 import type { TerrainSystem } from "../systems/shared/world/TerrainSystem";
@@ -128,7 +130,7 @@ export interface SystemMap {
   banking: unknown;
   store: unknown;
   resource: unknown;
-  "ground-items": GroundItemSystem;
+  "ground-items": unknown;
   loot: unknown;
 
   // Processing / crafting

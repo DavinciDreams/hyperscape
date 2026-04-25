@@ -27,7 +27,7 @@ import {
   EventType,
   type Fire,
   getTargetValidator,
-  type GroundItemSystem,
+  type GroundItemSystemDuck,
   ITEM_IDS,
   modelCache,
   ParticleSystem,
@@ -1357,8 +1357,9 @@ export class ProcessingSystem extends SystemBase {
 
     // Spawn ashes at fire position (server-only)
     if (this.world.isServer) {
-      const groundItems =
-        this.world.getSystem<GroundItemSystem>("ground-items");
+      const groundItems = this.world.getSystem("ground-items") as unknown as
+        | GroundItemSystemDuck
+        | undefined;
       if (groundItems) {
         groundItems.spawnGroundItem("ashes", 1, fire.position, {
           despawnTime: 120000, // 2 minutes

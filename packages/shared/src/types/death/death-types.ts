@@ -116,8 +116,43 @@ export interface GroundItemData {
 }
 
 /**
+ * Duck-typed surface of GroundItemSystem.
+ *
+ * GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25,
+ * Wave 1 follow-up). In-shared consumers (PlayerDeathSystem,
+ * SafeAreaDeathHandler, WildernessDeathHandler, InventorySystem,
+ * CombatTickProcessor, ItemInteractionHandler) reach the system via
+ * `world.getSystem("ground-items")` and type the reference as this
+ * interface so shared no longer depends on the concrete class.
+ *
+ * Once those consumers all migrate to `@hyperforge/hyperscape`, this
+ * interface can be deleted in favour of the concrete import.
+ */
+export interface GroundItemSystemDuck {
+  spawnGroundItem(
+    itemId: string,
+    quantity: number,
+    position: { x: number; y: number; z: number },
+    options: GroundItemOptions,
+  ): Promise<string | null>;
+  spawnGroundItems(
+    items: InventoryItem[],
+    position: { x: number; y: number; z: number },
+    options: GroundItemOptions,
+    throwOnFailure?: boolean,
+  ): Promise<string[]>;
+  rollbackGroundItems(entityIds: string[]): number;
+  removeGroundItem(itemId: string): boolean;
+  canPickup(itemId: string, playerId: string, currentTick: number): boolean;
+  getItemsAtTile(
+    tile: { x: number; z: number },
+    outArray?: GroundItemData[],
+  ): GroundItemData[];
+}
+
+/**
  * Ground item pile data - tracks all items at a single tile
- * Used for OSRS-style item stacking where only top item is visible
+ * Used for tile-based item stacking where only top item is visible
  */
 export interface GroundItemPileData {
   tileKey: string; // "x_z" format for Map key

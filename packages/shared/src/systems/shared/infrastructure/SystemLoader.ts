@@ -132,7 +132,7 @@ import { InteractionRouter } from "../../client/interaction";
 // dispatcher install + manifest seeding) is duck-typed locally
 // below so we don't depend on the migrated class.
 // GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import { GroundItemSystem } from "../economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import { createDropConditionDispatcher } from "../economy/DropConditionDispatcher";
 import { installWorldDropConditions } from "../economy/WorldDropConditionEvaluators";
 import { installWorldDialogueConditions } from "../interaction/WorldDialogueConditionEvaluators";
@@ -239,7 +239,8 @@ export interface Systems {
   // mobDeath: registered by @hyperforge/hyperscape plugin (2026-04-24)
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   inventoryInteraction?: unknown;
-  groundItems?: GroundItemSystem;
+  // GroundItemSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  groundItems?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`. Boot-time
   // dispatcher install + manifest seed below uses a local duck-type
   // for the surface SystemLoader actually touches.
@@ -489,7 +490,8 @@ export async function registerSystems(world: World): Promise<void> {
 
   // Ground Item System - shared across loot and death systems
   // Must be registered before systems that depend on it
-  world.register("ground-items", GroundItemSystem);
+  // "ground-items" registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-25).
 
   // "loot" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
@@ -568,7 +570,7 @@ export async function registerSystems(world: World): Promise<void> {
   }
 
   // Ground Item System
-  systems.groundItems = getSystem(world, "ground-items") as GroundItemSystem;
+  systems.groundItems = getSystem(world, "ground-items");
 
   // LootSystem migrated to @hyperforge/hyperscape (2026-04-25). The
   // setter surface SystemLoader uses for boot-time dispatcher install

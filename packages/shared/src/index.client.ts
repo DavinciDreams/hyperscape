@@ -1157,6 +1157,17 @@ export type {
 export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
 // (InteractionType already re-exported earlier in this file as a value)
 
+// GroundItemSystem deps — re-exported for the client bundle.
+export type {
+  GroundItemOptions,
+  GroundItemData,
+  GroundItemPileData,
+  GroundItemSystemDuck,
+} from "./types/death/death-types";
+export type { ItemEntityConfig } from "./types/entities";
+export { msToTicks } from "./utils/game/CombatCalculations";
+export { getUntradeableDespawnTicks } from "./data/live/combat-live";
+
 // MobNPCSystem deps — re-exported for the client bundle (Wave 3a).
 export { EntityManager } from "./systems/shared/entities/EntityManager";
 export { NPC_SPAWN_CONSTANTS } from "./data/npcs";

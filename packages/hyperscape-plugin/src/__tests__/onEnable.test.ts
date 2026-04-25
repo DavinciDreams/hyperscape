@@ -86,6 +86,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "station-spawner",
   "mob-npc-spawner",
   "item-spawner",
+  "ground-items",
   "loot",
   "resource",
   "towns",

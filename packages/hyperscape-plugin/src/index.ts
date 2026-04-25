@@ -45,6 +45,7 @@ import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js"
 import { EquipmentVisualSystem } from "./systems/EquipmentVisualSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
+import { GroundItemSystem } from "./systems/GroundItemSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -227,7 +228,14 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Same EntityManager-driven pattern as mob spawner.
       register("item-spawner", ItemSpawnerSystem);
 
-      // Loot system — drops mob loot to the ground via the shared
+      // Ground items — tile-based pile manager for dropped items.
+      // Migrated 2026-04-25 (Wave 1 follow-up). LootSystem +
+      // PlayerDeathSystem + InventorySystem all reach this via
+      // `world.getSystem("ground-items")` so it must register before
+      // `loot`.
+      register("ground-items", GroundItemSystem);
+
+      // Loot system — drops mob loot to the ground via
       // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
       // + authored manifest seed remains in `SystemLoader.init()`.
       register("loot", LootSystem);

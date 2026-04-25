@@ -27,7 +27,8 @@ import { EntityManager } from "..";
 import { SystemBase } from "../infrastructure/SystemBase";
 import { Logger } from "../../../utils/Logger";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-import type { GroundItemSystem } from "../economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { GroundItemSystemDuck } from "../../../types/death/death-types";
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local interface so InventorySystem doesn't need to import
 // from the plugin (which would create a forward dep). Mirrors the
@@ -759,8 +760,10 @@ export class InventorySystem extends SystemBase {
       }
       const position = player.node.position;
 
-      // Use GroundItemSystem for proper pile management (OSRS-style)
-      const groundItems = this.world.getSystem("ground-items");
+      // Use GroundItemSystem for proper pile management (tile-based)
+      const groundItems = this.world.getSystem("ground-items") as
+        | GroundItemSystemDuck
+        | undefined;
       if (groundItems) {
         // Spawn through GroundItemSystem for tile-based pile management
         await groundItems.spawnGroundItem(
@@ -988,8 +991,10 @@ export class InventorySystem extends SystemBase {
         return;
       }
 
-      // Check loot protection (OSRS: killer has 1 minute exclusivity on mob loot)
-      const groundItems = this.world.getSystem("ground-items");
+      // Check loot protection (killer has 1 minute exclusivity on mob loot)
+      const groundItems = this.world.getSystem("ground-items") as
+        | GroundItemSystemDuck
+        | undefined;
       if (groundItems) {
         const currentTick = this.world.currentTick ?? 0;
         if (!groundItems.canPickup(data.entityId, data.playerId, currentTick)) {
@@ -1028,7 +1033,9 @@ export class InventorySystem extends SystemBase {
         let worldRemovalSuccess = false;
 
         // Use GroundItemSystem if available - it handles entity destruction AND pile updates
-        const groundItemsSystem = this.world.getSystem("ground-items");
+        const groundItemsSystem = this.world.getSystem("ground-items") as
+          | GroundItemSystemDuck
+          | undefined;
         if (groundItemsSystem) {
           // removeGroundItem returns boolean indicating success
           worldRemovalSuccess = groundItemsSystem.removeGroundItem(

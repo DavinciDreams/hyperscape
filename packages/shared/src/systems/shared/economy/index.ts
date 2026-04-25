@@ -7,6 +7,6 @@
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./LootTableService";
-export * from "./GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
 export * from "./DropConditionDispatcher";
 export * from "./WorldDropConditionEvaluators";

@@ -19,7 +19,8 @@ import { calculateDistance } from "../../../utils/game/EntityUtils";
 import { DeathState } from "../../../types/entities";
 import type { EntityManager } from "..";
 import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
-import type { GroundItemSystem } from "../economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { GroundItemSystemDuck } from "../../../types/death/death-types";
 import { DeathStateManager } from "../death/DeathStateManager";
 import { SafeAreaDeathHandler } from "../death/SafeAreaDeathHandler";
 import { WildernessDeathHandler } from "../death/WildernessDeathHandler";
@@ -100,7 +101,7 @@ export class PlayerDeathSystem extends SystemBase {
   private tickUnsubscribe: (() => void) | null = null;
 
   private zoneDetection!: ZoneDetectionSystem;
-  private groundItemSystem!: GroundItemSystem;
+  private groundItemSystem!: GroundItemSystemDuck;
   private deathStateManager!: DeathStateManager;
   private safeAreaHandler!: SafeAreaDeathHandler;
   private wildernessHandler!: WildernessDeathHandler;
@@ -120,7 +121,9 @@ export class PlayerDeathSystem extends SystemBase {
     this.zoneDetection = new ZoneDetectionSystem(this.world);
     await this.zoneDetection.init();
 
-    this.groundItemSystem = this.world.getSystem("ground-items")!;
+    this.groundItemSystem = this.world.getSystem(
+      "ground-items",
+    ) as unknown as GroundItemSystemDuck;
     if (!this.groundItemSystem) {
       this.logger.error("GroundItemSystem not found");
     }

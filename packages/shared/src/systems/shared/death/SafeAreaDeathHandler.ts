@@ -17,7 +17,8 @@
 import type { World } from "../../../core/World";
 import { Logger } from "../../../utils/Logger";
 import type { InventoryItem } from "../../../types/core/core";
-import type { GroundItemSystem } from "../economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { GroundItemSystemDuck } from "../../../types/death/death-types";
 import type { DeathStateManager } from "./DeathStateManager";
 import type { EntityManager } from "..";
 import { ZoneType, type TransactionContext } from "../../../types/death";
@@ -53,7 +54,7 @@ export class SafeAreaDeathHandler {
 
   constructor(
     private world: World,
-    private groundItemManager: GroundItemSystem,
+    private groundItemManager: GroundItemSystemDuck,
     private deathStateManager: DeathStateManager,
   ) {}
 

@@ -26,7 +26,8 @@ import {
   TILE_SIZE,
 } from "../../../shared/movement/TileSystem";
 import type { Entity } from "../../../../entities/Entity";
-import type { GroundItemSystem } from "../../../shared/economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { GroundItemSystemDuck } from "../../../../types/death/death-types";
 import { getContextMenuItemColor } from "../../../../data/live/game-live";
 
 export class ItemInteractionHandler extends BaseInteractionHandler {
@@ -222,7 +223,9 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
   }> {
     // Try GroundItemSystem O(1) lookup (server-side only has pile data)
     // On client, GroundItemSystem exists but groundItemPiles is empty
-    const groundItems = this.world.getSystem("ground-items");
+    const groundItems = this.world.getSystem("ground-items") as
+      | GroundItemSystemDuck
+      | undefined;
     if (groundItems) {
       const groundItemsAtTile = groundItems.getItemsAtTile(tile);
 

@@ -8,41 +8,45 @@
  * with a single shared system, eliminating the need for ID prefixes.
  *
  * Features:
- * - OSRS-style tile-based piling
+ * - tile-based piling
  * - Stackable item merging
  * - Tick-based despawn timers
  * - Loot protection
  * - O(1) tile lookups via spatial indexing
  *
- * @see https://oldschool.runescape.wiki/w/Dropped_items
+ *
  */
 
-import type { World } from "../../../core/World";
-import type { EntityManager } from "..";
-import type { InventoryItem } from "../../../types/core/core";
-import type {
-  GroundItemOptions,
-  GroundItemData,
-  GroundItemPileData,
-} from "../../../types/death";
-import { EventType } from "../../../types/events";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/economy/`
+// into `@hyperforge/hyperscape` (Wave 1 follow-up: deferred from the
+// first wave because GroundItemSystem has 6 in-shared consumers —
+// all heavy-cluster systems still in shared. They duck-type the
+// surface via `GroundItemSystemDuck` from death-types until they
+// migrate too.
 import {
+  type EntityManager,
   EntityType,
-  InteractionType,
-  ItemRarity,
-} from "../../../types/entities";
-import { ItemType } from "../../../types/game/item-types";
-import type { ItemEntityConfig } from "../../../types/entities";
-import { groundToTerrain } from "../../../utils/game/EntityUtils";
-import { getItem } from "../../../data/items";
-import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
-import { msToTicks, ticksToMs } from "../../../utils/game/CombatCalculations";
-import {
+  EventType,
+  type GroundItemData,
+  type GroundItemOptions,
+  type GroundItemPileData,
   getGroundItemDespawnTicks,
+  getItem,
   getUntradeableDespawnTicks,
-} from "../../../data/live/combat-live";
-import { worldToTile, tileToWorld } from "../movement/TileSystem";
-import { SystemBase } from "../infrastructure/SystemBase";
+  groundToTerrain,
+  InteractionType,
+  type InventoryItem,
+  isPositionInsideDuelArenaZone,
+  type ItemEntityConfig,
+  ItemRarity,
+  ItemType,
+  msToTicks,
+  SystemBase,
+  ticksToMs,
+  tileToWorld,
+  worldToTile,
+  type World,
+} from "@hyperforge/shared";
 
 export class GroundItemSystem extends SystemBase {
   private groundItems = new Map<string, GroundItemData>();
@@ -67,7 +71,7 @@ export class GroundItemSystem extends SystemBase {
   private pickupLockTimestamps = new Map<string, number>();
   private readonly PICKUP_LOCK_TIMEOUT_MS = 5000;
 
-  /** OSRS: Maximum items per tile */
+  /** Maximum items per tile */
   private readonly MAX_PILE_SIZE = 128;
 
   /** Server-wide ground item limit to prevent memory exhaustion */
@@ -152,7 +156,7 @@ export class GroundItemSystem extends SystemBase {
   /**
    * Spawn a single ground item (TICK-BASED despawn)
    * Options accept ms for backwards compatibility, converted to ticks internally
-   * Items are snapped to tile centers and managed in piles (OSRS-style stacking)
+   * Items are snapped to tile centers and managed in piles (tile-based stacking)
    */
   async spawnGroundItem(
     itemId: string,
@@ -193,8 +197,8 @@ export class GroundItemSystem extends SystemBase {
 
     const currentTick = this.world.currentTick ?? 0;
 
-    // OSRS: Untradeable items ALWAYS despawn in 3 min, tradeable uses caller's time
-    // This overrides caller's despawnTime for untradeable items (OSRS-accurate behavior)
+    // Untradeable items ALWAYS despawn in 3 min, tradeable uses caller's time
+    // This overrides caller's despawnTime for untradeable items (tile-based MMORPG behavior)
     const despawnTicks =
       item.tradeable === false
         ? getUntradeableDespawnTicks() // 300 ticks = 3 min (forced)
@@ -204,7 +208,7 @@ export class GroundItemSystem extends SystemBase {
       ? msToTicks(options.lootProtection)
       : 0;
 
-    // OSRS-STYLE: Snap position to tile center
+    // // Snap position to tile center
     const tile = worldToTile(position.x, position.z);
     const tileKey = this.getTileKey(tile);
     const tileCenter = tileToWorld(tile);
@@ -220,7 +224,7 @@ export class GroundItemSystem extends SystemBase {
     // Check for existing pile at this tile
     const existingPile = this.groundItemPiles.get(tileKey);
 
-    // OSRS-STYLE: Check pile size limit (max 128 items per tile)
+    // // Check pile size limit (max 128 items per tile)
     // If full, remove oldest item (bottom of pile) to make room
     if (existingPile && existingPile.items.length >= this.MAX_PILE_SIZE) {
       const oldestItem = existingPile.items.pop(); // Remove from end (oldest)
@@ -235,7 +239,7 @@ export class GroundItemSystem extends SystemBase {
       }
     }
 
-    // OSRS-STYLE: If stackable, try to merge with existing item of same type
+    // // If stackable, try to merge with existing item of same type
     if (item.stackable && existingPile) {
       const existingStackItem = existingPile.items.find(
         (pileItem) =>
@@ -345,7 +349,7 @@ export class GroundItemSystem extends SystemBase {
 
     this.groundItems.set(dropId, groundItemData);
 
-    // OSRS-STYLE: Manage pile - hide previous top item, add new item to pile
+    // // Manage pile - hide previous top item, add new item to pile
     if (existingPile) {
       // Hide the current top item
       this.setItemVisibility(existingPile.topItemEntityId, false);
@@ -639,7 +643,7 @@ export class GroundItemSystem extends SystemBase {
   }
 
   /**
-   * Check if an item is visible to a specific player (OSRS visibility phases)
+   * Check if an item is visible to a specific player (visibility phases)
    * - Private phase (0-100 ticks): Only dropper/killer sees item
    * - Public phase (100-200 ticks): Everyone sees item
    *

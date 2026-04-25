@@ -669,7 +669,18 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // (line ~157) — no duplicate export needed here.
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
+// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Deps needed by the migrated class (most already exported elsewhere
+// in this barrel; add any missing here).
+export type {
+  GroundItemOptions,
+  GroundItemData,
+  GroundItemPileData,
+  GroundItemSystemDuck,
+} from "./types/death/death-types";
+export type { ItemEntityConfig } from "./types/entities";
+export { msToTicks } from "./utils/game/CombatCalculations";
+export { getUntradeableDespawnTicks } from "./data/live/combat-live";
 // ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
