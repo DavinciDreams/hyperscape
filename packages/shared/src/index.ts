@@ -890,6 +890,15 @@ export type {
 export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
 export { InteractionType } from "./types/entities/entities";
 
+// MobNPCSystem deps — needed by the migrated MobNPCSystem in
+// @hyperforge/hyperscape (Wave 3a).
+export { EntityManager } from "./systems/shared/entities/EntityManager";
+export { NPC_SPAWN_CONSTANTS } from "./data/npcs";
+export type {
+  MobInstance,
+  MobSpawnConfig,
+} from "./types/entities/npc-mob-types";
+
 // NPCSystem deps — needed by the migrated NPCSystem in
 // @hyperforge/hyperscape.
 export type { NPCLocation } from "./data/world-areas";

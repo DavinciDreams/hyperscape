@@ -66,6 +66,7 @@ import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem
 import { MusicSystem } from "./systems/MusicSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { MobNPCSpawnerSystem } from "./systems/MobNPCSpawnerSystem.js";
+import { MobNPCSystem } from "./systems/MobNPCSystem.js";
 import { NPCSystem } from "./systems/NPCSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
 import { QuestSystem } from "./systems/QuestSystem.js";
@@ -200,6 +201,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Processing — firemaking + cooking interaction handler.
       // Per-skill processing systems already registered above.
       register("processing", ProcessingSystem);
+
+      // Mob NPC core — owns mob lifecycle (spawn, despawn, leash,
+      // respawn timer). Migrated 2026-04-25 (Wave 3a). Must register
+      // before "mob-npc-spawner" so the spawner's lookup hits.
+      register("mob-npc", MobNPCSystem);
 
       // NPC interactions — banker + shopkeeper handlers. Server-only
       // logically (it answers PLAYER_INTERACT events) but registered

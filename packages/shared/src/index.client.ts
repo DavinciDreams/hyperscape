@@ -1157,6 +1157,14 @@ export type {
 export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
 // (InteractionType already re-exported earlier in this file as a value)
 
+// MobNPCSystem deps — re-exported for the client bundle (Wave 3a).
+export { EntityManager } from "./systems/shared/entities/EntityManager";
+export { NPC_SPAWN_CONSTANTS } from "./data/npcs";
+export type {
+  MobInstance,
+  MobSpawnConfig,
+} from "./types/entities/npc-mob-types";
+
 // NPCSystem deps — re-exported for the client bundle.
 export type { NPCLocation } from "./data/world-areas";
 export { worldAreasRegistry } from "./world-areas";

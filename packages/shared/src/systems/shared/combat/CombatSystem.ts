@@ -42,7 +42,8 @@ interface PrayerSystemLike {
 import { createEntityID } from "../../../utils/IdentifierUtils";
 // NOTE: Import directly to avoid circular dependency through barrel file
 import { EntityManager } from "../entities/EntityManager";
-import { MobNPCSystem } from "../entities/MobNPCSystem";
+// MobNPCSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 3a).
+// Was imported here only for the dead `mobSystem` field below.
 import { SystemBase } from "../infrastructure/SystemBase";
 import {
   tilesWithinMeleeRange,
@@ -146,7 +147,7 @@ interface AttackValidationResult {
 
 export class CombatSystem extends SystemBase {
   private nextAttackTicks = new Map<EntityID, number>(); // Tick when entity can next attack
-  private mobSystem?: MobNPCSystem;
+  // mobSystem field removed 2026-04-25: was set in init() but never read.
   private entityManager?: EntityManager;
   private playerSystem?: PlayerSystem; // Cached for auto-retaliate checks (hot path optimization)
 
@@ -474,8 +475,7 @@ export class CombatSystem extends SystemBase {
       );
     }
 
-    // Get mob NPC system - optional but recommended
-    this.mobSystem = this.world.getSystem<MobNPCSystem>("mob-npc");
+    // mobSystem lookup removed 2026-04-25: was assigned but never read.
 
     // Configure entity resolver with entity manager and logger
     this.entityResolver.setEntityManager(this.entityManager);

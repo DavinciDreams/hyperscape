@@ -37,7 +37,8 @@ import type { InventorySystem } from "../systems/shared";
 // "mob-death" SystemMap entry removed — its only consumer was a
 // dead `systems.mobDeath = ...` lookup in SystemLoader (no reads).
 // MobNPCSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { MobNPCSystem } from "../systems/shared";
+// MobNPCSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 3a).
+// SystemMap entry below typed as `unknown`.
 // NPCSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { PlayerDeathSystem } from "../systems/shared";
 import type { PlayerSystem } from "../systems/shared";
@@ -111,7 +112,7 @@ export interface SystemMap {
 
   // Core entity
   player: PlayerSystem;
-  "mob-npc": MobNPCSystem;
+  "mob-npc": unknown;
 
   // Combat & interaction
   combat: CombatSystem;

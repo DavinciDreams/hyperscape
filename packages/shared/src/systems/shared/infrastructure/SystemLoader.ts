@@ -112,7 +112,7 @@ import { InventorySystem } from "..";
 // — registered by the plugin's onEnable cross-cutting branch.
 // StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
-import { MobNPCSystem } from "..";
+// MobNPCSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 3a).
 import { PersistenceSystem } from "../../server/PersistenceSystem";
 import { PlayerSystem } from "..";
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -223,7 +223,8 @@ export interface Systems {
   // SystemLoader's bookkeeping object still compiles.
   banking?: unknown;
   interaction?: InteractionRouter;
-  mobNpc?: MobNPCSystem;
+  // MobNPCSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  mobNpc?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   store?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
@@ -372,8 +373,8 @@ export async function registerSystems(world: World): Promise<void> {
     return;
   }
 
-  // 6. Mob NPC system - Core mob NPC management (mobs, bosses, quest enemies)
-  world.register("mob-npc", MobNPCSystem);
+  // 6. Mob NPC system: registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-25, Wave 3a).
 
   // === INTERACTION SYSTEMS ===
   // These systems handle player-world interactions
@@ -543,7 +544,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.combat = getSystem(world, "combat") as CombatSystem;
   systems.inventory = getSystem(world, "inventory") as InventorySystem;
   systems.skills = getSystem(world, "skills") as SkillsSystem;
-  systems.mobNpc = getSystem(world, "mob-npc") as MobNPCSystem;
+  systems.mobNpc = getSystem(world, "mob-npc");
   systems.banking = getSystem(world, "banking");
   systems.store = getSystem(world, "store");
   // ResourceSystem migrated — `unknown` field; API adapter casts
@@ -873,11 +874,23 @@ function setupAPI(world: World, systems: Systems): void {
       });
     },
 
-    // Mob API
-    getMob: (mobId: string) => systems.mobNpc?.getMob(mobId),
-    getAllMobs: () => systems.mobNpc?.getAllMobs(),
+    // Mob API — MobNPCSystem migrated to @hyperforge/hyperscape
+    // (Wave 3a). Duck-type the surface inline so SystemLoader's API
+    // adapter doesn't need to import the concrete class.
+    getMob: (mobId: string) =>
+      (systems.mobNpc as { getMob(id: string): unknown } | undefined)?.getMob(
+        mobId,
+      ),
+    getAllMobs: () =>
+      (systems.mobNpc as { getAllMobs(): unknown } | undefined)?.getAllMobs(),
     getMobsInArea: (center: Position3D, radius: number) =>
-      systems.mobNpc?.getMobsInArea(center, radius),
+      (
+        systems.mobNpc as
+          | {
+              getMobsInArea(c: Position3D, r: number): unknown;
+            }
+          | undefined
+      )?.getMobsInArea(center, radius),
     spawnMob: (type: string, position: Position3D) =>
       systems.mobNpc &&
       world.emit(EventType.MOB_NPC_SPAWN_REQUEST, { mobType: type, position }),

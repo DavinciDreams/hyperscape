@@ -1,19 +1,24 @@
-import { AttackType } from "../../../types/core/core";
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { getDefaultNpcLeashRange } from "../../../data/live/combat-live";
-// World eliminated - using base World instead
-import { ALL_NPCS, NPC_SPAWN_CONSTANTS } from "../../../data/npcs";
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../../world-areas";
-import { MobInstance, MobSpawnConfig } from "../../../types/core/core";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/entities/`
+// into `@hyperforge/hyperscape` (Wave 3a of heavy-cluster plan).
+// 628 LOC. Sole consumer in shared (CombatSystem.mobSystem field) was
+// dead code — removed in the same diff. SystemLoader's typed
+// `mobNpc?` field is now `unknown`.
 import {
+  ALL_NPCS,
+  ALL_WORLD_AREAS,
+  AttackType,
   calculateDistance,
+  EntityManager,
+  EventType,
+  getDefaultNpcLeashRange,
+  getEffectiveWorldAreas,
   groundToTerrain,
-} from "../../../utils/game/EntityUtils";
-// NOTE: Import directly to avoid circular dependency through barrel file
-import { EntityManager } from "./EntityManager";
+  type MobInstance,
+  type MobSpawnConfig,
+  NPC_SPAWN_CONSTANTS,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 /**
  * Mob NPC System - GDD Compliant
@@ -61,7 +66,7 @@ export class MobNPCSystem extends SystemBase {
           type: npcId, // NPC ID from npcs.json
           name: npcData.name,
           level: npcData.stats.level,
-          health: npcData.stats.health, // OSRS: hitpoints = max HP directly
+          health: npcData.stats.health, // hitpoints = max HP directly (tile-based MMORPG model)
           stats: {
             attack: npcData.stats.attack,
             strength: npcData.stats.strength,
@@ -491,7 +496,7 @@ export class MobNPCSystem extends SystemBase {
       type: config.type,
       name: config.name,
       level: config.level,
-      health: config.health ?? config.level * 3, // OSRS: hitpoints = max HP
+      health: config.health ?? config.level * 3, // hitpoints = max HP
       stats: config.stats ?? {
         attack: config.level,
         strength: config.level,

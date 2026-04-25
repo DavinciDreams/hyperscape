@@ -81,6 +81,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "quest",
   "aggro",
   "processing",
+  "mob-npc",
   "npc",
   "station-spawner",
   "mob-npc-spawner",
