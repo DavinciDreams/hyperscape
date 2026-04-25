@@ -956,6 +956,11 @@ export {
 } from "./data/live/combat-live";
 export { ticksToMs } from "./utils/game/CombatCalculations";
 
+// ItemTargetingSystem deps — needed by the migrated
+// ItemTargetingSystem in @hyperforge/hyperscape. Protocol types
+// only; the system itself is exported by the plugin.
+export type { TargetType, SourceItem } from "./types/item-targeting";
+
 // QuestSystem deps — needed by the migrated QuestSystem in
 // @hyperforge/hyperscape.
 export { validateQuestDefinition } from "./types/game/quest-types";

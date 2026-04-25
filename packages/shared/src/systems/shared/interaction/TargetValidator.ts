@@ -7,7 +7,7 @@
  */
 
 import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import type { TargetType, SourceItem } from "./ItemTargetingSystem";
+import type { TargetType, SourceItem } from "../../../types/item-targeting";
 
 /**
  * Validation result for an item use action.

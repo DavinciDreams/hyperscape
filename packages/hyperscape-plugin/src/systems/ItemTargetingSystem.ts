@@ -18,19 +18,32 @@
  * - Clicking invalid target
  */
 
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import { SystemBase } from "../infrastructure/SystemBase";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/interaction/`
+// into `@hyperforge/hyperscape` (26th system migration). 390 LOC.
+// `ItemTargetingSystem` is currently scaffold — no `world.register`
+// site exists in shared/server/client, so migration is purely a
+// move + import-path cleanup. Protocol types `TargetType` and
+// `SourceItem` were extracted into
+// `packages/shared/src/types/item-targeting.ts` so the in-shared
+// `TargetValidator` consumer keeps resolving without depending on
+// this class.
+import {
+  EventType,
+  type SourceItem,
+  SystemBase,
+  type TargetType,
+  type World,
+} from "@hyperforge/shared";
 
 /**
  * Targeting state machine states.
  */
 export type TargetingState = "idle" | "selecting_target" | "executing";
 
-/**
- * Type of target that can be selected.
- */
-export type TargetType = "inventory_item" | "world_entity" | "ground_tile";
+// Re-export protocol types so any future plugin-side consumer can
+// `import { TargetType, SourceItem } from "@hyperforge/hyperscape"`
+// without reaching into shared.
+export type { TargetType, SourceItem };
 
 /**
  * Information about a selected target.
@@ -45,15 +58,6 @@ export interface TargetInfo {
   position?: { x: number; y: number; z: number };
   /** Entity type (for world entities) */
   entityType?: string;
-}
-
-/**
- * Source item information.
- */
-export interface SourceItem {
-  id: string;
-  slot: number;
-  name?: string;
 }
 
 /**

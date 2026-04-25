@@ -11,8 +11,7 @@ export * from "./Physics";
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./WorldDialogueConditionEvaluators";
 
-// Item Targeting System (for "Use X on Y" interactions)
-export * from "./ItemTargetingSystem";
+// ItemTargetingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./TargetValidator";
 
 // Smelting/Smithing/Crafting/Fletching all migrated to

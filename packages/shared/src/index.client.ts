@@ -1219,6 +1219,12 @@ export {
 } from "./data/live/combat-live";
 export { ticksToMs } from "./utils/game/CombatCalculations";
 
+// ItemTargetingSystem (migrated 2026-04-25) — re-exported here for
+// the client bundle so the plugin's ItemTargetingSystem can resolve
+// its protocol-type imports when the plugin is loaded on the
+// client world. (Mirrors index.ts.)
+export type { TargetType, SourceItem } from "./types/item-targeting";
+
 // QuestSystem (cross-cutting server-side) — re-exported here for the
 // client bundle.
 export { validateQuestDefinition } from "./types/game/quest-types";
