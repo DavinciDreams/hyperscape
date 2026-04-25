@@ -89,6 +89,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "projectile-renderer",
   "waterfall-visuals",
   "healthbars",
+  "zone-visuals",
   "bfsPathDebug",
   "walkableDebug",
   "resource-tile-debug",

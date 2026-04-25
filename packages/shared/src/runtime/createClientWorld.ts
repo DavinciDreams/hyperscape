@@ -125,7 +125,7 @@ import type { StageSystem } from "../types/systems/system-interfaces";
 import { LODs } from "../systems/shared";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-24).
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
-import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
+// ZoneVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // WaterfallVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
 // ResourceTileDebugSystem migrated to @hyperforge/hyperscape (2026-04-24).
@@ -347,7 +347,7 @@ export function createClientWorld() {
   // "healthbars" registered by @hyperforge/hyperscape onEnable (client branch).
   world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
-  world.register("zone-visuals", ZoneVisualsSystem); // PvP zone ground overlays and warnings
+  // "zone-visuals" registered by @hyperforge/hyperscape onEnable (client branch).
   // "waterfall-visuals" registered by @hyperforge/hyperscape onEnable (client branch).
   // "resource-tile-debug" registered by @hyperforge/hyperscape onEnable (client branch).
   // It self-no-ops at registration; users opt in via world.resourceTileDebug.setEnabled(true).

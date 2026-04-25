@@ -50,6 +50,7 @@ import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
+import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
 // Re-export combat surface so callers have one import path.
 export {
@@ -163,6 +164,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // entity id. OSRS pattern (right-click menus carry names;
         // bars carry HP percent).
         register("healthbars", HealthBars);
+        // Zone overlays (skull / home / swords) + chat warnings on
+        // wilderness/town/arena boundary crossings. Reads
+        // ZoneDetectionSystem live from world (which still lives
+        // in shared because combat consumes it).
+        register("zone-visuals", ZoneVisualsSystem);
         // Debug overlays — toggled via F5 panel keys (B / W).
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);

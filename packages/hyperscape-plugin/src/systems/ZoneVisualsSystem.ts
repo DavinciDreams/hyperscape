@@ -11,19 +11,28 @@
  * @see ZoneDetectionSystem for zone logic
  */
 
-import THREE from "../../extras/three/three";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (9th client-only system migration).
+// PvP / town / arena zone overlays + chat warnings. Reads
+// ZoneDetectionSystem live from world (which itself stays in shared
+// because combat consumes it). Chat class re-exported from shared
+// as `ChatSystem` to avoid a name clash with the existing
+// `type Chat` re-export.
 import {
+  LineBasicNodeMaterial,
   MeshBasicNodeMaterial,
   SpriteNodeMaterial,
-  LineBasicNodeMaterial,
 } from "three/webgpu";
-import { SystemBase } from "../shared/infrastructure/SystemBase";
-import type { World } from "../../types";
-import { ZoneDetectionSystem } from "../shared/death/ZoneDetectionSystem";
-import { Chat } from "../shared/presentation/Chat";
-import { ALL_WORLD_AREAS } from "../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../world-areas";
-import type { WorldArea } from "../../types/core/core";
+import {
+  ALL_WORLD_AREAS,
+  ChatSystem,
+  getEffectiveWorldAreas,
+  SystemBase,
+  THREE,
+  type World,
+  type WorldArea,
+  ZoneDetectionSystem,
+} from "@hyperforge/shared";
 
 // Zone visual colors
 const ZONE_COLORS = {
@@ -445,7 +454,7 @@ export class ZoneVisualsSystem extends SystemBase {
     to: "safe" | "pvp" | "wilderness",
     zoneName: string,
   ): void {
-    const chat = this.world.getSystem<Chat>("chat");
+    const chat = this.world.getSystem<ChatSystem>("chat");
     if (!chat) return;
 
     let message = "";

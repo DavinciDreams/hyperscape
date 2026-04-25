@@ -817,6 +817,13 @@ export {
   createHealthBarCanvas,
   updateHealthBarCanvas,
 } from "./utils/rendering/HealthBarRenderer";
+
+// Chat system class + zone-detection class + WorldArea types — used
+// by the migrated ZoneVisualsSystem in @hyperforge/hyperscape.
+export { Chat as ChatSystem } from "./systems/shared/presentation/Chat";
+export { ZoneDetectionSystem } from "./systems/shared/death/ZoneDetectionSystem";
+export type { WorldArea } from "./types/world/world-types";
+export { getEffectiveWorldAreas } from "./world-areas";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,
