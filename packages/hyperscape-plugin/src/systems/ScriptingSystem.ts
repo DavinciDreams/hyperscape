@@ -14,21 +14,30 @@
  * 6. Delayed continuations resume on subsequent ticks
  */
 
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/scripting/`
+// into `@hyperforge/hyperscape` (34th system migration; 18th
+// cross-cutting). 862 LOC + 325-LOC test moved to plugin. The
+// scripting/ siblings (ScriptGraphInterpreter, TriggerEvaluator,
+// ActionExecutor, ConditionEvaluator, NodeDataSchemas) stay in
+// shared because PIEScriptRunner + PIEEditorSession consume them
+// at PIE-bundle time. Plugin imports them through the shared
+// barrel.
 import {
-  ScriptGraphInterpreter,
+  ActionExecutor,
+  ConditionRegistry,
+  DEFAULT_TRIGGER_MAPPINGS,
+  type DelayedContinuation,
+  EventType,
+  type ExecutionContext,
   type RuntimeScriptGraph,
   type RuntimeScriptNode,
-  type ExecutionContext,
+  ScriptGraphInterpreter,
   type ScriptingWorldInterface,
-  type DelayedContinuation,
-} from "./ScriptGraphInterpreter";
-import { TriggerEvaluator, DEFAULT_TRIGGER_MAPPINGS } from "./TriggerEvaluator";
-import { ActionExecutor } from "./ActionExecutor";
-import { ConditionRegistry } from "./ConditionEvaluator";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
-import { EventType } from "../../../types/events";
-import { validateNodeData } from "./NodeDataSchemas";
+  SystemBase,
+  TriggerEvaluator,
+  validateNodeData,
+  type World,
+} from "@hyperforge/shared";
 
 // ---------------------------------------------------------------------------
 // Types

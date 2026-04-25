@@ -7,10 +7,12 @@
  * existing interpreter/trigger/action unit tests.
  */
 
+// Migrated 2026-04-25 alongside ScriptingSystem from
+// `packages/shared/src/systems/shared/scripting/__tests__/`.
+// Imports updated to match the new home in `@hyperforge/hyperscape`.
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { ScriptingSystem } from "../ScriptingSystem";
-import type { RuntimeScriptGraph } from "../ScriptGraphInterpreter";
-import { EventType } from "../../../../types/events";
+import { EventType, type RuntimeScriptGraph } from "@hyperforge/shared";
 
 // ---------------------------------------------------------------------------
 // Mock world / entity-manager

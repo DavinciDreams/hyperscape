@@ -79,7 +79,16 @@ import {
 } from "../pieShims";
 
 import type { RuntimeScriptGraph } from "../../systems/shared/scripting/ScriptGraphInterpreter";
-import type { ScriptingSystem } from "../../systems/shared/scripting/ScriptingSystem";
+// ScriptingSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// PIE only calls `addGraph` on it — duck-type locally so we don't
+// depend on the migrated class.
+interface ScriptingSystem {
+  addGraph(
+    entityId: string,
+    graph: RuntimeScriptGraph,
+    options: { trusted: boolean },
+  ): void;
+}
 import type { EntityData } from "../../types/core/base-types";
 import type { PIEEntity } from "./PIEEntity";
 import type { PIEDebugEntry, PIEDebugSink } from "../PIEScriptRunner";

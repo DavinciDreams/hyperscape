@@ -943,6 +943,36 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ScriptingSystem deps — needed by the migrated ScriptingSystem in
+// @hyperforge/hyperscape (and by its co-located unit test, which
+// also lives in the plugin). Implementation classes
+// (ScriptGraphInterpreter, ActionExecutor, ConditionRegistry,
+// TriggerEvaluator) stay in shared because PIEScriptRunner +
+// PIEEditorSession in `runtime/pie.ts` consume them at PIE-bundle
+// time. The plugin's ScriptingSystem ties them into ECS lifecycle.
+export {
+  ScriptGraphInterpreter,
+  type RuntimeScriptGraph,
+  type RuntimeScriptNode,
+  type RuntimeScriptEdge,
+  type RuntimeScriptVariable,
+  type RuntimePortDef,
+  type ExecutionContext,
+  type ScriptingWorldInterface,
+  type ActionHandler,
+  type ConditionEvaluator,
+  type DelayedContinuation,
+  type GraphRegistry,
+} from "./systems/shared/scripting/ScriptGraphInterpreter";
+export {
+  TriggerEvaluator,
+  DEFAULT_TRIGGER_MAPPINGS,
+  type TriggerMapping,
+} from "./systems/shared/scripting/TriggerEvaluator";
+export { ActionExecutor } from "./systems/shared/scripting/ActionExecutor";
+export { ConditionRegistry } from "./systems/shared/scripting/ConditionEvaluator";
+export { validateNodeData } from "./systems/shared/scripting/NodeDataSchemas";
+
 // RangeSystem deps — needed by the migrated RangeSystem in
 // @hyperforge/hyperscape. NPC tile-occupancy data drives hunt /
 // attack / max-range calculations.

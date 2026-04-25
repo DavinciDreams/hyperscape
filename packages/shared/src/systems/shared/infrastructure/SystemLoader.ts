@@ -173,7 +173,9 @@ interface DialogueSystem {
   unregisterConditionEvaluator(name: string): void;
 }
 // — registered by the plugin's onEnable cross-cutting branch.
-import { ScriptingSystem } from "../scripting/ScriptingSystem";
+// ScriptingSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemsRegistry field downgraded to `unknown`; the plugin
+// onEnable cross-cutting branch handles registration.
 
 // Client-only visual systems
 // NOTE: Import directly from specific files to avoid circular dependency
@@ -250,7 +252,8 @@ export interface Systems {
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   itemSpawner?: unknown;
   // healthRegen: registered by @hyperforge/hyperscape plugin (2026-04-24)
-  scripting?: ScriptingSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  scripting?: unknown;
 }
 
 /**
@@ -497,9 +500,12 @@ export async function registerSystems(world: World): Promise<void> {
   // "dialogue" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
 
-  // Scripting system - visual scripting runtime (subscribes to trigger events,
-  // auto-loads entity behaviorGraph on spawn, processes delayed continuations)
-  world.register("scripting", ScriptingSystem);
+  // "scripting" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25). The interpreter
+  // engine + sibling helpers (ScriptGraphInterpreter,
+  // ActionExecutor, ConditionRegistry, TriggerEvaluator) stay in
+  // shared because PIEScriptRunner consumes them at PIE-bundle
+  // time.
 
   // Quest system - handles quest progression (server only)
   // Note: world.isServer isn't reliable here because ServerNetwork registers later
@@ -660,7 +666,9 @@ export async function registerSystems(world: World): Promise<void> {
   }
 
   // Scripting system
-  systems.scripting = getSystem(world, "scripting") as ScriptingSystem;
+  // ScriptingSystem migrated — `unknown` field; consumers (none in
+  // shared today) would need to duck-type if they reach for it.
+  systems.scripting = getSystem(world, "scripting");
 
   // DYNAMIC WORLD CONTENT SYSTEMS
   systems.mobNpcSpawner = getSystem(world, "mob-npc-spawner");

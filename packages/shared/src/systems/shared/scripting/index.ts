@@ -22,6 +22,6 @@ export { ActionExecutor } from "./ActionExecutor";
 
 export { ConditionRegistry } from "./ConditionEvaluator";
 
-export { ScriptingSystem } from "./ScriptingSystem";
+// ScriptingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
 export { validateNodeData } from "./NodeDataSchemas";

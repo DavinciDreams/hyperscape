@@ -55,6 +55,7 @@ import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { BridgeSystem } from "./systems/BridgeSystem.js";
 import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
+import { ScriptingSystem } from "./systems/ScriptingSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
 import { InventoryInteractionSystem } from "./systems/InventoryInteractionSystem.js";
 import { MusicSystem } from "./systems/MusicSystem.js";
@@ -235,6 +236,13 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // landmarks). Read by RoadNetworkSystem (still in shared)
       // via duck-typed `getConfig()` lookup.
       register("pois", POISystem);
+
+      // Scripting — visual scripting runtime. Subscribes to
+      // trigger events, auto-loads entity behaviorGraphs on spawn,
+      // processes delayed continuations. Interpreter engine +
+      // sibling helpers stay in shared so PIEScriptRunner can
+      // consume them directly at PIE-bundle time.
+      register("scripting", ScriptingSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

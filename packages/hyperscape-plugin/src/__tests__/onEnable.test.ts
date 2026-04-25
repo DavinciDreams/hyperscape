@@ -89,6 +89,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "bridges",
   "docks",
   "pois",
+  "scripting",
   "tanning",
   "smithing",
   "smelting",
