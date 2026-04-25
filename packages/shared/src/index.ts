@@ -972,6 +972,17 @@ export {
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
 
+// NPCTickProcessor + SpatialAggroStrategy deps — needed by the
+// migrated NPC tick utilities in @hyperforge/hyperscape.
+export type {
+  IAggroStrategy,
+  IPathStrategy,
+  ICombatStrategy,
+  ProcessableNPC,
+  NPCTarget,
+} from "./types/systems/npc-strategies";
+export { SpatialEntityRegistry } from "./systems/shared/entities/SpatialEntityRegistry";
+
 // GrassSharedRegistry — mutable shader state owned by shared so
 // the migrated ProceduralGrass + still-in-shared sibling modules
 // share the same texture/uniform registry.

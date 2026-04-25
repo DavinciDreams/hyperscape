@@ -1,7 +1,7 @@
 /**
- * NPCTickProcessor - Processes all NPC logic in OSRS-accurate order
+ * NPCTickProcessor — Processes all NPC logic in tick-based order
  *
- * OSRS Processing Order (per tick):
+ * Processing Order (per tick):
  * 1. NPC timers execute
  * 2. NPC queues process
  * 3. NPC movement
@@ -11,19 +11,21 @@
  *
  * This processor handles steps 1-4 for all NPCs, ensuring they process
  * in the correct order and with zero allocations in the hot path.
- *
- * @see https://osrs-docs.com/docs/mechanics/timers/
  */
 
-import type { TileCoord } from "../movement/TileSystem";
-import { worldToTile } from "../movement/TileSystem";
-import type {
-  IAggroStrategy,
-  IPathStrategy,
-  ICombatStrategy,
-  ProcessableNPC,
-  NPCTarget,
-} from "../../../types/systems/npc-strategies";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/tick/`
+// into `@hyperforge/hyperscape` (41st system migration; fourth
+// scaffold archetype). 286 LOC. No external runtime consumers in
+// shared — pure file move + barrel cleanup.
+import {
+  type IAggroStrategy,
+  type ICombatStrategy,
+  type IPathStrategy,
+  type NPCTarget,
+  type ProcessableNPC,
+  type TileCoord,
+  worldToTile,
+} from "@hyperforge/shared";
 
 /**
  * Configuration for NPCTickProcessor
@@ -49,7 +51,7 @@ export interface TickProcessingStats {
 /**
  * NPCTickProcessor - Single entry point for all NPC tick processing
  *
- * Ensures correct OSRS processing order and zero allocations in hot paths.
+ * Ensures correct tick-based processing order and zero allocations in hot paths.
  */
 export class NPCTickProcessor {
   // Strategy dependencies (DIP - depend on abstractions)
@@ -122,7 +124,7 @@ export class NPCTickProcessor {
       }
     }
 
-    // Process in spawn order for determinism (OSRS processes NPCs by spawn order)
+    // Process in spawn order for determinism (processor processes NPCs by spawn order)
     this._npcBuffer.sort((a, b) => a.spawnOrder - b.spawnOrder);
 
     // Limit processing if needed (for performance)
@@ -165,7 +167,7 @@ export class NPCTickProcessor {
   /**
    * Process a single NPC for the current tick
    *
-   * OSRS order within NPC processing:
+   * Tick order within NPC processing:
    * 1. Update timers (handled externally by MobEntity)
    * 2. Process queues (handled externally by MobEntity)
    * 3. Aggro check and target selection
@@ -253,12 +255,12 @@ export class NPCTickProcessor {
   /**
    * Generate a wander destination for an NPC
    *
-   * OSRS: Random offset -5 to +5 tiles from spawn point
+   * Random offset -5 to +5 tiles from spawn point
    */
   private generateWanderTarget(npc: ProcessableNPC): TileCoord | null {
     const spawnTile = npc.getSpawnTile();
 
-    // OSRS: -5 to +5 offset from spawn (11x11 area)
+    // -5 to +5 offset from spawn (11x11 area)
     const offsetX = Math.floor(Math.random() * 11) - 5;
     const offsetZ = Math.floor(Math.random() * 11) - 5;
 

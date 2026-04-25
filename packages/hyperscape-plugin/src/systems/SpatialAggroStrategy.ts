@@ -11,12 +11,15 @@
  * - Caches player combat levels to avoid repeated calculations
  */
 
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/tick/`
+// into `@hyperforge/hyperscape` (alongside NPCTickProcessor).
+// 178 LOC. No external runtime consumers in shared.
 import type {
   IAggroStrategy,
-  ProcessableNPC,
   NPCTarget,
-} from "../../../types/systems/npc-strategies";
-import type { SpatialEntityRegistry } from "../entities/SpatialEntityRegistry";
+  ProcessableNPC,
+  SpatialEntityRegistry,
+} from "@hyperforge/shared";
 
 /**
  * Configuration for spatial aggro behavior

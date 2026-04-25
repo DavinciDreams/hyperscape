@@ -1231,6 +1231,16 @@ export {
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
 
+// NPCTickProcessor + SpatialAggroStrategy deps — mirror to client bundle.
+export type {
+  IAggroStrategy,
+  IPathStrategy,
+  ICombatStrategy,
+  ProcessableNPC,
+  NPCTarget,
+} from "./types/systems/npc-strategies";
+export { SpatialEntityRegistry } from "./systems/shared/entities/SpatialEntityRegistry";
+
 // GrassSharedRegistry — mirror to client bundle.
 export {
   CHARACTER_TEXTURE_WIDTH,
