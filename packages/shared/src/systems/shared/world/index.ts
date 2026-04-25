@@ -22,7 +22,7 @@ export * from "./StandaloneGrass";
 export * from "./TownSystem";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./BuildingRenderingSystem";
+// BuildingRenderingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralTownLandmarks migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./BuildingCollisionService";
 export * from "./GrassExclusionManager";

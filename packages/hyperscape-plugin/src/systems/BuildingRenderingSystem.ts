@@ -48,14 +48,30 @@
  * **Runs on:** Client only (buildings are purely visual on client)
  */
 
-import THREE, {
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (39th system migration). 5593 LOC.
+// Client + editor registration. No in-shared concrete-type
+// consumers (only register sites + comments). TownSystem stays
+// in shared so the migrated class continues to consume it for
+// building placement data.
+import {
+  applySkyFog,
+  getLamppostLightTextureState,
+  isLamppostLightTextureReady,
+  MAX_VERTEX_LIGHTS,
+  type ShaderNode,
+  SystemBase,
+  THREE,
+  type VertexLight,
+} from "@hyperforge/shared";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import {
   uniform,
   sub,
   add,
   mul,
   div,
   Fn,
-  MeshStandardNodeMaterial,
   float,
   smoothstep,
   positionWorld,
@@ -81,17 +97,8 @@ import THREE, {
   select,
   dFdx,
   dFdy,
-  type ShaderNode,
-} from "../../../extras/three/three";
+} from "three/tsl";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { MAX_VERTEX_LIGHTS } from "./TerrainShader";
-import type { VertexLight } from "./TerrainShader";
-import {
-  getLamppostLightTextureState,
-  isLamppostLightTextureReady,
-} from "./LamppostLightMask";
-import { applySkyFog } from "./FogConfig";
-import { SystemBase } from "../infrastructure/SystemBase";
 
 // ============================================================================
 // GEOMETRY UTILITIES
@@ -305,11 +312,21 @@ function hasTimeRemaining(deadline: IdleDeadline | void): boolean {
   if (!deadline) return true; // setTimeout fallback
   return deadline.timeRemaining() > 0;
 }
-import type { World } from "../../../types";
-import type {
-  ProceduralTown,
-  TownBuilding,
-} from "../../../types/world/world-types";
+import {
+  type AtlasBuildingData,
+  BakePriority,
+  DynamicBuildingImpostorAtlas,
+  getLODDistances,
+  getPhysX,
+  ImpostorBakeMode,
+  ImpostorManager,
+  Layers,
+  type LODDistancesWithSq,
+  type PhysicsHandle,
+  type ProceduralTown,
+  type TownBuilding,
+  type World,
+} from "@hyperforge/shared";
 import {
   BuildingGenerator,
   type BuildingLayout,
@@ -322,23 +339,12 @@ import {
   snapToBuildingGrid,
   computeTangentsForNonIndexed,
 } from "@hyperforge/procgen/building";
-import { getLODDistances, type LODDistancesWithSq } from "./LODConfig";
-import {
-  ImpostorManager,
-  BakePriority,
-  ImpostorBakeMode,
-  DynamicBuildingImpostorAtlas,
-  type AtlasBuildingData,
-} from "../rendering";
 import {
   createTSLImpostorMaterial,
   isTSLImpostorMaterial,
   type ImpostorBakeResult,
   type TSLImpostorMaterial,
 } from "@hyperforge/impostor";
-import { getPhysX } from "../../../physics/PhysXManager";
-import { Layers } from "../../../physics/Layers";
-import type { PhysicsHandle } from "../../../types/systems/physics";
 
 // ============================================================================
 // BUILDING OCCLUSION CONFIG
@@ -346,7 +352,7 @@ import type { PhysicsHandle } from "../../../types/systems/physics";
 
 /**
  * Building occlusion shader configuration.
- * Uses dithered/stippled effect like RuneScape for seeing character through walls.
+ * Uses dithered/stippled effect like classic MMORPGs for seeing character through walls.
  * Values are intentionally smaller than vegetation for subtle visibility.
  */
 export const BUILDING_OCCLUSION_CONFIG = {
@@ -371,7 +377,7 @@ export const BUILDING_OCCLUSION_CONFIG = {
   /** Occlusion strength (0 = disabled, only near-camera dissolve active) */
   STRENGTH: 0.0,
 
-  // ========== NEAR-CAMERA DISSOLVE (RuneScape-style depth fade) ==========
+  // ========== NEAR-CAMERA DISSOLVE (classic-MMORPG-style depth fade) ==========
   // Prevents hard geometry clipping when camera clips through objects
 
   /** Distance from camera where near-fade begins (meters) - fully opaque beyond this */
@@ -1078,7 +1084,7 @@ export type BuildingOcclusionMaterial = MeshStandardNodeMaterial & {
  * Uses TSL (Three Shading Language) for GPU-accelerated patterns and occlusion.
  *
  * The shader creates a cone-shaped dissolve from camera to player,
- * using a dithered/stippled pattern like classic RuneScape.
+ * using a dithered/stippled pattern like classic MMORPGs.
  *
  * @returns Material with occlusion shader
  */
@@ -1145,7 +1151,7 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
     const camDistSq = add(add(mul(cfX, cfX), mul(cfY, cfY)), mul(cfZ, cfZ));
     const camDist = sqrt(camDistSq);
 
-    // ========== NEAR-CAMERA DISSOLVE (RuneScape-style depth fade) ==========
+    // ========== NEAR-CAMERA DISSOLVE (classic-MMORPG-style depth fade) ==========
     // Prevents hard geometry clipping when camera clips through objects
     // smoothstep returns 0→1 as distance goes from end→start, we invert for fade
     const nearCameraFade = sub(
@@ -1229,7 +1235,7 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
     // - occlusionFade: dissolve when player is behind walls
     const combinedFade = max(max(nearCameraFade, distanceFade), occlusionFade);
 
-    // ========== SCREEN-SPACE 4x4 BAYER DITHERING (RuneScape 3 style) ==========
+    // ========== SCREEN-SPACE 4x4 BAYER DITHERING (classic-MMORPG style) ==========
     // 4x4 Bayer matrix: [ 0, 8, 2,10; 12, 4,14, 6; 3,11, 1, 9; 15, 7,13, 5]/16
     const ix = mod(floor(viewportCoordinate.x), float(4.0));
     const iy = mod(floor(viewportCoordinate.y), float(4.0));
@@ -2759,7 +2765,7 @@ export class BuildingRenderingSystem extends SystemBase {
   /** Shared uber-material for all batched buildings (with occlusion shader) */
   private batchedMaterial: BuildingOcclusionMaterial;
 
-  /** Shared roof material with per-building visibility (RuneScape-style roof hiding) */
+  /** Shared roof material with per-building visibility (classic-MMORPG-style roof hiding) */
   private roofMaterial: RoofOcclusionMaterial;
 
   /** Shared floor material for all batched building floors (no occlusion needed) */
@@ -2775,7 +2781,7 @@ export class BuildingRenderingSystem extends SystemBase {
 
   /** Cached physics material for collision shapes (avoid recreating for every building) */
   private _cachedPhysicsMaterial:
-    | import("../../../types/systems/physics").PxMaterial
+    | import("@hyperforge/shared").PxMaterial
     | null = null;
 
   // ============================================
@@ -2830,7 +2836,7 @@ export class BuildingRenderingSystem extends SystemBase {
     // Create shared material for batched buildings (with occlusion shader)
     this.batchedMaterial = createBuildingOcclusionMaterial();
 
-    // Create shared roof material with per-building visibility (RuneScape-style)
+    // Create shared roof material with per-building visibility (classic-MMORPG-style)
     this.roofMaterial = createBuildingRoofMaterial();
 
     // Create shared floor material (simple, no occlusion - floors are walkable)
@@ -3169,7 +3175,7 @@ export class BuildingRenderingSystem extends SystemBase {
   /**
    * Update roof visibility state.
    *
-   * **RuneScape-Style Per-Building Roof Hiding:**
+   * **Classic-MMORPG-Style Per-Building Roof Hiding:**
    * Individual building roofs are now hidden via the roof material's shader,
    * which reads buildingCenter and buildingRadius vertex attributes to determine
    * if the player or camera is close to each specific building. This enables
@@ -4232,7 +4238,7 @@ export class BuildingRenderingSystem extends SystemBase {
       );
     }
 
-    // === ROOF MESH (RuneScape-style per-building roof hiding) ===
+    // === ROOF MESH (classic-MMORPG-style per-building roof hiding) ===
     // Uses roofMaterial which has per-building visibility based on vertex attributes
     // buildingCenter and buildingRadius attributes enable the shader to hide roofs
     // when player/camera is close to that specific building

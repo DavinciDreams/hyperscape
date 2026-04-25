@@ -77,7 +77,7 @@ import { TownSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
 // ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
-import { BuildingRenderingSystem } from "../systems/shared";
+// BuildingRenderingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralTownLandmarksSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { Physics } from "../systems/shared";
 
@@ -332,7 +332,8 @@ export function createClientWorld() {
   // ============================================================================
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
-  world.register("building-rendering", BuildingRenderingSystem);
+  // "building-rendering" registered by @hyperforge/hyperscape
+  // plugin onEnable client-only branch (migrated 2026-04-25).
 
   // ============================================================================
   // TOWN LANDMARKS SYSTEM

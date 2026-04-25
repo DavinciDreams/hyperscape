@@ -943,6 +943,28 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// BuildingRenderingSystem deps — needed by the migrated
+// BuildingRenderingSystem in @hyperforge/hyperscape. TerrainShader
+// vertex-light helpers + lamppost mask + impostor atlas + physics
+// layer enum.
+export {
+  MAX_VERTEX_LIGHTS,
+  type VertexLight,
+} from "./systems/shared/world/TerrainShader";
+export {
+  getLamppostLightTextureState,
+  isLamppostLightTextureReady,
+} from "./systems/shared/world/LamppostLightMask";
+export type { TownBuilding } from "./types/world/world-types";
+export { Layers } from "./physics/Layers";
+export {
+  ImpostorManager,
+  BakePriority,
+  ImpostorBakeMode,
+  DynamicBuildingImpostorAtlas,
+  type AtlasBuildingData,
+} from "./systems/shared/rendering";
+
 // VegetationSystem deps — needed by the migrated VegetationSystem
 // in @hyperforge/hyperscape. Vegetation rendering pulls a wide
 // surface of types + utilities from shared (Loader, frustum

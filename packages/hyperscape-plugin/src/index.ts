@@ -53,6 +53,7 @@ import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { BridgeSystem } from "./systems/BridgeSystem.js";
+import { BuildingRenderingSystem } from "./systems/BuildingRenderingSystem.js";
 import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
 import { VegetationSystem } from "./systems/VegetationSystem.js";
@@ -305,6 +306,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // to TerrainSystem tile events for generation triggers.
         // Strictly client-side (purely visual).
         register("vegetation", VegetationSystem);
+        // Procedural town buildings — LOD batching, dynamic
+        // impostor atlas, lazy collision. Reads building placement
+        // data from TownSystem (still in shared).
+        register("building-rendering", BuildingRenderingSystem);
         // Drag-and-drop + right-click context menus. Originally
         // registered inside `if (world.isClient)` in SystemLoader.
         // Stats reader (`getSystemInfo`) is duck-typed at the

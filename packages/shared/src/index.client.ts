@@ -1205,6 +1205,27 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// BuildingRenderingSystem (client + editor) — re-exported here
+// for the client bundle so the migrated plugin
+// BuildingRenderingSystem resolves its imports. (Mirrors index.ts.)
+export {
+  MAX_VERTEX_LIGHTS,
+  type VertexLight,
+} from "./systems/shared/world/TerrainShader";
+export {
+  getLamppostLightTextureState,
+  isLamppostLightTextureReady,
+} from "./systems/shared/world/LamppostLightMask";
+export type { TownBuilding } from "./types/world/world-types";
+export { Layers } from "./physics/Layers";
+export {
+  ImpostorManager,
+  BakePriority,
+  ImpostorBakeMode,
+  DynamicBuildingImpostorAtlas,
+  type AtlasBuildingData,
+} from "./systems/shared/rendering";
+
 // VegetationSystem (client + editor) — re-exported here for the
 // client bundle so the migrated plugin VegetationSystem resolves
 // its imports. (Mirrors index.ts.)

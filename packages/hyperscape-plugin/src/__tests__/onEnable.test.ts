@@ -115,6 +115,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "resource-tile-debug",
   "music",
   "vegetation",
+  "building-rendering",
   "inventory-interaction",
 ];
 
