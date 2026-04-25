@@ -894,3 +894,134 @@ export {
   type CombatSpellTier,
   type CombatSpellsReloadListener,
 } from "./combat-spells/index";
+
+// ─────────────────────────────────────────────────────────────────────
+// Plugin-migration exports — re-exported here for the CLIENT bundle
+// (`framework.client.js`) so the migrated systems in
+// `@hyperforge/hyperscape` resolve their imports at runtime in the
+// browser. These mirror the additions made to `index.ts` (the
+// server-side entry) during the 2026-04-24/25 session migrations.
+// Each block names which migrated system needs which symbol.
+// ─────────────────────────────────────────────────────────────────────
+
+// HealthBars (client-only)
+export type {
+  ShaderNode,
+  TSLNodeFloat,
+  TSLNodeVec2,
+  TSLNodeVec3,
+  TSLNodeVec4,
+} from "./extras/three/three";
+export {
+  HEALTH_BAR_COLORS,
+  HEALTH_BAR_DIMENSIONS,
+  type HealthBarStyle,
+  type HealthBarCanvasOptions,
+  drawHealthBar,
+  clearHealthBar,
+  createHealthBarCanvas,
+  updateHealthBarCanvas,
+} from "./utils/rendering/HealthBarRenderer";
+
+// ZoneVisualsSystem (client-only)
+export { Chat as ChatSystem } from "./systems/shared/presentation/Chat";
+export { ZoneDetectionSystem } from "./systems/shared/death/ZoneDetectionSystem";
+export type { WorldArea } from "./types/world/world-types";
+export { getEffectiveWorldAreas } from "./world-areas";
+
+// EquipmentVisualSystem (client-only)
+export { EQUIPMENT_SLOT_NAMES } from "./constants/EquipmentConstants";
+
+// WaterfallVisualsSystem (client-only)
+export type { WaterfallDefinition } from "./systems/shared/world/WaterfallDefinition";
+
+// Identifier branded types + create helpers — needed by every
+// migrated cross-cutting server-side system (CoinPouch, Prayer,
+// Banking, Store, etc.) for id construction.
+export type {
+  PlayerID,
+  ItemID,
+  MobID,
+  EntityID,
+  StoreID,
+  BankID,
+  ResourceID,
+  NPCID,
+  SessionID,
+  QuestID,
+  SkillID,
+  ZoneID,
+  ChunkID,
+  SlotNumber,
+} from "./types/core/identifiers";
+export {
+  isValidPlayerID,
+  isValidMobID,
+  isValidEntityID,
+  isValidItemID,
+  isValidStoreID,
+  isValidBankID,
+  isValidResourceID,
+  isValidNPCID,
+  isValidSessionID,
+  isValidSlotNumber,
+  isValidQuestID,
+  isValidSkillID,
+  isValidZoneID,
+  isValidChunkID,
+  createPlayerID,
+  createMobID,
+  createEntityID,
+  createItemID,
+  createStoreID,
+  createBankID,
+  createResourceID,
+  createNPCID,
+  createSessionID,
+  createSlotNumber,
+  createQuestID,
+  createSkillID,
+  createZoneID,
+  createChunkID,
+} from "./types/core/identifiers";
+
+// CoinPouchSystem (cross-cutting server-side)
+export { toPlayerID } from "./utils/IdentifierUtils";
+export type { DatabaseSystem } from "./types/systems/system-interfaces";
+
+// PrayerSystem (cross-cutting server-side)
+export {
+  clampPrayerLevel,
+  clampPrayerPoints,
+  isAltarPrayPayload,
+  isPlayerCleanupPayload,
+  isPlayerRegisteredPayload,
+  isPrayerToggleEventPayload,
+  isValidRestoreAmount,
+  isValidPrayerId,
+  MAX_ACTIVE_PRAYERS,
+  PRAYER_TOGGLE_COOLDOWN_MS,
+  PRAYER_TOGGLE_RATE_LIMIT,
+  getPlayerPrayerLevel,
+  getPlayerPrayerBonus,
+} from "./types/game/prayer-types";
+export type { PlayerJoinedPayload } from "./types/events/event-payloads";
+export type {
+  PrayerState,
+  PrayerBonuses,
+  PlayerWithPrayerStats,
+} from "./types/game/prayer-types";
+// Note: PrayerDefinition + PrayerCategory already re-exported above
+// from ./data/PrayerDataProvider — same underlying type.
+
+// Logger (value) — used by every migrated SystemBase subclass for
+// structured console output.
+export { Logger } from "./utils/Logger";
+
+// BankingSystem (cross-cutting server-side)
+export type { BankData } from "./types/game/inventory-types";
+
+// StoreSystem (cross-cutting server-side)
+export type { Store } from "./types/game/item-types";
+export { GENERAL_STORES } from "./data/banks-stores";
+export { storesRegistry } from "./stores";
