@@ -21,7 +21,10 @@
 import * as THREE from "three";
 import { texture, uniform, Fn, vec3 } from "three/tsl";
 import type { World } from "../../../core/World";
-import { setCharacterBendingTexture } from "./ProceduralGrass";
+// Was `from "./ProceduralGrass"` — state moved 2026-04-25 to
+// `GrassSharedRegistry` so this in-shared module no longer depends
+// on ProceduralGrass (which is migrating to the plugin).
+import { setCharacterBendingTexture } from "./GrassSharedRegistry";
 
 // ============================================================================
 // CONFIGURATION

@@ -491,43 +491,26 @@ const uExclusionCenterX = uniform(0);
 const uExclusionCenterZ = uniform(0);
 
 // ============================================================================
-// GRID-BASED EXCLUSION - Uses texture from GrassExclusionGrid
+// GRID-BASED EXCLUSION — state moved 2026-04-25 to GrassSharedRegistry
 // ============================================================================
-// GrassExclusionGrid queries CollisionMatrix/TerrainSystem for blocked tiles.
-// ProceduralGrass samples this texture for O(1) per-blade exclusion check.
-
-/** Flag to use grid-based exclusion instead of legacy vegetation exclusion */
-let useGridBasedExclusion = true;
-
-/** Grid exclusion texture node (set by GrassExclusionGrid) */
-let gridExclusionTextureNode: ReturnType<typeof texture> | null = null;
-/** Grid exclusion uniforms */
-const uGridExclusionCenterX = uniform(0);
-const uGridExclusionCenterZ = uniform(0);
-const uGridExclusionWorldSize = uniform(256);
-
-/**
- * Set grid-based exclusion texture for the shader.
- * Called by GrassExclusionGrid when texture is updated.
- */
-export function setGridExclusionTexture(
-  textureNode: ReturnType<typeof texture> | null,
-  centerX: number,
-  centerZ: number,
-  worldSize: number,
-): void {
-  gridExclusionTextureNode = textureNode;
-  uGridExclusionCenterX.value = centerX;
-  uGridExclusionCenterZ.value = centerZ;
-  uGridExclusionWorldSize.value = worldSize;
-}
-
-/**
- * Enable or disable grid-based exclusion.
- */
-export function setUseGridExclusion(use: boolean): void {
-  useGridBasedExclusion = use;
-}
+// Module-level state + setters for grid exclusion now live in
+// `./GrassSharedRegistry` so the in-shared sibling modules
+// (`GrassExclusionGrid`) can keep calling `setGridExclusionTexture`
+// without depending on this file (which is migrating to the plugin).
+// `setGridExclusionTexture` and `setUseGridExclusion` are re-exported
+// here for backwards-compatibility with any direct callers; they
+// resolve to the registry singletons via ES-module live bindings.
+export {
+  setGridExclusionTexture,
+  setUseGridExclusion,
+} from "./GrassSharedRegistry";
+import {
+  gridExclusionTextureNode,
+  uGridExclusionCenterX,
+  uGridExclusionCenterZ,
+  uGridExclusionWorldSize,
+  useGridBasedExclusion,
+} from "./GrassSharedRegistry";
 
 // ============================================================================
 // WATER/SHORELINE CULLING - Gradual fade near water
@@ -558,39 +541,23 @@ const uWaterHardCutoff = uniform(WATER_CONFIG.WATER_HARD_CUTOFF);
 const uWaterFadeStart = uniform(WATER_CONFIG.WATER_FADE_START);
 
 // ============================================================================
-// MULTI-CHARACTER BENDING - Uses texture from CharacterInfluenceManager
+// MULTI-CHARACTER BENDING — state moved 2026-04-25 to GrassSharedRegistry
 // ============================================================================
-// Characters (players, NPCs, mobs) bend grass as they walk through it.
-// CharacterInfluenceManager packs character data into a 64x2 RGBA Float texture.
-
-/** Flag to use multi-character bending instead of single-player trail */
-let useMultiCharacterBending = true;
-
-/** Character data texture (64x2: row 0 = pos+radius, row 1 = vel+speed) */
-let characterBendingTextureNode: ReturnType<typeof texture> | null = null;
-/** Number of active characters */
-const uCharacterCount = uniform(0);
-/** Texture width (max characters) */
-const CHARACTER_TEXTURE_WIDTH = 64;
-
-/**
- * Set multi-character bending texture for the shader.
- * Called by CharacterInfluenceManager when texture is updated.
- */
-export function setCharacterBendingTexture(
-  textureNode: ReturnType<typeof texture> | null,
-  count: number,
-): void {
-  characterBendingTextureNode = textureNode;
-  uCharacterCount.value = count;
-}
-
-/**
- * Enable or disable multi-character bending.
- */
-export function setUseMultiCharacterBending(use: boolean): void {
-  useMultiCharacterBending = use;
-}
+// Module-level state + setters for character bending now live in
+// `./GrassSharedRegistry` so the in-shared sibling
+// `CharacterInfluenceManager` can keep calling
+// `setCharacterBendingTexture` without depending on this file
+// (which is migrating to the plugin).
+export {
+  setCharacterBendingTexture,
+  setUseMultiCharacterBending,
+} from "./GrassSharedRegistry";
+import {
+  characterBendingTextureNode,
+  CHARACTER_TEXTURE_WIDTH,
+  uCharacterCount,
+  useMultiCharacterBending,
+} from "./GrassSharedRegistry";
 
 // Legacy export for backwards compatibility (now a no-op)
 export function setCharacterBendingData(

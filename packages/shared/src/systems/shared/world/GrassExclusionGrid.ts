@@ -28,7 +28,10 @@ import { CollisionFlag, CollisionMask } from "../movement/CollisionFlags";
 import { BiomeType } from "./TerrainBiomeTypes";
 import { BIOMES } from "../../../data/world-structure";
 import { isBiomesDataAvailable, resolveBiomeOrFallback } from "../../../biomes";
-import { setGridExclusionTexture } from "./ProceduralGrass";
+// Was `from "./ProceduralGrass"` — state moved 2026-04-25 to
+// `GrassSharedRegistry` so this in-shared module no longer depends
+// on ProceduralGrass (which is migrating to the plugin).
+import { setGridExclusionTexture } from "./GrassSharedRegistry";
 import type { TownSystem } from "./TownSystem";
 
 // ============================================================================
