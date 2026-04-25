@@ -14,7 +14,7 @@
  *
  * Systems Registered:
  * 1. Core Systems: ClientRuntime, Stage, ClientNetwork
- * 2. Media: ClientLiveKit (voice), ClientAudio, MusicSystem
+ * 2. Media: ClientLiveKit (voice), ClientAudio
  * 3. Rendering: ClientGraphics, Environment, ClientCameraSystem
  * 4. Input: ClientInput (keyboard, mouse, touch)
  * 5. UI: ClientInterface (preferences, UI state)
@@ -63,7 +63,7 @@ import { ClientLoader } from "../systems/client/ClientLoader";
 import { ClientNetwork } from "../systems/client/ClientNetwork";
 import { ClientRuntime } from "../systems/client/ClientRuntime";
 import { ClientInterface } from "../systems/client/ClientInterface";
-import { MusicSystem } from "../systems/shared";
+// MusicSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { Stage } from "../systems/shared";
 
 import * as THREE from "../extras/three/three";
@@ -261,7 +261,8 @@ export function createClientWorld() {
 
   // Audio systems
   world.register("audio", ClientAudio); // 3D spatial audio
-  world.register("music", MusicSystem); // Background music player
+  // "music" registered by @hyperforge/hyperscape plugin onEnable
+  // (client-only branch). Migrated 2026-04-25.
 
   // Input and interaction
   world.register("controls", ClientInput); // Keyboard, mouse, touch input

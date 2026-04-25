@@ -7,7 +7,7 @@ export * from "./LODs";
 export * from "./Particles";
 export * from "./Stage";
 export * from "./Anchors";
-export * from "./MusicSystem";
+// MusicSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./Chat";
 export * from "./ActionRegistry";
 export { ParticleSystem } from "./ParticleSystem";

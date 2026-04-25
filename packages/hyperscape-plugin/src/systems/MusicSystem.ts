@@ -9,11 +9,21 @@
  * - Returns to previous track after combat with crossfade
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
-import type { ClientAudio } from "../../client/ClientAudio";
-import type { ClientLoader } from "../../client/ClientLoader";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/presentation/`
+// into `@hyperforge/hyperscape` (27th system migration). Client-only
+// system — uses Web Audio API + ClientAudio + ClientLoader, gated
+// behind `!ctx.world.isServer` in the plugin onEnable. 502 LOC.
+//
+// Pre-migration the typed `World.music?` property declaration in
+// shared was dead — never read by any consumer in shared/server/
+// client. Removed in the same diff.
+import {
+  type ClientAudio,
+  type ClientLoader,
+  EventType,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 interface MusicTrack {
   id: string;

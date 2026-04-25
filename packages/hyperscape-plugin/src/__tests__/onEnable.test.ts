@@ -109,6 +109,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "walkableDebug",
   "pathfindingDebug",
   "resource-tile-debug",
+  "music",
 ];
 
 describe("HyperscapePlugin.onEnable — registration contract", () => {

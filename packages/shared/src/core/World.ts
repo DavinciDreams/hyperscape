@@ -501,8 +501,9 @@ export class World extends EventEmitter {
   /** Audio system for spatial and ambient sound */
   audio?: ClientAudio;
 
-  /** Music system for background music playback */
-  music?: import("../systems/shared").MusicSystem;
+  // MusicSystem migrated to @hyperforge/hyperscape (2026-04-25). The
+  // typed `world.music?` property declaration here was scaffold —
+  // never read by any consumer in shared/server/client. Removed.
 
   /** Performance monitoring (CPU, memory, FPS) */
   monitor?: ClientMonitor & {

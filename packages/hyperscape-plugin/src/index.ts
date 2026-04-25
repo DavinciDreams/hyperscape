@@ -53,6 +53,7 @@ import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
+import { MusicSystem } from "./systems/MusicSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { MobNPCSpawnerSystem } from "./systems/MobNPCSpawnerSystem.js";
 import { NPCSystem } from "./systems/NPCSystem.js";
@@ -267,6 +268,9 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // Resource tile occupancy debug — opt-in via
         // world.resourceTileDebug.setEnabled(true).
         register("resource-tile-debug", ResourceTileDebugSystem);
+        // Background music with combat-aware crossfade. Web Audio
+        // API + ClientAudio + ClientLoader — strictly client-side.
+        register("music", MusicSystem);
       }
     },
     onDisable(_ctx) {
