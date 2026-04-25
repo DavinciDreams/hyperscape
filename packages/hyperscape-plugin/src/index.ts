@@ -42,6 +42,7 @@ import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
+import { ResourceTileDebugSystem } from "./systems/ResourceTileDebugSystem.js";
 import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
 import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
@@ -160,6 +161,9 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // Debug overlays — toggled via F5 panel keys (B / W).
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);
+        // Resource tile occupancy debug — opt-in via
+        // world.resourceTileDebug.setEnabled(true).
+        register("resource-tile-debug", ResourceTileDebugSystem);
       }
     },
     onDisable(_ctx) {

@@ -14,19 +14,22 @@
  * @see FOOTPRINT_SIZES for tile dimensions
  */
 
-import THREE from "../../extras/three/three";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (7th client-only system migration).
+// Pure debug overlay — disabled at registration in createClientWorld
+// before the migration; remains opt-in via world.resourceTileDebug
+// after. No gameplay impact.
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { SystemBase } from "../shared/infrastructure/SystemBase";
-import type { World } from "../../types";
-import {
-  TILE_SIZE,
-  worldToTile,
-  type TileCoord,
-} from "../shared/movement/TileSystem";
 import {
   FOOTPRINT_SIZES,
   type ResourceFootprint,
-} from "../../types/game/resource-processing-types";
+  SystemBase,
+  THREE,
+  TILE_SIZE,
+  type TileCoord,
+  type World,
+  worldToTile,
+} from "@hyperforge/shared";
 
 // Debug tile color - bright red for visibility
 const DEBUG_TILE_COLOR = 0xff0000; // Red

@@ -21,7 +21,7 @@ export { EquipmentVisualSystem } from "./EquipmentVisualSystem";
 export { XPDropSystem } from "./XPDropSystem";
 // ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 export { ZoneVisualsSystem } from "./ZoneVisualsSystem";
-export { ResourceTileDebugSystem } from "./ResourceTileDebugSystem";
+// ResourceTileDebugSystem migrated to @hyperforge/hyperscape (2026-04-24)
 export { DuelArenaVisualsSystem } from "./DuelArenaVisualsSystem";
 
 // New interaction system (replaces legacy InteractionSystem)
