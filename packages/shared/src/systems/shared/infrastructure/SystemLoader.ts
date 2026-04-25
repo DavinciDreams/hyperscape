@@ -104,7 +104,8 @@ import { EntityManager } from "..";
 import { EquipmentSystem } from "..";
 import { InventoryInteractionSystem } from "..";
 import { InventorySystem } from "..";
-import { ItemSpawnerSystem } from "..";
+// ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 // MobNPCSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 // StationSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -237,7 +238,8 @@ export interface Systems {
   mobNpcSpawner?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   stationSpawner?: unknown;
-  itemSpawner?: ItemSpawnerSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  itemSpawner?: unknown;
   // healthRegen: registered by @hyperforge/hyperscape plugin (2026-04-24)
   scripting?: ScriptingSystem;
 }
@@ -504,7 +506,8 @@ export async function registerSystems(world: World): Promise<void> {
   // onEnable cross-cutting branch (migrated 2026-04-25).
   // "station-spawner" registered by @hyperforge/hyperscape plugin
   // onEnable cross-cutting branch (migrated 2026-04-25).
-  world.register("item-spawner", ItemSpawnerSystem);
+  // "item-spawner" registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-25).
 
   // Zone Detection System - registered on server only (client registers in createClientWorld.ts)
   if (world.isServer) {
@@ -639,7 +642,7 @@ export async function registerSystems(world: World): Promise<void> {
   // DYNAMIC WORLD CONTENT SYSTEMS
   systems.mobNpcSpawner = getSystem(world, "mob-npc-spawner");
   systems.stationSpawner = getSystem(world, "station-spawner");
-  systems.itemSpawner = getSystem(world, "item-spawner") as ItemSpawnerSystem;
+  systems.itemSpawner = getSystem(world, "item-spawner");
 
   // Set up API for apps to access functionality
   setupAPI(world, systems);
@@ -944,12 +947,30 @@ function setupAPI(world: World, systems: Systems): void {
       (
         systems.mobNpcSpawner as { getMobStats?(): unknown } | undefined
       )?.getMobStats?.(),
-    getSpawnedItems: () => systems.itemSpawner?.getSpawnedItems(),
-    getItemCount: () => systems.itemSpawner?.getItemCount(),
+    // `systems.itemSpawner` is `unknown` since ItemSpawnerSystem
+    // migrated to @hyperforge/hyperscape; cast at each callsite.
+    getSpawnedItems: () =>
+      (
+        systems.itemSpawner as { getSpawnedItems?(): unknown } | undefined
+      )?.getSpawnedItems?.(),
+    getItemCount: () =>
+      (
+        systems.itemSpawner as { getItemCount?(): unknown } | undefined
+      )?.getItemCount?.(),
     getItemsByType: (itemType: string) =>
-      systems.itemSpawner?.getItemsByType(itemType),
-    getShopItems: () => systems.itemSpawner?.getShopItems(),
-    getChestItems: () => systems.itemSpawner?.getChestItems(),
+      (
+        systems.itemSpawner as
+          | { getItemsByType?(t: string): unknown }
+          | undefined
+      )?.getItemsByType?.(itemType),
+    getShopItems: () =>
+      (
+        systems.itemSpawner as { getShopItems?(): unknown } | undefined
+      )?.getShopItems?.(),
+    getChestItems: () =>
+      (
+        systems.itemSpawner as { getChestItems?(): unknown } | undefined
+      )?.getChestItems?.(),
     getItemStats: () => systems.itemSpawner?.getItemStats(),
 
     // Loot API

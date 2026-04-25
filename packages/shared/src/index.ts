@@ -1084,10 +1084,15 @@ export type {
   Inventory,
   PlayerEquipment,
   CombatStyle,
-  ItemRarity,
   CombatBonuses,
   EquipmentSlot,
 } from "./types/core/core";
+// ItemRarity is an enum — needs value export.
+export { ItemRarity } from "./types/entities/entities";
+
+// ItemSpawnerSystem stats type — needed by the migrated
+// ItemSpawnerSystem in @hyperforge/hyperscape.
+export type { ItemSpawnerStats } from "./types/entities";
 export type { Physics as PhysicsInterface } from "./types/index";
 // Re-export UI-related types used by UIView/UIText/UI
 export type {

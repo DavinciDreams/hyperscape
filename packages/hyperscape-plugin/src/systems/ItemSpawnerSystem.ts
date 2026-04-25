@@ -1,22 +1,38 @@
-import { SystemBase } from "../infrastructure/SystemBase";
-import { getSystem } from "../../../utils/SystemUtils";
-import { EventType } from "../../../types/events";
-import { GENERAL_STORES } from "../../../data/banks-stores";
-import { getItem } from "../../../data/items";
-import { ItemType } from "../../../types/index";
-import {
-  ItemRarity,
-  EntityType,
-  InteractionType,
-} from "../../../types/entities";
-import type { World } from "../../../types/index";
-import type { Item } from "../../../types/core/core";
-// NOTE: Import directly to avoid circular dependency through barrel file
-import type { EntityManager } from "./EntityManager";
-import { groundToTerrain } from "../../../utils/game/EntityUtils";
-import type { ItemSpawnerStats } from "../../../types/entities";
+/**
+ * ItemSpawnerSystem - Spawns ground items from world-areas.json
+ *
+ * Reads spawn definitions, creates ItemEntity instances via
+ * EntityManager. Handles initial spawn at world load + respawn
+ * cycles after pickup.
+ */
 
-// Define LootItem locally - Item with quantity
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/entities/`
+// into `@hyperforge/hyperscape` (24th system migration; 12th
+// cross-cutting server-side). Item spawner — places ground items
+// from manifest data. 562 LOC. No in-shared consumers reference
+// the class type — only SystemMap held the import.
+import {
+  EntityType,
+  EventType,
+  GENERAL_STORES,
+  getItem,
+  getSystemUtil as getSystem,
+  groundToTerrain,
+  InteractionType,
+  type Item,
+  ItemRarity,
+  type ItemSpawnerStats,
+  ItemType,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
+
+// EntityManager still lives in shared/. Loose-typed (matches the
+// pre-migration `getSystem<T> = any` default).
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type EntityManager = any;
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 type LootItem = Item & {
   quantity: number;
   rarity?: ItemRarity;

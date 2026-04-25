@@ -51,6 +51,7 @@ import { ProcessingSystem } from "./systems/ProcessingSystem.js";
 import { StationSpawnerSystem } from "./systems/StationSpawnerSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
+import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { MobNPCSpawnerSystem } from "./systems/MobNPCSpawnerSystem.js";
 import { NPCSystem } from "./systems/NPCSystem.js";
@@ -203,6 +204,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // death. Cross-cutting registration so client-side `getSystem
       // ("mob-npc-spawner")` lookups don't null in legacy paths.
       register("mob-npc-spawner", MobNPCSpawnerSystem);
+
+      // Item spawner — places ground items from world-areas.json.
+      // Same EntityManager-driven pattern as mob spawner.
+      register("item-spawner", ItemSpawnerSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

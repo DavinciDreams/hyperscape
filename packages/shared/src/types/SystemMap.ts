@@ -26,7 +26,7 @@ import type { EquipmentSystem } from "../systems/shared";
 // `systems.healthRegen = ...` lookup in SystemLoader.
 import type { InventoryInteractionSystem } from "../systems/shared";
 import type { InventorySystem } from "../systems/shared";
-import type { ItemSpawnerSystem } from "../systems/shared";
+// ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { LootSystem } from "../systems/shared";
 // MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // "mob-death" SystemMap entry removed — its only consumer was a
@@ -140,7 +140,7 @@ export interface SystemMap {
   quest: unknown;
   "mob-npc-spawner": unknown;
   "station-spawner": unknown;
-  "item-spawner": ItemSpawnerSystem;
+  "item-spawner": unknown;
   "zone-detection": ZoneDetectionSystem;
 
   // Terrain & world

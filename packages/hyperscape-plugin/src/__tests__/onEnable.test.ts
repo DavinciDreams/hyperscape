@@ -84,6 +84,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "npc",
   "station-spawner",
   "mob-npc-spawner",
+  "item-spawner",
   "tanning",
   "smithing",
   "smelting",
