@@ -26,6 +26,13 @@ export {
   type ItemIconRenderer,
 } from "./ItemIconContext";
 
+export {
+  ManifestRenderer,
+  type ManifestRendererProps,
+  type ManifestWidgetShell,
+  type ManifestWidgetShellProps,
+} from "./ManifestRenderer";
+
 // Re-export individual widget components + their prop interfaces so
 // test harnesses and Storybook-ish previews can mount them directly.
 export { ActionBarWidget } from "./widgets/ActionBarWidget";
