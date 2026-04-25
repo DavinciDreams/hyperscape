@@ -37,6 +37,7 @@ import { BankingSystem } from "./systems/BankingSystem.js";
 import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
 import { ClientTeleportEffectsSystem } from "./systems/ClientTeleportEffectsSystem.js";
 import { CoinPouchSystem } from "./systems/CoinPouchSystem.js";
+import { DialogueSystem } from "./systems/DialogueSystem.js";
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
@@ -160,6 +161,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Stores — OSRS general stores. Per-player open/close session
       // handler; reads catalog from `storesRegistry` + `GENERAL_STORES`.
       register("store", StoreSystem);
+
+      // NPC dialogue — tree processor + authored-dialogue runner.
+      // PIE + WorldDialogueConditionEvaluators (in shared) duck-type
+      // the surface they need.
+      register("dialogue", DialogueSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

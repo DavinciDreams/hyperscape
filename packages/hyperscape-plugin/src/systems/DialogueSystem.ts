@@ -8,22 +8,29 @@
  * - Sends dialogue packets to clients
  */
 
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { getNPCById } from "../../../data/npcs";
-import type {
-  NPCDialogueTree,
-  NPCDialogueNode,
-} from "../../../types/entities/npc-mob-types";
-import { isValidQuestId } from "../../../types/game/quest-types";
-import { DialogueRegistry } from "../../../dialogue/DialogueRegistry";
-import type {
-  DialogueContext,
-  DialoguePresentation,
-} from "../../../dialogue/DialogueRunner";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/interaction/`
+// into `@hyperforge/hyperscape` (17th system migration; 5th
+// cross-cutting server-side after CoinPouch + Prayer + Banking +
+// Store). OSRS-style NPC dialogue trees with effects (openBank,
+// startQuest, …) and authored-dialogue runner.
+//
+// In-shared consumers (`PIEEditorSession`,
+// `WorldDialogueConditionEvaluators`) duck-type the surface they
+// need via local `DialogueSystemLike` interfaces.
+import {
+  DialogueRegistry,
+  type DialogueContext,
+  type DialoguePresentation,
+  EventType,
+  getNPCById,
+  isValidQuestId,
+  LocalizationCatalog,
+  type NPCDialogueNode,
+  type NPCDialogueTree,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 import type { DialogueManifest } from "@hyperforge/manifest-schema";
-import type { LocalizationCatalog } from "../../../localization";
 
 interface DialogueState {
   npcId: string;

@@ -1034,10 +1034,10 @@ export { storesRegistry } from "./stores";
 // each system at runtime).
 // ─────────────────────────────────────────────────────────────────────
 
-// SkillsSystem `Skill` enum + DeathState + AttackType + ALL_WORLD_AREAS
+// SkillsSystem `Skill` enum + DeathState + ALL_WORLD_AREAS
+// (AttackType already re-exported earlier in this file)
 export { Skill } from "./systems/shared/character/SkillsSystem";
 export { DeathState } from "./types/entities/entities";
-export { AttackType } from "./types/core/core";
 // ALL_WORLD_AREAS + STARTER_TOWNS already re-exported above; just
 // add the missing helper.
 export { getRandomSpawnPoint } from "./data/world-areas";
@@ -1118,3 +1118,19 @@ export {
 
 // `toTHREEVector3` already re-exported earlier in this file; HealthBars
 // resolves through that.
+
+// DialogueSystem (cross-cutting server-side) — re-exported here for
+// the client bundle so the plugin's DialogueSystem can resolve its
+// imports when registered on the client world. (Mirrors index.ts.)
+export { DialogueRegistry } from "./dialogue/DialogueRegistry";
+export type {
+  DialogueContext,
+  DialoguePresentation,
+} from "./dialogue/DialogueRunner";
+export { LocalizationCatalog } from "./localization/LocalizationCatalog";
+export { getNPCById } from "./data/npcs";
+export type {
+  NPCDialogueTree,
+  NPCDialogueNode,
+} from "./types/entities/npc-mob-types";
+export { isValidQuestId } from "./types/game/quest-types";

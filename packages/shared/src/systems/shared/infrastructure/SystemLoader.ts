@@ -139,7 +139,8 @@ import { generateKillToken } from "../../../utils/game/KillTokenUtils";
 
 // World Content Systems
 import { NPCSystem } from "..";
-import { DialogueSystem } from "..";
+// DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 import { ScriptingSystem } from "../scripting/ScriptingSystem";
 
 // Client-only visual systems
@@ -444,7 +445,8 @@ export async function registerSystems(world: World): Promise<void> {
   }
 
   // Dialogue system - handles NPC dialogue trees
-  world.register("dialogue", DialogueSystem);
+  // "dialogue" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // Scripting system - visual scripting runtime (subscribes to trigger events,
   // auto-loads entity behaviorGraph on spawn, processes delayed continuations)

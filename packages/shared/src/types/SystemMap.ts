@@ -17,7 +17,7 @@ import type { AggroSystem } from "../systems/shared";
 // SystemMap entry below typed as `unknown` — same pattern as
 // HealthBars; consumers locally duck-type the surface they need.
 import type { CombatSystem } from "../systems/shared";
-import type { DialogueSystem } from "../systems/shared";
+// DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { EntityManager } from "../systems/shared";
 import type { EquipmentSystem } from "../systems/shared";
 // GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -136,7 +136,7 @@ export interface SystemMap {
 
   // World content
   npc: NPCSystem;
-  dialogue: DialogueSystem;
+  dialogue: unknown;
   quest: QuestSystem;
   "mob-npc-spawner": MobNPCSpawnerSystem;
   "station-spawner": StationSpawnerSystem;

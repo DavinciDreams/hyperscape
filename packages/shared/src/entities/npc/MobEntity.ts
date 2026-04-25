@@ -103,10 +103,23 @@ import {
 } from "../managers/AIStateMachine";
 import { generateKillToken } from "../../utils/game/KillTokenUtils";
 import { RespawnManager } from "../managers/RespawnManager";
-import type {
-  HealthBars as HealthBarsSystem,
-  HealthBarHandle,
-} from "../../systems/client/HealthBars";
+// HealthBars migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed local shapes (mirrors `nodes/HealthBar.ts` pattern).
+interface HealthBarHandle {
+  entityId: string;
+  move: (newMatrix: THREE.Matrix4) => void;
+  setHealth: (current: number, max: number) => void;
+  show: (timeoutMs?: number) => void;
+  hide: () => void;
+  destroy?: () => void;
+}
+interface HealthBarsSystem {
+  add: (
+    entityId: string,
+    health: number,
+    maxHealth: number,
+  ) => HealthBarHandle | null;
+}
 import {
   getCombatTimeoutTicks,
   getDefaultNpcLeashRange,

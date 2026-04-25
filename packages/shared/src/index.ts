@@ -859,6 +859,20 @@ export type { BankData } from "./types/game/inventory-types";
 export type { Store } from "./types/game/item-types";
 export { GENERAL_STORES } from "./data/banks-stores";
 export { storesRegistry } from "./stores";
+
+// DialogueSystem deps — needed by the migrated DialogueSystem in
+// @hyperforge/hyperscape.
+export { DialogueRegistry } from "./dialogue/DialogueRegistry";
+export type {
+  DialogueContext,
+  DialoguePresentation,
+} from "./dialogue/DialogueRunner";
+export { LocalizationCatalog } from "./localization/LocalizationCatalog";
+export { getNPCById } from "./data/npcs";
+export type {
+  NPCDialogueTree,
+  NPCDialogueNode,
+} from "./types/entities/npc-mob-types";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

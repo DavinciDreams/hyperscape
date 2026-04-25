@@ -118,7 +118,18 @@ import { hotReloadStores } from "../../data/banks-stores";
 import type { StoreData } from "../../types/core/core";
 import { gatheringResources } from "../../gathering/index";
 import type { LootSystem } from "../../systems/shared/economy/LootSystem";
-import type { DialogueSystem } from "../../systems/shared/interaction/DialogueSystem";
+// DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// PIE only calls 3 setter methods on it — duck-type locally.
+// (DialogueManifest is already imported below from manifest-schema.)
+import type { LocalizationCatalog as LocalizationCatalogType } from "../../localization/LocalizationCatalog";
+interface DialogueSystem {
+  setAuthoredDialogues(
+    manifest: DialogueManifest | null,
+    opts?: { preserveOpenSessionsByTreeId?: boolean },
+  ): void;
+  setAuthoredNpcDialogueBindings(bindings: Record<string, string> | null): void;
+  setLocalizationCatalog(catalog: LocalizationCatalogType | null): void;
+}
 import {
   createManagedDialogueConditionInstall,
   type ManagedDialogueConditionInstall,

@@ -26,7 +26,23 @@ import type { InventorySystem } from "../character/InventorySystem";
 import type { SkillsSystem } from "../character/SkillsSystem";
 import { SystemLogger } from "../../../utils/Logger";
 
-import type { DialogueSystem, DialogueConditionArgs } from "./DialogueSystem";
+// DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed local interfaces; this evaluator only calls
+// `registerConditionEvaluator` / `unregisterConditionEvaluator` and
+// references the `DialogueConditionArgs` shape (3 readonly fields).
+export interface DialogueConditionArgs {
+  readonly playerId: string;
+  readonly npcId: string;
+  readonly npcEntityId?: string;
+}
+type DialogueConditionEvaluator = (args: DialogueConditionArgs) => boolean;
+interface DialogueSystem {
+  registerConditionEvaluator(
+    name: string,
+    evaluator: DialogueConditionEvaluator,
+  ): void;
+  unregisterConditionEvaluator(name: string): void;
+}
 
 /**
  * Declarative binding: one entry installs a predicate with `name` on
