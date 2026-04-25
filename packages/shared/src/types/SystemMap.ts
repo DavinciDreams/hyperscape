@@ -36,7 +36,7 @@ import type { MobNPCSystem } from "../systems/shared";
 import type { NPCSystem } from "../systems/shared";
 import type { PlayerDeathSystem } from "../systems/shared";
 import type { PlayerSystem } from "../systems/shared";
-import type { PrayerSystem } from "../systems/shared";
+// PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { ProcessingSystem } from "../systems/shared";
 import type { QuestSystem } from "../systems/shared";
 import type { ResourceSystem } from "../systems/shared";
@@ -111,7 +111,7 @@ export interface SystemMap {
   inventory: InventorySystem;
   equipment: EquipmentSystem;
   skills: SkillsSystem;
-  prayer: PrayerSystem;
+  prayer: unknown;
   // "health-regen" registered by @hyperforge/hyperscape plugin onEnable
   aggro: AggroSystem;
 

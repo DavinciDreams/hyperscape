@@ -43,6 +43,7 @@ import { EquipmentVisualSystem } from "./systems/EquipmentVisualSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
+import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
@@ -142,6 +143,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // PLAYER_REGISTERED time, so plugin onEnable's later
       // registration order is fine.
       register("coin-pouch", CoinPouchSystem);
+
+      // Prayer — OSRS prayer points / drain / bonus calculations.
+      // CombatSystem (in shared) duck-types the surface it needs
+      // and looks up via getSystem at runtime. Self-gates internally
+      // on world.isServer for server-only branches.
+      register("prayer", PrayerSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

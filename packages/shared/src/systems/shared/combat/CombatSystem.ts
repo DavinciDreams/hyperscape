@@ -31,7 +31,14 @@ import {
   CombatStyle,
   PrayerCombatBonuses,
 } from "../../../utils/game/CombatCalculations";
-import { PrayerSystem } from "../character/PrayerSystem";
+// PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Duck-typed local interface; CombatSystem only calls
+// `getCombinedBonuses(playerId)` and passes the result to damage
+// handlers as opaque attacker/defender bonus blobs.
+import type { PrayerBonuses } from "../../../types/game/prayer-types";
+interface PrayerSystemLike {
+  getCombinedBonuses(playerId: string): Partial<PrayerBonuses>;
+}
 import { createEntityID } from "../../../utils/IdentifierUtils";
 // NOTE: Import directly to avoid circular dependency through barrel file
 import { EntityManager } from "../entities/EntityManager";
@@ -144,7 +151,7 @@ export class CombatSystem extends SystemBase {
   private playerSystem?: PlayerSystem; // Cached for auto-retaliate checks (hot path optimization)
 
   // OPTIMIZATION: Cache frequently used systems to avoid getSystem() lookups in hot paths
-  private prayerSystem?: PrayerSystem | null;
+  private prayerSystem?: PrayerSystemLike | null;
   private zoneDetectionSystem?: ZoneDetectionSystem | null;
   private _systemsCached = false;
 
@@ -479,7 +486,8 @@ export class CombatSystem extends SystemBase {
     this.playerSystem = this.world.getSystem<PlayerSystem>("player");
 
     // OPTIMIZATION: Cache other systems used in hot paths (damage calc, PvP zone checks)
-    this.prayerSystem = this.world.getSystem<PrayerSystem>("prayer") ?? null;
+    this.prayerSystem =
+      this.world.getSystem<PrayerSystemLike>("prayer") ?? null;
     this.zoneDetectionSystem =
       this.world.getSystem<ZoneDetectionSystem>("zone-detection") ?? null;
     this._systemsCached = true;
@@ -1863,7 +1871,9 @@ export class CombatSystem extends SystemBase {
         : (targetEquipStats?.defenseRanged ?? targetEquipStats?.ranged ?? 0);
 
     // Get prayer bonuses
-    const prayerSystem = this.world.getSystem("prayer") as PrayerSystem | null;
+    const prayerSystem = this.world.getSystem(
+      "prayer",
+    ) as PrayerSystemLike | null;
     const attackerPrayer = prayerSystem?.getCombinedBonuses(attackerId);
     const defenderPrayer =
       targetType === "player"
@@ -1971,7 +1981,9 @@ export class CombatSystem extends SystemBase {
         : (this.playerEquipmentStats.get(String(target.id))?.magicDefense ?? 0);
 
     // Get prayer bonuses
-    const prayerSystem = this.world.getSystem("prayer") as PrayerSystem | null;
+    const prayerSystem = this.world.getSystem(
+      "prayer",
+    ) as PrayerSystemLike | null;
     const attackerPrayer = prayerSystem?.getCombinedBonuses(attackerId);
     const defenderPrayer =
       targetType === "player"

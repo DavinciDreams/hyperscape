@@ -664,7 +664,7 @@ export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
 export { CombatSystem } from "./systems/shared/combat";
 export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
-export { PrayerSystem } from "./systems/shared/character/PrayerSystem";
+// PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // `Player` type already exported from the shared types block above
 // (line ~157) — no duplicate export needed here.
 export { LootSystem } from "./systems/shared/economy/LootSystem";
@@ -836,6 +836,19 @@ export { EQUIPMENT_SLOT_NAMES } from "./constants/EquipmentConstants";
 // the migrated CoinPouchSystem in @hyperforge/hyperscape.
 export { toPlayerID } from "./utils/IdentifierUtils";
 export type { DatabaseSystem } from "./types/systems/system-interfaces";
+
+// Prayer-event-payload type guards + level/points clampers — needed
+// by the migrated PrayerSystem in @hyperforge/hyperscape.
+export {
+  clampPrayerLevel,
+  clampPrayerPoints,
+  isAltarPrayPayload,
+  isPlayerCleanupPayload,
+  isPlayerRegisteredPayload,
+  isPrayerToggleEventPayload,
+  isValidRestoreAmount,
+} from "./types/game/prayer-types";
+export type { PlayerJoinedPayload } from "./types/events/event-payloads";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

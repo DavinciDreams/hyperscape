@@ -15,7 +15,14 @@ import type { CombatAnimationManager } from "../CombatAnimationManager";
 import type { CombatRotationManager } from "../CombatRotationManager";
 import type { ProjectileService } from "../ProjectileService";
 import type { PlayerSystem } from "../..";
-import type { PrayerSystem } from "../../character/PrayerSystem";
+// PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// AttackContext only carries the reference; downstream handlers may
+// call `getCombinedBonuses(playerId)`. Local duck-typed shape avoids
+// a forward dep on the plugin.
+import type { PrayerBonuses } from "../../../../types/game/prayer-types";
+interface PrayerSystemLike {
+  getCombinedBonuses(playerId: string): Partial<PrayerBonuses>;
+}
 import type { EquipmentSystem } from "../../character/EquipmentSystem";
 import type { InventorySystem } from "../../character/InventorySystem";
 import type { TerrainSystem } from "../../world/TerrainSystem";
@@ -83,7 +90,7 @@ export interface CombatAttackContext {
 
   // Cached systems
   playerSystem?: PlayerSystem;
-  prayerSystem?: PrayerSystem | null;
+  prayerSystem?: PrayerSystemLike | null;
   equipmentSystem?: EquipmentSystem;
   inventorySystem?: InventorySystem;
   terrainSystem?: TerrainSystem;

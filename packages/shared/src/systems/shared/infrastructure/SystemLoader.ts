@@ -161,7 +161,8 @@ import { SkillsSystem } from "..";
 // RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)
-import { PrayerSystem } from "..";
+// PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 import { QuestSystem } from "..";
 
 /** Minimal contract for the client-side movement system (physics-based in PlayerLocal) */
@@ -343,7 +344,8 @@ export async function registerSystems(world: World): Promise<void> {
   world.register("skills", SkillsSystem);
 
   // 12b. Prayer system - Prayer mechanics (depends on player, skills systems)
-  world.register("prayer", PrayerSystem);
+  // "prayer" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // 12a. Health regeneration system - Passive health regen (depends on combat system)
   // Server-only: handles RuneScape-style out-of-combat health regeneration

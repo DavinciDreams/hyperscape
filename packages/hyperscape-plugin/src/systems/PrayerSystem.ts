@@ -17,41 +17,45 @@
  * @see {@link SkillsSystem} for prayer XP and leveling
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
-import { Logger } from "../../../utils/Logger";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/character/`
+// into `@hyperforge/hyperscape` (14th migration; 2nd cross-cutting
+// server-side system after CoinPouchSystem). OSRS prayer points +
+// drain + bonus calculations + altar interactions. Self-gates
+// internally on `world.isServer` for server-only branches (drain
+// timer, persistence) and client-only branches (UI state sync).
+//
+// In-shared consumers (`CombatSystem`, `AttackContext`) duck-type the
+// surface they need via a local `PrayerSystemLike` interface so
+// shared doesn't need a forward dep on the plugin.
 import {
-  createPlayerID,
-  isValidPlayerID,
-  toPlayerID,
-} from "../../../utils/IdentifierUtils";
-import type { PlayerID } from "../../../types/core/identifiers";
-import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-import {
-  prayerDataProvider,
-  type PrayerDefinition,
-} from "../../../data/PrayerDataProvider";
-import type { PlayerJoinedPayload } from "../../../types/events";
-import {
-  type PrayerState,
-  isValidPrayerId,
-  MAX_ACTIVE_PRAYERS,
-  PRAYER_TOGGLE_COOLDOWN_MS,
-  PRAYER_TOGGLE_RATE_LIMIT,
-  getPlayerPrayerLevel,
-  getPlayerPrayerBonus,
-  type PlayerWithPrayerStats,
-  // Type guards for validation
-  isPlayerRegisteredPayload,
-  isPlayerCleanupPayload,
-  isPrayerToggleEventPayload,
-  isAltarPrayPayload,
-  // Bounds checking
   clampPrayerLevel,
   clampPrayerPoints,
+  createPlayerID,
+  type DatabaseSystem,
+  EventType,
+  getPlayerPrayerBonus,
+  getPlayerPrayerLevel,
+  isAltarPrayPayload,
+  isPlayerCleanupPayload,
+  isPlayerRegisteredPayload,
+  isPrayerToggleEventPayload,
+  isValidPlayerID,
+  isValidPrayerId,
   isValidRestoreAmount,
-} from "../../../types/game/prayer-types";
+  Logger,
+  MAX_ACTIVE_PRAYERS,
+  type PlayerID,
+  type PlayerJoinedPayload,
+  type PlayerWithPrayerStats,
+  type PrayerDefinition,
+  prayerDataProvider,
+  type PrayerState,
+  PRAYER_TOGGLE_COOLDOWN_MS,
+  PRAYER_TOGGLE_RATE_LIMIT,
+  SystemBase,
+  toPlayerID,
+  type World,
+} from "@hyperforge/shared";
 
 /**
  * Mutable prayer bonuses buffer for hot-path calculations
