@@ -33,6 +33,7 @@ import type {
 } from "@hyperforge/gameplay-framework";
 import type { World } from "@hyperforge/shared";
 
+import { BankingSystem } from "./systems/BankingSystem.js";
 import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
 import { ClientTeleportEffectsSystem } from "./systems/ClientTeleportEffectsSystem.js";
 import { CoinPouchSystem } from "./systems/CoinPouchSystem.js";
@@ -149,6 +150,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // and looks up via getSystem at runtime. Self-gates internally
       // on world.isServer for server-only branches.
       register("prayer", PrayerSystem);
+
+      // Banking — one bank per starter town, unlimited slots,
+      // drag-to-store interface. No in-shared callers reference the
+      // class type; SystemMap downgraded to `unknown`.
+      register("banking", BankingSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

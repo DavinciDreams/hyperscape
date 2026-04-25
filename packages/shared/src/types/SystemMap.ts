@@ -12,7 +12,7 @@
 
 import type { ActionRegistry } from "../systems/shared";
 import type { AggroSystem } from "../systems/shared";
-import type { BankingSystem } from "../systems/shared";
+// BankingSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown` — same pattern as
 // HealthBars; consumers locally duck-type the surface they need.
@@ -116,7 +116,7 @@ export interface SystemMap {
   aggro: AggroSystem;
 
   // Economy
-  banking: BankingSystem;
+  banking: unknown;
   store: StoreSystem;
   resource: ResourceSystem;
   "ground-items": GroundItemSystem;

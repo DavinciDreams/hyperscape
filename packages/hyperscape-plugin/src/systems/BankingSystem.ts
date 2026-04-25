@@ -1,19 +1,26 @@
-import type { World } from "../../../types";
-import { EventType } from "../../../types/events";
-import type {
-  BankDepositEvent,
-  BankWithdrawEvent,
-} from "../../../types/events";
-import { getMaxBankSlots } from "../../../data/live/banking-live";
-import { BankData, InventoryItem } from "../../../types/core/core";
-import { BankID, PlayerID } from "../../../types/core/identifiers";
-import { calculateDistance } from "../../../utils/game/EntityUtils";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/economy/`
+// into `@hyperforge/hyperscape` (15th migration; 3rd cross-cutting
+// server-side system after CoinPouch + Prayer). OSRS-style banking:
+// one bank per starter town, unlimited slots, drag-to-store interface.
+//
+// In-shared consumers cleaned up via SystemMap downgrade — no
+// direct callers reference the BankingSystem class type today.
 import {
+  type BankData,
+  type BankDepositEvent,
+  type BankID,
+  type BankWithdrawEvent,
+  calculateDistance,
   createBankID,
   createItemID,
   createPlayerID,
-} from "../../../utils/IdentifierUtils";
-import { SystemBase } from "../infrastructure/SystemBase";
+  EventType,
+  getMaxBankSlots,
+  type InventoryItem,
+  type PlayerID,
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 /**
  * Banking System

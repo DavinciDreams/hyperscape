@@ -92,7 +92,8 @@ function isTruthy(value: string | undefined): boolean {
 
 // Import systems
 import { AggroSystem } from "..";
-import { BankingSystem } from "..";
+// BankingSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 import { CombatSystem } from "..";
@@ -365,7 +366,8 @@ export async function registerSystems(world: World): Promise<void> {
   // These systems provide specific game features
 
   // 13. Banking system - Item storage (depends on inventory system)
-  world.register("banking", BankingSystem);
+  // "banking" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // 14. Store system - Item trading (depends on inventory system)
   world.register("store", StoreSystem);

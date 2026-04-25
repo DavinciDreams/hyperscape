@@ -849,6 +849,10 @@ export {
   isValidRestoreAmount,
 } from "./types/game/prayer-types";
 export type { PlayerJoinedPayload } from "./types/events/event-payloads";
+
+// BankData — needed by the migrated BankingSystem in
+// @hyperforge/hyperscape.
+export type { BankData } from "./types/game/inventory-types";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

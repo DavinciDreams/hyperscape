@@ -75,6 +75,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "gravestone-loot",
   "coin-pouch",
   "prayer",
+  "banking",
   "tanning",
   "smithing",
   "smelting",
