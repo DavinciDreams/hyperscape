@@ -6,7 +6,7 @@
  */
 
 export * from "./InventoryInteractionSystem";
-export * from "./ProcessingSystem";
+// ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./Physics";
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./WorldDialogueConditionEvaluators";

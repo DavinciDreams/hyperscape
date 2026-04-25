@@ -47,6 +47,7 @@ import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
+import { ProcessingSystem } from "./systems/ProcessingSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
@@ -179,6 +180,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // region spatial index. Only MobEntity touches it directly (via
       // a duck-typed `getPlayersInNearbyRegions` call).
       register("aggro", AggroSystem);
+
+      // Processing — firemaking + cooking interaction handler.
+      // Per-skill processing systems already registered above.
+      register("processing", ProcessingSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

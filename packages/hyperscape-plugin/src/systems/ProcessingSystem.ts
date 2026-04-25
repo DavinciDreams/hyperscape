@@ -1,38 +1,45 @@
-import THREE from "../../../extras/three/three";
-import { MeshBasicNodeMaterial } from "three/webgpu";
-import { ITEM_IDS } from "../../../constants/GameConstants";
-import { Fire, ProcessingAction } from "../../../types/core/core";
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import { calculateDistance2D } from "../../../utils/game/EntityUtils";
-import { EventType } from "../../../types/events";
-import {
-  worldToTile,
-  tileToWorld,
-  type TileCoord,
-} from "../../shared/movement/TileSystem";
-
 /**
  * Processing System
- * Implements firemaking and cooking per GDD specifications:
  *
- * FIREMAKING:
+ * Firemaking + cooking interactions:
+ *
+ * Firemaking:
  * - Use tinderbox on logs in inventory
- * - Creates fire object in world at player position
+ * - Creates a fire object in the world at the player's position
  * - Grants firemaking XP
- * - Fire lasts for limited time
+ * - Fire lasts for a limited time
  *
- * COOKING:
- * - Use raw fish on fire object
+ * Cooking:
+ * - Use raw fish on a fire object
  * - Converts raw fish to cooked fish
  * - Grants cooking XP
  * - Can burn food at low levels
  */
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../types/index";
-import { getTargetValidator } from "./TargetValidator";
-import { modelCache } from "../../../utils/rendering/ModelCache";
-import type { ParticleSystem } from "../presentation/ParticleSystem";
-import type { GroundItemSystem } from "../economy/GroundItemSystem";
+
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/interaction/`
+// into `@hyperforge/hyperscape` (20th system migration; 8th
+// cross-cutting server-side). Tile-based firemaking + cooking
+// interaction handler. 1568 LOC. No in-shared consumers reference
+// the class type directly — only the SystemMap entry was the import.
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  calculateDistance2D,
+  EventType,
+  type Fire,
+  getTargetValidator,
+  type GroundItemSystem,
+  ITEM_IDS,
+  modelCache,
+  ParticleSystem,
+  processingDataProvider,
+  type ProcessingAction,
+  SystemBase,
+  THREE,
+  tileToWorld,
+  type TileCoord,
+  type World,
+  worldToTile,
+} from "@hyperforge/shared";
 
 /**
  * Debug logging flag for processing system.
@@ -1135,6 +1142,12 @@ export class ProcessingSystem extends SystemBase {
         this.createPlaceholderFireMesh(fire);
         return;
       }
+    }
+
+    // Guard: model load may have failed silently (returned to caller
+    // via createPlaceholderFireMesh inside the catch).
+    if (!model) {
+      return;
     }
 
     // Guard: fire may have been extinguished during async model load

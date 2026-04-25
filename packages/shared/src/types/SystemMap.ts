@@ -37,7 +37,7 @@ import type { NPCSystem } from "../systems/shared";
 import type { PlayerDeathSystem } from "../systems/shared";
 import type { PlayerSystem } from "../systems/shared";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { ProcessingSystem } from "../systems/shared";
+// ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { ResourceSystem } from "../systems/shared";
 import type { SkillsSystem } from "../systems/shared";
@@ -123,7 +123,7 @@ export interface SystemMap {
   loot: LootSystem;
 
   // Processing / crafting
-  processing: ProcessingSystem;
+  processing: unknown;
   // The five OSRS skill processing systems are all registered by
   // the @hyperforge/hyperscape plugin onEnable (2026-04-24):
   //   "smelting", "smithing", "crafting", "fletching",

@@ -1135,6 +1135,14 @@ export type {
 } from "./types/entities/npc-mob-types";
 export { isValidQuestId } from "./types/game/quest-types";
 
+// ProcessingSystem deps — re-exported for the client bundle.
+export { ITEM_IDS } from "./constants/GameConstants";
+export type { ProcessingAction } from "./types/game/resource-processing-types";
+export { getTargetValidator } from "./systems/shared/interaction/TargetValidator";
+export { modelCache } from "./utils/rendering/ModelCache";
+export { ParticleSystem } from "./systems/shared/presentation/ParticleSystem";
+// (calculateDistance2D + GroundItemSystem are already in client barrel)
+
 // AggroSystem deps — re-exported for the client bundle.
 export type {
   AggroTarget,

@@ -110,7 +110,8 @@ import { StationSpawnerSystem } from "..";
 import { MobNPCSystem } from "..";
 import { PersistenceSystem } from "../../server/PersistenceSystem";
 import { PlayerSystem } from "..";
-import { ProcessingSystem } from "..";
+// ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// — registered by the plugin's onEnable cross-cutting branch.
 import { ResourceSystem } from "..";
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
@@ -217,7 +218,8 @@ export interface Systems {
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   aggro?: unknown;
   equipment?: EquipmentSystem;
-  processing?: ProcessingSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  processing?: unknown;
   entityManager?: EntityManager;
   playerDeath?: PlayerDeathSystem;
   // mobDeath: registered by @hyperforge/hyperscape plugin (2026-04-24)
@@ -406,7 +408,8 @@ export async function registerSystems(world: World): Promise<void> {
   world.register("resource", ResourceSystem);
 
   // 18. Processing system - Crafting and item processing (depends on inventory system)
-  world.register("processing", ProcessingSystem);
+  // "processing" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // (Slots 18a–18f — the six OSRS skill processing systems —
   //  Smelting / Smithing / Crafting / Fletching / Tanning /
@@ -517,7 +520,7 @@ export async function registerSystems(world: World): Promise<void> {
 
   systems.aggro = getSystem(world, "aggro");
   systems.equipment = getSystem(world, "equipment") as EquipmentSystem;
-  systems.processing = getSystem(world, "processing") as ProcessingSystem;
+  systems.processing = getSystem(world, "processing");
   // healthRegen registration moved to @hyperforge/hyperscape plugin —
   // no SystemReferences slot needed (no consumer reads it today).
   systems.playerDeath = getSystem(world, "player-death") as PlayerDeathSystem;
@@ -975,13 +978,31 @@ function setupAPI(world: World, systems: Systems): void {
       systems.inventoryInteraction?.getSystemInfo()?.dropTargetsCount || 0,
 
     // Processing API
-    getActiveFires: () => systems.processing?.getActiveFires(),
+    // Processing API — `systems.processing` is `unknown` since
+    // ProcessingSystem migrated to @hyperforge/hyperscape; cast at
+    // each callsite to the surface this adapter calls.
+    getActiveFires: () =>
+      (
+        systems.processing as { getActiveFires?(): unknown } | undefined
+      )?.getActiveFires?.(),
     getPlayerFires: (playerId: string) =>
-      systems.processing?.getPlayerFires(playerId),
+      (
+        systems.processing as
+          | { getPlayerFires?(id: string): unknown }
+          | undefined
+      )?.getPlayerFires?.(playerId),
     isPlayerProcessing: (playerId: string) =>
-      systems.processing?.isPlayerProcessing(playerId),
+      (
+        systems.processing as
+          | { isPlayerProcessing?(id: string): boolean }
+          | undefined
+      )?.isPlayerProcessing?.(playerId),
     getFiresInRange: (position: Position3D, range?: number) =>
-      systems.processing?.getFiresInRange(position, range || 5),
+      (
+        systems.processing as
+          | { getFiresInRange?(p: Position3D, r: number): unknown }
+          | undefined
+      )?.getFiresInRange?.(position, range || 5),
 
     // Attack Style API (now handled by PlayerSystem)
     getPlayerAttackStyle: (playerId: string) =>

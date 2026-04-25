@@ -874,6 +874,15 @@ export type {
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
 
+// ProcessingSystem deps — needed by the migrated ProcessingSystem
+// in @hyperforge/hyperscape.
+export { ITEM_IDS } from "./constants/GameConstants";
+export type { ProcessingAction } from "./types/game/resource-processing-types";
+// (calculateDistance2D already exported above)
+export { getTargetValidator } from "./systems/shared/interaction/TargetValidator";
+export { modelCache } from "./utils/rendering/ModelCache";
+export { ParticleSystem } from "./systems/shared/presentation/ParticleSystem";
+
 // AggroSystem deps — needed by the migrated AggroSystem in
 // @hyperforge/hyperscape.
 export type {

@@ -80,6 +80,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "dialogue",
   "quest",
   "aggro",
+  "processing",
   "tanning",
   "smithing",
   "smelting",
