@@ -83,7 +83,7 @@ interface HealthBarHandle {
   setHealth: (current: number, max: number) => void;
   show: (timeoutMs?: number) => void;
   hide: () => void;
-  destroy?: () => void;
+  destroy: () => void;
 }
 interface HealthBarsSystem {
   add: (
