@@ -1205,6 +1205,16 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralTownLandmarksSystem (editor-only) — re-exported here
+// for the client bundle so the migrated plugin
+// ProceduralTownLandmarks resolves its imports. (`applySkyFog`
+// resolves via existing earlier export.)
+export type { TownLandmarkType } from "./types/world/world-types";
+export {
+  clearLamppostLightTexture,
+  setLamppostLightTextureData,
+} from "./systems/shared/world/LamppostLightMask";
+
 // ProceduralFlowerSystem (editor-only) — re-exported here for the
 // client bundle so the migrated plugin ProceduralFlowerSystem
 // resolves its imports. (Mirrors index.ts. `getNoiseTexture` /

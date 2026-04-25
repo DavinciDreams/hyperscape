@@ -943,6 +943,17 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralTownLandmarksSystem deps — needed by the migrated
+// ProceduralTownLandmarks in @hyperforge/hyperscape. TownSystem
+// and getGlobalTerrainComputeContext stay in shared so the
+// migrated class continues to consume them through the barrel.
+// (`applySkyFog` is already exported earlier in this file.)
+export type { TownLandmarkType } from "./types/world/world-types";
+export {
+  clearLamppostLightTexture,
+  setLamppostLightTextureData,
+} from "./systems/shared/world/LamppostLightMask";
+
 // ProceduralFlowerSystem deps — needed by the migrated
 // ProceduralFlowerSystem in @hyperforge/hyperscape. Vegetation /
 // TSL helpers live in shared because ProceduralGrass + Vegetation

@@ -13,26 +13,28 @@
  * @module ProceduralTownLandmarks
  */
 
-import THREE, {
-  MeshStandardNodeMaterial,
-  float,
-  mul,
-  uniform,
-  vec3,
-} from "../../../extras/three/three";
-import { System } from "../infrastructure/System";
-import type { SystemDependencies } from "../infrastructure/System";
-import type { World } from "../../../types";
-import type { TownLandmarkType } from "../../../types/world/world-types";
-import { Logger } from "../../../utils/Logger";
-import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { TownSystem } from "./TownSystem";
-import { getGlobalTerrainComputeContext } from "../../../utils/compute";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (37th system migration). 1378 LOC.
+// Editor-only registration in `createEditorWorld` removed; the
+// `createClientWorld` register call was already commented out.
+// TownSystem stays in shared so the migrated class continues to
+// consume it (concrete type) through the barrel.
 import {
+  applySkyFog,
   clearLamppostLightTexture,
+  getGlobalTerrainComputeContext,
+  Logger,
   setLamppostLightTextureData,
-} from "./LamppostLightMask";
-import { applySkyFog } from "./FogConfig";
+  SystemClass as System,
+  type SystemDependencies,
+  THREE,
+  type TownLandmarkType,
+  type TownSystem,
+  type World,
+} from "@hyperforge/shared";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import { float, mul, uniform, vec3 } from "three/tsl";
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 // ============================================================================
 // CONFIGURATION

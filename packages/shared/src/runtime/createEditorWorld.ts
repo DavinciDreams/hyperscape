@@ -30,7 +30,10 @@ import { ProceduralGrassSystem } from "../systems/shared/world/ProceduralGrass";
 // plugin or import ProceduralFlowerSystem from
 // @hyperforge/hyperscape and register it manually.
 import { BuildingRenderingSystem } from "../systems/shared/world/BuildingRenderingSystem";
-import { ProceduralTownLandmarksSystem } from "../systems/shared/world/ProceduralTownLandmarks";
+// ProceduralTownLandmarksSystem migrated to @hyperforge/hyperscape
+// (2026-04-25). Editor mode no longer registers it by default —
+// load the plugin or import it from @hyperforge/hyperscape and
+// register manually to use it here.
 
 // Editor-specific systems
 import { EditorCameraSystem } from "../systems/editor/EditorCameraSystem";
@@ -109,8 +112,10 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   if (cfg.enableBuildings)
     world.register("building-rendering", BuildingRenderingSystem);
   if (cfg.enableTownLandmarks)
-    world.register("town-landmarks", ProceduralTownLandmarksSystem);
-  if (cfg.enableGrass) world.register("grass", ProceduralGrassSystem);
+    if (cfg.enableGrass)
+      // "town-landmarks" migrated to @hyperforge/hyperscape
+      // (2026-04-25). Editor mode no longer registers it by default.
+      world.register("grass", ProceduralGrassSystem);
   // "flowers" migrated to @hyperforge/hyperscape (2026-04-25). Editor
   // mode no longer registers it by default.
 

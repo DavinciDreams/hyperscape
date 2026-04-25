@@ -78,7 +78,7 @@ import { ProceduralGrassSystem } from "../systems/shared";
 // ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 import { BuildingRenderingSystem } from "../systems/shared";
-import { ProceduralTownLandmarksSystem } from "../systems/shared";
+// ProceduralTownLandmarksSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { Physics } from "../systems/shared";
 
 // Tree cache pre-warming for faster world loading
@@ -339,7 +339,8 @@ export function createClientWorld() {
   // Procedural town landmarks (fences, lampposts, wells, signposts)
   // Must be registered after towns and roads as it depends on both
   // TEMPORARILY DISABLED
-  // world.register("town-landmarks", ProceduralTownLandmarksSystem);
+  // ProceduralTownLandmarksSystem migrated 2026-04-25; was already
+  // commented out here.
 
   // ============================================================================
   // VISUAL EFFECTS SYSTEMS
