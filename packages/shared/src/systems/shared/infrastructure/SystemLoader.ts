@@ -124,7 +124,10 @@ import { ResourceSystem } from "..";
 // The barrel file (systems/client/index.ts) exports ClientNetwork which imports PlayerLocal
 // which extends Entity, causing a circular dependency during module initialization
 import { InteractionRouter } from "../../client/interaction";
-import { LootSystem } from "..";
+// LootSystem migrated to @hyperforge/hyperscape (2026-04-25). The
+// surface SystemLoader needs (3 setters used during boot-time
+// dispatcher install + manifest seeding) is duck-typed locally
+// below so we don't depend on the migrated class.
 // GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
 import { GroundItemSystem } from "../economy/GroundItemSystem";
 import { createDropConditionDispatcher } from "../economy/DropConditionDispatcher";
@@ -229,7 +232,10 @@ export interface Systems {
   // mobDeath: registered by @hyperforge/hyperscape plugin (2026-04-24)
   inventoryInteraction?: InventoryInteractionSystem;
   groundItems?: GroundItemSystem;
-  loot?: LootSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`. Boot-time
+  // dispatcher install + manifest seed below uses a local duck-type
+  // for the surface SystemLoader actually touches.
+  loot?: unknown;
   cameraSystem?: CameraSystemInterface;
   movementSystem?: MovementSystemLike;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
@@ -475,8 +481,8 @@ export async function registerSystems(world: World): Promise<void> {
   // Must be registered before systems that depend on it
   world.register("ground-items", GroundItemSystem);
 
-  // New MMO-style Systems
-  world.register("loot", LootSystem);
+  // "loot" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-25).
 
   // World Content Systems (server only for world management)
   if (world.isServer) {
@@ -550,19 +556,34 @@ export async function registerSystems(world: World): Promise<void> {
   // Ground Item System
   systems.groundItems = getSystem(world, "ground-items") as GroundItemSystem;
 
-  // New MMO-style Systems
-  systems.loot = getSystem(world, "loot") as LootSystem;
+  // LootSystem migrated to @hyperforge/hyperscape (2026-04-25). The
+  // setter surface SystemLoader uses for boot-time dispatcher install
+  // + manifest seeding is duck-typed inline so we don't import the
+  // migrated class. Handlers re-resolve `getSystem` on every call,
+  // so QuestSystem / InventorySystem / SkillsSystem registered later
+  // in init still get picked up without re-installing.
+  systems.loot = getSystem(world, "loot");
+  const lootSystem = systems.loot as
+    | {
+        setDropConditionEvaluator(
+          evaluator:
+            | ReturnType<typeof createDropConditionDispatcher>["evaluate"]
+            | null,
+        ): void;
+        setAuthoredLootTables(manifest: unknown): void;
+        setMobLootTableMappings(
+          mappings: ReadonlyMap<string, string> | Record<string, string>,
+        ): void;
+      }
+    | undefined;
 
   // Wire pluggable DropCondition evaluator to the live world. The
   // dispatcher is server-authoritative — loot rolls happen on the
-  // server only, so the install is gated on `isServer`. Handlers
-  // re-resolve `getSystem` on every call, so QuestSystem /
-  // InventorySystem / SkillsSystem registered later in init still
-  // get picked up without re-installing.
-  if (world.isServer && systems.loot) {
+  // server only, so the install is gated on `isServer`.
+  if (world.isServer && lootSystem) {
     const dropConditionDispatcher = createDropConditionDispatcher();
     installWorldDropConditions(dropConditionDispatcher, world);
-    systems.loot.setDropConditionEvaluator(dropConditionDispatcher.evaluate);
+    lootSystem.setDropConditionEvaluator(dropConditionDispatcher.evaluate);
 
     // Boot-time seed: install any authored loot-tables manifest that
     // DataManager already loaded from disk, plus the authored
@@ -571,10 +592,10 @@ export async function registerSystems(world: World): Promise<void> {
     // for every mob type. Subsequent edits flow through
     // `PIEEditorSession.updateManifests` → live `LootSystem` write.
     if (lootTablesProvider.isLoaded()) {
-      systems.loot.setAuthoredLootTables(lootTablesProvider.getManifest());
+      lootSystem.setAuthoredLootTables(lootTablesProvider.getManifest());
     }
     if (mobLootTableMappingsProvider.isLoaded()) {
-      systems.loot.setMobLootTableMappings(
+      lootSystem.setMobLootTableMappings(
         mobLootTableMappingsProvider.getMappings(),
       );
     }
@@ -971,7 +992,10 @@ function setupAPI(world: World, systems: Systems): void {
       (
         systems.itemSpawner as { getChestItems?(): unknown } | undefined
       )?.getChestItems?.(),
-    getItemStats: () => systems.itemSpawner?.getItemStats(),
+    getItemStats: () =>
+      (
+        systems.itemSpawner as { getItemStats?(): unknown } | undefined
+      )?.getItemStats?.(),
 
     // Loot API
     spawnLoot: (_mobType: string, _position: Position3D, _killerId?: string) =>

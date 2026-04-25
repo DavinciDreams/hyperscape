@@ -117,7 +117,16 @@ import { hotReloadNpcSpawnConstants } from "../../data/npcs";
 import { hotReloadStores } from "../../data/banks-stores";
 import type { StoreData } from "../../types/core/core";
 import { gatheringResources } from "../../gathering/index";
-import type { LootSystem } from "../../systems/shared/economy/LootSystem";
+// LootSystem migrated to @hyperforge/hyperscape (2026-04-25). PIE
+// only calls 2 setter methods on it (`setAuthoredLootTables` and
+// `setMobLootTableMappings`) — duck-type locally so we don't depend
+// on the migrated class.
+interface LootSystem {
+  setAuthoredLootTables(manifest: LootTablesManifest | null): void;
+  setMobLootTableMappings(
+    mappings: ReadonlyMap<string, string> | Record<string, string>,
+  ): void;
+}
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // PIE only calls 3 setter methods on it — duck-type locally.
 // (DialogueManifest is already imported below from manifest-schema.)
@@ -1511,7 +1520,8 @@ export class PIEEditorSession {
       // dead mob's `mobType`, otherwise falls through to the legacy
       // `LootTableService` path.
       const lootSystem =
-        this._server?.world.getSystem<LootSystem>("loot") ?? null;
+        (this._server?.world.getSystem("loot") as LootSystem | undefined) ??
+        null;
       if (lootSystem) {
         if (partial.lootTables !== undefined) {
           lootSystem.setAuthoredLootTables(partial.lootTables);

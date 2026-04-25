@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 import type { World } from "../../../../types/index";
-import type { LootDropContext } from "../LootSystem";
+import type { LootDropContext } from "../../../../types/loot-drops";
 import {
   createQuestActiveHandler,
   createQuestCompletedHandler,

@@ -52,6 +52,7 @@ import { StationSpawnerSystem } from "./systems/StationSpawnerSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { ItemSpawnerSystem } from "./systems/ItemSpawnerSystem.js";
+import { LootSystem } from "./systems/LootSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { MobNPCSpawnerSystem } from "./systems/MobNPCSpawnerSystem.js";
 import { NPCSystem } from "./systems/NPCSystem.js";
@@ -208,6 +209,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // Item spawner — places ground items from world-areas.json.
       // Same EntityManager-driven pattern as mob spawner.
       register("item-spawner", ItemSpawnerSystem);
+
+      // Loot system — drops mob loot to the ground via the shared
+      // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
+      // + authored manifest seed remains in `SystemLoader.init()`.
+      register("loot", LootSystem);
 
       // OSRS skill processing systems — all self-gate their init()
       // on world.isServer. Safe to register on both sides.

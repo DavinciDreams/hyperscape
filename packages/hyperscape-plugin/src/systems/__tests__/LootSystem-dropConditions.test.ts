@@ -20,14 +20,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { LootTablesManifest } from "@hyperforge/manifest-schema";
 
+// Migrated 2026-04-25 alongside LootSystem from
+// `packages/shared/src/systems/shared/economy/__tests__/`. Imports
+// updated to match the new home in `@hyperforge/hyperscape`.
+import { LootSystem } from "../LootSystem";
 import {
-  LootSystem,
+  createDropConditionDispatcher,
   defaultDropConditionEvaluator,
   type LootDropConditionEvaluator,
   type LootDropContext,
-} from "../LootSystem";
-import { createDropConditionDispatcher } from "../DropConditionDispatcher";
-import type { World } from "../../../../types/index";
+  type World,
+} from "@hyperforge/shared";
 
 function makeWorld(): World {
   return {

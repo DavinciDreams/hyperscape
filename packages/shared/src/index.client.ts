@@ -1195,6 +1195,30 @@ export {
   shouldMobIgnorePlayer,
 } from "./utils/game/CombatLevelCalculator";
 
+// LootSystem (cross-cutting server-side) — re-exported here for the
+// client bundle so the migrated plugin LootSystem resolves its
+// imports when the plugin is loaded on the client world. (Mirrors
+// index.ts.)
+export {
+  defaultDropConditionEvaluator,
+  type LootDropContext,
+  type LootDropConditionEvaluator,
+} from "./types/loot-drops";
+export { LootTableRoller } from "./loot/LootTableRoller";
+// LootTableService already re-exported earlier (line ~1208).
+export {
+  createDropConditionDispatcher,
+  createCustomKindDispatcher,
+  type DropConditionDispatcher,
+  type DropConditionKind,
+  type DropConditionKindHandler,
+} from "./systems/shared/economy/DropConditionDispatcher";
+export {
+  getGroundItemDespawnTicks,
+  getLootProtectionTicks,
+} from "./data/live/combat-live";
+export { ticksToMs } from "./utils/game/CombatCalculations";
+
 // QuestSystem (cross-cutting server-side) — re-exported here for the
 // client bundle.
 export { validateQuestDefinition } from "./types/game/quest-types";

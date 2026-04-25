@@ -18,8 +18,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { LootTablesManifest } from "@hyperforge/manifest-schema";
 
+// Migrated 2026-04-25 alongside LootSystem from
+// `packages/shared/src/systems/shared/economy/__tests__/`. Imports
+// updated to match the new home in `@hyperforge/hyperscape`.
 import { LootSystem } from "../LootSystem";
-import type { World } from "../../../../types/index";
+import type { World } from "@hyperforge/shared";
 
 function makeWorld(): World {
   const systems = new Map<string, unknown>();

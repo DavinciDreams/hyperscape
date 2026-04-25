@@ -1,69 +1,62 @@
 /**
- * Loot System - GDD Compliant (TICK-BASED)
+ * Loot System (TICK-BASED)
  *
  * Orchestrates loot drops using modular services:
  * - LootTableService: Pure loot table logic and rolling
  * - GroundItemSystem: Shared ground item management
  *
- * OSRS-STYLE BEHAVIOR:
+ * BEHAVIOR:
  * - Mob dies → Items drop directly to ground at tile center
  * - Items pile on same tile, stackables merge
  * - Click item directly to pick up (no loot window)
- * - 2 minute despawn timer per item
- *
- * @see https://oldschool.runescape.wiki/w/Loot
- * @see https://oldschool.runescape.wiki/w/Dropped_items
+ * - Despawn timer per item driven by combat-live tunables
  */
 
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/economy/`
+// into `@hyperforge/hyperscape` (25th system migration; 13th
+// cross-cutting server-side). LootSystem orchestrates mob-death
+// drops via the shared GroundItemSystem and authored / legacy
+// loot-table rollers. Protocol types (`LootDropContext`,
+// `LootDropConditionEvaluator`, `defaultDropConditionEvaluator`)
+// were extracted into `packages/shared/src/types/loot-drops.ts` so
+// in-shared consumers (`DropConditionDispatcher`,
+// `WorldDropConditionEvaluators`) keep resolving without depending
+// on this class. 382 LOC pre-migration.
 import type {
   LootTablesManifest,
   DropCondition,
 } from "@hyperforge/manifest-schema";
 
-import type { World } from "../../../types/index";
-import { EventType } from "../../../types/events";
-import type { InventoryItem } from "../../../types/core/core";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { groundToTerrain } from "../../../utils/game/EntityUtils";
 import {
+  defaultDropConditionEvaluator,
+  EventType,
   getGroundItemDespawnTicks,
   getLootProtectionTicks,
-} from "../../../data/live/combat-live";
-import { ticksToMs } from "../../../utils/game/CombatCalculations";
-import { LootTableRoller } from "../../../loot/LootTableRoller";
-import { LootTableService } from "./LootTableService";
-import type { GroundItemSystem } from "./GroundItemSystem";
+  groundToTerrain,
+  type InventoryItem,
+  type LootDropConditionEvaluator,
+  type LootDropContext,
+  LootTableRoller,
+  LootTableService,
+  SystemBase,
+  ticksToMs,
+  type World,
+} from "@hyperforge/shared";
 
-/**
- * Runtime context passed to a `LootDropConditionEvaluator`. Carries
- * the mob type that died and (when known) the killer's character id,
- * so the evaluator can query player-scoped state like inventory,
- * quest progress, or skill level.
- */
-export interface LootDropContext {
-  readonly mobType: string;
-  readonly killerId?: string;
+// GroundItemSystem still lives in shared/. Duck-typed locally —
+// only `spawnGroundItems` is called from this file.
+interface GroundItemSystem {
+  spawnGroundItems(
+    items: InventoryItem[],
+    position: { x: number; y: number; z: number },
+    options: {
+      despawnTime: number;
+      droppedBy: string;
+      lootProtection: number;
+      scatter: boolean;
+    },
+  ): Promise<void>;
 }
-
-/**
- * Predicate invoked by `LootSystem.rollLootFor` to gate every non-
- * `always` `DropCondition`. Return `true` to allow the entry to roll,
- * `false` to skip it. Throwing is caught at the callsite and treated
- * as `false` — plugin misbehavior never takes down the drop loop.
- */
-export type LootDropConditionEvaluator = (
-  condition: DropCondition,
-  ctx: LootDropContext,
-) => boolean;
-
-/**
- * Default evaluator. `always` → true; every other kind → false. Safe-
- * by-default so unlocked plugin conditions never fire until a real
- * evaluator is installed via `setDropConditionEvaluator`.
- */
-export const defaultDropConditionEvaluator: LootDropConditionEvaluator = (
-  condition,
-) => condition.kind === "always";
 
 export class LootSystem extends SystemBase {
   private lootTableService: LootTableService;
@@ -116,7 +109,9 @@ export class LootSystem extends SystemBase {
   async init(): Promise<void> {
     // Get shared GroundItemSystem
     this.groundItemSystem =
-      this.world.getSystem<GroundItemSystem>("ground-items") ?? null;
+      (this.world.getSystem("ground-items") as unknown as
+        | GroundItemSystem
+        | undefined) ?? null;
     if (!this.groundItemSystem) {
       console.warn(
         "[LootSystem] GroundItemSystem not found - mob loot drops disabled",
@@ -183,7 +178,7 @@ export class LootSystem extends SystemBase {
   }
 
   /**
-   * Handle mob death and generate loot (OSRS-style ground items)
+   * Handle mob death and generate ground-item drops.
    *
    * Drops items directly to ground at tile center instead of creating
    * a corpse entity. Items can be picked up by clicking directly.
@@ -232,16 +227,17 @@ export class LootSystem extends SystemBase {
       Infinity,
     );
 
-    // OSRS-STYLE: Spawn ground items directly (no corpse entity)
-    // Items pile at tile center, stackables merge, 2 minute despawn
+    // Spawn ground items directly (no corpse entity).
+    // Items pile at tile center, stackables merge, despawn after the
+    // configured tick budget.
     await this.groundItemSystem.spawnGroundItems(
       inventoryItems,
       groundedPosition,
       {
-        despawnTime: ticksToMs(getGroundItemDespawnTicks()), // 2 minutes
+        despawnTime: ticksToMs(getGroundItemDespawnTicks()),
         droppedBy: data.killedBy, // Killer gets loot protection
-        lootProtection: ticksToMs(getLootProtectionTicks()), // 1 minute protection
-        scatter: false, // Items pile at mob position tile center (OSRS-style)
+        lootProtection: ticksToMs(getLootProtectionTicks()),
+        scatter: false, // Items pile at mob position tile center
       },
     );
 

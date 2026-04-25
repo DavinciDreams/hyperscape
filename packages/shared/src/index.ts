@@ -667,7 +667,7 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // `Player` type already exported from the shared types block above
 // (line ~157) — no duplicate export needed here.
-export { LootSystem } from "./systems/shared/economy/LootSystem";
+// LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
@@ -932,6 +932,29 @@ export {
   normalizeCombatSkills,
   shouldMobIgnorePlayer,
 } from "./utils/game/CombatLevelCalculator";
+
+// LootSystem deps — needed by the migrated LootSystem in
+// @hyperforge/hyperscape (and by its co-located tests, which import
+// the dispatcher helpers from the shared barrel).
+export {
+  defaultDropConditionEvaluator,
+  type LootDropContext,
+  type LootDropConditionEvaluator,
+} from "./types/loot-drops";
+export { LootTableRoller } from "./loot/LootTableRoller";
+export { LootTableService } from "./systems/shared/economy/LootTableService";
+export {
+  createDropConditionDispatcher,
+  createCustomKindDispatcher,
+  type DropConditionDispatcher,
+  type DropConditionKind,
+  type DropConditionKindHandler,
+} from "./systems/shared/economy/DropConditionDispatcher";
+export {
+  getGroundItemDespawnTicks,
+  getLootProtectionTicks,
+} from "./data/live/combat-live";
+export { ticksToMs } from "./utils/game/CombatCalculations";
 
 // QuestSystem deps — needed by the migrated QuestSystem in
 // @hyperforge/hyperscape.

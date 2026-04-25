@@ -39,7 +39,7 @@ import type { SkillsSystem } from "../character/SkillsSystem";
 import { SystemLogger } from "../../../utils/Logger";
 
 import type { DropConditionDispatcher } from "./DropConditionDispatcher";
-import type { LootDropContext } from "./LootSystem";
+import type { LootDropContext } from "../../../types/loot-drops";
 
 const KNOWN_SKILLS: ReadonlySet<keyof Skills> = new Set<keyof Skills>([
   "attack",

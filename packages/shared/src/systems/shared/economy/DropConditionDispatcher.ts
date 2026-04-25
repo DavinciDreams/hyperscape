@@ -33,7 +33,10 @@
  */
 import type { DropCondition } from "@hyperforge/manifest-schema";
 
-import type { LootDropConditionEvaluator, LootDropContext } from "./LootSystem";
+import type {
+  LootDropConditionEvaluator,
+  LootDropContext,
+} from "../../../types/loot-drops";
 
 /** One entry in the dispatcher — a predicate scoped to a single `kind`. */
 export type DropConditionKindHandler = (

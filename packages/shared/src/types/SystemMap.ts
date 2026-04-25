@@ -27,7 +27,10 @@ import type { EquipmentSystem } from "../systems/shared";
 import type { InventoryInteractionSystem } from "../systems/shared";
 import type { InventorySystem } from "../systems/shared";
 // ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { LootSystem } from "../systems/shared";
+// LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entry below typed as `unknown` — the only consumer
+// pattern is the boot-time setter calls in SystemLoader, which
+// duck-type the surface they need.
 // MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // "mob-death" SystemMap entry removed — its only consumer was a
 // dead `systems.mobDeath = ...` lookup in SystemLoader (no reads).
@@ -120,7 +123,7 @@ export interface SystemMap {
   store: unknown;
   resource: ResourceSystem;
   "ground-items": GroundItemSystem;
-  loot: LootSystem;
+  loot: unknown;
 
   // Processing / crafting
   processing: unknown;
