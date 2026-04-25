@@ -1025,3 +1025,94 @@ export type { BankData } from "./types/game/inventory-types";
 export type { Store } from "./types/game/item-types";
 export { GENERAL_STORES } from "./data/banks-stores";
 export { storesRegistry } from "./stores";
+
+// ─────────────────────────────────────────────────────────────────────
+// Earlier-session migration deps that need client-bundle exports too
+// (the OSRS skill systems + visual systems migrated 2026-04-24 also
+// import these symbols, but `index.client.ts` was never updated for
+// them — the dev server crashes only surface as users actually hit
+// each system at runtime).
+// ─────────────────────────────────────────────────────────────────────
+
+// SkillsSystem `Skill` enum + DeathState + AttackType + ALL_WORLD_AREAS
+export { Skill } from "./systems/shared/character/SkillsSystem";
+export { DeathState } from "./types/entities/entities";
+export { AttackType } from "./types/core/core";
+// ALL_WORLD_AREAS + STARTER_TOWNS already re-exported above; just
+// add the missing helper.
+export { getRandomSpawnPoint } from "./data/world-areas";
+
+// World systems consumed by migrated systems via `getSystem` (some
+// already imported at the top of this file, re-listed here for clarity)
+export { BridgeSystem } from "./systems/shared/world/BridgeSystem";
+export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisionService";
+export { TownSystem, POISystem, RoadNetworkSystem } from "./systems/shared";
+
+// Combat + Player system class refs — Hyperscape plugins like
+// HealthRegenSystem do `getSystem<CombatSystem>("combat")`.
+// (Not yet migrated; downstream plugin systems still reference them.)
+export { CombatSystem } from "./systems/shared/combat";
+export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
+
+// Spell-visual / arrow-visual config helpers — ProjectileRenderer.
+export {
+  getSpellVisual,
+  getArrowVisual,
+  type SpellVisualConfig,
+  type ArrowVisualConfig,
+} from "./data/spell-visuals";
+
+// Collision flags + masks — used by visual systems for ray queries.
+export {
+  CollisionFlag,
+  CollisionMask,
+} from "./systems/shared/movement/CollisionFlags";
+
+// Resource footprint constants + types.
+export {
+  FOOTPRINT_SIZES,
+  resolveFootprint,
+} from "./types/game/resource-processing-types";
+export type {
+  ResourceFootprint,
+  FootprintDimensions,
+  FootprintSpec,
+} from "./types/game/resource-processing-types";
+
+// Smithing helpers consumed by every OSRS skill system migrated.
+export {
+  getItemQuantity,
+  getSmithingLevelSafe,
+  hasSkills,
+  isLooseInventoryItem,
+} from "./constants/SmithingConstants";
+export { getHammerItemId } from "./data/live/smithing-live";
+
+// Tile pathfinding helpers — `hasLineOfSight` etc. consumed by
+// PathfindingDebugSystem + future migrated combat.
+export {
+  hasLineOfSight,
+  getValidRangedTiles,
+  getValidMeleeTiles,
+} from "./systems/shared/movement/TileSystem";
+
+// Processing data provider + recipe types.
+export { processingDataProvider } from "./data/ProcessingDataProvider";
+export type {
+  CraftingRecipeData,
+  FletchingRecipeData,
+} from "./data/ProcessingDataProvider";
+
+// EquipmentVisual helpers already re-exported earlier in this file
+// (search for "EquipmentVisualHelpers"); EquipmentVisualSystem in
+// the plugin imports them from `@hyperforge/shared` and resolves
+// through that earlier re-export.
+
+// HealthRegen live-getters consumed by HealthRegenSystem in plugin.
+export {
+  getHealthRegenIntervalTicks,
+  getHealthRegenCooldownTicks,
+} from "./data/live/game-live";
+
+// `toTHREEVector3` already re-exported earlier in this file; HealthBars
+// resolves through that.
