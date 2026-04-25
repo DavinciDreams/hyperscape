@@ -124,7 +124,7 @@ import { modelCache } from "../utils/rendering/ModelCache";
 import type { StageSystem } from "../types/systems/system-interfaces";
 import { LODs } from "../systems/shared";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-24).
-import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
+// EquipmentVisualSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // ZoneVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // WaterfallVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 import { BridgeSystem } from "../systems/shared/world/BridgeSystem";
@@ -345,7 +345,7 @@ export function createClientWorld() {
   world.register("lods", LODs); // Level-of-detail mesh management
   // Nametags disabled - OSRS pattern: names shown in right-click menu only
   // "healthbars" registered by @hyperforge/hyperscape onEnable (client branch).
-  world.register("equipment-visual", EquipmentVisualSystem); // Visual weapon/equipment attachment
+  // "equipment-visual" registered by @hyperforge/hyperscape onEnable (client branch).
   world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
   // "zone-visuals" registered by @hyperforge/hyperscape onEnable (client branch).
   // "waterfall-visuals" registered by @hyperforge/hyperscape onEnable (client branch).

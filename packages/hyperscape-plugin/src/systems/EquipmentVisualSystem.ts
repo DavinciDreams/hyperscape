@@ -1,14 +1,7 @@
 /**
- * Equipment Visual System (Client-Only)
+ * EquipmentVisualSystem
  *
- * Handles visual rendering of equipped items on player avatars using VRM bones.
- * Works with weapons exported from Asset Forge with pre-baked attachment data.
- *
- * **How It Works:**
- * 1. Listens for PLAYER_EQUIPMENT_CHANGED events
- * 2. Loads weapon GLB from Asset Forge (with userData.hyperia metadata)
- * 3. Attaches weapon to VRM bone specified in metadata
- * 4. Transforms are pre-baked - just attach directly!
+ * Renders equipped weapons, armor, and accessories on player avatars.
  *
  * **Asset Forge Integration:**
  * - Weapons fitted in Asset Forge Equipment Page
@@ -17,25 +10,31 @@
  * - See: /packages/asset-forge/WEAPON_FITTING_GUIDE.md
  */
 
-import { GLTFLoader } from "../../libs/gltfloader/GLTFLoader";
+// Migrated 2026-04-25 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (10th client-only system migration).
+// VRM bone-attached weapon/armor/accessory rendering. Helpers
+// (`attachEquipmentVisualToVRM` etc.) stay in shared because
+// asset-forge + other external callers consume them as part of
+// the shared package's public API.
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import * as THREE from "three";
-import { EventType } from "../../types/events";
-import { SystemBase } from "../shared/infrastructure/SystemBase";
-import type { World } from "../../types";
 import type { VRM } from "@pixiv/three-vrm";
-import { EQUIPMENT_SLOT_NAMES } from "../../constants/EquipmentConstants";
-import type { Entity } from "../../entities/Entity";
-import { AttackType } from "../../types/game/item-types";
-import { getItem } from "../../data/items";
 import {
   attachEquipmentVisualToVRM,
+  AttackType,
+  Entity,
+  EQUIPMENT_SLOT_NAMES,
+  type EquipmentVisualStore,
+  EventType,
+  getItem,
   removeEquipmentVisual,
   resolveEquipmentVisualData,
   resolveEquipmentVisualUrls,
-  type EquipmentVisualStore,
-} from "./EquipmentVisualHelpers";
+  SystemBase,
+  type World,
+} from "@hyperforge/shared";
 
 interface AvatarLike {
   instance?: {

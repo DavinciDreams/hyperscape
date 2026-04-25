@@ -134,6 +134,7 @@ export {
 export * from "./core";
 
 // Export entity classes
+export { Entity } from "./entities/Entity";
 export { PlayerEntity } from "./entities/player/PlayerEntity";
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
@@ -824,6 +825,11 @@ export { Chat as ChatSystem } from "./systems/shared/presentation/Chat";
 export { ZoneDetectionSystem } from "./systems/shared/death/ZoneDetectionSystem";
 export type { WorldArea } from "./types/world/world-types";
 export { getEffectiveWorldAreas } from "./world-areas";
+
+// Equipment-slot ordering tuple — referenced by the migrated
+// EquipmentVisualSystem in @hyperforge/hyperscape (and any other
+// consumer that needs the canonical OSRS slot iteration order).
+export { EQUIPMENT_SLOT_NAMES } from "./constants/EquipmentConstants";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

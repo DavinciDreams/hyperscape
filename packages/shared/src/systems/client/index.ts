@@ -15,7 +15,7 @@ export { ClientNetwork } from "./ClientNetwork";
 export { ClientRuntime } from "./ClientRuntime";
 export { NodeClient } from "./NodeClient";
 export { ControlPriorities } from "./ControlPriorities";
-export { EquipmentVisualSystem } from "./EquipmentVisualSystem";
+// EquipmentVisualSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 export { XPDropSystem } from "./XPDropSystem";

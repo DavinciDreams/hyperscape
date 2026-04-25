@@ -37,6 +37,7 @@ import { BFSPathDebugSystem } from "./systems/BFSPathDebugSystem.js";
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
+import { EquipmentVisualSystem } from "./systems/EquipmentVisualSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { HealthBars } from "./systems/HealthBars.js";
@@ -156,6 +157,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       if (!ctx.world.isServer) {
         register("damage-splat", DamageSplatSystem);
         register("duel-countdown-splat", DuelCountdownSplatSystem);
+        // VRM bone-attached weapons / armor / accessories. Helpers
+        // (`attachEquipmentVisualToVRM` etc.) stay in shared because
+        // asset-forge consumes them as part of the public API.
+        register("equipment-visual", EquipmentVisualSystem);
         register("projectile-renderer", ProjectileRenderer);
         // Procedural-river TSL waterfall renderer — purely visual,
         // self-no-op when there are no river-derived definitions.

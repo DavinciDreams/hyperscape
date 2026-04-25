@@ -86,6 +86,7 @@ const SERVER_ONLY_REGISTRATIONS = ["health-regen"];
 const CLIENT_ONLY_REGISTRATIONS = [
   "damage-splat",
   "duel-countdown-splat",
+  "equipment-visual",
   "projectile-renderer",
   "waterfall-visuals",
   "healthbars",
