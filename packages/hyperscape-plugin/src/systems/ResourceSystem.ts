@@ -1,42 +1,23 @@
-import { SystemBase } from "../infrastructure/SystemBase";
-// NOTE: Import directly to avoid circular dependency through barrel file
-import { TerrainSystem } from "../world/TerrainSystem";
-import { uuid } from "../../../utils";
-import type { World } from "../../../types";
-import { ResourceEntity } from "../../../entities/world/ResourceEntity";
-import { disposeFishingSpotTextures } from "../../../entities/world/visuals/FishingSpotVisualStrategy";
-
-import { EventType } from "../../../types/events";
-import { Resource, ResourceDrop } from "../../../types/core/core";
-import { PlayerID, ResourceID } from "../../../types/core/identifiers";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/entities/`
+// into `@hyperforge/hyperscape` (Wave 1 of heavy-cluster plan,
+// 42nd system migration). 3398 LOC + gathering/ subdirectory
+// co-migrated. Unblocked by `TreeSubType` d.ts fix
+// (commit f73f7fb5e) which fixed cross-package union narrowing.
 import {
+  ALL_WORLD_AREAS,
   calculateDistance,
   calculateDistance2D,
-} from "../../../utils/game/EntityUtils";
-import {
   createPlayerID,
   createResourceID,
-} from "../../../utils/IdentifierUtils";
-import type { TerrainResourceSpawnPoint } from "../../../types/world/terrain";
-import {
-  TICK_DURATION_MS,
-  snapToTileCenter,
-  worldToTile,
-  isCardinallyAdjacentToResource,
-  type TileCoord,
-} from "../movement/TileSystem";
-import {
+  disposeFishingSpotTextures,
+  EventType,
   FOOTPRINT_SIZES,
-  type ResourceFootprint,
-} from "../../../types/game/resource-processing-types";
-import { getExternalToolsForSkill } from "../../../utils/ExternalAssetUtils";
-import { gatheringResources } from "../../../gathering/index";
-import type { GatheringToolData } from "../../../data/DataManager";
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../../world-areas";
-import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
-import {
+  findFishingSpotTiles,
+  type GatheringToolData,
+  gatheringResources,
   getDefaultInteractionRange,
+  getEffectiveWorldAreas,
+  getExternalToolsForSkill,
   getFishingSpotMove,
   getGatheringRateLimitMs,
   getGatheringSkillMechanics,
@@ -48,10 +29,27 @@ import {
   getTimerRegenPerTick,
   getTreeDespawnTicks,
   getValidResourceIdPattern,
-} from "../../../data/live/gathering-live";
-import { getWaterThreshold } from "../../../data/live/game-live";
-import { findFishingSpotTiles, shuffleArray } from "../../../utils/ShoreUtils";
-import type { WorldArea } from "../../../types/world/world-types";
+  getWaterThreshold,
+  isCardinallyAdjacentToResource,
+  isPositionInsideDuelArenaZone,
+  type PlayerID,
+  type Resource,
+  ResourceEntity,
+  type ResourceDrop,
+  type ResourceFootprint,
+  type ResourceID,
+  shuffleArray,
+  snapToTileCenter,
+  SystemBase,
+  type TerrainResourceSpawnPoint,
+  TerrainSystem,
+  TICK_DURATION_MS,
+  type TileCoord,
+  uuid,
+  type World,
+  type WorldArea,
+  worldToTile,
+} from "@hyperforge/shared";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
 
 // SOLID: Extracted pure utility functions
@@ -98,7 +96,7 @@ interface ResourceEntityMethods {
  * 2. Handler sends network message → resources.ts handler
  * 3. Handler emits RESOURCE_GATHER event with server-authoritative position
  * 4. ResourceSystem.startGathering() validates and creates session
- * 5. TickSystem calls processGatheringTick() every 600ms (OSRS tick rate)
+ * 5. TickSystem calls processGatheringTick() every 600ms (600ms tick rate)
  * 6. On success: drops item via manifest data, awards XP, may deplete resource
  *
  * ### Manifest Integration
@@ -119,7 +117,7 @@ interface ResourceEntityMethods {
  * - Resource ID validation: Alphanumeric with length limit to prevent injection
  * - Proximity checks: Uses server-side player position for range validation
  *
- * ### Tool Tier System (OSRS-Accurate, Manifest-Driven)
+ * ### Tool Tier System (tick-based, Manifest-Driven)
  * Tool definitions loaded from tools.json manifest:
  * - Woodcutting: Axe tier affects SUCCESS RATE (not speed), fixed 4-tick rolls
  * - Mining: Pickaxe tier affects ROLL FREQUENCY (not success), variable ticks
@@ -132,7 +130,7 @@ interface ResourceEntityMethods {
 export class ResourceSystem extends SystemBase {
   private resources = new Map<ResourceID, Resource>();
 
-  // Tick-based gathering sessions (OSRS-accurate timing)
+  // Tick-based gathering sessions (tick-based timing)
   // Session includes cached data to avoid per-tick allocations
   private activeGathering = new Map<
     PlayerID,
@@ -158,7 +156,7 @@ export class ResourceSystem extends SystemBase {
       cachedSuccessRate: number;
       cachedDrops: ResourceDrop[];
       cachedResourceName: string; // For messages without lookup
-      // OSRS-ACCURACY: Store start position to detect movement (cancels gathering)
+      // TICK-ACCURACY: Store start position to detect movement (cancels gathering)
       cachedStartPosition: { x: number; y: number; z: number };
       // DEBUG: Cached for logging (only used when DEBUG_GATHERING=true)
       debugInfo?: {
@@ -188,16 +186,15 @@ export class ResourceSystem extends SystemBase {
    */
   useHighPriorityBatch = true;
 
-  // ===== FORESTRY-STYLE RESOURCE TIMERS (OSRS-accurate) =====
+  // ===== FORESTRY-STYLE RESOURCE TIMERS (tick-based) =====
   /**
-   * Per-resource depletion timer for Forestry-style tree mechanics.
+   * Per-resource depletion timer for forestry-style tree mechanics.
    * - Timer starts on FIRST LOG (not first interaction)
    * - Counts down at 1 tick/tick while anyone is gathering
    * - Regenerates at 1 tick/tick when no one is gathering
    * - Tree depletes when timer=0 AND player receives a log
    * - Multiple players share the same timer (no penalty)
    *
-   * @see https://oldschool.runescape.wiki/w/Forestry
    */
   private resourceTimers = new Map<
     ResourceID,
@@ -231,12 +228,11 @@ export class ResourceSystem extends SystemBase {
     }
   >();
 
-  // ===== OSRS-ACCURACY: Fishing spot movement timers =====
+  // ===== TICK-ACCURACY: Fishing spot movement timers =====
   /**
    * Fishing spots don't deplete - they periodically move to nearby tiles.
    * Each spot has a random timer that triggers relocation.
    *
-   * @see https://oldschool.runescape.wiki/w/Fishing
    */
   private fishingSpotMoveTimers = new Map<
     ResourceID,
@@ -264,13 +260,11 @@ export class ResourceSystem extends SystemBase {
   // Tool definitions are in packages/server/world/assets/manifests/tools.json
   // Loaded at runtime via DataManager → getExternalToolsForSkill()
   //
-  // OSRS-ACCURATE MECHANICS:
+  // TICK-ACCURATE MECHANICS:
   // - Woodcutting: tier affects success rate, roll frequency is fixed (4 ticks)
   // - Mining: rollTicks affects roll frequency, success rate is level-only
   // - Fishing: Equipment doesn't affect speed or success
   //
-  // @see https://oldschool.runescape.wiki/w/Axe
-  // @see https://oldschool.runescape.wiki/w/Pickaxe
   // =============================================================================
 
   constructor(world: World) {
@@ -299,7 +293,7 @@ export class ResourceSystem extends SystemBase {
   /**
    * Calculate all tiles occupied by a resource based on its anchor tile and footprint
    *
-   * OSRS-ACCURACY: Multi-tile resources (like large trees) occupy multiple tiles.
+   * TICK-ACCURACY: Multi-tile resources (like large trees) occupy multiple tiles.
    * The anchor tile is the SW corner, and this function returns all tiles
    * in the rectangular footprint.
    *
@@ -377,9 +371,9 @@ export class ResourceSystem extends SystemBase {
       this.cleanupPlayerGathering(data.id),
     );
 
-    // OSRS-ACCURACY: Cancel gathering when player clicks to move anywhere
-    // In OSRS, gathering uses "weak queue" which is cancelled by ANY click (even same tile)
-    // This ensures clicking ground under yourself cancels gathering, matching OSRS behavior
+    // TICK-ACCURACY: Cancel gathering when player clicks to move anywhere
+    // In classic-MMORPG mechanics, gathering uses "weak queue" which is cancelled by ANY click (even same tile)
+    // This ensures clicking ground under yourself cancels gathering, matching classic-MMORPG behavior
     this.subscribe<{
       playerId: string;
       targetPosition: { x: number; y: number; z: number };
@@ -397,7 +391,7 @@ export class ResourceSystem extends SystemBase {
       }
     });
 
-    // OSRS-ACCURACY: Cancel gathering when player dies
+    // TICK-ACCURACY: Cancel gathering when player dies
     // Critical: Dead players cannot continue gathering
     this.subscribe<{ entityId: string; entityType: string }>(
       EventType.ENTITY_DEATH,
@@ -408,7 +402,7 @@ export class ResourceSystem extends SystemBase {
       },
     );
 
-    // OSRS-ACCURACY: Cancel gathering when player teleports
+    // TICK-ACCURACY: Cancel gathering when player teleports
     // Cannot gather from a resource across the map
     this.subscribe<{
       playerId: string;
@@ -417,7 +411,7 @@ export class ResourceSystem extends SystemBase {
       this.cancelGatheringForPlayer(data.playerId, "teleported");
     });
 
-    // OSRS-ACCURACY: Cancel gathering when player initiates combat
+    // TICK-ACCURACY: Cancel gathering when player initiates combat
     // Attacking a mob/player is a new action that replaces gathering
     this.subscribe<{
       attackerId?: string;
@@ -432,7 +426,7 @@ export class ResourceSystem extends SystemBase {
       }
     });
 
-    // OSRS-ACCURACY: Cancel gathering when player opens bank
+    // TICK-ACCURACY: Cancel gathering when player opens bank
     // Opening interface = new action
     this.subscribe<{ playerId: string; bankId?: string }>(
       EventType.BANK_OPEN,
@@ -441,7 +435,7 @@ export class ResourceSystem extends SystemBase {
       },
     );
 
-    // OSRS-ACCURACY: Cancel gathering when player opens store
+    // TICK-ACCURACY: Cancel gathering when player opens store
     // Opening interface = new action
     this.subscribe<{ playerId: string; storeId?: string }>(
       EventType.STORE_OPEN,
@@ -450,7 +444,7 @@ export class ResourceSystem extends SystemBase {
       },
     );
 
-    // OSRS-ACCURACY: Cancel gathering when player interacts with any entity
+    // TICK-ACCURACY: Cancel gathering when player interacts with any entity
     // Clicking on an entity (NPC, player, object) = new action
     // Exception: Don't cancel if interacting with the same resource we're gathering
     this.subscribe<{
@@ -466,7 +460,7 @@ export class ResourceSystem extends SystemBase {
       }
     });
 
-    // OSRS-ACCURACY: Cancel gathering when player drops an item
+    // TICK-ACCURACY: Cancel gathering when player drops an item
     // Dropping is an action that should cancel gathering
     // Also prevents database deadlocks between inventory insert (gathering) and delete (drop)
     this.subscribe<{
@@ -478,8 +472,8 @@ export class ResourceSystem extends SystemBase {
       this.cancelGatheringForPlayer(data.playerId, "item_drop");
     });
 
-    // OSRS-ACCURACY: Cancel gathering when equipping/unequipping items
-    // In OSRS, equipment changes are distinct actions that interrupt gathering
+    // TICK-ACCURACY: Cancel gathering when equipping/unequipping items
+    // In classic-MMORPG mechanics, equipment changes are distinct actions that interrupt gathering
     this.subscribe<{
       playerId: string;
       itemId: string;
@@ -601,7 +595,7 @@ export class ResourceSystem extends SystemBase {
     // Resources will be spawned procedurally by TerrainSystem across all terrain tiles
     // No need for manual default spawning - TerrainSystem generates resources based on biome
     // NOTE: Gathering is now processed via processGatheringTick() called by TickSystem
-    // The old 500ms interval has been removed in favor of OSRS-accurate 600ms tick-based processing
+    // The old 500ms interval has been removed in favor of tick-based 600ms tick-based processing
     // Registration happens in ServerNetwork/index.ts at TickPriority.RESOURCES
 
     // Load explicit resource placements from world-areas.json (server only)
@@ -1035,7 +1029,7 @@ export class ResourceSystem extends SystemBase {
           : `${resource.type}_normal`;
         this.resourceVariants.set(rid, variant);
 
-        // OSRS-ACCURACY: Initialize fishing spot movement timer
+        // TICK-ACCURACY: Initialize fishing spot movement timer
         if (
           resource.type === "fishing_spot" ||
           resource.skillRequired === "fishing"
@@ -1054,7 +1048,7 @@ export class ResourceSystem extends SystemBase {
           w: Math.cos(yRotation / 2),
         };
 
-        // OSRS-ACCURACY: Calculate tile footprint data for proper interaction positioning
+        // TICK-ACCURACY: Calculate tile footprint data for proper interaction positioning
         const footprint: ResourceFootprint = resource.footprint || "standard";
         const anchorTile = worldToTile(
           resource.position.x,
@@ -1144,7 +1138,7 @@ export class ResourceSystem extends SystemBase {
             resource.type,
             spawnPoint.subType,
           ),
-          // OSRS-ACCURACY: Tile-based positioning for face direction and interaction
+          // TICK-ACCURACY: Tile-based positioning for face direction and interaction
           footprint,
           anchorTile,
           occupiedTiles,
@@ -1368,18 +1362,33 @@ export class ResourceSystem extends SystemBase {
       );
     }
 
-    return manifestData.harvestYield.map((yield_) => ({
-      itemId: yield_.itemId,
-      itemName: yield_.itemName,
-      quantity: yield_.quantity,
-      chance: yield_.chance,
-      xpAmount: yield_.xpAmount,
-      stackable: yield_.stackable,
-      // OSRS-ACCURACY: Include fishing priority rolling fields
-      levelRequired: yield_.levelRequired,
-      catchLow: yield_.catchLow,
-      catchHigh: yield_.catchHigh,
-    }));
+    return manifestData.harvestYield.map((yield_) => {
+      // TICK-ACCURACY: Include fishing priority rolling fields when
+      // present. The harvestYield union has two variants — the
+      // priority-rolling arm carries `levelRequired/catchLow/catchHigh`,
+      // the always-rolled arm doesn't. Spread an extras object only
+      // when those fields exist on this entry.
+      const extras: Partial<ResourceDrop> = {};
+      const yieldRecord = yield_ as Record<string, unknown>;
+      if (typeof yieldRecord.levelRequired === "number")
+        (extras as { levelRequired: number }).levelRequired =
+          yieldRecord.levelRequired as number;
+      if (typeof yieldRecord.catchLow === "number")
+        (extras as { catchLow: number }).catchLow =
+          yieldRecord.catchLow as number;
+      if (typeof yieldRecord.catchHigh === "number")
+        (extras as { catchHigh: number }).catchHigh =
+          yieldRecord.catchHigh as number;
+      return {
+        itemId: yield_.itemId,
+        itemName: yield_.itemName,
+        quantity: yield_.quantity,
+        chance: yield_.chance,
+        xpAmount: yield_.xpAmount,
+        stackable: yield_.stackable,
+        ...extras,
+      };
+    });
   }
 
   /**
@@ -1418,7 +1427,7 @@ export class ResourceSystem extends SystemBase {
       return undefined;
     }
 
-    // OSRS-ACCURACY: Snap position to tile center for proper face direction and interaction
+    // TICK-ACCURACY: Snap position to tile center for proper face direction and interaction
     // This ensures resources are always at tile centers (e.g., 15.5, -9.5) not corners (15, -10)
     const snappedPosition = snapToTileCenter(position);
 
@@ -1541,12 +1550,12 @@ export class ResourceSystem extends SystemBase {
     const playerId = createPlayerID(data.playerId);
 
     // ===== SECURITY: Rate limiting - prevent gather request spam =====
-    // Silently drops requests faster than 1 tick (600ms), just like OSRS
+    // Silently drops requests faster than 1 tick (600ms), just like the classic-MMORPG pattern
     // This allows normal spam clicking without punishment
     const now = Date.now();
     const lastAttempt = this.gatherRateLimits.get(playerId);
     if (lastAttempt && now - lastAttempt < getGatheringRateLimitMs()) {
-      // Silently drop rapid requests (OSRS behavior - no punishment for spam clicking)
+      // Silently drop rapid requests (classic-MMORPG behavior — no punishment for spam clicking)
       return;
     }
     this.gatherRateLimits.set(playerId, now);
@@ -1753,7 +1762,7 @@ export class ResourceSystem extends SystemBase {
       return;
     }
 
-    // Tool check using manifest's toolRequired field (RuneScape-style: any tier qualifies; tier affects speed)
+    // Tool check using manifest's toolRequired field (classic MMORPG-style: any tier qualifies; tier affects speed)
     if (resource.toolRequired) {
       const toolCategory = this.getToolCategory(resource.toolRequired);
       const hasTool = this.playerHasToolCategory(data.playerId, toolCategory);
@@ -1791,8 +1800,7 @@ export class ResourceSystem extends SystemBase {
       }
     }
 
-    // OSRS-ACCURACY: Check for secondary consumable (bait, feathers, etc.)
-    // @see https://oldschool.runescape.wiki/w/Fishing - "Bait fishing requires fishing bait"
+    // TICK-ACCURACY: Check for secondary consumable (bait, feathers, etc.)
     if (resource.secondaryRequired) {
       const hasSecondary = this.playerHasItem(
         data.playerId,
@@ -1816,13 +1824,10 @@ export class ResourceSystem extends SystemBase {
       this.activeGathering.delete(playerId);
     }
 
-    // Start RS-like timed gathering session with OSRS-accurate messages
+    // Start RS-like timed gathering session with tick-based messages
     const resourceName = resource.name || resource.type.replace("_", " ");
 
-    // OSRS-ACCURACY: Skill-specific gathering start messages
-    // @see https://oldschool.runescape.wiki/w/Woodcutting
-    // @see https://oldschool.runescape.wiki/w/Mining
-    // @see https://oldschool.runescape.wiki/w/Fishing
+    // TICK-ACCURACY: Skill-specific gathering start messages
     const gatheringStartMessage = (() => {
       switch (resource.skillRequired) {
         case "woodcutting":
@@ -1839,7 +1844,7 @@ export class ResourceSystem extends SystemBase {
     // Create tick-based session
     const sessionResourceId = createResourceID(resource.id);
 
-    // Get current tick from world (OSRS-accurate tick-based timing)
+    // Get current tick from world (tick-based tick-based timing)
     const currentTick = this.world.currentTick || 0;
 
     // Compute tick-based cycle interval
@@ -1856,7 +1861,7 @@ export class ResourceSystem extends SystemBase {
     // Get best tool tier using unified tool system
     const toolInfo = this.getBestTool(data.playerId, resource.skillRequired);
 
-    // OSRS-ACCURATE: Compute cycle ticks based on skill-specific mechanics
+    // TICK-ACCURATE: Compute cycle ticks based on skill-specific mechanics
     // - Woodcutting: Fixed 4 ticks (axe affects success rate, not speed)
     // - Mining: Variable ticks based on pickaxe tier
     // - Fishing: Fixed 5 ticks
@@ -1867,7 +1872,7 @@ export class ResourceSystem extends SystemBase {
     );
 
     // PERFORMANCE: Pre-compute success rate to avoid per-tick calculation
-    // OSRS-ACCURATE: Uses LERP formula with skill-specific tables
+    // TICK-ACCURATE: Uses LERP formula with skill-specific tables
     // - Woodcutting: Tree type + axe tier determines success
     // - Mining/Fishing: Resource type only (tool doesn't affect success)
     const successRate = this.computeSuccessRate(
@@ -1877,7 +1882,7 @@ export class ResourceSystem extends SystemBase {
       toolInfo?.tier ?? null,
     );
 
-    // OSRS-ACCURACY: Get server-authoritative player position for movement detection
+    // TICK-ACCURACY: Get server-authoritative player position for movement detection
     const player = this.world.getPlayer?.(data.playerId);
     const startPosition = player?.position
       ? { x: player.position.x, y: player.position.y, z: player.position.z }
@@ -1887,7 +1892,7 @@ export class ResourceSystem extends SystemBase {
           z: data.playerPosition.z,
         };
 
-    // OSRS-ACCURACY: Rotate player to face the resource (instant rotation like OSRS)
+    // TICK-ACCURACY: Rotate player to face the resource (instant rotation like classic-MMORPG)
     // This happens before session starts so animation plays in correct direction
     const footprintForRotation = resource.footprint || "standard";
     if (DEBUG_GATHERING) {
@@ -1928,7 +1933,7 @@ export class ResourceSystem extends SystemBase {
       cachedSuccessRate: successRate,
       cachedDrops: resource.drops,
       cachedResourceName: resourceName,
-      // OSRS-ACCURACY: Store position to detect movement (any movement cancels gathering)
+      // TICK-ACCURACY: Store position to detect movement (any movement cancels gathering)
       cachedStartPosition: startPosition,
       // DEBUG: Store for logging (only used when DEBUG_GATHERING=true)
       debugInfo: DEBUG_GATHERING
@@ -1941,7 +1946,7 @@ export class ResourceSystem extends SystemBase {
         : undefined,
     });
 
-    // DEBUG: Log session start with OSRS mechanics details
+    // DEBUG: Log session start with tick-based mechanics details
     if (DEBUG_GATHERING) {
       const skillMechanics = getGatheringSkillMechanics();
       const mechanics =
@@ -1991,7 +1996,7 @@ export class ResourceSystem extends SystemBase {
       tickDurationMs: TICK_DURATION_MS,
     });
 
-    // OSRS-STYLE: Show gathering tool in hand during gathering (overrides equipped weapon)
+    // CLASSIC-MMORPG-STYLE: Show gathering tool in hand during gathering (overrides equipped weapon)
     // e.g., if player has a pickaxe equipped but a hatchet in inventory, the hatchet
     // appears in hand while woodcutting. Applies to all gathering skills.
     if (toolInfo?.itemId) {
@@ -2002,7 +2007,7 @@ export class ResourceSystem extends SystemBase {
       });
     }
 
-    // OSRS-ACCURACY: Send OSRS-style gathering start message via chat and UI
+    // TICK-ACCURACY: Send classic-MMORPG-style gathering start message via chat and UI
     this.sendChat(data.playerId, gatheringStartMessage);
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId: data.playerId,
@@ -2030,7 +2035,7 @@ export class ResourceSystem extends SystemBase {
       // Reset emote back to idle when gathering stops
       this.resetGatheringEmote(data.playerId);
 
-      // OSRS-STYLE: Hide gathering tool visual and restore equipped weapon
+      // CLASSIC-MMORPG-STYLE: Hide gathering tool visual and restore equipped weapon
       if (session.toolItemId) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: data.playerId,
@@ -2075,7 +2080,7 @@ export class ResourceSystem extends SystemBase {
       patterns.lastDisconnect = now;
       this.suspiciousPatterns.set(pid, patterns);
 
-      // OSRS-STYLE: Hide gathering tool visual and restore equipped weapon
+      // CLASSIC-MMORPG-STYLE: Hide gathering tool visual and restore equipped weapon
       if (session.toolItemId) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: playerId,
@@ -2107,7 +2112,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Cancel gathering for a player due to an action/event (OSRS weak queue behavior)
+   * Cancel gathering for a player due to an action/event (weak queue behavior)
    * Used by event subscriptions to cancel gathering when player performs another action.
    *
    * @param playerId - The player whose gathering should be cancelled
@@ -2125,7 +2130,7 @@ export class ResourceSystem extends SystemBase {
       // FORESTRY: Remove from active gatherers (timer will regenerate if no other gatherers)
       this.removeActiveGatherer(pid, session.resourceId);
 
-      // OSRS-STYLE: Hide gathering tool visual and restore equipped weapon
+      // CLASSIC-MMORPG-STYLE: Hide gathering tool visual and restore equipped weapon
       if (session.toolItemId) {
         this.emitTypedEvent(EventType.GATHERING_TOOL_HIDE, {
           playerId: playerId,
@@ -2143,9 +2148,9 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Set face target for player to face a resource (OSRS-accurate deferred rotation)
+   * Set face target for player to face a resource (tick-based deferred rotation)
    *
-   * OSRS-ACCURACY: Face direction is NOT applied immediately. Instead:
+   * TICK-ACCURACY: Face direction is NOT applied immediately. Instead:
    * 1. A faceTarget is set on the player
    * 2. At END of the server tick, if player did NOT move, rotation is applied
    * 3. If player moved, rotation is skipped but faceTarget persists
@@ -2154,7 +2159,6 @@ export class ResourceSystem extends SystemBase {
    * For multi-tile resources (2×2, 3×3), the player faces the center of the
    * occupied tile area, not just a single tile.
    *
-   * @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
    *
    * @param playerId - The player to set face target for
    * @param resourcePosition - The position of the resource (tile-centered)
@@ -2165,7 +2169,7 @@ export class ResourceSystem extends SystemBase {
     resourcePosition: { x: number; y: number; z: number },
     footprint: ResourceFootprint = "standard",
   ): void {
-    // OSRS-ACCURACY: Use FaceDirectionManager for deferred tick-end processing
+    // TICK-ACCURACY: Use FaceDirectionManager for deferred tick-end processing
     // The manager will apply rotation at end of tick only if player didn't move
     //
     // CARDINAL-ONLY: Uses deterministic cardinal face direction for AAA quality.
@@ -2221,7 +2225,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Process resource timers for Forestry-style depletion/regeneration.
+   * Process resource timers for forestry-style depletion/regeneration.
    * Called every tick to:
    * - Decrement timers for resources being gathered
    * - Regenerate timers for resources not being gathered
@@ -2235,7 +2239,7 @@ export class ResourceSystem extends SystemBase {
 
       if (timer.activeGatherers.size > 0 && timer.hasReceivedFirstLog) {
         // Being gathered AND first log received - decrement timer
-        // OSRS-ACCURACY: Timer only counts down AFTER first log is received
+        // TICK-ACCURACY: Timer only counts down AFTER first log is received
         const oldTicks = timer.currentTicks;
         timer.currentTicks = Math.max(
           0,
@@ -2244,7 +2248,7 @@ export class ResourceSystem extends SystemBase {
         if (oldTicks !== timer.currentTicks) {
           if (DEBUG_GATHERING) {
             console.log(
-              `[Forestry] ⏬ ${resourceId}: timer ${oldTicks} → ${timer.currentTicks} ` +
+              `[forestry] ⏬ ${resourceId}: timer ${oldTicks} → ${timer.currentTicks} ` +
                 `(${timer.activeGatherers.size} gatherer${timer.activeGatherers.size > 1 ? "s" : ""})`,
             );
           }
@@ -2263,7 +2267,7 @@ export class ResourceSystem extends SystemBase {
         if (oldTicks !== timer.currentTicks) {
           if (DEBUG_GATHERING) {
             console.log(
-              `[Forestry] ⏫ ${resourceId}: timer REGEN ${oldTicks} → ${timer.currentTicks}/${timer.maxTicks} (no gatherers)`,
+              `[forestry] ⏫ ${resourceId}: timer REGEN ${oldTicks} → ${timer.currentTicks}/${timer.maxTicks} (no gatherers)`,
             );
           }
         }
@@ -2272,7 +2276,7 @@ export class ResourceSystem extends SystemBase {
         if (timer.currentTicks >= timer.maxTicks) {
           if (DEBUG_GATHERING) {
             console.log(
-              `[Forestry] ✅ ${resourceId}: timer FULLY REGENERATED - resetting firstLog flag`,
+              `[forestry] ✅ ${resourceId}: timer FULLY REGENERATED - resetting firstLog flag`,
             );
           }
           timer.hasReceivedFirstLog = false;
@@ -2283,7 +2287,7 @@ export class ResourceSystem extends SystemBase {
 
   /**
    * Add a player to a resource's active gatherers set.
-   * Creates the timer structure if it doesn't exist (for Forestry resources).
+   * Creates the timer structure if it doesn't exist (for forestry resources).
    *
    * @param playerId - Player starting to gather
    * @param resourceId - Resource being gathered
@@ -2299,7 +2303,7 @@ export class ResourceSystem extends SystemBase {
     if (despawnTicks <= 0) {
       if (DEBUG_GATHERING) {
         console.log(
-          `[Forestry] ℹ️ ${resourceId}: NOT timer-based (despawnTicks=0), using chance depletion`,
+          `[forestry] ℹ️ ${resourceId}: NOT timer-based (despawnTicks=0), using chance depletion`,
         );
       }
       return;
@@ -2318,7 +2322,7 @@ export class ResourceSystem extends SystemBase {
       this.resourceTimers.set(resourceId, timer);
       if (DEBUG_GATHERING) {
         console.log(
-          `[Forestry] 🌲 ${resourceId}: Created timer structure (${despawnTicks} ticks max)`,
+          `[forestry] 🌲 ${resourceId}: Created timer structure (${despawnTicks} ticks max)`,
         );
       }
     }
@@ -2326,7 +2330,7 @@ export class ResourceSystem extends SystemBase {
     timer.activeGatherers.add(playerId);
     if (DEBUG_GATHERING) {
       console.log(
-        `[Forestry] 👤+ ${resourceId}: Added gatherer ${playerId} ` +
+        `[forestry] 👤+ ${resourceId}: Added gatherer ${playerId} ` +
           `(now ${timer.activeGatherers.size} total, timer=${timer.currentTicks}/${timer.maxTicks}, started=${timer.hasReceivedFirstLog})`,
       );
     }
@@ -2349,7 +2353,7 @@ export class ResourceSystem extends SystemBase {
       if (hadPlayer) {
         if (DEBUG_GATHERING) {
           console.log(
-            `[Forestry] 👤- ${resourceId}: Removed gatherer ${playerId} ` +
+            `[forestry] 👤- ${resourceId}: Removed gatherer ${playerId} ` +
               `(now ${timer.activeGatherers.size} total, timer=${timer.currentTicks}/${timer.maxTicks})` +
               (timer.activeGatherers.size === 0 && timer.hasReceivedFirstLog
                 ? " - will start REGENERATING"
@@ -2361,7 +2365,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Handle receiving a log from a Forestry-timer resource.
+   * Handle receiving a log from a forestry-timer resource.
    * Initializes the timer on first log and checks for depletion.
    *
    * @param playerId - Player who received the log
@@ -2369,7 +2373,7 @@ export class ResourceSystem extends SystemBase {
    * @param tickNumber - Current tick
    * @returns true if resource should deplete, false otherwise
    */
-  private handleForestryLog(
+  private handleforestryLog(
     playerId: PlayerID,
     resourceId: ResourceID,
     tickNumber: number,
@@ -2378,7 +2382,7 @@ export class ResourceSystem extends SystemBase {
     if (!timer) {
       if (DEBUG_GATHERING) {
         console.log(
-          `[Forestry] ⚠️ ${resourceId}: handleForestryLog called but no timer exists!`,
+          `[forestry] ⚠️ ${resourceId}: handleforestryLog called but no timer exists!`,
         );
       }
       return false;
@@ -2390,14 +2394,14 @@ export class ResourceSystem extends SystemBase {
       timer.lastUpdateTick = tickNumber;
       if (DEBUG_GATHERING) {
         console.log(
-          `[Forestry] 🪵 ${resourceId}: FIRST LOG received by ${playerId}! ` +
+          `[forestry] 🪵 ${resourceId}: FIRST LOG received by ${playerId}! ` +
             `Timer NOW ACTIVE: ${timer.currentTicks}/${timer.maxTicks} ticks`,
         );
       }
     } else {
       if (DEBUG_GATHERING) {
         console.log(
-          `[Forestry] 🪵 ${resourceId}: Log received by ${playerId}, ` +
+          `[forestry] 🪵 ${resourceId}: Log received by ${playerId}, ` +
             `timer=${timer.currentTicks}/${timer.maxTicks}`,
         );
       }
@@ -2407,7 +2411,7 @@ export class ResourceSystem extends SystemBase {
     if (timer.currentTicks <= 0) {
       if (DEBUG_GATHERING) {
         console.log(
-          `[Forestry] 🌳💥 ${resourceId}: Timer=0 AND log received - TREE FALLS! ` +
+          `[forestry] 🌳💥 ${resourceId}: Timer=0 AND log received - TREE FALLS! ` +
             `(${timer.activeGatherers.size} gatherers were active)`,
         );
       }
@@ -2420,7 +2424,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Process resource respawns on tick (OSRS-accurate tick-based timing)
+   * Process resource respawns on tick (tick-based tick-based timing)
    * Replaces setTimeout-based respawn with deterministic tick counting
    */
   private processRespawns(tickNumber: number): void {
@@ -2465,7 +2469,7 @@ export class ResourceSystem extends SystemBase {
 
   /**
    * Initialize a fishing spot movement timer with random delay.
-   * OSRS-ACCURACY: Fishing spots move periodically instead of depleting.
+   * TICK-ACCURACY: Fishing spots move periodically instead of depleting.
    */
   private initializeFishingSpotTimer(
     resourceId: ResourceID,
@@ -2493,9 +2497,8 @@ export class ResourceSystem extends SystemBase {
 
   /**
    * Process fishing spot movement on each tick.
-   * OSRS-ACCURACY: Fishing spots don't deplete - they move to nearby tiles periodically.
+   * TICK-ACCURACY: Fishing spots don't deplete - they move to nearby tiles periodically.
    *
-   * @see https://oldschool.runescape.wiki/w/Fishing
    */
   private processFishingSpotMovement(tickNumber: number): void {
     // PERFORMANCE: Use pre-allocated buffer to avoid GC pressure
@@ -2624,7 +2627,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Process all active gathering sessions on each server tick (OSRS-accurate 600ms)
+   * Process all active gathering sessions on each server tick (tick-based 600ms)
    *
    * Called by TickSystem at RESOURCES priority. Handles:
    * 1. Resource respawn checks (tick-based, not setTimeout)
@@ -2649,7 +2652,7 @@ export class ResourceSystem extends SystemBase {
     // Process respawns first (tick-based)
     this.processRespawns(tickNumber);
 
-    // OSRS-ACCURACY: Process fishing spot movement
+    // TICK-ACCURACY: Process fishing spot movement
     this.processFishingSpotMovement(tickNumber);
 
     // Retry deferred fishing spot spawns (waiting for collision flags to bake).
@@ -2695,8 +2698,8 @@ export class ResourceSystem extends SystemBase {
       // Only process when it's time for the next attempt (tick-based)
       if (tickNumber < session.nextAttemptTick) continue;
 
-      // OSRS-ACCURACY: Server-authoritative movement detection
-      // In OSRS, ANY movement cancels gathering (weak queue action)
+      // TICK-ACCURACY: Server-authoritative movement detection
+      // In classic-MMORPG mechanics, ANY movement cancels gathering (weak queue action)
       // Position is fetched from world state, never from client payload
       const p = this.world.getPlayer?.(playerId);
       const playerPos =
@@ -2714,14 +2717,14 @@ export class ResourceSystem extends SystemBase {
         continue;
       }
 
-      // Check if player moved from their starting position (OSRS: any movement cancels)
+      // Check if player moved from their starting position (any movement cancels)
       const startPos = session.cachedStartPosition;
       const epsilon = getPositionEpsilon();
       const movedX = Math.abs(playerPos.x - startPos.x) > epsilon;
       const movedZ = Math.abs(playerPos.z - startPos.z) > epsilon;
 
       if (movedX || movedZ) {
-        // Player moved - cancel gathering (OSRS: weak queue cancelled on any movement)
+        // Player moved - cancel gathering (weak queue cancelled on any movement)
         if (DEBUG_GATHERING) {
           console.log(
             `[ResourceSystem] Cancelling gather for ${playerId} - player moved from (${startPos.x.toFixed(2)}, ${startPos.z.toFixed(2)}) to (${playerPos.x.toFixed(2)}, ${playerPos.z.toFixed(2)})`,
@@ -2779,7 +2782,7 @@ export class ResourceSystem extends SystemBase {
         }
       }
 
-      // OSRS-ACCURACY: Check for secondary consumable (bait, feathers) on each tick
+      // TICK-ACCURACY: Check for secondary consumable (bait, feathers) on each tick
       // Stop gathering if player runs out of bait/feathers
       if (resource.secondaryRequired) {
         const hasSecondary = this.playerHasItem(
@@ -2826,13 +2829,13 @@ export class ResourceSystem extends SystemBase {
       if (isSuccessful) {
         session.successes++;
 
-        // OSRS-ACCURACY: Get player's skill level for priority-based fish rolling
+        // TICK-ACCURACY: Get player's skill level for priority-based fish rolling
         const cachedSkills = this.playerSkills.get(playerId);
         const playerSkillLevel =
           cachedSkills?.[resource.skillRequired]?.level ?? 1;
 
         // PERFORMANCE: Roll against cached drop table (avoids resource lookup)
-        // For fishing, this uses OSRS priority rolling with per-fish catch rates
+        // For fishing, this uses priority rolling with per-fish catch rates
         const drop = this.rollDrop(session.cachedDrops, playerSkillLevel);
 
         // Add item to inventory using manifest data
@@ -2855,8 +2858,7 @@ export class ResourceSystem extends SystemBase {
           amount: xpAmount,
         });
 
-        // OSRS-ACCURACY: Consume secondary item (bait, feathers) on successful harvest
-        // @see https://oldschool.runescape.wiki/w/Fishing - "One bait is used per fish caught"
+        // TICK-ACCURACY: Consume secondary item (bait, feathers) on successful harvest
         if (resource.secondaryRequired) {
           this.emitTypedEvent(EventType.INVENTORY_ITEM_REMOVED, {
             playerId: playerId,
@@ -2877,13 +2879,13 @@ export class ResourceSystem extends SystemBase {
         });
 
         // ===== DEPLETION CHECK =====
-        // OSRS-ACCURACY: Use Forestry timer for higher-level trees, chance-based for mining/regular trees
+        // TICK-ACCURACY: Use forestry timer for higher-level trees, chance-based for mining/regular trees
         let shouldDeplete = false;
 
         if (this.usesTimerBasedDepletion(session.resourceId)) {
           // FORESTRY: Timer-based depletion (oak, willow, maple, yew, magic, redwood)
           // Timer started on first log, depletes when timer=0 AND player receives log
-          shouldDeplete = this.handleForestryLog(
+          shouldDeplete = this.handleforestryLog(
             playerId,
             session.resourceId,
             tickNumber,
@@ -2893,7 +2895,7 @@ export class ResourceSystem extends SystemBase {
           resource.skillRequired === "mining"
         ) {
           // MINING: Use manifest depleteChance (1.0 for most rocks, 0 for essence)
-          // OSRS: Rune essence rocks never deplete — continuous mining until inventory full.
+          // Rune essence rocks never deplete — continuous mining until inventory full.
           const depletionChance = tuned.depleteChance ?? 1.0;
           if (depletionChance <= 0) {
             shouldDeplete = false;
@@ -2916,7 +2918,7 @@ export class ResourceSystem extends SystemBase {
           const fallbackChance = tuned.depleteChance ?? 1.0;
           shouldDeplete = roll < fallbackChance;
           console.log(
-            `[Forestry] 🌲 ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${fallbackChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
+            `[forestry] 🌲 ${session.resourceId}: Chance roll=${roll.toFixed(3)} vs ${fallbackChance} → ${shouldDeplete ? "DEPLETE" : "continue"}`,
           );
         }
 
@@ -2987,10 +2989,8 @@ export class ResourceSystem extends SystemBase {
 
   // Legacy completeGathering() method removed - continuous loop in updateGathering() handles all gathering now
 
-  // ===== Tuning helpers (TICK-BASED for OSRS accuracy) =====
-  // OSRS Reference: https://oldschool.runescape.wiki/w/Tick_manipulation
+  // ===== Tuning helpers (TICK-BASED for tick accuracy) =====
   // Standard woodcutting = 4 ticks (2.4 seconds) per attempt
-  // Respawn times from OSRS Wiki: https://oldschool.runescape.wiki/w/Tree
   private getVariantTuning(variantKey: string): {
     levelRequired: number;
     xpPerLog: number;
@@ -3026,7 +3026,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Compute gathering cycle in ticks (OSRS-accurate, skill-specific).
+   * Compute gathering cycle in ticks (tick-based, skill-specific).
    * SERVER-SIDE: Rolls for dragon/crystal pickaxe bonus speed here to maintain determinism.
    * @see gathering/SuccessRateCalculator.ts for implementation
    */
@@ -3058,7 +3058,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Compute success rate using OSRS's LERP interpolation formula.
+   * Compute success rate using classic-MMORPG's LERP interpolation formula.
    * @see gathering/SuccessRateCalculator.ts for implementation
    */
   private computeSuccessRate(
@@ -3195,7 +3195,7 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Get the despawn ticks for a resource based on its type (Forestry system).
+   * Get the despawn ticks for a resource based on its type (forestry system).
    * Returns 0 for resources that use chance-based depletion (regular trees, mining).
    *
    * @param resourceId - The resource ID to look up
@@ -3211,7 +3211,7 @@ export class ResourceSystem extends SystemBase {
     const resourceType = parts[0];
     const subType = parts.length > 1 ? parts[1] : "tree";
 
-    // Only trees use the Forestry timer system
+    // Only trees use the forestry timer system
     if (resourceType !== "tree") {
       return 0; // Mining, fishing, etc. use chance-based or don't deplete
     }
@@ -3227,10 +3227,10 @@ export class ResourceSystem extends SystemBase {
   }
 
   /**
-   * Check if a resource uses timer-based depletion (Forestry) vs chance-based.
+   * Check if a resource uses timer-based depletion (forestry) vs chance-based.
    *
    * @param resourceId - The resource ID
-   * @returns true if uses Forestry timer, false if chance-based
+   * @returns true if uses forestry timer, false if chance-based
    */
   private usesTimerBasedDepletion(resourceId: ResourceID): boolean {
     return this.getResourceDespawnTicks(resourceId) > 0;
@@ -3379,7 +3379,7 @@ export class ResourceSystem extends SystemBase {
     // FORESTRY: Clear resource timer tracking
     this.resourceTimers.clear();
 
-    // OSRS-ACCURACY: Clear fishing spot movement timers
+    // TICK-ACCURACY: Clear fishing spot movement timers
     this.fishingSpotMoveTimers.clear();
 
     // Clear all resource data

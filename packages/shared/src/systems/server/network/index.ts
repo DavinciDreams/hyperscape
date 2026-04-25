@@ -39,7 +39,8 @@ import {
   World,
   EventType,
   CombatSystem,
-  ResourceSystem,
+  // ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25).
+  // Duck-typed inline at the single callsite below.
   worldToTile,
   tilesWithinMeleeRange,
   tileChebyshevDistance,
@@ -1265,9 +1266,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // OSRS-accurate: Woodcutting attempts every 4 ticks (2.4 seconds)
     this.tickSystem.onTick(
       (tickNumber) => {
-        const resourceSystem = this.world.getSystem(
-          "resource",
-        ) as ResourceSystem | null;
+        // ResourceSystem migrated. Duck-typed inline — only
+        // `processGatheringTick` is called here.
+        const resourceSystem = this.world.getSystem("resource") as unknown as {
+          processGatheringTick?(tick: number): void;
+        } | null;
         if (
           resourceSystem &&
           typeof resourceSystem.processGatheringTick === "function"

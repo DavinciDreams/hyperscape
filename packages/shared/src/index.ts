@@ -670,7 +670,7 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
-export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
+// ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25)
 
 // xp-curves runtime registry — shared module-level singleton.
@@ -971,6 +971,39 @@ export {
   getCharacterInfluenceManager,
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
+
+// ResourceSystem deps — needed by the migrated ResourceSystem in
+// @hyperforge/hyperscape (Wave 1 of heavy-cluster plan).
+export { ResourceEntity } from "./entities/world/ResourceEntity";
+export { disposeFishingSpotTextures } from "./entities/world/visuals/FishingSpotVisualStrategy";
+export type { TerrainResourceSpawnPoint } from "./types/world/terrain";
+export { gatheringResources } from "./gathering/index";
+export type { GatheringToolData } from "./data/DataManager";
+export { findFishingSpotTiles, shuffleArray } from "./utils/ShoreUtils";
+export type { ResourceDrop } from "./types/core/core";
+export {
+  getExternalTool,
+  getExternalToolsForSkill,
+} from "./utils/ExternalAssetUtils";
+export {
+  getDefaultInteractionRange,
+  getDefaultSuccessRate,
+  getFishingSpotMove,
+  getFishingSuccessRates,
+  getGatheringRateLimitMs,
+  getGatheringSkillMechanics,
+  getMaxResourceIdLength,
+  getMinimumCycleTicks,
+  getMiningSuccessRates,
+  getPositionEpsilon,
+  getProximitySearchRadius,
+  getRateLimitCleanupIntervalMs,
+  getStaleRateLimitMs,
+  getTimerRegenPerTick,
+  getTreeDespawnTicks,
+  getValidResourceIdPattern,
+  getWoodcuttingSuccessRates,
+} from "./data/live/gathering-live";
 
 // ProceduralGrass deferred-import deps — the migrated
 // ProceduralGrass system dynamically imports these via

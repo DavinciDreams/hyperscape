@@ -117,7 +117,8 @@ import { PersistenceSystem } from "../../server/PersistenceSystem";
 import { PlayerSystem } from "..";
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
-import { ResourceSystem } from "..";
+// ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25,
+// Wave 1). Field downgraded to `unknown`.
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 
@@ -225,7 +226,8 @@ export interface Systems {
   mobNpc?: MobNPCSystem;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   store?: unknown;
-  resource?: ResourceSystem;
+  // Migrated to @hyperforge/hyperscape — typed as `unknown`.
+  resource?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   aggro?: unknown;
   equipment?: EquipmentSystem;
@@ -425,7 +427,8 @@ export async function registerSystems(world: World): Promise<void> {
   // cross-cutting branch (migrated 2026-04-25).
 
   // 15. Resource system - Gathering mechanics (depends on inventory system)
-  world.register("resource", ResourceSystem);
+  // "resource" registered by @hyperforge/hyperscape plugin onEnable
+  // (Wave 1 of heavy-cluster migration, 2026-04-25).
 
   // 18. Processing system - Crafting and item processing (depends on inventory system)
   // "processing" registered by @hyperforge/hyperscape plugin onEnable
@@ -543,7 +546,9 @@ export async function registerSystems(world: World): Promise<void> {
   systems.mobNpc = getSystem(world, "mob-npc") as MobNPCSystem;
   systems.banking = getSystem(world, "banking");
   systems.store = getSystem(world, "store");
-  systems.resource = getSystem(world, "resource") as ResourceSystem;
+  // ResourceSystem migrated — `unknown` field; API adapter casts
+  // to inline duck-types at each callsite below.
+  systems.resource = getSystem(world, "resource");
 
   systems.aggro = getSystem(world, "aggro");
   systems.equipment = getSystem(world, "equipment") as EquipmentSystem;
@@ -918,12 +923,23 @@ function setupAPI(world: World, systems: Systems): void {
     isItemAvailable: (_storeId: string, _itemId: number, _quantity?: number) =>
       false, // Store system doesn't expose this method
 
-    // Resource API
+    // Resource API — `systems.resource` is `unknown` since
+    // ResourceSystem migrated; cast to inline duck-types at each
+    // callsite.
     getResource: (resourceId: string) =>
-      systems.resource?.getResource(resourceId),
-    getAllResources: () => systems.resource?.getAllResources(),
+      (
+        systems.resource as { getResource?(id: string): unknown } | undefined
+      )?.getResource?.(resourceId),
+    getAllResources: () =>
+      (
+        systems.resource as { getAllResources?(): unknown } | undefined
+      )?.getAllResources?.(),
     getResourcesByType: (type: "tree" | "fishing_spot" | "ore") =>
-      systems.resource?.getResourcesByType(type),
+      (
+        systems.resource as
+          | { getResourcesByType?(t: string): unknown }
+          | undefined
+      )?.getResourcesByType?.(type),
     getResourcesInArea: (_center: Position3D, _radius: number) => [], // Resource system doesn't expose this method
     isPlayerGathering: (_playerId: string) => false, // Resource system doesn't expose this method
 

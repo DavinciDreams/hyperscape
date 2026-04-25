@@ -1,10 +1,9 @@
 /**
- * SuccessRateCalculator - OSRS-accurate success rate and cycle calculations
+ * SuccessRateCalculator - tick-based success rate and cycle calculations
  *
  * Extracted from ResourceSystem.ts for SOLID compliance.
- * These functions compute gathering success rates using OSRS formulas.
+ * These functions compute gathering success rates using classic-MMORPG formulas.
  *
- * @see https://oldschool.runescape.wiki/w/Skilling_success_rate
  */
 
 import {
@@ -14,14 +13,14 @@ import {
   getMinimumCycleTicks,
   getMiningSuccessRates,
   getWoodcuttingSuccessRates,
-} from "../../../../data/live/gathering-live";
-import type { GatheringToolData } from "../../../../data/DataManager";
-import { TICK_DURATION_MS } from "../../movement/TileSystem";
+} from "@hyperforge/shared";
+import type { GatheringToolData } from "@hyperforge/shared";
+import { TICK_DURATION_MS } from "@hyperforge/shared";
 import { lerpSuccessRate } from "./DropRoller";
 import type { SuccessRateValues } from "./types";
 
 /**
- * Get low/high success rate values from OSRS-accurate tables.
+ * Get low/high success rate values from tick-based tables.
  *
  * @param skill - The gathering skill (woodcutting, mining, fishing)
  * @param resourceVariant - Resource type key (e.g., "tree_normal", "ore_copper")
@@ -73,9 +72,9 @@ export function getSuccessRateValues(
 }
 
 /**
- * Compute success rate using OSRS's LERP interpolation formula.
+ * Compute success rate using classic-MMORPG's LERP interpolation formula.
  *
- * OSRS Formula: P(Level) = (1 + floor(low × (99 - L) / 98 + high × (L - 1) / 98 + 0.5)) / 256
+ * classic-MMORPG Formula: P(Level) = (1 + floor(low × (99 - L) / 98 + high × (L - 1) / 98 + 0.5)) / 256
  *
  * The low/high values come from skill-specific tables:
  * - Woodcutting: Varies by tree type AND axe tier
@@ -88,7 +87,6 @@ export function getSuccessRateValues(
  * @param toolTier - Tool tier for woodcutting (e.g., "bronze", "rune"), ignored for other skills
  * @returns Success probability (0-1)
  *
- * @see https://oldschool.runescape.wiki/w/Skilling_success_rate
  */
 export function computeSuccessRate(
   skillLevel: number,
@@ -99,17 +97,17 @@ export function computeSuccessRate(
   // Get low/high values based on skill type
   const { low, high } = getSuccessRateValues(skill, resourceVariant, toolTier);
 
-  // Apply OSRS LERP formula
+  // Apply classic-MMORPG LERP formula
   return lerpSuccessRate(low, high, skillLevel);
 }
 
 /**
- * Compute gathering cycle in ticks (OSRS-accurate, skill-specific).
+ * Compute gathering cycle in ticks (tick-based, skill-specific).
  *
  * This is a DETERMINISTIC (pure) function - no randomness.
  * For dragon/crystal pickaxe bonus speed, the caller must roll and pass bonusRollTriggered.
  *
- * OSRS MECHANICS:
+ * classic-MMORPG MECHANICS:
  * - Woodcutting: Fixed 4 ticks, tool doesn't affect frequency
  * - Mining: Tool determines tick interval (8 bronze → 3 rune/dragon)
  *   - Dragon pickaxe: 3 ticks default, 1/6 chance for 2 ticks (avg 2.83)
@@ -122,8 +120,6 @@ export function computeSuccessRate(
  * @param bonusRollTriggered - Whether the dragon/crystal pickaxe bonus speed triggered (caller rolls this server-side)
  * @returns Number of ticks between gathering attempts
  *
- * @see https://oldschool.runescape.wiki/w/Mining
- * @see https://oldschool.runescape.wiki/w/Dragon_pickaxe
  */
 export function computeCycleTicks(
   skill: string,
@@ -147,7 +143,7 @@ export function computeCycleTicks(
       // Use rollTicks from tool data, or fall back to base (bronze = 8)
       let rollTicks = toolData?.rollTicks ?? mechanics.baseRollTicks;
 
-      // OSRS: Dragon/Crystal pickaxe have a chance for bonus speed
+      // classic-MMORPG: Dragon/Crystal pickaxe have a chance for bonus speed
       // Dragon: 1/6 chance for 2 ticks (vs 3), avg 2.83
       // Crystal: 1/4 chance for 2 ticks (vs 3), avg 2.75
       // The caller (server-side) rolls for this and passes bonusRollTriggered

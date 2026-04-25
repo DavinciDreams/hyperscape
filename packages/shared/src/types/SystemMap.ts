@@ -44,7 +44,8 @@ import type { PlayerSystem } from "../systems/shared";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { ResourceSystem } from "../systems/shared";
+// ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 1).
+// SystemMap entry below typed as `unknown`.
 import type { SkillsSystem } from "../systems/shared";
 // SmeltingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -124,7 +125,7 @@ export interface SystemMap {
   // Economy
   banking: unknown;
   store: unknown;
-  resource: ResourceSystem;
+  resource: unknown;
   "ground-items": GroundItemSystem;
   loot: unknown;
 

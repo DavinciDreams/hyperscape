@@ -1231,6 +1231,38 @@ export {
   disposeCharacterInfluenceManager,
 } from "./systems/shared/world/CharacterInfluenceManager";
 
+// ResourceSystem deps — mirror to client bundle.
+export { ResourceEntity } from "./entities/world/ResourceEntity";
+export { disposeFishingSpotTextures } from "./entities/world/visuals/FishingSpotVisualStrategy";
+export type { TerrainResourceSpawnPoint } from "./types/world/terrain";
+export { gatheringResources } from "./gathering/index";
+export type { GatheringToolData } from "./data/DataManager";
+export { findFishingSpotTiles, shuffleArray } from "./utils/ShoreUtils";
+export type { ResourceDrop } from "./types/core/core";
+export {
+  getExternalTool,
+  getExternalToolsForSkill,
+} from "./utils/ExternalAssetUtils";
+export {
+  getDefaultInteractionRange,
+  getDefaultSuccessRate,
+  getFishingSpotMove,
+  getFishingSuccessRates,
+  getGatheringRateLimitMs,
+  getGatheringSkillMechanics,
+  getMaxResourceIdLength,
+  getMinimumCycleTicks,
+  getMiningSuccessRates,
+  getPositionEpsilon,
+  getProximitySearchRadius,
+  getRateLimitCleanupIntervalMs,
+  getStaleRateLimitMs,
+  getTimerRegenPerTick,
+  getTreeDespawnTicks,
+  getValidResourceIdPattern,
+  getWoodcuttingSuccessRates,
+} from "./data/live/gathering-live";
+
 // ProceduralGrass deferred-import deps — mirror to client bundle.
 export { getGrassExclusionManager } from "./systems/shared/world/GrassExclusionManager";
 export { ProcgenTreeInstancer } from "./systems/shared/world/ProcgenTreeInstancer";

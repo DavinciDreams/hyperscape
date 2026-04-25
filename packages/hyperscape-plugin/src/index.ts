@@ -57,6 +57,7 @@ import { BuildingRenderingSystem } from "./systems/BuildingRenderingSystem.js";
 import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
 import { ProceduralGrassSystem } from "./systems/ProceduralGrass.js";
+import { ResourceSystem } from "./systems/ResourceSystem.js";
 import { VegetationSystem } from "./systems/VegetationSystem.js";
 import { ScriptingSystem } from "./systems/ScriptingSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
@@ -223,6 +224,11 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
       // + authored manifest seed remains in `SystemLoader.init()`.
       register("loot", LootSystem);
+
+      // Resource system — gathering nodes (trees, rocks, fishing
+      // spots). Wave 1 of the heavy-cluster migration; the
+      // gathering/ subdirectory co-migrated.
+      register("resource", ResourceSystem);
 
       // Bridges — collision + procedural deck/fence geometry.
       // Both client and server register it: server computes
