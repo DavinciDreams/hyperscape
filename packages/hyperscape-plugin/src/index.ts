@@ -39,6 +39,7 @@ import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
+import { HealthBars } from "./systems/HealthBars.js";
 import { HealthRegenSystem } from "./systems/HealthRegenSystem.js";
 import { MobDeathSystem } from "./systems/MobDeathSystem.js";
 import { ProjectileRenderer } from "./systems/ProjectileRenderer.js";
@@ -158,6 +159,10 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // Procedural-river TSL waterfall renderer — purely visual,
         // self-no-op when there are no river-derived definitions.
         register("waterfall-visuals", WaterfallVisualsSystem);
+        // Per-entity HP bars — single instanced TSL mesh keyed by
+        // entity id. OSRS pattern (right-click menus carry names;
+        // bars carry HP percent).
+        register("healthbars", HealthBars);
         // Debug overlays — toggled via F5 panel keys (B / W).
         register("bfsPathDebug", BFSPathDebugSystem);
         register("walkableDebug", WalkableTileDebugSystem);

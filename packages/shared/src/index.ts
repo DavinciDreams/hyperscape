@@ -795,6 +795,28 @@ export { ReactiveVector3 } from "./extras/animation/ReactiveVector3";
 export { createEmoteFactory } from "./extras/three/createEmoteFactory";
 export { createNode } from "./extras/three/createNode";
 export { glbToNodes } from "./extras/three/glbToNodes";
+
+// TSL node type aliases — re-exported for migrated visual systems
+// (HealthBars + future TSL-shaded systems in @hyperforge/hyperscape).
+export type {
+  TSLNodeFloat,
+  TSLNodeVec2,
+  TSLNodeVec3,
+  TSLNodeVec4,
+} from "./extras/three/three";
+
+// HealthBar canvas renderer + dimension constants — used by the
+// migrated HealthBars system in @hyperforge/hyperscape.
+export {
+  HEALTH_BAR_COLORS,
+  HEALTH_BAR_DIMENSIONS,
+  type HealthBarStyle,
+  type HealthBarCanvasOptions,
+  drawHealthBar,
+  clearHealthBar,
+  createHealthBarCanvas,
+  updateHealthBarCanvas,
+} from "./utils/rendering/HealthBarRenderer";
 export { Emotes } from "./data/playerEmotes";
 export {
   DUEL_RULE_DEFINITIONS,

@@ -88,6 +88,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "duel-countdown-splat",
   "projectile-renderer",
   "waterfall-visuals",
+  "healthbars",
   "bfsPathDebug",
   "walkableDebug",
   "resource-tile-debug",

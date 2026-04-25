@@ -9,33 +9,39 @@
  * @see HealthBarRenderer for the drawing logic
  */
 
-import * as THREE from "../../extras/three/three";
+// Migrated 2026-04-24 from `packages/shared/src/systems/client/`
+// into `@hyperforge/hyperscape` (8th client-only system migration).
+// OSRS-style entity health bars rendered as a single instanced TSL
+// mesh. HealthBarRenderer (canvas drawing helpers) + HEALTH_BAR_*
+// constants are re-exported from `@hyperforge/shared` for this
+// system's consumption.
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
-  MeshBasicNodeMaterial,
-  texture,
-  uv,
-  positionLocal,
-  uniform,
+  Fn,
+  add,
+  cross,
+  div,
   float,
+  instancedBufferAttribute,
+  mul,
+  positionLocal,
+  sub,
+  texture,
+  uniform,
+  uv,
   vec2,
   vec3,
   vec4,
-  add,
-  sub,
-  mul,
-  div,
-  cross,
-  instancedBufferAttribute,
-  Fn,
-} from "../../extras/three/three";
-import { toTHREEVector3 } from "../../extras/three/three";
-import type { TSLNodeVec2 } from "../../extras/three/three";
-import { SystemBase } from "../shared/infrastructure/SystemBase";
-import type { World } from "../../types";
+} from "three/tsl";
 import {
   drawHealthBar,
   HEALTH_BAR_DIMENSIONS,
-} from "../../utils/rendering/HealthBarRenderer";
+  SystemBase,
+  THREE,
+  toTHREEVector3,
+  type TSLNodeVec2,
+  type World,
+} from "@hyperforge/shared";
 
 const _v3_1 = new THREE.Vector3();
 

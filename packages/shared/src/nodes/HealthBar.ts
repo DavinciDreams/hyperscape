@@ -29,11 +29,28 @@
  * ```
  */
 
-import type {
-  HealthBars as HealthBarsSystem,
-  HealthBarHandle,
-} from "../systems/client/HealthBars";
 import { Node } from "./Node";
+
+// Structural shape of the `healthbars` system as this node uses it.
+// The concrete `HealthBars` class lives in `@hyperforge/hyperscape`
+// (migrated 2026-04-24); shared keeps only the duck-typed surface
+// the node touches so we don't have a forward dep on the plugin.
+import type * as THREE from "three";
+interface HealthBarHandle {
+  entityId: string;
+  move: (newMatrix: THREE.Matrix4) => void;
+  setHealth: (current: number, max: number) => void;
+  show: (timeoutMs?: number) => void;
+  hide: () => void;
+  dispose?: () => void;
+}
+interface HealthBarsSystem {
+  add: (
+    entityId: string,
+    health: number,
+    maxHealth: number,
+  ) => HealthBarHandle | null;
+}
 
 interface HealthBarData {
   entityId?: string;

@@ -66,7 +66,9 @@ import type { ClientActions } from "../systems/client/ClientActions";
 import type { SocialSystem } from "../systems/client";
 import type { DuelArenaVisualsSystem } from "../systems/client";
 import type { InteractionRouter } from "../systems/client";
-import type { HealthBars } from "../systems/client/HealthBars";
+// HealthBars migrated to @hyperforge/hyperscape (2026-04-24).
+// SystemMap entry below typed as `unknown` — the only consumer
+// (nodes/HealthBar.ts) duck-types the surface it needs.
 
 // Shared systems accessed by key
 import type { Chat } from "../systems/shared/presentation/Chat";
@@ -166,7 +168,7 @@ export interface SystemMap {
   // "duel-countdown-splat" registered by @hyperforge/hyperscape plugin onEnable
   social: SocialSystem;
   "duel-arena-visuals": DuelArenaVisualsSystem;
-  healthbars: HealthBars;
+  healthbars: unknown;
 
   // Shared systems with key access
   chat: Chat;
