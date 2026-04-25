@@ -1205,6 +1205,21 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralFlowerSystem (editor-only) — re-exported here for the
+// client bundle so the migrated plugin ProceduralFlowerSystem
+// resolves its imports. (Mirrors index.ts. `getNoiseTexture` /
+// `generateNoiseTexture` resolve via existing exports earlier.)
+export { tslUtils } from "./utils/TSLUtils";
+export { VegetationSsboUtils } from "./systems/shared/world/VegetationSsboUtils";
+export { windManager } from "./systems/shared/world/Wind";
+export {
+  getGrassHeightmapTextureNode,
+  getGrassHeightmapUniforms,
+  getGrassExclusionTexture,
+  getGrassGridExclusionTexture,
+  getGrassRoadInfluenceTexture,
+} from "./systems/shared/world/ProceduralGrass";
+
 // RoadNetworkSystem (editor-only) — re-exported here for the
 // client bundle so the migrated plugin RoadNetworkSystem resolves
 // its imports. (Mirrors index.ts. `getGlobalTerrainComputeContext`

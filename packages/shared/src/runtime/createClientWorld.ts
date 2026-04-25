@@ -75,7 +75,7 @@ import { TownSystem } from "../systems/shared";
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 import { VegetationSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
-import { ProceduralFlowerSystem } from "../systems/shared";
+// ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 import { BuildingRenderingSystem } from "../systems/shared";
 import { ProceduralTownLandmarksSystem } from "../systems/shared";
@@ -370,11 +370,9 @@ export function createClientWorld() {
   // ============================================================================
   // FLOWER SYSTEM
   // GPU Procedural flowers using SpriteNodeMaterial
-  // Has its own lightweight heightmap fallback when grass system is disabled.
-  // TEMPORARILY DISABLED - investigating spawn blocking issue
-  // if (!isEmbeddedSpectatorMode()) {
-  //   world.register("flowers", ProceduralFlowerSystem);
-  // }
+  // ProceduralFlowerSystem migrated to @hyperforge/hyperscape
+  // (2026-04-25). Was already disabled here. Load the plugin to
+  // re-enable flowers.
 
   // ============================================================================
   // DOCK SYSTEM

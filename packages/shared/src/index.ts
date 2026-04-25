@@ -943,6 +943,22 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralFlowerSystem deps — needed by the migrated
+// ProceduralFlowerSystem in @hyperforge/hyperscape. Vegetation /
+// TSL helpers live in shared because ProceduralGrass + Vegetation
+// systems still consume them directly. (`getNoiseTexture` /
+// `generateNoiseTexture` already exported earlier in this file.)
+export { tslUtils } from "./utils/TSLUtils";
+export { VegetationSsboUtils } from "./systems/shared/world/VegetationSsboUtils";
+export { windManager } from "./systems/shared/world/Wind";
+export {
+  getGrassHeightmapTextureNode,
+  getGrassHeightmapUniforms,
+  getGrassExclusionTexture,
+  getGrassGridExclusionTexture,
+  getGrassRoadInfluenceTexture,
+} from "./systems/shared/world/ProceduralGrass";
+
 // RoadNetworkSystem deps — needed by the migrated
 // RoadNetworkSystem in @hyperforge/hyperscape. Procedural road
 // generation reads procgen types + worker helpers + GPU compute

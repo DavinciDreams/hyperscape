@@ -17,7 +17,7 @@ export * from "./VegetationSystem";
 export * from "./ProceduralGrass";
 export * from "./GrassMaterialCore";
 export * from "./StandaloneGrass";
-export * from "./ProceduralFlowers";
+// ProceduralFlowers migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./TownSystem";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)

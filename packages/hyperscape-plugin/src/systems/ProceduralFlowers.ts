@@ -11,7 +11,29 @@
  * @module ProceduralFlowers
  */
 
-import THREE, {
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (36th system migration). 1175 LOC.
+// Editor-only registration in `createEditorWorld` removed; the
+// `createClientWorld` import was already commented out. Vegetation
+// helpers (ProceduralGrass / VegetationSsboUtils / Wind / Noise)
+// stay in shared because the still-in-shared ProceduralGrass +
+// VegetationSystem consume them directly.
+import {
+  generateNoiseTexture,
+  getGrassExclusionTexture,
+  getGrassGridExclusionTexture,
+  getGrassHeightmapTextureNode,
+  getGrassHeightmapUniforms,
+  getGrassRoadInfluenceTexture,
+  getNoiseTexture,
+  SystemClass as System,
+  THREE,
+  tslUtils,
+  VegetationSsboUtils,
+  type World,
+  windManager,
+} from "@hyperforge/shared";
+import {
   uniform,
   Fn,
   float,
@@ -41,21 +63,8 @@ import THREE, {
   mul,
   atan,
   smoothstep,
-} from "../../../extras/three/three";
+} from "three/tsl";
 import { SpriteNodeMaterial } from "three/webgpu";
-import { System } from "../infrastructure/System";
-import type { World } from "../../../types";
-import { tslUtils } from "../../../utils/TSLUtils";
-import { VegetationSsboUtils } from "./VegetationSsboUtils";
-import { windManager } from "./Wind";
-import {
-  getGrassHeightmapTextureNode,
-  getGrassHeightmapUniforms,
-  getGrassExclusionTexture,
-  getGrassGridExclusionTexture,
-  getGrassRoadInfluenceTexture,
-} from "./ProceduralGrass";
-import { getNoiseTexture, generateNoiseTexture } from "./TerrainShader";
 
 // TSL types - use any for dynamic TSL function signatures
 type TSLFn = (...args: any[]) => any;

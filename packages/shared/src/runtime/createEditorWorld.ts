@@ -25,7 +25,10 @@ import { TownSystem } from "../systems/shared/world/TownSystem";
 // and register it manually if you need road generation here.
 import { VegetationSystem } from "../systems/shared/world/VegetationSystem";
 import { ProceduralGrassSystem } from "../systems/shared/world/ProceduralGrass";
-import { ProceduralFlowerSystem } from "../systems/shared/world/ProceduralFlowers";
+// ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Editor mode no longer registers flowers by default — load the
+// plugin or import ProceduralFlowerSystem from
+// @hyperforge/hyperscape and register it manually.
 import { BuildingRenderingSystem } from "../systems/shared/world/BuildingRenderingSystem";
 import { ProceduralTownLandmarksSystem } from "../systems/shared/world/ProceduralTownLandmarks";
 
@@ -108,7 +111,8 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   if (cfg.enableTownLandmarks)
     world.register("town-landmarks", ProceduralTownLandmarksSystem);
   if (cfg.enableGrass) world.register("grass", ProceduralGrassSystem);
-  if (cfg.enableFlowers) world.register("flowers", ProceduralFlowerSystem);
+  // "flowers" migrated to @hyperforge/hyperscape (2026-04-25). Editor
+  // mode no longer registers it by default.
 
   // Editor
   world.register("editor-camera", EditorCameraSystem);
