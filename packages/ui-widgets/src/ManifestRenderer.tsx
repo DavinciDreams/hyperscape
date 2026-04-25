@@ -122,6 +122,15 @@ export interface ManifestRendererProps {
    * whose customization policy permits it.
    */
   widgetShell?: ManifestWidgetShell;
+  /**
+   * Position scheme for the outer overlay div.
+   *   - `"fixed"` (default) — covers the whole window. The live game
+   *     HUD renders this way.
+   *   - `"absolute"` — sized to the nearest positioned ancestor.
+   *     Use this when embedding the renderer inside a bounded
+   *     container (e.g. the World Studio PIE viewport overlay).
+   */
+  overlayPosition?: "fixed" | "absolute";
 }
 
 /**
@@ -260,6 +269,7 @@ export const ManifestRenderer = memo(function ManifestRenderer({
   resolveTheme,
   onIssues,
   widgetShell,
+  overlayPosition = "fixed",
 }: ManifestRendererProps) {
   const Shell = widgetShell ?? PassthroughShell;
 
@@ -295,7 +305,7 @@ export const ManifestRenderer = memo(function ManifestRenderer({
     <div
       data-layout-id={layout.id}
       style={{
-        position: "fixed",
+        position: overlayPosition,
         inset: 0,
         pointerEvents: "none",
         zIndex: 10,
