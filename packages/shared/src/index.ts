@@ -943,6 +943,54 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralGrassSystem deps — needed by the migrated
+// ProceduralGrass in @hyperforge/hyperscape. RoadInfluenceMask
+// helpers + grass material core + exclusion grid + character
+// influence manager.
+export {
+  clearRoadInfluenceTexture,
+  getRoadInfluenceTexture,
+  getRoadInfluenceTextureState,
+  getRoadInfluenceThreshold,
+  setRoadInfluenceTextureData,
+  setRoadInfluenceThreshold,
+  type RoadInfluenceTextureState,
+} from "./systems/shared/world/RoadInfluenceMask";
+export {
+  createGrassLod0Geometry,
+  createGrassLod0Material,
+  type GrassExclusionOptions,
+} from "./systems/shared/world/GrassMaterialCore";
+export {
+  GrassExclusionGrid,
+  getGrassExclusionGrid,
+  disposeGrassExclusionGrid,
+} from "./systems/shared/world/GrassExclusionGrid";
+export {
+  CharacterInfluenceManager,
+  getCharacterInfluenceManager,
+  disposeCharacterInfluenceManager,
+} from "./systems/shared/world/CharacterInfluenceManager";
+
+// GrassSharedRegistry — mutable shader state owned by shared so
+// the migrated ProceduralGrass + still-in-shared sibling modules
+// share the same texture/uniform registry.
+export {
+  CHARACTER_TEXTURE_WIDTH,
+  characterBendingTextureNode,
+  gridExclusionTextureNode,
+  setCharacterBendingTexture,
+  setGridExclusionTexture,
+  setUseGridExclusion,
+  setUseMultiCharacterBending,
+  uCharacterCount,
+  uGridExclusionCenterX,
+  uGridExclusionCenterZ,
+  uGridExclusionWorldSize,
+  useGridBasedExclusion,
+  useMultiCharacterBending,
+} from "./systems/shared/world/GrassSharedRegistry";
+
 // BuildingRenderingSystem deps — needed by the migrated
 // BuildingRenderingSystem in @hyperforge/hyperscape. TerrainShader
 // vertex-light helpers + lamppost mask + impostor atlas + physics
@@ -1020,13 +1068,9 @@ export {
 export { tslUtils } from "./utils/TSLUtils";
 export { VegetationSsboUtils } from "./systems/shared/world/VegetationSsboUtils";
 export { windManager } from "./systems/shared/world/Wind";
-export {
-  getGrassHeightmapTextureNode,
-  getGrassHeightmapUniforms,
-  getGrassExclusionTexture,
-  getGrassGridExclusionTexture,
-  getGrassRoadInfluenceTexture,
-} from "./systems/shared/world/ProceduralGrass";
+// `getGrass*` helpers migrated to @hyperforge/hyperscape (2026-04-25)
+// alongside ProceduralGrass. Plugin consumers (ProceduralFlowers)
+// import them from the sibling plugin file directly.
 
 // RoadNetworkSystem deps — needed by the migrated
 // RoadNetworkSystem in @hyperforge/hyperscape. Procedural road

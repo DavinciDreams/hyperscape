@@ -27,7 +27,9 @@ import { TownSystem } from "../systems/shared/world/TownSystem";
 // Editor mode no longer registers it by default — load the plugin
 // or import VegetationSystem from @hyperforge/hyperscape and
 // register manually to use it here.
-import { ProceduralGrassSystem } from "../systems/shared/world/ProceduralGrass";
+// ProceduralGrassSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Editor mode no longer registers grass by default — load the
+// plugin or register manually.
 // ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Editor mode no longer registers flowers by default — load the
 // plugin or import ProceduralFlowerSystem from
@@ -121,7 +123,8 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   // "town-landmarks" migrated to @hyperforge/hyperscape (2026-04-25).
   // Editor mode no longer registers it by default — load the plugin
   // or import ProceduralTownLandmarksSystem and register manually.
-  if (cfg.enableGrass) world.register("grass", ProceduralGrassSystem);
+  // "grass" migrated to @hyperforge/hyperscape (2026-04-25). Editor
+  // mode no longer registers it by default.
   // "flowers" migrated to @hyperforge/hyperscape (2026-04-25). Editor
   // mode no longer registers it by default.
 

@@ -20,11 +20,6 @@
 // VegetationSystem consume them directly.
 import {
   generateNoiseTexture,
-  getGrassExclusionTexture,
-  getGrassGridExclusionTexture,
-  getGrassHeightmapTextureNode,
-  getGrassHeightmapUniforms,
-  getGrassRoadInfluenceTexture,
   getNoiseTexture,
   SystemClass as System,
   THREE,
@@ -33,6 +28,15 @@ import {
   type World,
   windManager,
 } from "@hyperforge/shared";
+// Grass helpers migrated alongside ProceduralGrass to the plugin
+// (2026-04-25). Import directly from sibling plugin file.
+import {
+  getGrassExclusionTexture,
+  getGrassGridExclusionTexture,
+  getGrassHeightmapTextureNode,
+  getGrassHeightmapUniforms,
+  getGrassRoadInfluenceTexture,
+} from "./ProceduralGrass.js";
 import {
   uniform,
   Fn,

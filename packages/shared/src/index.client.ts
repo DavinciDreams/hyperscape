@@ -1205,6 +1205,49 @@ export {
   type BridgeDefinition,
 } from "./systems/shared/world/BridgeDefinition";
 
+// ProceduralGrassSystem deps — mirror to client bundle.
+export {
+  clearRoadInfluenceTexture,
+  getRoadInfluenceTexture,
+  getRoadInfluenceTextureState,
+  getRoadInfluenceThreshold,
+  setRoadInfluenceTextureData,
+  setRoadInfluenceThreshold,
+  type RoadInfluenceTextureState,
+} from "./systems/shared/world/RoadInfluenceMask";
+export {
+  createGrassLod0Geometry,
+  createGrassLod0Material,
+  type GrassExclusionOptions,
+} from "./systems/shared/world/GrassMaterialCore";
+export {
+  GrassExclusionGrid,
+  getGrassExclusionGrid,
+  disposeGrassExclusionGrid,
+} from "./systems/shared/world/GrassExclusionGrid";
+export {
+  CharacterInfluenceManager,
+  getCharacterInfluenceManager,
+  disposeCharacterInfluenceManager,
+} from "./systems/shared/world/CharacterInfluenceManager";
+
+// GrassSharedRegistry — mirror to client bundle.
+export {
+  CHARACTER_TEXTURE_WIDTH,
+  characterBendingTextureNode,
+  gridExclusionTextureNode,
+  setCharacterBendingTexture,
+  setGridExclusionTexture,
+  setUseGridExclusion,
+  setUseMultiCharacterBending,
+  uCharacterCount,
+  uGridExclusionCenterX,
+  uGridExclusionCenterZ,
+  uGridExclusionWorldSize,
+  useGridBasedExclusion,
+  useMultiCharacterBending,
+} from "./systems/shared/world/GrassSharedRegistry";
+
 // BuildingRenderingSystem (client + editor) — re-exported here
 // for the client bundle so the migrated plugin
 // BuildingRenderingSystem resolves its imports. (Mirrors index.ts.)
@@ -1277,13 +1320,9 @@ export {
 export { tslUtils } from "./utils/TSLUtils";
 export { VegetationSsboUtils } from "./systems/shared/world/VegetationSsboUtils";
 export { windManager } from "./systems/shared/world/Wind";
-export {
-  getGrassHeightmapTextureNode,
-  getGrassHeightmapUniforms,
-  getGrassExclusionTexture,
-  getGrassGridExclusionTexture,
-  getGrassRoadInfluenceTexture,
-} from "./systems/shared/world/ProceduralGrass";
+// `getGrass*` helpers migrated to @hyperforge/hyperscape (2026-04-25)
+// alongside ProceduralGrass. Plugin consumers import them from the
+// sibling plugin file directly.
 
 // RoadNetworkSystem (editor-only) — re-exported here for the
 // client bundle so the migrated plugin RoadNetworkSystem resolves

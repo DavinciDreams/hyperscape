@@ -56,6 +56,7 @@ import { BridgeSystem } from "./systems/BridgeSystem.js";
 import { BuildingRenderingSystem } from "./systems/BuildingRenderingSystem.js";
 import { POISystem } from "./systems/POISystem.js";
 import { ProceduralDocks } from "./systems/ProceduralDocks.js";
+import { ProceduralGrassSystem } from "./systems/ProceduralGrass.js";
 import { VegetationSystem } from "./systems/VegetationSystem.js";
 import { ScriptingSystem } from "./systems/ScriptingSystem.js";
 import { LootSystem } from "./systems/LootSystem.js";
@@ -310,6 +311,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         // impostor atlas, lazy collision. Reads building placement
         // data from TownSystem (still in shared).
         register("building-rendering", BuildingRenderingSystem);
+        // Procedural grass — GPU instanced + heightmap fallback.
+        // Mutable shader state (grid exclusion, character bending)
+        // owned by `GrassSharedRegistry` in shared so in-shared
+        // sibling modules (`GrassExclusionGrid`,
+        // `CharacterInfluenceManager`) can push updates.
+        register("grass", ProceduralGrassSystem);
         // Drag-and-drop + right-click context menus. Originally
         // registered inside `if (world.isClient)` in SystemLoader.
         // Stats reader (`getSystemInfo`) is duck-typed at the

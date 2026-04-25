@@ -74,7 +74,7 @@ import { TownSystem } from "../systems/shared";
 // POISystem migrated to @hyperforge/hyperscape (2026-04-25)
 // RoadNetworkSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // VegetationSystem migrated to @hyperforge/hyperscape (2026-04-25)
-import { ProceduralGrassSystem } from "../systems/shared";
+// ProceduralGrassSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralFlowerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ProceduralDocks migrated to @hyperforge/hyperscape (2026-04-25)
 // BuildingRenderingSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -368,7 +368,8 @@ export function createClientWorld() {
   // ============================================================================
   // GPU Procedural grass with heightmap sampling
   // TEMPORARILY DISABLED - performance optimization
-  // world.register("grass", ProceduralGrassSystem);
+  // ProceduralGrassSystem migrated 2026-04-25; was already
+  // commented out here.
 
   // ============================================================================
   // FLOWER SYSTEM

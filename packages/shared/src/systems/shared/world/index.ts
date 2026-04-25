@@ -14,7 +14,7 @@ export * from "./WaterBodyRegistry";
 export * from "./Wind";
 export * from "./VegetationSsboUtils";
 // VegetationSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./ProceduralGrass";
+// ProceduralGrass migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./GrassMaterialCore";
 export * from "./StandaloneGrass";
 // ProceduralFlowers migrated to @hyperforge/hyperscape (2026-04-25)

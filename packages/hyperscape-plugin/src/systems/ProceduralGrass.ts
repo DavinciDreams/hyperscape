@@ -39,7 +39,60 @@
  * @module ProceduralGrass
  */
 
-import THREE, {
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/world/`
+// into `@hyperforge/hyperscape` (40th system migration). 3468 LOC.
+// Editor-only registration (commented out in client). Module-level
+// shader state previously owned here was extracted to
+// `GrassSharedRegistry` (in shared) so this file no longer owns
+// state that in-shared sibling modules need to push updates into.
+import {
+  applySkyFog,
+  CharacterInfluenceManager,
+  CHARACTER_TEXTURE_WIDTH,
+  characterBendingTextureNode,
+  clearRoadInfluenceTexture as clearRoadInfluenceMask,
+  createGrassLod0Geometry,
+  createGrassLod0Material,
+  disposeCharacterInfluenceManager,
+  disposeGrassExclusionGrid,
+  generateNoiseTexture,
+  getCharacterInfluenceManager,
+  getGrassExclusionGrid,
+  getNoiseTexture,
+  getRoadInfluenceTexture as getRoadInfluenceMaskTexture,
+  getRoadInfluenceTextureState,
+  getRoadInfluenceThreshold as getRoadInfluenceMaskThreshold,
+  GrassExclusionGrid,
+  type GrassExclusionOptions,
+  gridExclusionTextureNode,
+  setRoadInfluenceTextureData,
+  setRoadInfluenceThreshold as setRoadInfluenceMaskThreshold,
+  SystemClass as System,
+  TERRAIN_CONSTANTS,
+  THREE,
+  tslUtils,
+  uCharacterCount,
+  uGridExclusionCenterX,
+  uGridExclusionCenterZ,
+  uGridExclusionWorldSize,
+  useGridBasedExclusion,
+  useMultiCharacterBending,
+  VegetationSsboUtils,
+  windManager,
+  type World,
+} from "@hyperforge/shared";
+// Re-export setters that previously lived in this file. Resolves to
+// `GrassSharedRegistry` via the shared barrel; preserves
+// back-compat for any direct callers from before the registry
+// extraction.
+export {
+  setCharacterBendingTexture,
+  setGridExclusionTexture,
+  setUseGridExclusion,
+  setUseMultiCharacterBending,
+} from "@hyperforge/shared";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
   uniform,
   Fn,
   float,
@@ -80,44 +133,12 @@ import THREE, {
   positionLocal,
   Loop,
   attribute,
-} from "../../../extras/three/three";
-import { MeshBasicNodeMaterial } from "three/webgpu";
-import { System } from "../infrastructure/System";
-import type { World } from "../../../types";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import { tslUtils } from "../../../utils/TSLUtils";
-import { windManager } from "./Wind";
-import { VegetationSsboUtils } from "./VegetationSsboUtils";
-import { getNoiseTexture, generateNoiseTexture } from "./TerrainShader";
-import {
-  clearRoadInfluenceTexture as clearRoadInfluenceMask,
-  getRoadInfluenceThreshold as getRoadInfluenceMaskThreshold,
-  getRoadInfluenceTexture as getRoadInfluenceMaskTexture,
-  getRoadInfluenceTextureState,
-  setRoadInfluenceTextureData,
-  setRoadInfluenceThreshold as setRoadInfluenceMaskThreshold,
-} from "./RoadInfluenceMask";
-import { applySkyFog } from "./FogConfig";
-import {
-  createGrassLod0Geometry,
-  createGrassLod0Material,
-  type GrassExclusionOptions,
-} from "./GrassMaterialCore";
+} from "three/tsl";
 import {
   GrassGenerator,
   createGrassClumpGeometry,
   type GrassFieldResult,
 } from "@hyperforge/procgen/grass";
-import {
-  GrassExclusionGrid,
-  getGrassExclusionGrid,
-  disposeGrassExclusionGrid,
-} from "./GrassExclusionGrid";
-import {
-  CharacterInfluenceManager,
-  getCharacterInfluenceManager,
-  disposeCharacterInfluenceManager,
-} from "./CharacterInfluenceManager";
 
 // ============================================================================
 // ASYNC UTILITIES - Non-blocking main thread helpers
@@ -490,27 +511,10 @@ const uExclusionWorldSize = uniform(EXCLUSION_WORLD_SIZE);
 const uExclusionCenterX = uniform(0);
 const uExclusionCenterZ = uniform(0);
 
-// ============================================================================
-// GRID-BASED EXCLUSION — state moved 2026-04-25 to GrassSharedRegistry
-// ============================================================================
-// Module-level state + setters for grid exclusion now live in
-// `./GrassSharedRegistry` so the in-shared sibling modules
-// (`GrassExclusionGrid`) can keep calling `setGridExclusionTexture`
-// without depending on this file (which is migrating to the plugin).
-// `setGridExclusionTexture` and `setUseGridExclusion` are re-exported
-// here for backwards-compatibility with any direct callers; they
-// resolve to the registry singletons via ES-module live bindings.
-export {
-  setGridExclusionTexture,
-  setUseGridExclusion,
-} from "./GrassSharedRegistry";
-import {
-  gridExclusionTextureNode,
-  uGridExclusionCenterX,
-  uGridExclusionCenterZ,
-  uGridExclusionWorldSize,
-  useGridBasedExclusion,
-} from "./GrassSharedRegistry";
+// Grid-exclusion state lives in shared `GrassSharedRegistry` and is
+// imported via the consolidated `@hyperforge/shared` block at the
+// top of this file (after the migration). Re-exports for back-compat
+// were also lifted up there.
 
 // ============================================================================
 // WATER/SHORELINE CULLING - Gradual fade near water
@@ -540,24 +544,9 @@ const WATER_CONFIG = {
 const uWaterHardCutoff = uniform(WATER_CONFIG.WATER_HARD_CUTOFF);
 const uWaterFadeStart = uniform(WATER_CONFIG.WATER_FADE_START);
 
-// ============================================================================
-// MULTI-CHARACTER BENDING — state moved 2026-04-25 to GrassSharedRegistry
-// ============================================================================
-// Module-level state + setters for character bending now live in
-// `./GrassSharedRegistry` so the in-shared sibling
-// `CharacterInfluenceManager` can keep calling
-// `setCharacterBendingTexture` without depending on this file
-// (which is migrating to the plugin).
-export {
-  setCharacterBendingTexture,
-  setUseMultiCharacterBending,
-} from "./GrassSharedRegistry";
-import {
-  characterBendingTextureNode,
-  CHARACTER_TEXTURE_WIDTH,
-  uCharacterCount,
-  useMultiCharacterBending,
-} from "./GrassSharedRegistry";
+// Character-bending state lives in shared `GrassSharedRegistry` and
+// is imported via the consolidated `@hyperforge/shared` block at the
+// top of this file. Re-exports for back-compat were also lifted up.
 
 // Legacy export for backwards compatibility (now a no-op)
 export function setCharacterBendingData(

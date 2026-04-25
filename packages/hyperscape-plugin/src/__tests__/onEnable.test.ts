@@ -116,6 +116,7 @@ const CLIENT_ONLY_REGISTRATIONS = [
   "music",
   "vegetation",
   "building-rendering",
+  "grass",
   "inventory-interaction",
 ];
 
