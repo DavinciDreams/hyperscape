@@ -20,12 +20,15 @@
 import type { World } from "@hyperforge/shared";
 import { EventType, TICK_DURATION_MS } from "@hyperforge/shared";
 import type { ActionQueue } from "../../../shared/src/systems/server/network/action-queue";
-import type { TileMovementManager } from "../../../shared/src/systems/server/network/tile-movement";
-import type { MobTileMovementManager } from "../../../shared/src/systems/server/network/mob-tile-movement";
-import type { PendingAttackManager } from "../../../shared/src/systems/server/network/PendingAttackManager";
+import type {
+  TileMovementManager,
+  MobTileMovementManager,
+  PendingAttackManager,
+  FaceDirectionManager,
+  PlayerScriptQueue,
+  NPCScriptQueue,
+} from "@hyperforge/hyperscape";
 import type { BroadcastManager } from "./ServerNetwork/broadcast";
-import type { PlayerScriptQueue, NPCScriptQueue } from "@hyperforge/hyperscape";
-import type { FaceDirectionManager } from "../../../shared/src/systems/server/network/FaceDirectionManager";
 
 /**
  * Combat system interface for tick processing

@@ -387,6 +387,55 @@ export {
   isDuelFoodItemId,
 } from "./systems/duelFood.js";
 
+// PlayerEntity / PlayerLocal / PlayerRemote — needed by server-side
+// DuelScheduler and other consumers that previously imported from
+// `@hyperforge/shared` (where these classes used to live before the
+// player-entity migration session).
+export { PlayerEntity } from "./entities/player/PlayerEntity.js";
+export { PlayerLocal } from "./entities/player/PlayerLocal.js";
+export { PlayerRemote } from "./entities/player/PlayerRemote.js";
+
+// DuelSystem internals — re-exported so the server-side
+// `packages/server/src/systems/DuelSystem/*` shims can resolve via
+// `@hyperforge/hyperscape` instead of dangling `@hyperforge/shared`
+// paths that no longer exist post-migration.
+export { ArenaPoolManager } from "./systems/DuelSystem/ArenaPoolManager.js";
+export {
+  CHALLENGE_TIMEOUT_TICKS,
+  DISCONNECT_TIMEOUT_TICKS,
+  SETUP_DISCONNECT_GRACE_TICKS,
+  SESSION_MAX_AGE_TICKS,
+  DEATH_RESOLUTION_DELAY_TICKS,
+  CLEANUP_INTERVAL_TICKS,
+  CHALLENGE_CLEANUP_INTERVAL_TICKS,
+  ticksToMs,
+  TICK_DURATION_MS,
+  CHALLENGE_DISTANCE_TILES,
+  LOBBY_SPAWN_WINNER,
+  LOBBY_SPAWN_LOSER,
+} from "./systems/DuelSystem/config.js";
+export {
+  DuelCombatResolver,
+  type DuelResolutionReason,
+  type DuelResolutionResult,
+} from "./systems/DuelSystem/DuelCombatResolver.js";
+export {
+  DuelSessionManager,
+  getParticipantRole,
+  getSessionOpponentId,
+  type ServerDuelSession,
+  type EquipmentRestrictions,
+} from "./systems/DuelSystem/DuelSessionManager.js";
+export { DUEL_ERRORS } from "./systems/DuelSystem/error-messages.js";
+export { PendingDuelManager } from "./systems/DuelSystem/PendingDuelManager.js";
+export {
+  isPlayerDisconnectPayload,
+  isEntityDeathPayload,
+  isPlayerDeath,
+  type PlayerDisconnectPayload,
+  type EntityDeathPayload,
+} from "./systems/DuelSystem/validation.js";
+
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
  * meta-plugin's lifecycle hooks don't need any handles, since the

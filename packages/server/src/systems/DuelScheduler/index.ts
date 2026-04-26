@@ -20,7 +20,8 @@
  */
 
 import type { World } from "@hyperforge/shared";
-import { EventType, type PlayerEntity } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import type { PlayerEntity } from "@hyperforge/hyperscape";
 import { Logger } from "../ServerNetwork/services";
 
 // ============================================================================

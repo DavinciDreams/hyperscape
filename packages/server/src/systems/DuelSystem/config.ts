@@ -1,10 +1,21 @@
 /**
  * @deprecated Re-export shim.
  *
- * `DuelSystem/config` relocated to
- * `packages/shared/src/systems/server/DuelSystem/config.ts`
- * as part of the engine/game separation (PLAN_SERVERNETWORK_MIGRATION.md Step 4).
- * Delete after Step 8.
+ * Relocated to `@hyperforge/hyperscape`
+ * (DuelSystem migration session, 2026-04-26).
  */
 
-export * from "../../../../shared/src/systems/server/DuelSystem/config";
+export {
+  CHALLENGE_TIMEOUT_TICKS,
+  DISCONNECT_TIMEOUT_TICKS,
+  SETUP_DISCONNECT_GRACE_TICKS,
+  SESSION_MAX_AGE_TICKS,
+  DEATH_RESOLUTION_DELAY_TICKS,
+  CLEANUP_INTERVAL_TICKS,
+  CHALLENGE_CLEANUP_INTERVAL_TICKS,
+  ticksToMs,
+  TICK_DURATION_MS,
+  CHALLENGE_DISTANCE_TILES,
+  LOBBY_SPAWN_WINNER,
+  LOBBY_SPAWN_LOSER,
+} from "@hyperforge/hyperscape";
