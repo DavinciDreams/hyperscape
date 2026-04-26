@@ -57,35 +57,20 @@
  */
 
 import { Entity } from "../../../entities/Entity";
-import { PlayerLocal } from "../../../entities/player/PlayerLocal";
-import { PlayerRemote } from "../../../entities/player/PlayerRemote";
-import { PlayerEntity } from "../../../entities/player/PlayerEntity";
-import { MobEntity } from "../../../entities/npc/MobEntity";
-import { NPCEntity } from "../../../entities/npc/NPCEntity";
-import { ItemEntity } from "../../../entities/world/ItemEntity";
-import { ResourceEntity } from "../../../entities/world/ResourceEntity";
-import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
-import { BankEntity } from "../../../entities/world/BankEntity";
-import {
-  FurnaceEntity,
-  type FurnaceEntityConfig,
-} from "../../../entities/world/FurnaceEntity";
-import {
-  AnvilEntity,
-  type AnvilEntityConfig,
-} from "../../../entities/world/AnvilEntity";
-import {
-  AltarEntity,
-  type AltarEntityConfig,
-} from "../../../entities/world/AltarEntity";
-import {
-  RunecraftingAltarEntity,
-  type RunecraftingAltarEntityConfig,
-} from "../../../entities/world/RunecraftingAltarEntity";
-import {
-  RangeEntity,
-  type RangeEntityConfig,
-} from "../../../entities/world/RangeEntity";
+// Entity classes (PlayerEntity, MobEntity, etc.) used to be imported
+// here as runtime classes and registered in `initializeEntityTypes()`.
+// Decoupled 2026-04-26: registration now happens via the public
+// `registerEntityType(name, ctor)` API. The plugin
+// (`@hyperforge/hyperscape`) registers all 13 game entity types in its
+// onEnable so this engine-side registry can stay class-agnostic.
+//
+// Config types remain imported as TYPES ONLY — they don't pull the
+// runtime class into the bundle.
+import type { FurnaceEntityConfig } from "../../../entities/world/FurnaceEntity";
+import type { AnvilEntityConfig } from "../../../entities/world/AnvilEntity";
+import type { AltarEntityConfig } from "../../../entities/world/AltarEntity";
+import type { RunecraftingAltarEntityConfig } from "../../../entities/world/RunecraftingAltarEntity";
+import type { RangeEntityConfig } from "../../../entities/world/RangeEntity";
 import type {
   ComponentDefinition,
   EntityConstructor,
@@ -128,44 +113,46 @@ class GenericEntity extends Entity {
 }
 
 /**
- * Entity type registry - maps type strings to entity constructors.
- * LAZY INITIALIZATION: Entity classes are imported on first access to avoid circular dependencies.
- * New entity types can be registered at runtime via registerEntityType().
+ * Entity type registry — maps type strings to entity constructors.
+ *
+ * The framework provides only `entity` (GenericEntity) by default.
+ * Game-specific entity types (player, mob, npc, item, resource,
+ * headstone, bank, furnace, anvil, altar, range, ...) are registered
+ * by the `@hyperforge/hyperscape` plugin's onEnable via the public
+ * `registerEntityType()` API exported from this module.
+ *
+ * Pre-2026-04-26 this used a hardcoded `initializeEntityTypes()` that
+ * imported every entity class as a runtime dep. Decoupled to keep
+ * shared engine-only.
  */
-let _entityTypesInitialized = false;
 const EntityTypes: Record<string, EntityConstructor> = {
   entity: GenericEntity as EntityConstructor,
 };
 
 /**
- * Initialize entity type registry with all built-in entity types.
- * Called lazily on first access.
+ * Public API — register an entity constructor under a string type tag.
+ *
+ * Plugins call this in their onEnable hook before any entity of that
+ * type is spawned. Calling this twice with the same name overwrites
+ * the previous registration (last write wins; no warning, by design).
+ *
+ * @example
+ *   import { registerEntityType } from "@hyperforge/shared";
+ *   import { PlayerEntity } from "./entities/PlayerEntity";
+ *   registerEntityType("player", PlayerEntity);
  */
-function initializeEntityTypes(): void {
-  if (_entityTypesInitialized) return;
-  _entityTypesInitialized = true;
-
-  EntityTypes.player = PlayerEntity as EntityConstructor;
-  EntityTypes.playerLocal = PlayerLocal as EntityConstructor;
-  EntityTypes.playerRemote = PlayerRemote as EntityConstructor;
-  EntityTypes.item = ItemEntity as unknown as EntityConstructor;
-  EntityTypes.mob = MobEntity as unknown as EntityConstructor;
-  EntityTypes.npc = NPCEntity as unknown as EntityConstructor;
-  EntityTypes.resource = ResourceEntity as unknown as EntityConstructor;
-  EntityTypes.headstone = HeadstoneEntity as unknown as EntityConstructor;
-  EntityTypes.bank = BankEntity as unknown as EntityConstructor;
-  EntityTypes.furnace = FurnaceEntity as unknown as EntityConstructor;
-  EntityTypes.anvil = AnvilEntity as unknown as EntityConstructor;
-  EntityTypes.altar = AltarEntity as unknown as EntityConstructor;
-  EntityTypes.range = RangeEntity as unknown as EntityConstructor;
+export function registerEntityType(
+  type: string,
+  ctor: EntityConstructor,
+): void {
+  EntityTypes[type] = ctor;
 }
 
 /**
  * Get an entity constructor by type name.
- * Initializes the entity type registry on first call.
+ * Returns undefined if no plugin has registered the type.
  */
 function getEntityType(type: string): EntityConstructor | undefined {
-  initializeEntityTypes();
   return EntityTypes[type];
 }
 
@@ -1005,7 +992,11 @@ export class Entities extends SystemBase implements IEntities {
         runeType: (data.runeType as string) || "air",
       };
 
-      const entity = new RunecraftingAltarEntity(this.world, rcAltarConfig);
+      const RunecraftingAltarEntityClass = getEntityType("runecrafting_altar")!;
+      const entity = new RunecraftingAltarEntityClass(
+        this.world,
+        rcAltarConfig as unknown as EntityData,
+      );
       this.items.set(entity.id, entity);
 
       if (entity.init) {
@@ -1069,7 +1060,7 @@ export class Entities extends SystemBase implements IEntities {
       if (network?.isClient && data.owner !== network.id) {
         this.world.emit(EventType.PLAYER_JOINED, {
           playerId: entity.id,
-          player: entity as PlayerLocal,
+          player: entity as never,
         });
       }
 
@@ -1089,7 +1080,7 @@ export class Entities extends SystemBase implements IEntities {
         // Emit PLAYER_JOINED for local player so PlayerSystem can track them
         this.world.emit(EventType.PLAYER_JOINED, {
           playerId: entity.id,
-          player: entity as PlayerLocal,
+          player: entity as never,
         });
         this.world.emit(EventType.PLAYER_REGISTERED, { playerId: entity.id });
       }

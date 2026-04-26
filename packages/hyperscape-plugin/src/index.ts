@@ -31,7 +31,24 @@ import type {
   PluginContextBase,
   PluginFactory,
 } from "@hyperforge/gameplay-framework";
-import type { World } from "@hyperforge/shared";
+import {
+  AltarEntity,
+  AnvilEntity,
+  BankEntity,
+  FurnaceEntity,
+  HeadstoneEntity,
+  ItemEntity,
+  MobEntity,
+  NPCEntity,
+  PlayerEntity,
+  PlayerLocal,
+  PlayerRemote,
+  RangeEntity,
+  registerEntityType,
+  ResourceEntity,
+  RunecraftingAltarEntity,
+  type World,
+} from "@hyperforge/shared";
 
 import { AggroSystem } from "./systems/AggroSystem.js";
 import { BankingSystem } from "./systems/BankingSystem.js";
@@ -164,6 +181,28 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.world.register(name, Ctor as never);
         ctx.scope.register(() => w.unregister?.(name));
       };
+
+      // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
+      // the registry hardcoded these in shared `Entities.ts` —
+      // decoupled so the engine no longer imports game classes.
+      // Order doesn't matter; lookup is by string key.
+      registerEntityType("player", PlayerEntity as never);
+      registerEntityType("playerLocal", PlayerLocal as never);
+      registerEntityType("playerRemote", PlayerRemote as never);
+      registerEntityType("item", ItemEntity as never);
+      registerEntityType("mob", MobEntity as never);
+      registerEntityType("npc", NPCEntity as never);
+      registerEntityType("resource", ResourceEntity as never);
+      registerEntityType("headstone", HeadstoneEntity as never);
+      registerEntityType("bank", BankEntity as never);
+      registerEntityType("furnace", FurnaceEntity as never);
+      registerEntityType("anvil", AnvilEntity as never);
+      registerEntityType("altar", AltarEntity as never);
+      registerEntityType("range", RangeEntity as never);
+      registerEntityType(
+        "runecrafting_altar",
+        RunecraftingAltarEntity as never,
+      );
 
       // Cross-cutting systems that run on both server + client.
       register("mob-death", MobDeathSystem);

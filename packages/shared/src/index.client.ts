@@ -1161,6 +1161,22 @@ export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
 // InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
 export type { PlayerInventory } from "./types/core/core";
 
+// Entity classes — registered with the engine ECS via the public
+// `registerEntityType()` API in plugin onEnable (decoupled
+// 2026-04-26, post-Wave 6 cleanup).
+export { NPCEntity } from "./entities/npc/NPCEntity";
+export { ItemEntity } from "./entities/world/ItemEntity";
+export { HeadstoneEntity } from "./entities/world/HeadstoneEntity";
+export { BankEntity } from "./entities/world/BankEntity";
+export { FurnaceEntity } from "./entities/world/FurnaceEntity";
+export { AnvilEntity } from "./entities/world/AnvilEntity";
+export { AltarEntity } from "./entities/world/AltarEntity";
+export { RangeEntity } from "./entities/world/RangeEntity";
+export { RunecraftingAltarEntity } from "./entities/world/RunecraftingAltarEntity";
+
+// Engine ECS — public API for registering entity types.
+export { registerEntityType } from "./systems/shared/entities/Entities";
+
 // GroundItemSystem + ZoneDetectionSystem deps — re-exported for the
 // client bundle.
 export type {

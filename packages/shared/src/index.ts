@@ -661,6 +661,23 @@ export { ClientActions } from "./systems/client/ClientActions";
 export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
+// Entity classes — registered with the engine ECS via the public
+// `registerEntityType()` API in plugin onEnable (decoupled
+// 2026-04-26, post-Wave 6 cleanup). Stay in shared for now; will
+// move to plugin in a follow-up cut.
+export { NPCEntity } from "./entities/npc/NPCEntity";
+export { ItemEntity } from "./entities/world/ItemEntity";
+export { HeadstoneEntity } from "./entities/world/HeadstoneEntity";
+export { BankEntity } from "./entities/world/BankEntity";
+export { FurnaceEntity } from "./entities/world/FurnaceEntity";
+export { AnvilEntity } from "./entities/world/AnvilEntity";
+export { AltarEntity } from "./entities/world/AltarEntity";
+export { RangeEntity } from "./entities/world/RangeEntity";
+export { RunecraftingAltarEntity } from "./entities/world/RunecraftingAltarEntity";
+
+// Engine ECS — public API for registering entity types.
+export { registerEntityType } from "./systems/shared/entities/Entities";
+
 // CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 // Deps needed by the migrated cluster — most already exported
 // elsewhere; add the gaps here.
