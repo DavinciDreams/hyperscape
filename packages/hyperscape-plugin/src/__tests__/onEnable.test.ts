@@ -109,6 +109,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "docks",
   "pois",
   "scripting",
+  "duel-arena-visuals",
   "tanning",
   "smithing",
   "smelting",

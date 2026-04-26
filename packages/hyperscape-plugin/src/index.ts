@@ -64,6 +64,7 @@ import { CoinPouchSystem } from "./systems/CoinPouchSystem.js";
 import { DialogueSystem } from "./systems/DialogueSystem.js";
 import { CraftingSystem } from "./systems/CraftingSystem.js";
 import { DamageSplatSystem } from "./systems/DamageSplatSystem.js";
+import { DuelArenaVisualsSystem } from "./systems/DuelArenaVisualsSystem.js";
 import { DuelCountdownSplatSystem } from "./systems/DuelCountdownSplatSystem.js";
 import { EquipmentVisualSystem } from "./systems/EquipmentVisualSystem.js";
 import { FletchingSystem } from "./systems/FletchingSystem.js";
@@ -377,8 +378,24 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // consume them directly at PIE-bundle time.
       register("scripting", ScriptingSystem);
 
-      // OSRS skill processing systems — all self-gate their init()
-      // on world.isServer. Safe to register on both sides.
+      // Duel arena visuals — procedural arena geometry + PhysX wall
+      // collision. System self-gates mesh logic on `world.isClient`;
+      // server-side stays headless. Original env-gating on
+      // DUEL_ARENA_VISUALS_ENABLED preserved (SystemLoader → here,
+      // 2026-04-26).
+      if (process.env.DUEL_ARENA_VISUALS_ENABLED !== "false") {
+        try {
+          register("duel-arena-visuals", DuelArenaVisualsSystem);
+        } catch (err) {
+          console.error(
+            "[hyperscape-plugin] Failed to register DuelArenaVisualsSystem:",
+            err,
+          );
+        }
+      }
+
+      // Tile-based skill processing systems — all self-gate their
+      // init() on world.isServer. Safe to register on both sides.
       register("tanning", TanningSystem);
       register("smithing", SmithingSystem);
       register("smelting", SmeltingSystem);

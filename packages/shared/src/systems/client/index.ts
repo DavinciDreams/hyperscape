@@ -22,7 +22,7 @@ export { ControlPriorities } from "./ControlPriorities";
 // ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 // ZoneVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // ResourceTileDebugSystem migrated to @hyperforge/hyperscape (2026-04-24)
-export { DuelArenaVisualsSystem } from "./DuelArenaVisualsSystem";
+// DuelArenaVisualsSystem migrated to @hyperforge/hyperscape (2026-04-26).
 
 // New interaction system (replaces legacy InteractionSystem)
 export { InteractionRouter } from "./interaction";

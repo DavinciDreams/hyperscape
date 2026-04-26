@@ -179,7 +179,7 @@ interface DialogueSystem {
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 // SocialSystem migrated to @hyperforge/hyperscape (2026-04-26).
-import { DuelArenaVisualsSystem } from "../../client/DuelArenaVisualsSystem";
+// DuelArenaVisualsSystem migrated to @hyperforge/hyperscape (2026-04-26).
 
 // Zone systems
 // ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -465,23 +465,9 @@ export async function registerSystems(world: World): Promise<void> {
   // "aggro" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
 
-  // Duel Arena visual system - procedural arena geometry and physics collision
-  const duelArenaVisualsEnabled =
-    process.env.DUEL_ARENA_VISUALS_ENABLED !== "false";
-  if (duelArenaVisualsEnabled) {
-    try {
-      world.register("duel-arena-visuals", DuelArenaVisualsSystem);
-    } catch (err) {
-      console.error(
-        "[SystemLoader] Failed to register DuelArenaVisualsSystem:",
-        err,
-      );
-    }
-  } else if (isServerEnvironment) {
-    console.log(
-      "[SystemLoader] DuelArenaVisualsSystem skipped (DUEL_ARENA_VISUALS_ENABLED=false)",
-    );
-  }
+  // DuelArenaVisualsSystem registered by @hyperforge/hyperscape plugin
+  // onEnable (migrated 2026-04-26). Env-gating on
+  // DUEL_ARENA_VISUALS_ENABLED moved with the registration.
 
   // Client-only visual combat feedback systems
   if (world.isClient) {

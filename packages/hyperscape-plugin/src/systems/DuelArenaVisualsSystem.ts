@@ -21,10 +21,9 @@
  * - Base coordinates: see arena-layout.ts (single source of truth)
  */
 
-import THREE, {
-  MeshStandardNodeMaterial,
-  uniform,
-} from "../../extras/three/three";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "@hyperforge/shared";
+import { uniform } from "three/tsl";
 import {
   Fn,
   positionWorld,
@@ -42,19 +41,19 @@ import {
   min as tslMin,
   mod,
 } from "three/tsl";
-import { System } from "../shared/infrastructure/System";
-import type { World } from "../../core/World";
-import type { WorldOptions } from "../../types/index";
-import { getPhysX } from "../../physics/PhysXManager";
-import { Layers } from "../../physics/Layers";
-import type { Physics } from "../shared/interaction/Physics";
-import type { PxRigidStatic } from "../../types/systems/physics";
-import type { ParticleSystem } from "../shared/presentation/ParticleSystem";
-import type { FlatZone } from "../../types/world/terrain";
 import {
-  getDuelArenaConfig,
   type DuelArenaConfig,
-} from "../../data/duel-manifest";
+  type FlatZone,
+  getDuelArenaConfig,
+  getPhysX,
+  Layers,
+  type ParticleSystem,
+  type Physics,
+  type PxRigidStatic,
+  SystemClass as System,
+  type World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 // ============================================================================
 // Arena Configuration — derived from manifest via getDuelArenaConfig()
@@ -1696,8 +1695,7 @@ export class DuelArenaVisualsSystem extends System {
 
   private async registerGrassExclusions(): Promise<void> {
     try {
-      const { getGrassExclusionManager } =
-        await import("../../systems/shared/world/GrassExclusionManager");
+      const { getGrassExclusionManager } = await import("@hyperforge/shared");
       const exclusionManager = getGrassExclusionManager();
 
       if (!exclusionManager) {

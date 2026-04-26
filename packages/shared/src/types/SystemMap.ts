@@ -85,7 +85,7 @@ import type { ClientActions } from "../systems/client/ClientActions";
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 // SocialSystem migrated to @hyperforge/hyperscape (2026-04-26).
-import type { DuelArenaVisualsSystem } from "../systems/client";
+// DuelArenaVisualsSystem migrated to @hyperforge/hyperscape (2026-04-26).
 import type { InteractionRouter } from "../systems/client";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-24).
 // SystemMap entry below typed as `unknown` — the only consumer
@@ -188,7 +188,7 @@ export interface SystemMap {
   // "projectile-renderer" registered by @hyperforge/hyperscape plugin onEnable
   // "duel-countdown-splat" registered by @hyperforge/hyperscape plugin onEnable
   social: unknown;
-  "duel-arena-visuals": DuelArenaVisualsSystem;
+  "duel-arena-visuals": unknown;
   healthbars: unknown;
 
   // Shared systems with key access
