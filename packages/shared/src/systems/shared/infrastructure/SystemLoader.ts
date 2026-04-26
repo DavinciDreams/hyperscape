@@ -101,7 +101,7 @@ import { CombatSystem } from "..";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 // PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
 import { EntityManager } from "..";
-import { EquipmentSystem } from "..";
+// EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
 // InventoryInteractionSystem migrated to @hyperforge/hyperscape
 // (2026-04-25). The lone external touchpoint is the
 // `getSystemInfo()` stats reader below — duck-typed inline.
@@ -232,7 +232,8 @@ export interface Systems {
   resource?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   aggro?: unknown;
-  equipment?: EquipmentSystem;
+  // EquipmentSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  equipment?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   processing?: unknown;
   entityManager?: EntityManager;
@@ -396,7 +397,8 @@ export async function registerSystems(world: World): Promise<void> {
   world.register("inventory", InventorySystem);
 
   // 11. Equipment system - Item equipping (depends on inventory system)
-  world.register("equipment", EquipmentSystem);
+  // "equipment" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-26, Wave 5b).
 
   // 12. XP system - Experience and leveling (depends on player system)
   // "skills" registered by @hyperforge/hyperscape plugin onEnable
@@ -557,7 +559,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.resource = getSystem(world, "resource");
 
   systems.aggro = getSystem(world, "aggro");
-  systems.equipment = getSystem(world, "equipment") as EquipmentSystem;
+  systems.equipment = getSystem(world, "equipment");
   systems.processing = getSystem(world, "processing");
   // healthRegen registration moved to @hyperforge/hyperscape plugin —
   // no SystemReferences slot needed (no consumer reads it today).
@@ -784,7 +786,11 @@ function setupAPI(world: World, systems: Systems): void {
       }));
     },
     getEquipment: (playerId: string) => {
-      const equipment = systems.equipment?.getEquipmentData(playerId);
+      const equipment = (
+        systems.equipment as
+          | { getEquipmentData(id: string): unknown }
+          | undefined
+      )?.getEquipmentData(playerId);
       if (!equipment) return {};
       // Convert equipment data to expected format
       const result: Record<string, { itemId: string; [key: string]: unknown }> =
@@ -1090,19 +1096,42 @@ function setupAPI(world: World, systems: Systems): void {
     getLootTable: (_mobType: string) => [], // Loot system doesn't expose this method
     getDroppedItems: () => [], // Loot system doesn't expose this method
 
-    // Equipment API
+    // Equipment API — EquipmentSystem migrated to
+    // @hyperforge/hyperscape (Wave 5b); duck-type the surface inline.
     getPlayerEquipment: (playerId: string) =>
-      systems.equipment?.getPlayerEquipment(playerId),
+      (
+        systems.equipment as
+          | { getPlayerEquipment(id: string): unknown }
+          | undefined
+      )?.getPlayerEquipment(playerId),
     getEquipmentData: (playerId: string) =>
-      systems.equipment?.getEquipmentData(playerId),
+      (
+        systems.equipment as
+          | { getEquipmentData(id: string): unknown }
+          | undefined
+      )?.getEquipmentData(playerId),
     getEquipmentStats: (playerId: string) =>
-      systems.equipment?.getEquipmentStats(playerId),
+      (
+        systems.equipment as
+          | { getEquipmentStats(id: string): unknown }
+          | undefined
+      )?.getEquipmentStats(playerId),
     isItemEquipped: (playerId: string, itemId: number) =>
-      systems.equipment?.isItemEquipped(playerId, itemId),
+      (
+        systems.equipment as
+          | { isItemEquipped(id: string, n: number): boolean }
+          | undefined
+      )?.isItemEquipped(playerId, itemId),
     canEquipItem: (playerId: string, itemId: number) =>
-      systems.equipment?.canEquipItem(playerId, itemId),
+      (
+        systems.equipment as
+          | { canEquipItem(id: string, n: number): boolean }
+          | undefined
+      )?.canEquipItem(playerId, itemId),
     consumeArrow: (playerId: string) =>
-      systems.equipment?.consumeArrow(playerId),
+      (
+        systems.equipment as { consumeArrow(id: string): boolean } | undefined
+      )?.consumeArrow(playerId),
 
     // Item Drop API (via Loot System)
     dropItem: (item: Item, position: Position3D, droppedBy?: string) => {

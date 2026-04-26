@@ -117,7 +117,11 @@ import {
   type CreateProjectileParams,
 } from "./ProjectileService";
 import { getNPCById } from "../../../data/npcs";
-import type { EquipmentSystem } from "../character/EquipmentSystem";
+// EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
+import type { PlayerEquipment } from "../../../types/core/core";
+interface EquipmentSystemDuck {
+  getPlayerEquipment(playerId: string): PlayerEquipment | undefined;
+}
 import type { InventorySystem } from "../character/InventorySystem";
 import type { Item, EquipmentSlot } from "../../../types/game/item-types";
 
@@ -197,7 +201,7 @@ export class CombatSystem extends SystemBase {
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
-  private equipmentSystem?: EquipmentSystem;
+  private equipmentSystem?: EquipmentSystemDuck;
   private inventorySystem?: InventorySystem;
 
   // Pre-allocated pooled tiles for hot path calculations (zero GC)
@@ -503,7 +507,9 @@ export class CombatSystem extends SystemBase {
     }
 
     // Cache EquipmentSystem and InventorySystem for ranged/magic combat (F2P)
-    this.equipmentSystem = this.world.getSystem<EquipmentSystem>("equipment");
+    this.equipmentSystem = this.world.getSystem("equipment") as unknown as
+      | EquipmentSystemDuck
+      | undefined;
     this.inventorySystem = this.world.getSystem<InventorySystem>("inventory");
 
     // Listen for auto-retaliate toggle to start combat if toggled ON while being attacked

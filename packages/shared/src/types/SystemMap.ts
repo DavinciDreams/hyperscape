@@ -19,7 +19,8 @@ import type { ActionRegistry } from "../systems/shared";
 import type { CombatSystem } from "../systems/shared";
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { EntityManager } from "../systems/shared";
-import type { EquipmentSystem } from "../systems/shared";
+// EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
+// SystemMap entry below typed as `unknown`.
 // GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // SystemMap entry removed — its only consumer was a dead
@@ -124,7 +125,7 @@ export interface SystemMap {
   combat: CombatSystem;
   "coin-pouch": unknown;
   inventory: InventorySystem;
-  equipment: EquipmentSystem;
+  equipment: unknown;
   skills: unknown;
   prayer: unknown;
   // "health-regen" registered by @hyperforge/hyperscape plugin onEnable

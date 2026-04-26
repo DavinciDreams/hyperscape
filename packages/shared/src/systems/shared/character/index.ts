@@ -4,7 +4,7 @@
  */
 
 export * from "./PlayerSystem";
-export * from "./EquipmentSystem";
+// EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b)
 export * from "./InventorySystem";
 // SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a)
 // HealthRegenSystem migrated to @hyperforge/hyperscape (2026-04-24)

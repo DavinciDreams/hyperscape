@@ -8,10 +8,18 @@
  * - Write-through database persistence
  */
 
-import { EventType, type EquipmentSyncData } from "../../../types/events";
-import { dataManager } from "../../../data/DataManager";
-import type { InventorySystem } from "./InventorySystem";
-import { EQUIPMENT_SLOT_NAMES } from "../../../constants/EquipmentConstants";
+// Migrated 2026-04-26 from
+// `packages/shared/src/systems/shared/character/` into
+// `@hyperforge/hyperscape` (Wave 5b). 1887 LOC. Two in-shared
+// consumers (CombatSystem, AttackContext) duck-type the
+// `getPlayerEquipment` surface inline.
+import {
+  dataManager,
+  EQUIPMENT_SLOT_NAMES,
+  type EquipmentSyncData,
+  EventType,
+  InventorySystem,
+} from "@hyperforge/shared";
 
 /**
  * Helper functions for equipment requirements
@@ -43,20 +51,19 @@ const equipmentRequirements = {
       .join(", ");
   },
 };
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { WorldOptions } from "../../../types";
-import { Logger } from "../../../utils/Logger";
-import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-import type { TransactionContext } from "../../../types/death";
-
-import { World } from "../../../core/World";
 import {
-  ItemType,
+  type DatabaseSystem,
   EquipmentSlot,
   EquipmentSlotName,
-  PlayerEquipment as PlayerEquipment,
-  Item,
-} from "../../../types/core/core";
+  type Item,
+  ItemType,
+  Logger,
+  type PlayerEquipment,
+  SystemBase,
+  type TransactionContext,
+  World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 // Re-export for backward compatibility
 export type { EquipmentSlot, PlayerEquipment };
@@ -860,7 +867,9 @@ export class EquipmentSystem extends SystemBase {
     }
 
     // DUPLICATION FIX: Acquire transaction lock to prevent race conditions
-    const inventorySystem = this.world.getSystem("inventory");
+    const inventorySystem = this.world.getSystem(
+      "inventory",
+    ) as InventorySystem | null;
     if (inventorySystem && !inventorySystem.lockForTransaction(data.playerId)) {
       // Another transaction in progress, abort to prevent duplication
       this.sendMessage(
@@ -1168,7 +1177,7 @@ export class EquipmentSystem extends SystemBase {
         if (bonuses.defenseMagic)
           equipment.totalStats.magicDefense += bonuses.defenseMagic;
 
-        // Map per-style defence bonuses (OSRS combat triangle)
+        // Map per-style defence bonuses (combat triangle)
         if (bonuses.defenseStab)
           equipment.totalStats.defenseStab += bonuses.defenseStab;
         if (bonuses.defenseSlash)
@@ -1216,7 +1225,7 @@ export class EquipmentSystem extends SystemBase {
       return "weapon";
     }
 
-    // OSRS-accurate: Check explicit equipSlot first (handles tools like hatchets/pickaxes)
+    // Check explicit equipSlot first (handles tools like hatchets/pickaxes)
     // Tools have type: "tool" but equipSlot: "weapon" - they should be equipable
     if (itemData.equipSlot && itemData.equipSlot !== "2h") {
       return itemData.equipSlot;

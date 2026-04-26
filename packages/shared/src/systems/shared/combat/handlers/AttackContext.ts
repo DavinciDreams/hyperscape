@@ -23,7 +23,11 @@ import type { PrayerBonuses } from "../../../../types/game/prayer-types";
 interface PrayerSystemLike {
   getCombinedBonuses(playerId: string): Partial<PrayerBonuses>;
 }
-import type { EquipmentSystem } from "../../character/EquipmentSystem";
+// EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
+import type { PlayerEquipment } from "../../../../types/core/core";
+interface EquipmentSystemDuck {
+  getPlayerEquipment(playerId: string): PlayerEquipment | undefined;
+}
 import type { InventorySystem } from "../../character/InventorySystem";
 import type { TerrainSystem } from "../../world/TerrainSystem";
 import type { PooledTile } from "../../../../utils/pools/TilePool";
@@ -91,7 +95,7 @@ export interface CombatAttackContext {
   // Cached systems
   playerSystem?: PlayerSystem;
   prayerSystem?: PrayerSystemLike | null;
-  equipmentSystem?: EquipmentSystem;
+  equipmentSystem?: EquipmentSystemDuck;
   inventorySystem?: InventorySystem;
   terrainSystem?: TerrainSystem;
 

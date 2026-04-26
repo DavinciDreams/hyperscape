@@ -49,6 +49,7 @@ import { GroundItemSystem } from "./systems/GroundItemSystem.js";
 import { ZoneDetectionSystem } from "./systems/ZoneDetectionSystem.js";
 import { PlayerDeathSystem } from "./systems/PlayerDeathSystem.js";
 import { SkillsSystem } from "./systems/SkillsSystem.js";
+import { EquipmentSystem } from "./systems/EquipmentSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -257,6 +258,13 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // WorldDropConditionEvaluators + WorldDialogueConditionEvaluators
       // (still in shared) all duck-type-lookup `world.getSystem("skills")`.
       register("skills", SkillsSystem);
+
+      // Equipment — slot-based wear / unequip + stat bonus
+      // computation + DB persistence. Migrated 2026-04-26 (Wave 5b).
+      // CombatSystem + AttackContext (still in shared) duck-type
+      // lookup `world.getSystem("equipment")`. Depends on
+      // InventorySystem (still in shared).
+      register("equipment", EquipmentSystem);
 
       // Loot system — drops mob loot to the ground via
       // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
