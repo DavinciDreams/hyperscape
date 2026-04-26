@@ -16,7 +16,7 @@ Drafted 2026-04-26.
 - ✅ **Phase D** (Pending*/Follow managers migrated): D1 PendingTradeManager, D2 PendingDuelChallengeManager, D3 PendingAttackManager, D4 PendingCookManager, D5 PendingGatherManager, D6 FollowManager, D7 FaceDirectionManager
 - ✅ **Phase E** (TileMovementManager migrated): E1 TileMovementManager, E2 MobTileMovementManager
 - ✅ **Phase F1+F2** (IConnectionRegistry substrate + pinning): shipped 2026-04-26
-- 🟢 **Phase F3** (network handlers): **12/12 handler families addressed**. Done: chat, resources, magic, dialogue, entities, player, prayer, quest, processing, duel/* (5 files), trade/* (2 files), combat (style/retaliate split), home-teleport (substrate-promote with `IHomeTeleportManager` + factory). Remaining 2 blocked by engine coupling: combat (handleAttackPlayer/Mob — needs onAttackPlayer/Mob inline blocks moved plugin-side), friends (sendFriendsListSync/notifyFriendsOfStatusChange/getFriendIds called from shared internals — needs substrate-promote of those helpers).
+- 🟢 **Phase F3** (network handlers): **13/13 handler families addressed**. Done: chat, resources, magic, dialogue, entities, player, prayer, quest, processing, duel/* (5 files), trade/* (2 files), combat (style/retaliate split), home-teleport (substrate-promote with `IHomeTeleportManager` + factory), friends (substrate-promote with `IFriendsService`). Remaining 1 blocked by engine coupling: combat partial (handleAttackPlayer/Mob — needs ServerNetwork.onAttackPlayer/Mob inline blocks moved plugin-side; ~331 LOC).
 - ⏳ **Phase G** (character-selection / initialization / save-manager / InteractionSessionManager, ~2149 LOC): needs `ISaveService` and `IDatabaseService` substrate first
 
 Plugin tests stable at 187/187 throughout the phases A–F migrations.
