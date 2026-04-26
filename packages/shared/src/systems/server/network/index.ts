@@ -139,6 +139,7 @@ import { SpatialIndex } from "./SpatialIndex";
 import type { ISpatialIndex } from "./substrate/spatial-index";
 import type { IBroadcastService } from "./substrate/broadcast-service";
 import type { IRegionSubscriptionService } from "./substrate/region-subscription-service";
+import type { IConnectionRegistry } from "./substrate/connection-registry";
 import { RegionSubscriptionService } from "./RegionSubscriptionService";
 // `ITileMovementService` already imported at the top of this file
 // (Phase E1 — see TileMovementManager local duck-type).
@@ -598,6 +599,23 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     (
       world as { regionSubscriptions?: IRegionSubscriptionService }
     ).regionSubscriptions = this.regionSubscriptions;
+
+    // ConnectionRegistry (Phase F2, 2026-04-26) — resolve the
+    // packet-handler bridge that the host registered before
+    // ServerNetwork (server: `PacketHandlerBridgeSystem`; PIE:
+    // `PIEPacketHandlerStub`) and pin to `world.connectionRegistry`
+    // for substrate-style access. Plugin onEnable registers handlers
+    // via `world.connectionRegistry.register(name, handler)`. The
+    // existing `getPacketRegistryHandler` getSystem lookup is kept
+    // as the dispatch path — both reach the same registry instance.
+    const connectionRegistry = world.getSystem(
+      "packet-handlers",
+    ) as unknown as IConnectionRegistry | null;
+    if (connectionRegistry) {
+      (
+        world as { connectionRegistry?: IConnectionRegistry }
+      ).connectionRegistry = connectionRegistry;
+    }
 
     // TickSystem and TileMovementManager (Phase B4). TMM's broadcast
     // TileMovementManager — migrated to @hyperforge/hyperscape (Phase
@@ -2560,6 +2578,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     delete (this.world as { regionSubscriptions?: IRegionSubscriptionService })
       .regionSubscriptions;
     delete (this.world as { tileMovement?: ITileMovementService }).tileMovement;
+    delete (this.world as { connectionRegistry?: IConnectionRegistry })
+      .connectionRegistry;
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
     this.eventBridge.destroy();
