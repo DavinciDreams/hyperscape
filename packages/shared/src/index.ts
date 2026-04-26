@@ -2162,6 +2162,9 @@ export { AuditLogger } from "./systems/server/network/services/AuditLogger";
 // migrated DuelSystem keeps its existing 3-arg call style without
 // shadowing the singleton.
 export { Logger as NetworkLogger } from "./systems/server/network/services/Logger";
+// ServerSocket type — needed by migrated ScriptQueue (the queued
+// player/NPC action types reference ServerSocket).
+export type { ServerSocket } from "./systems/server/network/server-types";
 export {
   InMemorySessionStore,
   type SessionStore,

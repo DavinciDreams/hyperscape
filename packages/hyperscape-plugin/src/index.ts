@@ -144,6 +144,18 @@ export { manifest } from "./manifest.js";
 export { TradingSystem } from "./systems/TradingSystem/index.js";
 export { DuelSystem } from "./systems/DuelSystem/index.js";
 
+// ScriptQueue — tile-based action priority queue, consumed by
+// `@hyperforge/server`'s GameTickProcessor. Migrated from
+// `@hyperforge/shared` (2026-04-26).
+export {
+  PlayerScriptQueue,
+  NPCScriptQueue,
+  ScriptPriority,
+  ScriptType,
+  type QueuedScript,
+  type ModalState,
+} from "./systems/ScriptQueue.js";
+
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
  * meta-plugin's lifecycle hooks don't need any handles, since the

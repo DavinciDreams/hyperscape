@@ -1,14 +1,9 @@
 /**
  * @deprecated Re-export shim.
  *
- * `ScriptQueue` relocated to
- * `packages/shared/src/systems/server/network/ScriptQueue.ts` as part of the
- * ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 1 — zero-dep leaves).
- *
- * Zero-dep: the only external dependencies are `ServerSocket` (already in
- * shared at `systems/server/network/server-types`) and `getCachedTimestamp`
- * (already in shared index). Delete this shim after Step 8.
+ * `ScriptQueue` relocated to `@hyperforge/hyperscape` (2026-04-26).
+ * Server callers should import directly from `@hyperforge/hyperscape`
+ * once the shim is removed in a follow-up cleanup.
  */
 
 export {
@@ -18,4 +13,4 @@ export {
   ScriptType,
   type QueuedScript,
   type ModalState,
-} from "../../../../shared/src/systems/server/network/ScriptQueue";
+} from "@hyperforge/hyperscape";

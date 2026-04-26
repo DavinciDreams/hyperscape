@@ -24,10 +24,7 @@ import type { TileMovementManager } from "../../../shared/src/systems/server/net
 import type { MobTileMovementManager } from "../../../shared/src/systems/server/network/mob-tile-movement";
 import type { PendingAttackManager } from "../../../shared/src/systems/server/network/PendingAttackManager";
 import type { BroadcastManager } from "./ServerNetwork/broadcast";
-import type {
-  PlayerScriptQueue,
-  NPCScriptQueue,
-} from "../../../shared/src/systems/server/network/ScriptQueue";
+import type { PlayerScriptQueue, NPCScriptQueue } from "@hyperforge/hyperscape";
 import type { FaceDirectionManager } from "../../../shared/src/systems/server/network/FaceDirectionManager";
 
 /**
