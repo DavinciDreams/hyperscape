@@ -6,7 +6,20 @@ This plan extracts those services into engine-side substrate, pinned to the worl
 
 ## Status
 
-Drafted 2026-04-26. **Not yet started.** Estimated 2–3 focused sessions to land the substrate; then 5+ migration sessions to drain the unblocked code into the plugin.
+Drafted 2026-04-26.
+
+**Phases A–F substantially complete** as of 2026-04-26 (tip: `b7fd7318a`).
+
+- ✅ **Phase A** (substrate interfaces): `ISpatialIndex`, `IBroadcastService`, `IRegionSubscriptionService`, `ITileMovementService`, `IConnectionRegistry`, `ProcessingHandlerContext` — all in `packages/shared/src/systems/server/network/substrate/`
+- ✅ **Phase B** (pin substrate to `world.X` early): SpatialIndex, BroadcastManager, RegionSubscriptionService, TileMovementManager — all 4 pinned in ServerNetwork constructor at register-time
+- ✅ **Phase C** (refactor managers to consume `world.tileMovement`): 6 managers refactored
+- ✅ **Phase D** (Pending*/Follow managers migrated): D1 PendingTradeManager, D2 PendingDuelChallengeManager, D3 PendingAttackManager, D4 PendingCookManager, D5 PendingGatherManager, D6 FollowManager, D7 FaceDirectionManager
+- ✅ **Phase E** (TileMovementManager migrated): E1 TileMovementManager, E2 MobTileMovementManager
+- ✅ **Phase F1+F2** (IConnectionRegistry substrate + pinning): shipped 2026-04-26
+- 🟡 **Phase F3** (network handlers): **11/12 handler families migrated**. Done: chat, resources, magic, dialogue, entities, player, prayer, quest, processing, duel/* (5 files), trade/* (2 files), combat (style/retaliate split). Remaining 3 blocked: combat (handleAttackPlayer/Mob — needs onAttackPlayer/Mob inline blocks moved plugin-side), friends (sendFriendsListSync/notifyFriendsOfStatusChange/getFriendIds called from shared internals), home-teleport (manager owned by ServerNetwork lifecycle)
+- ⏳ **Phase G** (character-selection / initialization / save-manager / InteractionSessionManager, ~2149 LOC): needs `ISaveService` and `IDatabaseService` substrate first
+
+Plugin tests stable at 187/187 throughout the phases A–F migrations.
 
 ## Coupling map (what's blocked, on what)
 
