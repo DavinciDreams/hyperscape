@@ -1,53 +1,52 @@
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
+// Migrated 2026-04-26 from `packages/shared/src/systems/shared/combat/`
+// into `@hyperforge/hyperscape`. PlayerDeathSystem (1858 LOC) moved
+// together with its 3 internal helpers (DeathStateManager,
+// SafeAreaDeathHandler, WildernessDeathHandler) — total ~3247 LOC.
+// DeathTypes.ts + DeathUtils.ts stay in shared because PlayerSystem
+// also reads `PlayerEntityLike` from there.
 import {
+  calculateDistance,
+  type DatabaseSystemLike,
+  type DeathLocationData,
+  type DeathLocationDataWithHeadstone,
+  DeathState,
+  type EntityManager,
+  type EquipmentSystemLike,
+  EventType,
   getDeathAnimationTicks,
   getDeathCooldownTicks,
   getDeathReconnectRespawnDelayTicks,
   getDeathStaleLockAgeTicks,
   getDefaultRespawnPosition,
   getDefaultRespawnTown,
+  getEntityPosition,
   getGravestoneTicks,
-} from "../../../data/live/combat-live";
-import { ticksToMs } from "../../../utils/game/CombatCalculations";
-import type {
-  InventoryItem,
-  DeathLocationData,
-} from "../../../types/core/core";
-import { calculateDistance } from "../../../utils/game/EntityUtils";
-import { DeathState } from "../../../types/entities";
-import type { EntityManager } from "..";
-// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { ZoneDetectionSystemDuck } from "../../../types/death/death-types";
-// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { GroundItemSystemDuck } from "../../../types/death/death-types";
-import { DeathStateManager } from "../death/DeathStateManager";
-import { SafeAreaDeathHandler } from "../death/SafeAreaDeathHandler";
-import { WildernessDeathHandler } from "../death/WildernessDeathHandler";
-import { ZoneType, type TransactionContext } from "../../../types/death";
-import type { InventorySystem } from "../character/InventorySystem";
-import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
-import { resolveStarterTownArea } from "../../../world-areas";
-import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
-import type {
-  PlayerSystemLike,
-  DatabaseSystemLike,
-  EquipmentSystemLike,
-  TerrainSystemLike,
-  NetworkLike,
-  TickSystemLike,
-  PlayerEntityLike,
-  DeathLocationDataWithHeadstone,
-} from "./DeathTypes";
-import {
-  sanitizeKilledBy,
-  ITEMS_KEPT_ON_DEATH,
   GRAVESTONE_ID_PREFIX,
-  splitItemsForSafeDeath,
-  validatePosition,
+  type GroundItemSystemDuck,
+  type InventoryItem,
+  InventorySystem,
   isPositionInBounds,
-} from "./DeathUtils";
+  isPositionInsideDuelArenaZone,
+  ITEMS_KEPT_ON_DEATH,
+  type NetworkLike,
+  type PlayerEntityLike,
+  type PlayerSystemLike,
+  resolveStarterTownArea,
+  sanitizeKilledBy,
+  splitItemsForSafeDeath,
+  SystemBase,
+  validateDeathPosition as validatePosition,
+  type TerrainSystemLike,
+  ticksToMs,
+  type TickSystemLike,
+  type TransactionContext,
+  type World,
+  ZoneType,
+  type ZoneDetectionSystemDuck,
+} from "@hyperforge/shared";
+import { DeathStateManager } from "./DeathStateManager.js";
+import { SafeAreaDeathHandler } from "./SafeAreaDeathHandler.js";
+import { WildernessDeathHandler } from "./WildernessDeathHandler.js";
 
 /**
  * Orchestrates player death via modular handlers (zone detection, safe area, wilderness).
@@ -621,7 +620,9 @@ export class PlayerDeathSystem extends SystemBase {
     }
 
     // Get inventory system
-    const inventorySystem = this.world.getSystem("inventory");
+    const inventorySystem = this.world.getSystem(
+      "inventory",
+    ) as InventorySystem | null;
     if (!inventorySystem) {
       // No inventory system: same as no-DB — respawn without item drops.
       this.postDeathCleanup(playerId, deathPosition, [], killedBy);

@@ -40,7 +40,8 @@ import type { InventorySystem } from "../systems/shared";
 // MobNPCSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 3a).
 // SystemMap entry below typed as `unknown`.
 // NPCSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { PlayerDeathSystem } from "../systems/shared";
+// PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
+// SystemMap entry below typed as `unknown`.
 import type { PlayerSystem } from "../systems/shared";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -143,7 +144,7 @@ export interface SystemMap {
   //   "tanning", "runecrafting"
 
   // Death
-  "player-death": PlayerDeathSystem;
+  "player-death": unknown;
   // "gravestone-loot" registered by @hyperforge/hyperscape plugin onEnable
   // "mob-death" registered by @hyperforge/hyperscape plugin onEnable
 

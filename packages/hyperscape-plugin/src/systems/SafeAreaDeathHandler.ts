@@ -14,23 +14,26 @@
  * @see https://oldschool.runescape.wiki/w/Gravestone
  */
 
-import type { World } from "../../../core/World";
-import { Logger } from "../../../utils/Logger";
-import type { InventoryItem } from "../../../types/core/core";
-// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { GroundItemSystemDuck } from "../../../types/death/death-types";
-import type { DeathStateManager } from "./DeathStateManager";
-import type { EntityManager } from "..";
-import { ZoneType, type TransactionContext } from "../../../types/death";
-import { EntityType, InteractionType } from "../../../types/entities";
-import type { HeadstoneEntityConfig } from "../../../types/entities";
+// Migrated 2026-04-26 from `packages/shared/src/systems/shared/death/`
+// into `@hyperforge/hyperscape` (with PlayerDeathSystem cluster).
 import {
+  type EntityManager,
+  EntityType,
   getGravestoneTicks,
   getGroundItemDespawnTicks,
-} from "../../../data/live/combat-live";
-import { ticksToMs } from "../../../utils/game/CombatCalculations";
-import { isPositionInsideDuelArenaZone } from "../../../data/duel-manifest";
-import { GRAVESTONE_ID_PREFIX } from "../combat/DeathUtils";
+  GRAVESTONE_ID_PREFIX,
+  type GroundItemSystemDuck,
+  type HeadstoneEntityConfig,
+  InteractionType,
+  type InventoryItem,
+  isPositionInsideDuelArenaZone,
+  Logger,
+  ticksToMs,
+  type TransactionContext,
+  type World,
+  ZoneType,
+} from "@hyperforge/shared";
+import type { DeathStateManager } from "./DeathStateManager.js";
 
 const GRAVESTONE_MODEL_PATH = "models/environment/gravestone.glb";
 

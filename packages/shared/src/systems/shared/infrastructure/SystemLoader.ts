@@ -99,7 +99,7 @@ function isTruthy(value: string | undefined): boolean {
 // — registered by the plugin's onEnable cross-cutting branch.
 import { CombatSystem } from "..";
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-import { PlayerDeathSystem } from "..";
+// PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
 import { EntityManager } from "..";
 import { EquipmentSystem } from "..";
 // InventoryInteractionSystem migrated to @hyperforge/hyperscape
@@ -235,7 +235,8 @@ export interface Systems {
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   processing?: unknown;
   entityManager?: EntityManager;
-  playerDeath?: PlayerDeathSystem;
+  // PlayerDeathSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  playerDeath?: unknown;
   // mobDeath: registered by @hyperforge/hyperscape plugin (2026-04-24)
   // Migrated to @hyperforge/hyperscape — typed as `unknown`.
   inventoryInteraction?: unknown;
@@ -445,7 +446,8 @@ export async function registerSystems(world: World): Promise<void> {
   // These systems provide advanced gameplay mechanics
 
   // 19. Player death system - Player death and respawn mechanics (depends on player system)
-  world.register("player-death", PlayerDeathSystem);
+  // "player-death" registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-26).
 
   // (Slot 19b — GravestoneLootSystem — registered by
   //  @hyperforge/hyperscape plugin onEnable. Migrated 2026-04-24.)
@@ -557,7 +559,7 @@ export async function registerSystems(world: World): Promise<void> {
   systems.processing = getSystem(world, "processing");
   // healthRegen registration moved to @hyperforge/hyperscape plugin —
   // no SystemReferences slot needed (no consumer reads it today).
-  systems.playerDeath = getSystem(world, "player-death") as PlayerDeathSystem;
+  systems.playerDeath = getSystem(world, "player-death");
   // mobDeath registration moved to @hyperforge/hyperscape plugin —
   // no SystemReferences slot needed (no consumer reads it today).
 
@@ -968,18 +970,38 @@ function setupAPI(world: World, systems: Systems): void {
     movePlayer: (playerId: string, targetPosition: Position3D) =>
       systems.movementSystem?.movePlayer?.(playerId, targetPosition),
 
-    // Player Death API
+    // Player Death API — PlayerDeathSystem migrated to
+    // @hyperforge/hyperscape (Wave 4); duck-type the surface inline.
     getDeathLocation: (playerId: string) =>
-      systems.playerDeath?.getDeathLocation(playerId),
-    getAllDeathLocations: () => systems.playerDeath?.getAllDeathLocations(),
+      (
+        systems.playerDeath as
+          | { getDeathLocation(id: string): unknown }
+          | undefined
+      )?.getDeathLocation(playerId),
+    getAllDeathLocations: () =>
+      (
+        systems.playerDeath as { getAllDeathLocations(): unknown } | undefined
+      )?.getAllDeathLocations(),
     isPlayerDead: (playerId: string) =>
-      systems.playerDeath?.isPlayerDead(playerId),
+      (
+        systems.playerDeath as { isPlayerDead(id: string): boolean } | undefined
+      )?.isPlayerDead(playerId),
     getRemainingRespawnTime: (playerId: string) =>
-      systems.playerDeath?.getRemainingRespawnTime(playerId),
+      (
+        systems.playerDeath as
+          | { getRemainingRespawnTime(id: string): number }
+          | undefined
+      )?.getRemainingRespawnTime(playerId),
     getRemainingDespawnTime: (playerId: string) =>
-      systems.playerDeath?.getRemainingDespawnTime(playerId),
+      (
+        systems.playerDeath as
+          | { getRemainingDespawnTime(id: string): number }
+          | undefined
+      )?.getRemainingDespawnTime(playerId),
     forceRespawn: (playerId: string) =>
-      systems.playerDeath?.forceRespawn(playerId),
+      (
+        systems.playerDeath as { forceRespawn(id: string): void } | undefined
+      )?.forceRespawn(playerId),
 
     // Terrain API (Terrain System)
     getHeightAtPosition: (_worldX: number, _worldZ: number) => 0, // Terrain system doesn't expose this method

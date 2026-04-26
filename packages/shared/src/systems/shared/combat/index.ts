@@ -5,7 +5,7 @@
 
 export * from "./CombatSystem";
 // AggroSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./PlayerDeathSystem";
+// PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
 // MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // — first slice of the Hyperscape→meta-plugin extraction.
 

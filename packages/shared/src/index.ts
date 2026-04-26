@@ -669,6 +669,44 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // (line ~157) — no duplicate export needed here.
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// PlayerDeathSystem + helpers (DeathStateManager, SafeAreaDeathHandler,
+// WildernessDeathHandler) migrated to @hyperforge/hyperscape
+// (2026-04-26). Deps needed by the migrated cluster.
+export {
+  getDeathAnimationTicks,
+  getDeathCooldownTicks,
+  getDeathReconnectRespawnDelayTicks,
+  getDeathStaleLockAgeTicks,
+  getDefaultRespawnPosition,
+  getDefaultRespawnTown,
+  getGravestoneTicks,
+} from "./data/live/combat-live";
+export type { DeathLocationData } from "./types/core/core";
+// `DeathLock` already exported earlier in this file.
+export type { TransactionContext } from "./types/death";
+export { InventorySystem } from "./systems/shared/character/InventorySystem";
+export { getEntityPosition } from "./utils/game/EntityPositionUtils";
+export { resolveStarterTownArea } from "./world-areas";
+export type {
+  PlayerSystemLike,
+  DatabaseSystemLike,
+  EquipmentSystemLike,
+  TerrainSystemLike,
+  NetworkLike,
+  TickSystemLike,
+  PlayerEntityLike,
+  DeathLocationDataWithHeadstone,
+} from "./systems/shared/combat/DeathTypes";
+export {
+  sanitizeKilledBy,
+  ITEMS_KEPT_ON_DEATH,
+  GRAVESTONE_ID_PREFIX,
+  splitItemsForSafeDeath,
+  validatePosition as validateDeathPosition,
+  isPositionInBounds,
+} from "./systems/shared/combat/DeathUtils";
+export type { HeadstoneEntityConfig } from "./types/entities";
+
 // GroundItemSystem + ZoneDetectionSystem migrated to
 // @hyperforge/hyperscape (2026-04-25). Deps needed by the migrated
 // classes (most already exported elsewhere in this barrel; add any

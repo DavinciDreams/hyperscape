@@ -12,15 +12,17 @@
  * world entities that persist via the entity system.
  */
 
-import type { World } from "../../../core/World";
-import type {
-  DeathLock,
+// Migrated 2026-04-26 from `packages/shared/src/systems/shared/death/`
+// into `@hyperforge/hyperscape` (with PlayerDeathSystem cluster).
+import {
+  type DeathLock,
+  type EntityManager,
+  EventType,
+  type InventoryItem,
+  type TransactionContext,
+  type World,
   ZoneType,
-  TransactionContext,
-} from "../../../types/death";
-import type { InventoryItem } from "../../../types/core/core";
-import type { EntityManager } from "..";
-import { EventType } from "../../../types/events";
+} from "@hyperforge/shared";
 
 const DEBUG_DEATH_STATE = false;
 const isTruthyEnv = (value: string | undefined): boolean =>

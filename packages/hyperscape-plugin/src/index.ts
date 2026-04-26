@@ -47,6 +47,7 @@ import { FletchingSystem } from "./systems/FletchingSystem.js";
 import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { GroundItemSystem } from "./systems/GroundItemSystem.js";
 import { ZoneDetectionSystem } from "./systems/ZoneDetectionSystem.js";
+import { PlayerDeathSystem } from "./systems/PlayerDeathSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -237,11 +238,18 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       register("ground-items", GroundItemSystem);
 
       // Zone detection — single source of truth for safe / pvp /
-      // wilderness lookups. Migrated 2026-04-25. CombatSystem and
-      // PlayerDeathSystem (still in shared) look it up via
+      // wilderness lookups. Migrated 2026-04-25. CombatSystem
+      // (still in shared) looks it up via
       // `world.getSystem("zone-detection")`, so it must register
       // before SystemLoader runs.
       register("zone-detection", ZoneDetectionSystem);
+
+      // Player death — handles inventory drop, gravestone spawn,
+      // respawn timer. Migrated 2026-04-26 with its 3 internal
+      // helpers (DeathStateManager, SafeAreaDeathHandler,
+      // WildernessDeathHandler). Depends on zone-detection +
+      // ground-items so registers after both.
+      register("player-death", PlayerDeathSystem);
 
       // Loot system — drops mob loot to the ground via
       // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
