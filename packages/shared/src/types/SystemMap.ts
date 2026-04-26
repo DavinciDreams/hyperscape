@@ -48,7 +48,8 @@ import type { PlayerSystem } from "../systems/shared";
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 1).
 // SystemMap entry below typed as `unknown`.
-import type { SkillsSystem } from "../systems/shared";
+// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a).
+// SystemMap entry below typed as `unknown`.
 // SmeltingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // CraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -124,7 +125,7 @@ export interface SystemMap {
   "coin-pouch": unknown;
   inventory: InventorySystem;
   equipment: EquipmentSystem;
-  skills: SkillsSystem;
+  skills: unknown;
   prayer: unknown;
   // "health-regen" registered by @hyperforge/hyperscape plugin onEnable
   aggro: unknown;

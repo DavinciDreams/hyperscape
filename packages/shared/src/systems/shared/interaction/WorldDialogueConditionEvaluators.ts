@@ -29,7 +29,14 @@ interface QuestSystem {
   hasCompletedQuest(playerId: string, questId: string): boolean;
 }
 import type { InventorySystem } from "../character/InventorySystem";
-import type { SkillsSystem } from "../character/SkillsSystem";
+// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26).
+// `Skills` already imported above.
+interface SkillsSystemDuck {
+  getSkillData(
+    playerId: string,
+    skill: keyof Skills,
+  ): { level: number; xp: number } | undefined;
+}
 import { SystemLogger } from "../../../utils/Logger";
 
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -141,7 +148,9 @@ export function buildDialoguePredicate(
         return () => false;
       }
       return (args) => {
-        const skills = world.getSystem<SkillsSystem>("skills") ?? null;
+        const skills =
+          (world.getSystem("skills") as unknown as SkillsSystemDuck | null) ??
+          null;
         if (!skills) return false;
         const data = skills.getSkillData(args.playerId, binding.skill);
         if (!data) return false;

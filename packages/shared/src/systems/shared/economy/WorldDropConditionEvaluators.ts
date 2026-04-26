@@ -35,7 +35,14 @@ interface QuestSystem {
   hasCompletedQuest(playerId: string, questId: string): boolean;
 }
 import type { InventorySystem } from "../character/InventorySystem";
-import type { SkillsSystem } from "../character/SkillsSystem";
+// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26).
+// `Skills` already imported above.
+interface SkillsSystemDuck {
+  getSkillData(
+    playerId: string,
+    skill: keyof Skills,
+  ): { level: number; xp: number } | undefined;
+}
 import { SystemLogger } from "../../../utils/Logger";
 
 import type { DropConditionDispatcher } from "./DropConditionDispatcher";
@@ -139,7 +146,8 @@ export function createLevelAtLeastHandler(
     if (!skill || level === undefined) return false;
     const skillKey = asSkillKey(skill);
     if (!skillKey) return false;
-    const skills = world.getSystem<SkillsSystem>("skills") ?? null;
+    const skills =
+      (world.getSystem("skills") as unknown as SkillsSystemDuck | null) ?? null;
     if (!skills) return false;
     const data = skills.getSkillData(ctx.killerId, skillKey);
     if (!data) return false;

@@ -191,7 +191,7 @@ import { DuelArenaVisualsSystem } from "../../client/DuelArenaVisualsSystem";
 
 import type { CameraSystem as CameraSystemInterface } from "../../../types/systems/physics";
 import { ActionRegistry } from "..";
-import { SkillsSystem } from "..";
+// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a).
 // SmeltingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // SmithingSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // CraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)
@@ -218,7 +218,8 @@ export interface Systems {
   player?: PlayerSystem;
   inventory?: InventorySystem;
   combat?: CombatSystem;
-  skills?: SkillsSystem;
+  // SkillsSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  skills?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown` so
   // SystemLoader's bookkeeping object still compiles.
   banking?: unknown;
@@ -398,7 +399,8 @@ export async function registerSystems(world: World): Promise<void> {
   world.register("equipment", EquipmentSystem);
 
   // 12. XP system - Experience and leveling (depends on player system)
-  world.register("skills", SkillsSystem);
+  // "skills" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-26, Wave 5a).
 
   // 12b. Prayer system - Prayer mechanics (depends on player, skills systems)
   // "prayer" registered by @hyperforge/hyperscape plugin onEnable
@@ -546,7 +548,7 @@ export async function registerSystems(world: World): Promise<void> {
       : undefined;
   systems.combat = getSystem(world, "combat") as CombatSystem;
   systems.inventory = getSystem(world, "inventory") as InventorySystem;
-  systems.skills = getSystem(world, "skills") as SkillsSystem;
+  systems.skills = getSystem(world, "skills");
   systems.mobNpc = getSystem(world, "mob-npc");
   systems.banking = getSystem(world, "banking");
   systems.store = getSystem(world, "store");
@@ -829,17 +831,23 @@ function setupAPI(world: World, systems: Systems): void {
       return stats || {};
     },
     getSkillLevel: (playerId: string, skill: string) => {
-      const skillData = systems.skills?.getSkillData(
-        playerId,
-        skill as keyof Skills,
-      );
+      const skillData = (
+        systems.skills as
+          | { getSkillData(id: string, s: keyof Skills): unknown }
+          | undefined
+      )?.getSkillData(playerId, skill as keyof Skills) as
+        | { level: number; xp: number }
+        | undefined;
       return skillData?.level || 1;
     },
     getSkillXP: (playerId: string, skill: string) => {
-      const skillData = systems.skills?.getSkillData(
-        playerId,
-        skill as keyof Skills,
-      );
+      const skillData = (
+        systems.skills as
+          | { getSkillData(id: string, s: keyof Skills): unknown }
+          | undefined
+      )?.getSkillData(playerId, skill as keyof Skills) as
+        | { level: number; xp: number }
+        | undefined;
       return skillData?.xp || 0;
     },
     getCombatLevel: (playerId: string) => {
@@ -849,15 +857,32 @@ function setupAPI(world: World, systems: Systems): void {
         "stats",
       ) as StatsComponent | null;
       if (!stats) return 1;
-      return systems.skills?.getCombatLevel(stats) ?? 1;
+      return (
+        (
+          systems.skills as
+            | { getCombatLevel(s: StatsComponent): number }
+            | undefined
+        )?.getCombatLevel(stats) ?? 1
+      );
     },
     getXPToNextLevel: (playerId: string, skill: string) => {
-      const skillData = systems.skills?.getSkillData(
-        playerId,
-        skill as keyof Skills,
-      );
+      const skillData = (
+        systems.skills as
+          | { getSkillData(id: string, s: keyof Skills): unknown }
+          | undefined
+      )?.getSkillData(playerId, skill as keyof Skills) as
+        | { level: number; xp: number }
+        | undefined;
       if (!skillData) return 0;
-      return systems.skills?.getXPToNextLevel(skillData) ?? 0;
+      return (
+        (
+          systems.skills as
+            | {
+                getXPToNextLevel(d: { level: number; xp: number }): number;
+              }
+            | undefined
+        )?.getXPToNextLevel(skillData) ?? 0
+      );
     },
 
     // UI API (handled via events, no UISystem)

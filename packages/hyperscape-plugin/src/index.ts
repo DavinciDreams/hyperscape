@@ -48,6 +48,7 @@ import { GravestoneLootSystem } from "./systems/GravestoneLootSystem.js";
 import { GroundItemSystem } from "./systems/GroundItemSystem.js";
 import { ZoneDetectionSystem } from "./systems/ZoneDetectionSystem.js";
 import { PlayerDeathSystem } from "./systems/PlayerDeathSystem.js";
+import { SkillsSystem } from "./systems/SkillsSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -250,6 +251,12 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // WildernessDeathHandler). Depends on zone-detection +
       // ground-items so registers after both.
       register("player-death", PlayerDeathSystem);
+
+      // Skills — XP table + skill data + combat-level calculation.
+      // Migrated 2026-04-26 (Wave 5a). CombatSystem +
+      // WorldDropConditionEvaluators + WorldDialogueConditionEvaluators
+      // (still in shared) all duck-type-lookup `world.getSystem("skills")`.
+      register("skills", SkillsSystem);
 
       // Loot system — drops mob loot to the ground via
       // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install

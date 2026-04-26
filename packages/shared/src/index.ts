@@ -669,6 +669,20 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // (line ~157) — no duplicate export needed here.
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
+// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26,
+// Wave 5a). Deps needed by the migrated class.
+export { StatsComponent } from "./components/StatsComponent";
+export {
+  getStatsComponent,
+  requireStatsComponent,
+} from "./utils/game/ComponentUtils";
+export type { SkillMilestone, XPDrop } from "./types/systems/system-interfaces";
+export {
+  getCombatXpPerDamage,
+  getControlledXpPerDamage,
+  getHitpointsXpPerDamage,
+} from "./data/live/combat-live";
+
 // PlayerDeathSystem + helpers (DeathStateManager, SafeAreaDeathHandler,
 // WildernessDeathHandler) migrated to @hyperforge/hyperscape
 // (2026-04-26). Deps needed by the migrated cluster.
@@ -1976,7 +1990,9 @@ export { Logger } from "./utils/Logger";
 
 // Skill enum — referenced by gameplay plugins to identify which
 // skill grants XP for a given action. Re-exported from SkillsSystem.
-export { Skill } from "./systems/shared/character/SkillsSystem";
+// `Skill` constants extracted from SkillsSystem when SkillsSystem
+// migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a).
+export { Skill } from "./data/skills/SkillConstants";
 
 // Processing recipe data types — typed shapes returned by
 // processingDataProvider.get*Recipe() methods. Consumed by

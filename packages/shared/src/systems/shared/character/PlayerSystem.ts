@@ -77,7 +77,10 @@ import {
   getEatAttackDelayTicks,
   getMaxHealAmount,
 } from "../../../data/live/combat-live";
-import { Skill } from "./SkillsSystem";
+// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a).
+// `Skill` constants extracted to `data/skills/SkillConstants` so this
+// in-shared consumer keeps working.
+import { Skill } from "../../../data/skills/SkillConstants";
 import type { CombatSystem } from "../combat/CombatSystem";
 
 /**

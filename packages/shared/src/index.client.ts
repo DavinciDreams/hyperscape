@@ -1040,9 +1040,11 @@ export { storesRegistry } from "./stores";
 // each system at runtime).
 // ─────────────────────────────────────────────────────────────────────
 
-// SkillsSystem `Skill` enum + DeathState + ALL_WORLD_AREAS
+// `Skill` constants extracted from SkillsSystem when SkillsSystem
+// migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a).
+// DeathState + ALL_WORLD_AREAS
 // (AttackType already re-exported earlier in this file)
-export { Skill } from "./systems/shared/character/SkillsSystem";
+export { Skill } from "./data/skills/SkillConstants";
 export { DeathState } from "./types/entities/entities";
 // ALL_WORLD_AREAS + STARTER_TOWNS already re-exported above; just
 // add the missing helper.

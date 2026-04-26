@@ -89,6 +89,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "ground-items",
   "zone-detection",
   "player-death",
+  "skills",
   "loot",
   "resource",
   "towns",

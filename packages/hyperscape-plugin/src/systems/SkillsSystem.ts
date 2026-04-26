@@ -31,48 +31,36 @@
  * **Referenced by:** CombatSystem, ResourceSystem, ProcessingSystem, all skill-based interactions
  */
 
-import { Entity } from "../../../entities/Entity";
-import { SkillData, Skills } from "../../../types/core/core";
-import { StatsComponent } from "../../../components/StatsComponent";
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import { SystemBase } from "../infrastructure/SystemBase";
+// Migrated 2026-04-26 from
+// `packages/shared/src/systems/shared/character/` into
+// `@hyperforge/hyperscape` (Wave 5a). 956 LOC.
+//
+// `Skill` constants stayed in shared (extracted to
+// `data/skills/SkillConstants` in the same diff) so PlayerSystem
+// (still in shared) can keep importing them.
 import {
-  getStatsComponent,
-  requireStatsComponent,
-} from "../../../utils/game/ComponentUtils";
-import {
+  Entity,
+  EventType,
   getCombatXpPerDamage,
   getControlledXpPerDamage,
   getHitpointsXpPerDamage,
-} from "../../../data/live/combat-live";
-import { xpCurveRegistry } from "../../../progression/index.js";
+  getStatsComponent,
+  requireStatsComponent,
+  Skill,
+  type SkillData,
+  type SkillMilestone,
+  type Skills,
+  StatsComponent,
+  SystemBase,
+  type World,
+  type XPDrop,
+  xpCurveRegistry,
+} from "@hyperforge/shared";
 
-/** Skill name constants for type-safe skill references */
-export const Skill = {
-  ATTACK: "attack" as keyof Skills,
-  STRENGTH: "strength" as keyof Skills,
-  DEFENSE: "defense" as keyof Skills,
-  RANGE: "ranged" as keyof Skills,
-  MAGIC: "magic" as keyof Skills,
-  CONSTITUTION: "constitution" as keyof Skills,
-  PRAYER: "prayer" as keyof Skills,
-  WOODCUTTING: "woodcutting" as keyof Skills,
-  MINING: "mining" as keyof Skills,
-  FISHING: "fishing" as keyof Skills,
-  FIREMAKING: "firemaking" as keyof Skills,
-  COOKING: "cooking" as keyof Skills,
-  SMITHING: "smithing" as keyof Skills,
-  AGILITY: "agility" as keyof Skills,
-  CRAFTING: "crafting" as keyof Skills,
-  FLETCHING: "fletching" as keyof Skills,
-  RUNECRAFTING: "runecrafting" as keyof Skills,
-};
-
-import type {
-  SkillMilestone,
-  XPDrop,
-} from "../../../types/systems/system-interfaces";
+// Re-export Skill so plugin systems that previously did
+// `import { Skill } from "@hyperforge/shared"` (or via a barrel
+// pull) keep working unchanged.
+export { Skill };
 
 /**
  * SkillsSystem - Experience and Level Management
