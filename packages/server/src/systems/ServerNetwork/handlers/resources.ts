@@ -1,11 +1,8 @@
 /**
  * @deprecated Re-export shim.
  *
- * Handler relocated to
- * `packages/shared/src/systems/server/network/handlers/resources.ts`
- * as part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 5).
- * Delete after Step 8.
+ * Handler relocated to `@hyperforge/hyperscape`
+ * (Phase F3 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export * from "../../../../../shared/src/systems/server/network/handlers/resources";
+export { handleResourceGather } from "@hyperforge/hyperscape";

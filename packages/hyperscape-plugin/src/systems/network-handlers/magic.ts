@@ -10,15 +10,15 @@
  * - Server-side spell existence verification via SpellService
  */
 
-import type { ServerSocket } from "../server-types";
+import type { ServerSocket } from "@hyperforge/shared";
 // SpellService migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 // Read straight from the COMBAT_SPELLS data map (still in shared) for
 // the simple `isValidSpell` check.
-import { COMBAT_SPELLS, EventType, World } from "../../../../index";
+import { COMBAT_SPELLS, EventType, World } from "@hyperforge/shared";
 const spellService = {
   isValidSpell: (spellId: string) => spellId in COMBAT_SPELLS,
 };
-import { validateRequestTimestamp } from "../services/InputValidation";
+import { validateRequestTimestamp } from "@hyperforge/shared";
 
 /**
  * Validate spell ID format

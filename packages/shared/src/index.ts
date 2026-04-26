@@ -2185,6 +2185,26 @@ export {
   getPathfindRateLimiter,
   getChatRateLimiter,
 } from "./systems/server/network/services/SlidingWindowRateLimiter";
+// Handler-utility substrate — needed by migrated network handlers
+// (Phase F3, 2026-04-26).
+export {
+  validateRequestTimestamp,
+  isValidNpcId,
+  isValidResponseIndex,
+} from "./systems/server/network/services/InputValidation";
+export {
+  getPlayerId,
+  sendToSocket,
+  sendErrorToast,
+  sendSuccessToast,
+  getSessionManager,
+  hasActiveInterfaceSession,
+  // `getEntityPosition` already re-exported earlier from
+  // `utils/game/EntityPositionUtils`. Skip re-exporting from
+  // `handlers/common/helpers` to avoid duplicate-export collision.
+  type SessionInfo,
+  type EntityPosition,
+} from "./systems/server/network/handlers/common/helpers";
 // Substrate interfaces — needed by plugin-side game managers
 // (PendingTrade/Duel/Attack/Cook/Gather, Follow) that resolve
 // `world.tileMovement` etc. at construction time.

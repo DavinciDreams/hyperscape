@@ -223,13 +223,8 @@ export function registerMigratedPacketHandlers(world: World): void {
     socket.send("pong", data);
   });
 
-  // Entity lifecycle — simple delegates that only need `world`.
-  registry.register("onEntityEvent", (socket, data) =>
-    handleEntityEvent(socket, data, world),
-  );
-  registry.register("onEntityRemoved", (socket, data) =>
-    handleEntityRemoved(socket, data, world),
-  );
+  // Entity lifecycle (`onEntityEvent`, `onEntityRemoved`) migrated
+  // to @hyperforge/hyperscape plugin onEnable (Phase F3, 2026-04-26).
 
   // Handlers that need ServerNetwork's BroadcastManager. ServerNetwork has
   // already initialized by the time this module runs (world.init() returned
@@ -249,12 +244,8 @@ export function registerMigratedPacketHandlers(world: World): void {
   // 2026-04-26). Plugin resolves `world.connectionRegistry` and
   // registers via the substrate. The local `handleChatAdded` import
   // above is now unused and can be dropped in a follow-up cleanup.
-  registry.register("onEntityModified", (socket, data) =>
-    handleEntityModified(socket, data, world, sendToAll),
-  );
-  registry.register("onSettingsModified", (socket, data) =>
-    handleSettings(socket, data, world, sendToAll),
-  );
+  // `onEntityModified` + `onSettingsModified` migrated to
+  // @hyperforge/hyperscape plugin onEnable (Phase F3, 2026-04-26).
 
   // Admin/debug commands — DB-coupled via `getDatabase(world)`. Kept
   // server-only (handler imports drizzle/pg schema); registered via
@@ -272,10 +263,8 @@ export function registerMigratedPacketHandlers(world: World): void {
     ),
   );
 
-  // Resource gathering — plain world-only delegate.
-  registry.register("onResourceGather", (socket, data) =>
-    handleResourceGather(socket, data, world),
-  );
+  // `onResourceGather` migrated to @hyperforge/hyperscape plugin
+  // onEnable (Phase F3, 2026-04-26).
 
   // Processing / skill handlers share a single context object built from
   // ServerNetwork-internal managers. Built once here and closed over.
@@ -488,16 +477,9 @@ export function registerMigratedPacketHandlers(world: World): void {
   registry.register("onKeepalive", keepaliveNoop);
   registry.register("keepalive", keepaliveNoop);
 
-  // Dialogue handlers — all world-only.
-  registry.register("onDialogueResponse", (socket, data) =>
-    handleDialogueResponse(socket, data as DialogueResponsePayload, world),
-  );
-  registry.register("onDialogueContinue", (socket, data) =>
-    handleDialogueContinue(socket, data as DialogueNpcPayload, world),
-  );
-  registry.register("onDialogueClose", (socket, data) =>
-    handleDialogueClose(socket, data as DialogueNpcPayload, world),
-  );
+  // Dialogue handlers (`onDialogueResponse`, `onDialogueContinue`,
+  // `onDialogueClose`) migrated to @hyperforge/hyperscape plugin
+  // onEnable (Phase F3, 2026-04-26).
 
   // Quest list/detail queries — world-only.
   const getQuestList = (
@@ -571,13 +553,9 @@ export function registerMigratedPacketHandlers(world: World): void {
   registry.register("onAltarPray", altarPray);
   registry.register("altarPray", altarPray);
 
-  // Magic: autocast spell selection — world-only.
-  const setAutocast = (
-    socket: Parameters<typeof handleSetAutocast>[0],
-    data: unknown,
-  ) => handleSetAutocast(socket, data, world);
-  registry.register("onSetAutocast", setAutocast);
-  registry.register("setAutocast", setAutocast);
+  // Magic: autocast spell selection (`onSetAutocast` + `setAutocast`)
+  // migrated to @hyperforge/hyperscape plugin onEnable (Phase F3,
+  // 2026-04-26).
 
   // Action bar handlers — world-only.
   const actionBarSave = (

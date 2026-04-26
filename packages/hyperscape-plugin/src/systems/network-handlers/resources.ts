@@ -8,8 +8,8 @@
  * Client-provided position is ignored to prevent position spoofing exploits.
  */
 
-import type { ServerSocket } from "../server-types";
-import { EventType, World } from "../../../../index";
+import type { ServerSocket } from "@hyperforge/shared";
+import { EventType, World } from "@hyperforge/shared";
 
 /**
  * Handle direct resource gather request.

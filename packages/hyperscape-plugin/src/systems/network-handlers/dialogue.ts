@@ -18,13 +18,10 @@
  * machine. This handler is just the network entry point with validation.
  */
 
-import { type World, EventType } from "../../../../index";
-import type { ServerSocket } from "../server-types";
-import {
-  isValidNpcId,
-  isValidResponseIndex,
-} from "../services/InputValidation";
-import { getPlayerId, sendErrorToast } from "./common";
+import { type World, EventType } from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
+import { isValidNpcId, isValidResponseIndex } from "@hyperforge/shared";
+import { getPlayerId, sendErrorToast } from "@hyperforge/shared";
 
 /**
  * Handle dialogue response

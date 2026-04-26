@@ -121,6 +121,19 @@ import { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 import { TileMovementManager } from "./systems/tile-movement.js";
 import { MobTileMovementManager } from "./systems/mob-tile-movement.js";
 import { handleChatAdded } from "./systems/network-handlers/chat.js";
+import {
+  handleDialogueResponse,
+  handleDialogueContinue,
+  handleDialogueClose,
+} from "./systems/network-handlers/dialogue.js";
+import {
+  handleEntityEvent,
+  handleEntityRemoved,
+  handleEntityModified,
+  handleSettings,
+} from "./systems/network-handlers/entities.js";
+import { handleSetAutocast } from "./systems/network-handlers/magic.js";
+import { handleResourceGather } from "./systems/network-handlers/resources.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -185,6 +198,19 @@ export { MobTileMovementManager } from "./systems/mob-tile-movement.js";
 // `world.connectionRegistry`; these re-exports are for direct
 // importers in `@hyperforge/server` or tests.
 export { handleChatAdded } from "./systems/network-handlers/chat.js";
+export {
+  handleDialogueResponse,
+  handleDialogueContinue,
+  handleDialogueClose,
+} from "./systems/network-handlers/dialogue.js";
+export {
+  handleEntityEvent,
+  handleEntityRemoved,
+  handleEntityModified,
+  handleSettings,
+} from "./systems/network-handlers/entities.js";
+export { handleSetAutocast } from "./systems/network-handlers/magic.js";
+export { handleResourceGather } from "./systems/network-handlers/resources.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -616,14 +642,96 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           }
         ).connectionRegistry;
         if (connectionRegistry) {
-          // Chat — F3 first cut (smallest handler, ~85 LOC).
+          const sendToAll = (name: string, payload: unknown, ignore?: string) =>
+            tmmBroadcast?.sendToAll(name, payload, ignore);
+
+          // Chat — F3 first cut.
           connectionRegistry.register("onChatAdded", (socket, data) => {
-            handleChatAdded(socket, data, ctx.world, (name, payload, ignore) =>
-              tmmBroadcast?.sendToAll(name, payload, ignore),
-            );
+            handleChatAdded(socket, data, ctx.world, sendToAll);
           });
           ctx.scope.register(() =>
             connectionRegistry.unregister("onChatAdded"),
+          );
+
+          // Entity lifecycle — F3 batch-1.
+          connectionRegistry.register("onEntityEvent", (socket, data) => {
+            handleEntityEvent(socket, data, ctx.world);
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onEntityEvent"),
+          );
+          connectionRegistry.register("onEntityRemoved", (socket, data) => {
+            handleEntityRemoved(socket, data, ctx.world);
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onEntityRemoved"),
+          );
+          connectionRegistry.register("onEntityModified", (socket, data) => {
+            handleEntityModified(socket, data, ctx.world, sendToAll);
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onEntityModified"),
+          );
+          connectionRegistry.register("onSettingsModified", (socket, data) => {
+            handleSettings(socket, data, ctx.world, sendToAll);
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onSettingsModified"),
+          );
+
+          // Resources — F3 batch-1.
+          connectionRegistry.register("onResourceGather", (socket, data) => {
+            handleResourceGather(socket, data, ctx.world);
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onResourceGather"),
+          );
+
+          // Dialogue — F3 batch-1.
+          connectionRegistry.register("onDialogueResponse", (socket, data) => {
+            handleDialogueResponse(
+              socket,
+              data as Parameters<typeof handleDialogueResponse>[1],
+              ctx.world,
+            );
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onDialogueResponse"),
+          );
+          connectionRegistry.register("onDialogueContinue", (socket, data) => {
+            handleDialogueContinue(
+              socket,
+              data as Parameters<typeof handleDialogueContinue>[1],
+              ctx.world,
+            );
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onDialogueContinue"),
+          );
+          connectionRegistry.register("onDialogueClose", (socket, data) => {
+            handleDialogueClose(
+              socket,
+              data as Parameters<typeof handleDialogueClose>[1],
+              ctx.world,
+            );
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onDialogueClose"),
+          );
+
+          // Magic: autocast — F3 batch-1. Server registers under
+          // both "onSetAutocast" and "setAutocast" (alias).
+          const setAutocast = (
+            socket: Parameters<typeof handleSetAutocast>[0],
+            data: unknown,
+          ) => handleSetAutocast(socket, data, ctx.world);
+          connectionRegistry.register("onSetAutocast", setAutocast);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onSetAutocast"),
+          );
+          connectionRegistry.register("setAutocast", setAutocast);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("setAutocast"),
           );
         }
 

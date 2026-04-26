@@ -4,11 +4,11 @@
  * Handles entity modification and event broadcasting
  */
 
-import type { ServerSocket } from "../server-types";
-import type { World } from "../../../../index";
-import { hasRole } from "../../../../index";
-import type { SettingsData } from "../../../../index";
-import { sendErrorToast } from "./common";
+import type { ServerSocket } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import { hasRole } from "@hyperforge/shared";
+import type { SettingsData } from "@hyperforge/shared";
+import { sendErrorToast } from "@hyperforge/shared";
 
 type SettingsValue =
   | string
