@@ -244,7 +244,10 @@ interface FaceDirectionManager {
   setFaceTarget(playerId: string, target: unknown): void;
   markPlayerMoved(playerId: string): void;
 }
-import { handleFollowPlayer } from "./handlers/player";
+// handleFollowPlayer migrated to @hyperforge/hyperscape (Phase F3,
+// 2026-04-26). Plugin onEnable registers `onFollowPlayer` via
+// `world.connectionRegistry`. Pre-handler logic that cancelled
+// `pendingAttackManager` lives plugin-side now.
 import {
   initHomeTeleportManager,
   getHomeTeleportManager,
@@ -2131,23 +2134,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     };
 
-    // Follow another player (OSRS-style)
-    this.handlers["onFollowPlayer"] = (socket, data) => {
-      const playerEntity = socket.player;
-      if (!playerEntity) return;
-
-      // Cancel any pending attack when starting to follow
-      (
-        this.world as { pendingAttackManager?: PendingAttackManager }
-      ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
-
-      // Validate and start following
-      const fm = (this.world as { followManager?: FollowManager })
-        .followManager;
-      if (fm) {
-        handleFollowPlayer(socket, data, this.world, fm);
-      }
-    };
+    // Follow another player (OSRS-style) migrated to @hyperforge/hyperscape
+    // (Phase F3 batch-2, 2026-04-26). Plugin onEnable registers
+    // `onFollowPlayer` via `world.connectionRegistry`; pre-handler logic
+    // (cancelPendingAttack) is inlined plugin-side.
 
     // Combat-style toggles (onChangeAttackStyle, onSetAutoRetaliate),
     // inventory (onPickup/Drop/Equip/Use/Unequip/Move/CoinPouchWithdraw/

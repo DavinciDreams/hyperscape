@@ -2184,7 +2184,20 @@ export {
   getTileMovementRateLimiter,
   getPathfindRateLimiter,
   getChatRateLimiter,
+  getFollowRateLimiter,
+  getPrayerRateLimiter,
+  getQuestListRateLimiter,
+  getQuestDetailRateLimiter,
+  getQuestAcceptRateLimiter,
+  getQuestAbandonRateLimiter,
+  getQuestCompleteRateLimiter,
 } from "./systems/server/network/services/SlidingWindowRateLimiter";
+// Network handler interfaces — needed by Phase F3 migrated handlers
+// (player, prayer, quest, etc.) that look up systems at the world level.
+export type {
+  IDatabaseSystem,
+  IFollowManager,
+} from "./systems/server/network/interfaces";
 // Handler-utility substrate — needed by migrated network handlers
 // (Phase F3, 2026-04-26).
 export {

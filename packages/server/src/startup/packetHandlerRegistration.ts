@@ -33,9 +33,6 @@ import type {
   BankSlotPayload,
   BankWithdrawToEquipmentPayload,
   BankDepositEquipmentPayload,
-  DialogueResponsePayload,
-  DialogueNpcPayload,
-  QuestIdPayload,
   CorpseLootAllPayload,
   NpcInteractPayload,
   EntityInteractPayload,
@@ -62,18 +59,16 @@ import type {
   PrivateMessagePayload,
 } from "../systems/ServerNetwork/types";
 import { DeathState } from "@hyperforge/shared";
-import {
-  handleQuestAccept,
-  handleQuestAbandon,
-  handleQuestComplete,
-} from "../../../shared/src/systems/server/network/handlers/quest";
+// Quest handlers migrated to @hyperforge/hyperscape plugin onEnable
+// (Phase F3 batch-2, 2026-04-26).
 import {
   handleStoreOpen,
   handleStoreBuy,
   handleStoreSell,
   handleStoreClose,
 } from "../systems/ServerNetwork/handlers/store";
-import { handleChangePlayerName } from "../../../shared/src/systems/server/network/handlers/player";
+// `handleChangePlayerName` migrated to @hyperforge/hyperscape plugin
+// onEnable (Phase F3 batch-2, 2026-04-26).
 import {
   handleTradeRequest,
   handleTradeRequestRespond,
@@ -134,10 +129,8 @@ import {
   handleDialogueContinue,
   handleDialogueClose,
 } from "../systems/ServerNetwork/handlers/dialogue";
-import {
-  handleGetQuestList,
-  handleGetQuestDetail,
-} from "../systems/ServerNetwork/handlers/quest";
+// Quest list/detail handlers migrated to @hyperforge/hyperscape plugin
+// onEnable (Phase F3 batch-2, 2026-04-26).
 import {
   handleChangeAttackStyle,
   handleSetAutoRetaliate,
@@ -152,11 +145,8 @@ import {
   handleCoinPouchWithdraw,
   handleXpLampUse,
 } from "../systems/ServerNetwork/handlers/inventory";
-import {
-  handlePrayerToggle,
-  handlePrayerDeactivateAll,
-  handleAltarPray,
-} from "../systems/ServerNetwork/handlers/prayer";
+// Prayer handlers migrated to @hyperforge/hyperscape plugin onEnable
+// (Phase F3 batch-2, 2026-04-26).
 import { handleSetAutocast } from "../systems/ServerNetwork/handlers/magic";
 import {
   handleActionBarSave,
@@ -481,20 +471,10 @@ export function registerMigratedPacketHandlers(world: World): void {
   // `onDialogueClose`) migrated to @hyperforge/hyperscape plugin
   // onEnable (Phase F3, 2026-04-26).
 
-  // Quest list/detail queries — world-only.
-  const getQuestList = (
-    socket: Parameters<typeof handleGetQuestList>[0],
-    data: unknown,
-  ) => handleGetQuestList(socket, data as Record<string, unknown>, world);
-  registry.register("onGetQuestList", getQuestList);
-  registry.register("getQuestList", getQuestList);
-
-  const getQuestDetail = (
-    socket: Parameters<typeof handleGetQuestDetail>[0],
-    data: unknown,
-  ) => handleGetQuestDetail(socket, data as QuestIdPayload, world);
-  registry.register("onGetQuestDetail", getQuestDetail);
-  registry.register("getQuestDetail", getQuestDetail);
+  // Quest handlers (`onGetQuestList`, `onGetQuestDetail`,
+  // `questAccept`, `questAbandon`, `questComplete`) migrated to
+  // @hyperforge/hyperscape plugin onEnable (Phase F3 batch-2,
+  // 2026-04-26).
 
   // Combat-style toggles — world-only.
   registry.register("onChangeAttackStyle", (socket, data) =>
@@ -531,27 +511,10 @@ export function registerMigratedPacketHandlers(world: World): void {
     handleXpLampUse(socket, data, world),
   );
 
-  // Prayer handlers — world-only. Each has an `onX` primary + legacy `x` alias.
-  const prayerToggle = (
-    socket: Parameters<typeof handlePrayerToggle>[0],
-    data: unknown,
-  ) => handlePrayerToggle(socket, data, world);
-  registry.register("onPrayerToggle", prayerToggle);
-  registry.register("prayerToggle", prayerToggle);
-
-  const prayerDeactivateAll = (
-    socket: Parameters<typeof handlePrayerDeactivateAll>[0],
-    data: unknown,
-  ) => handlePrayerDeactivateAll(socket, data, world);
-  registry.register("onPrayerDeactivateAll", prayerDeactivateAll);
-  registry.register("prayerDeactivateAll", prayerDeactivateAll);
-
-  const altarPray = (
-    socket: Parameters<typeof handleAltarPray>[0],
-    data: unknown,
-  ) => handleAltarPray(socket, data, world);
-  registry.register("onAltarPray", altarPray);
-  registry.register("altarPray", altarPray);
+  // Prayer handlers (`onPrayerToggle`, `onPrayerDeactivateAll`,
+  // `onAltarPray` + their legacy aliases) migrated to
+  // @hyperforge/hyperscape plugin onEnable (Phase F3 batch-2,
+  // 2026-04-26).
 
   // Magic: autocast spell selection (`onSetAutocast` + `setAutocast`)
   // migrated to @hyperforge/hyperscape plugin onEnable (Phase F3,
@@ -634,13 +597,9 @@ export function registerMigratedPacketHandlers(world: World): void {
   registry.register("onCharacterSelected", characterSelected);
   registry.register("characterSelected", characterSelected);
 
-  // Player name change — broadcasts to all clients on success. Reuses the
-  // `sendToAll` binding created above for chat/entity-modified handlers.
-  const changePlayerName = (
-    socket: Parameters<typeof handleChangePlayerName>[0],
-    data: unknown,
-  ) => handleChangePlayerName(socket, data, world, sendToAll);
-  registry.register("changePlayerName", changePlayerName);
+  // Player name change handler (`changePlayerName`) migrated to
+  // @hyperforge/hyperscape plugin onEnable (Phase F3 batch-2,
+  // 2026-04-26).
 
   // Death/respawn — inline handler: validates player is actually dead,
   // then emits PLAYER_RESPAWN_REQUEST. Preserves original behavior from
@@ -758,33 +717,9 @@ export function registerMigratedPacketHandlers(world: World): void {
   registry.register("onEntityInteract", entityInteract);
   registry.register("entityInteract", entityInteract);
 
-  // Quest mutations — accept/abandon/complete. Each has `on*` + legacy alias.
-  const questAccept = (
-    socket: Parameters<typeof handleQuestAccept>[0],
-    data: unknown,
-  ) => {
-    void handleQuestAccept(socket, data as QuestIdPayload, world);
-  };
-  registry.register("onQuestAccept", questAccept);
-  registry.register("questAccept", questAccept);
-
-  const questAbandon = (
-    socket: Parameters<typeof handleQuestAbandon>[0],
-    data: unknown,
-  ) => {
-    void handleQuestAbandon(socket, data as QuestIdPayload, world);
-  };
-  registry.register("onQuestAbandon", questAbandon);
-  registry.register("questAbandon", questAbandon);
-
-  const questComplete = (
-    socket: Parameters<typeof handleQuestComplete>[0],
-    data: unknown,
-  ) => {
-    void handleQuestComplete(socket, data as QuestIdPayload, world);
-  };
-  registry.register("onQuestComplete", questComplete);
-  registry.register("questComplete", questComplete);
+  // Quest accept/abandon/complete handlers migrated to
+  // @hyperforge/hyperscape plugin onEnable (Phase F3 batch-2,
+  // 2026-04-26).
 
   // Store handlers — coupled to drizzle/Postgres, stay in server for now.
   registry.register("onStoreOpen", (socket, data) =>

@@ -14,15 +14,15 @@
  * - Server-side prayer existence verification via PrayerDataProvider
  */
 
-import type { ServerSocket } from "../server-types";
+import type { ServerSocket } from "@hyperforge/shared";
 import {
   EventType,
   World,
   isValidPrayerId,
   isValidPrayerTogglePayload,
-} from "../../../../index";
-import { validateRequestTimestamp } from "../services/InputValidation";
-import { getPrayerRateLimiter } from "../services/SlidingWindowRateLimiter";
+} from "@hyperforge/shared";
+import { validateRequestTimestamp } from "@hyperforge/shared";
+import { getPrayerRateLimiter } from "@hyperforge/shared";
 
 /**
  * Send error feedback to client

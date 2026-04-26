@@ -6,7 +6,7 @@
  * - getQuestDetail: Fetch detailed info for a specific quest
  */
 
-import type { World } from "../../../../index";
+import type { World } from "@hyperforge/shared";
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local interface; this server handler calls 9 methods
 // on the system. Returns are typed against shared's quest-types.
@@ -14,7 +14,7 @@ import type {
   QuestDefinition,
   QuestStatus,
   QuestProgress,
-} from "../../../../types/game/quest-types";
+} from "@hyperforge/shared";
 interface QuestSystem {
   getAllQuestDefinitions(): QuestDefinition[];
   getActiveQuests(playerId: string): QuestProgress[];
@@ -25,16 +25,16 @@ interface QuestSystem {
   abandonQuest(playerId: string, questId: string): Promise<boolean>;
   completeQuest(playerId: string, questId: string): Promise<boolean>;
 }
-import { SystemLogger, isValidQuestId } from "../../../../index";
-import type { ServerSocket } from "../server-types";
-import { sendToSocket, getPlayerId } from "./common";
+import { SystemLogger, isValidQuestId } from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
+import { sendToSocket, getPlayerId } from "@hyperforge/shared";
 import {
   getQuestListRateLimiter,
   getQuestDetailRateLimiter,
   getQuestAcceptRateLimiter,
   getQuestAbandonRateLimiter,
   getQuestCompleteRateLimiter,
-} from "../services/SlidingWindowRateLimiter";
+} from "@hyperforge/shared";
 
 /** Logger for quest handlers */
 const logger = new SystemLogger("QuestHandlers");

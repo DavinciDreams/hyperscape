@@ -16,11 +16,11 @@
  * @see https://runescape.wiki/w/Follow
  */
 
-import type { ServerSocket } from "../server-types";
-import type { World } from "../../../../index";
-import type { IDatabaseSystem, IFollowManager } from "../interfaces";
-import { validateRequestTimestamp } from "../services/InputValidation";
-import { getFollowRateLimiter } from "../services/SlidingWindowRateLimiter";
+import type { ServerSocket } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import type { IDatabaseSystem, IFollowManager } from "@hyperforge/shared";
+import { validateRequestTimestamp } from "@hyperforge/shared";
+import { getFollowRateLimiter } from "@hyperforge/shared";
 
 /**
  * Send feedback to client

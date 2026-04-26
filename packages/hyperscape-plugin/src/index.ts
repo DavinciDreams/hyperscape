@@ -134,6 +134,22 @@ import {
 } from "./systems/network-handlers/entities.js";
 import { handleSetAutocast } from "./systems/network-handlers/magic.js";
 import { handleResourceGather } from "./systems/network-handlers/resources.js";
+import {
+  handleFollowPlayer,
+  handleChangePlayerName,
+} from "./systems/network-handlers/player.js";
+import {
+  handlePrayerToggle,
+  handleAltarPray,
+  handlePrayerDeactivateAll,
+} from "./systems/network-handlers/prayer.js";
+import {
+  handleGetQuestList,
+  handleGetQuestDetail,
+  handleQuestAccept,
+  handleQuestAbandon,
+  handleQuestComplete,
+} from "./systems/network-handlers/quest.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -211,6 +227,22 @@ export {
 } from "./systems/network-handlers/entities.js";
 export { handleSetAutocast } from "./systems/network-handlers/magic.js";
 export { handleResourceGather } from "./systems/network-handlers/resources.js";
+export {
+  handleFollowPlayer,
+  handleChangePlayerName,
+} from "./systems/network-handlers/player.js";
+export {
+  handlePrayerToggle,
+  handleAltarPray,
+  handlePrayerDeactivateAll,
+} from "./systems/network-handlers/prayer.js";
+export {
+  handleGetQuestList,
+  handleGetQuestDetail,
+  handleQuestAccept,
+  handleQuestAbandon,
+  handleQuestComplete,
+} from "./systems/network-handlers/quest.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -732,6 +764,177 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           connectionRegistry.register("setAutocast", setAutocast);
           ctx.scope.register(() =>
             connectionRegistry.unregister("setAutocast"),
+          );
+
+          // Player follow + name change — F3 batch-2.
+          // The follow handler ports inline the pre-handler logic from
+          // ServerNetwork (cancel pending attack, look up follow manager).
+          connectionRegistry.register("onFollowPlayer", (socket, data) => {
+            const playerEntity = socket.player;
+            if (!playerEntity) return;
+
+            const pendingAttackManager = (
+              ctx.world as {
+                pendingAttackManager?: PendingAttackManager;
+              }
+            ).pendingAttackManager;
+            pendingAttackManager?.cancelPendingAttack(playerEntity.id);
+
+            const fm = (ctx.world as { followManager?: FollowManager })
+              .followManager;
+            if (fm) {
+              handleFollowPlayer(socket, data, ctx.world, fm);
+            }
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onFollowPlayer"),
+          );
+
+          const changePlayerName = (
+            socket: Parameters<typeof handleChangePlayerName>[0],
+            data: unknown,
+          ) => handleChangePlayerName(socket, data, ctx.world, sendToAll);
+          connectionRegistry.register("changePlayerName", changePlayerName);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("changePlayerName"),
+          );
+
+          // Prayer — F3 batch-2. Each has `onX` primary + legacy `x` alias.
+          const prayerToggle = (
+            socket: Parameters<typeof handlePrayerToggle>[0],
+            data: unknown,
+          ) => handlePrayerToggle(socket, data, ctx.world);
+          connectionRegistry.register("onPrayerToggle", prayerToggle);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onPrayerToggle"),
+          );
+          connectionRegistry.register("prayerToggle", prayerToggle);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("prayerToggle"),
+          );
+
+          const prayerDeactivateAll = (
+            socket: Parameters<typeof handlePrayerDeactivateAll>[0],
+            data: unknown,
+          ) => handlePrayerDeactivateAll(socket, data, ctx.world);
+          connectionRegistry.register(
+            "onPrayerDeactivateAll",
+            prayerDeactivateAll,
+          );
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onPrayerDeactivateAll"),
+          );
+          connectionRegistry.register(
+            "prayerDeactivateAll",
+            prayerDeactivateAll,
+          );
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("prayerDeactivateAll"),
+          );
+
+          const altarPray = (
+            socket: Parameters<typeof handleAltarPray>[0],
+            data: unknown,
+          ) => handleAltarPray(socket, data, ctx.world);
+          connectionRegistry.register("onAltarPray", altarPray);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onAltarPray"),
+          );
+          connectionRegistry.register("altarPray", altarPray);
+          ctx.scope.register(() => connectionRegistry.unregister("altarPray"));
+
+          // Quest — F3 batch-2.
+          const getQuestList = (
+            socket: Parameters<typeof handleGetQuestList>[0],
+            data: unknown,
+          ) =>
+            handleGetQuestList(
+              socket,
+              data as Record<string, unknown>,
+              ctx.world,
+            );
+          connectionRegistry.register("onGetQuestList", getQuestList);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onGetQuestList"),
+          );
+          connectionRegistry.register("getQuestList", getQuestList);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("getQuestList"),
+          );
+
+          const getQuestDetail = (
+            socket: Parameters<typeof handleGetQuestDetail>[0],
+            data: unknown,
+          ) =>
+            handleGetQuestDetail(
+              socket,
+              data as { questId: string },
+              ctx.world,
+            );
+          connectionRegistry.register("onGetQuestDetail", getQuestDetail);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onGetQuestDetail"),
+          );
+          connectionRegistry.register("getQuestDetail", getQuestDetail);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("getQuestDetail"),
+          );
+
+          const questAccept = (
+            socket: Parameters<typeof handleQuestAccept>[0],
+            data: unknown,
+          ) => {
+            void handleQuestAccept(
+              socket,
+              data as { questId: string },
+              ctx.world,
+            );
+          };
+          connectionRegistry.register("onQuestAccept", questAccept);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onQuestAccept"),
+          );
+          connectionRegistry.register("questAccept", questAccept);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("questAccept"),
+          );
+
+          const questAbandon = (
+            socket: Parameters<typeof handleQuestAbandon>[0],
+            data: unknown,
+          ) => {
+            void handleQuestAbandon(
+              socket,
+              data as { questId: string },
+              ctx.world,
+            );
+          };
+          connectionRegistry.register("onQuestAbandon", questAbandon);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onQuestAbandon"),
+          );
+          connectionRegistry.register("questAbandon", questAbandon);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("questAbandon"),
+          );
+
+          const questComplete = (
+            socket: Parameters<typeof handleQuestComplete>[0],
+            data: unknown,
+          ) => {
+            void handleQuestComplete(
+              socket,
+              data as { questId: string },
+              ctx.world,
+            );
+          };
+          connectionRegistry.register("onQuestComplete", questComplete);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onQuestComplete"),
+          );
+          connectionRegistry.register("questComplete", questComplete);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("questComplete"),
           );
         }
 
