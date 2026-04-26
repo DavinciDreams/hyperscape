@@ -260,6 +260,39 @@ export {
   handleRunecraftingAltarInteract,
   type ProcessingHandlerContext,
 } from "./systems/network-handlers/processing.js";
+export {
+  handleDuelChallenge,
+  handleDuelChallengeRespond,
+} from "./systems/network-handlers/duel/challenge.js";
+export { handleDuelForfeit } from "./systems/network-handlers/duel/combat.js";
+export { handleDuelAcceptFinal } from "./systems/network-handlers/duel/confirmation.js";
+export {
+  handleDuelToggleRule,
+  handleDuelToggleEquipment,
+  handleDuelAcceptRules,
+  handleDuelCancel,
+} from "./systems/network-handlers/duel/rules.js";
+export {
+  rateLimiter,
+  getDuelSystem,
+  getPendingDuelChallengeManager,
+  getPlayerName,
+  getPlayerCombatLevel,
+  isPlayerOnline,
+  getSocketByPlayerId,
+  sendDuelError,
+  sendSuccessToast,
+  withDuelAuth,
+  DUEL_PACKETS,
+  assertDuelState,
+  sendToSocket,
+  getPlayerId,
+  isInDuelArenaZone,
+  isInsideCombatArena,
+  isInDuelArenaLobby,
+  arePlayersInChallengeRange,
+  arePlayersAdjacent,
+} from "./systems/network-handlers/duel/helpers.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the

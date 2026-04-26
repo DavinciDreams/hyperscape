@@ -11,10 +11,10 @@ import {
   type PlayerID,
   isValidPlayerID,
   uuid,
-} from "../../../../../index";
-import type { ServerSocket } from "../../server-types";
-import { hasActiveInterfaceSession } from "../common";
-import { Logger } from "../../services";
+} from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
+import { hasActiveInterfaceSession } from "@hyperforge/shared";
+import { NetworkLogger as Logger } from "@hyperforge/shared";
 import {
   rateLimiter,
   getDuelSystem,

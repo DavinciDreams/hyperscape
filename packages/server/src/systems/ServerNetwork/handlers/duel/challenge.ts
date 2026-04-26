@@ -1,11 +1,11 @@
 /**
  * @deprecated Re-export shim.
  *
- * Relocated to
- * `packages/shared/src/systems/server/network/handlers/duel/challenge.ts`
- * as part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 5).
- * Delete after Step 8.
+ * Handler relocated to `@hyperforge/hyperscape`
+ * (Phase F3 batch-4 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export * from "../../../../../../shared/src/systems/server/network/handlers/duel/challenge";
+export {
+  handleDuelChallenge,
+  handleDuelChallengeRespond,
+} from "@hyperforge/hyperscape";

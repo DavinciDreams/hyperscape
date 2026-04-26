@@ -10,12 +10,12 @@ import {
   type World,
   ALL_WORLD_AREAS,
   isPositionInsideCombatArena,
-} from "../../../../../index";
-import type { ServerSocket } from "../../server-types";
+} from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
 // DuelSystem migrated to @hyperforge/hyperscape (2026-04-26). The
 // `DuelSystem` interface in system-interfaces is the duck-type
 // contract — plugin's concrete class structurally satisfies it.
-import type { DuelSystem } from "../../../../../types/systems/system-interfaces";
+import type { DuelSystem } from "@hyperforge/shared";
 // PendingDuelChallengeManager migrated to @hyperforge/hyperscape
 // (Phase D2, 2026-04-26). Duck-typed locally — only
 // `queuePendingChallenge` is called from the duel handlers.
@@ -26,8 +26,8 @@ interface PendingDuelChallengeManager {
     onInRange: () => void,
   ): void;
 }
-import { Logger, RateLimitService } from "../../services";
-import { sendToSocket, getPlayerId } from "../common";
+import { NetworkLogger as Logger, RateLimitService } from "@hyperforge/shared";
+import { sendToSocket, getPlayerId } from "@hyperforge/shared";
 
 // ============================================================================
 // Rate Limiter
@@ -227,7 +227,7 @@ export function assertDuelState(
 }
 
 // Re-export common utilities for convenience
-export { sendToSocket, getPlayerId } from "../common";
+export { sendToSocket, getPlayerId } from "@hyperforge/shared";
 
 // ============================================================================
 // Zone Utilities

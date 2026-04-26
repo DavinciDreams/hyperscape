@@ -7,8 +7,8 @@
  * - handleDuelAcceptRules: Accept current rules configuration
  */
 
-import type { World, DuelRules, DuelEquipmentSlot } from "../../../../../index";
-import type { ServerSocket } from "../../server-types";
+import type { World, DuelRules, DuelEquipmentSlot } from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
 import {
   sendDuelError,
   sendToSocket,

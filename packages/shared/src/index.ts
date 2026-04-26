@@ -2163,6 +2163,16 @@ export { AuditLogger } from "./systems/server/network/services/AuditLogger";
 // migrated DuelSystem keeps its existing 3-arg call style without
 // shadowing the singleton.
 export { Logger as NetworkLogger } from "./systems/server/network/services/Logger";
+// RateLimitService — interval-based rate limiter used by the
+// network handlers (trade, duel) migrated to @hyperforge/hyperscape.
+export {
+  RateLimitService,
+  IntervalRateLimiter,
+} from "./systems/server/network/services/IntervalRateLimiter";
+// DuelSystem duck-type interface — concrete class lives in
+// @hyperforge/hyperscape; this shape is how shared code refers to
+// the system without a back-reference.
+export type { DuelSystem } from "./types/systems/system-interfaces";
 // ServerSocket type — needed by migrated ScriptQueue (the queued
 // player/NPC action types reference ServerSocket).
 export type { ServerSocket } from "./systems/server/network/server-types";
