@@ -38,7 +38,8 @@ import type { CombatStateService } from "./CombatStateService";
 import type { CombatEntityResolver } from "./CombatEntityResolver";
 import type { PidManager } from "./PidManager";
 import type { ProjectileService } from "./ProjectileService";
-import type { PlayerSystem } from "..";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
+// Was imported here but never used; safe to drop.
 import type { PooledTile } from "../../../utils/pools/TilePool";
 import type { SystemLogger } from "../../../utils/Logger";
 import type { World } from "../../../core/World";

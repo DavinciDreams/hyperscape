@@ -663,7 +663,7 @@ export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
 export { CombatSystem } from "./systems/shared/combat";
-export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // `Player` type already exported from the shared types block above
 // (line ~157) — no duplicate export needed here.
@@ -704,6 +704,28 @@ export type { TransactionContext } from "./types/death";
 export type { InventoryItemAddedPayload } from "./types/events";
 export type { InventoryData } from "./types/systems/system-interfaces";
 export type { PlayerInventory } from "./types/core/core";
+
+// PlayerSystem + EatDelayManager + BuryDelayManager migrated to
+// @hyperforge/hyperscape (2026-04-26, Wave 5d). Deps needed by the
+// migrated cluster (most already exported elsewhere; add the gaps).
+export type {
+  AttackStyle,
+  PlayerAttackStyleState,
+  PlayerSpawnData,
+} from "./types/core/core";
+export type { CombatStyleExtended } from "./types/game/combat-types";
+export type {
+  HealthUpdateEvent,
+  PlayerEnterEvent,
+  PlayerLeaveEvent,
+  PlayerLevelUpEvent,
+} from "./types/events";
+export { PlayerIdMapper } from "./utils/PlayerIdMapper";
+export {
+  getEatAttackDelayTicks,
+  getEatDelayTicks,
+  getMaxHealAmount,
+} from "./data/live/combat-live";
 export { getEntityPosition } from "./utils/game/EntityPositionUtils";
 export { resolveStarterTownArea } from "./world-areas";
 export type {
@@ -1488,7 +1510,11 @@ export type {
   InterpolatedPhysicsHandle,
   NonInterpolatedPhysicsHandle,
 } from "./types/systems/physics";
-// Re-export specific core types referenced by entity declarations
+// Re-export specific core types referenced by entity declarations.
+// `Player` from this path is the *record* interface (alive/skills/
+// combat/death) — used by PlayerSystem in @hyperforge/hyperscape.
+// Exported as `PlayerCore` here since the plain `Player` export
+// above resolves to the entity-class alias (back-compat).
 export type {
   PlayerDeathData,
   Player as PlayerCore,

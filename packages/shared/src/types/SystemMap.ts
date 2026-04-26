@@ -44,7 +44,8 @@ import type { EntityManager } from "../systems/shared";
 // NPCSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
 // SystemMap entry below typed as `unknown`.
-import type { PlayerSystem } from "../systems/shared";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
+// SystemMap entry below typed as `unknown`.
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -119,7 +120,7 @@ export interface SystemMap {
   persistence: PersistenceSystem;
 
   // Core entity
-  player: PlayerSystem;
+  player: unknown;
   "mob-npc": unknown;
 
   // Combat & interaction

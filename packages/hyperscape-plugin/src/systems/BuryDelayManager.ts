@@ -1,9 +1,9 @@
 /**
  * BuryDelayManager - Manages bone burying cooldowns per player
  *
- * Single Responsibility: Track and enforce bury delay timing (OSRS-accurate)
+ * Single Responsibility: Track and enforce bury delay timing (tile-based MMORPG)
  *
- * OSRS Mechanics:
+ * Mechanics:
  * - Bone burying has 2-tick (1.2s) delay
  * - Player cannot bury again until delay expires
  * - Delay is per-player, not global
@@ -13,7 +13,7 @@
  * @see https://oldschool.runescape.wiki/w/Bones
  */
 
-/** OSRS-accurate bury delay: 2 ticks = 1.2 seconds */
+/** tile-based MMORPG bury delay: 2 ticks = 1.2 seconds */
 const BURY_DELAY_TICKS = 2;
 
 export class BuryDelayManager {

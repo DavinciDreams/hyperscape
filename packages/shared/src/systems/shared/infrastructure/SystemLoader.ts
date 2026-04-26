@@ -115,7 +115,7 @@ import { EntityManager } from "..";
 // — registered by the plugin's onEnable cross-cutting branch.
 // MobNPCSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 3a).
 import { PersistenceSystem } from "../../server/PersistenceSystem";
-import { PlayerSystem } from "..";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 // ProcessingSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 // ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25,
@@ -216,7 +216,8 @@ interface MovementSystemLike {
 export interface Systems {
   actionRegistry?: ActionRegistry;
   database?: DatabaseSystem;
-  player?: PlayerSystem;
+  // PlayerSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  player?: unknown;
   // InventorySystem migrated to @hyperforge/hyperscape — typed as `unknown`.
   inventory?: unknown;
   combat?: CombatSystem;
@@ -355,9 +356,10 @@ export async function registerSystems(world: World): Promise<void> {
   // These systems manage the primary game entities
 
   // 5. Player system - Core player management (depends on database & persistence)
-  world.register("player", PlayerSystem);
+  // "player" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-26, Wave 5d).
 
-  systems.player = getSystem(world, "player") as PlayerSystem;
+  systems.player = getSystem(world, "player");
   systems.entityManager = getSystem(world, "entity-manager") as EntityManager;
 
   if (world.isClient) {
@@ -753,16 +755,35 @@ function setupAPI(world: World, systems: Systems): void {
     savePlayer: (playerId: string, data: Partial<PlayerRow>) =>
       systems.database?.savePlayer(playerId, data),
 
-    getAllPlayers: () => systems.player?.getAllPlayers(),
+    // Player API — PlayerSystem migrated to @hyperforge/hyperscape
+    // (Wave 5d); duck-type the surface inline.
+    getAllPlayers: () =>
+      (
+        systems.player as { getAllPlayers(): unknown[] } | undefined
+      )?.getAllPlayers(),
     healPlayer: (playerId: string, amount: number) =>
-      systems.player?.healPlayer(playerId, amount),
+      (
+        systems.player as
+          | { healPlayer(id: string, n: number): boolean }
+          | undefined
+      )?.healPlayer(playerId, amount),
     damagePlayer: (playerId: string, amount: number) =>
-      systems.player?.damagePlayer(playerId, amount),
+      (
+        systems.player as
+          | { damagePlayer(id: string, n: number): boolean }
+          | undefined
+      )?.damagePlayer(playerId, amount),
     isPlayerAlive: (playerId: string) =>
-      systems.player?.isPlayerAlive(playerId),
+      (
+        systems.player as { isPlayerAlive(id: string): boolean } | undefined
+      )?.isPlayerAlive(playerId),
     getPlayerHealth: (playerId: string) => {
       return (
-        systems.player?.getPlayerHealth(playerId) ?? { current: 100, max: 100 }
+        (
+          systems.player as
+            | { getPlayerHealth(id: string): { current: number; max: number } }
+            | undefined
+        )?.getPlayerHealth(playerId) ?? { current: 100, max: 100 }
       );
     },
     teleportPlayer: (playerId: string, position: Position3D) =>
@@ -1213,13 +1234,27 @@ function setupAPI(world: World, systems: Systems): void {
           | undefined
       )?.getFiresInRange?.(position, range || 5),
 
-    // Attack Style API (now handled by PlayerSystem)
+    // Attack Style API — PlayerSystem migrated; duck-type the surface.
     getPlayerAttackStyle: (playerId: string) =>
-      systems.player?.getPlayerAttackStyle(playerId),
-    getAllAttackStyles: () => systems.player?.getAllAttackStyles(),
+      (
+        systems.player as
+          | { getPlayerAttackStyle(id: string): unknown }
+          | undefined
+      )?.getPlayerAttackStyle(playerId),
+    getAllAttackStyles: () =>
+      (
+        systems.player as { getAllAttackStyles(): unknown } | undefined
+      )?.getAllAttackStyles(),
     forceChangeAttackStyle: (playerId: string, styleId: string) =>
-      systems.player?.forceChangeAttackStyle(playerId, styleId),
-    getAttackStyleSystemInfo: () => systems.player?.getAttackStyleSystemInfo(),
+      (
+        systems.player as
+          | { forceChangeAttackStyle(id: string, s: string): boolean }
+          | undefined
+      )?.forceChangeAttackStyle(playerId, styleId),
+    getAttackStyleSystemInfo: () =>
+      (
+        systems.player as { getAttackStyleSystemInfo(): unknown } | undefined
+      )?.getAttackStyleSystemInfo(),
 
     // App Manager API
     createApp: (_appType: string, _config: AppConfig) => null,
@@ -1247,7 +1282,10 @@ function setupAPI(world: World, systems: Systems): void {
     hasPlayerCompletedSpawn: (_playerId: string) => true, // Handled by PlayerSystem
     getPlayerSpawnData: (_playerId: string) => null, // Handled by PlayerSystem
     forceTriggerAggro: (_playerId: string) => {}, // Handled by AggroSystem
-    getAllSpawnedPlayers: () => systems.player?.getAllPlayers() || [],
+    getAllSpawnedPlayers: () =>
+      (
+        systems.player as { getAllPlayers(): unknown[] } | undefined
+      )?.getAllPlayers() || [],
 
     // Interaction API (Client only)
     registerInteractable: (data: Record<string, unknown>) =>

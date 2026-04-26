@@ -26,10 +26,10 @@ import {
   getHealthRegenCooldownTicks,
   getHealthRegenIntervalTicks,
   getHealthRegenRate,
-  type PlayerSystem,
   SystemBase,
   type World,
 } from "@hyperforge/shared";
+import type { PlayerSystem } from "./PlayerSystem.js";
 
 /**
  * Minimal player snapshot shape this system needs. Inlined because

@@ -24,7 +24,13 @@ import { EntityID } from "../../../types/core/identifiers";
 import { MobEntity } from "../../../entities/npc/MobEntity";
 import { Entity } from "../../../entities/Entity";
 // NOTE: Import directly to avoid circular dependency through barrel file
-import { PlayerSystem } from "../character/PlayerSystem";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
+interface PlayerSystem {
+  getPlayer(id: string): { alive?: boolean } | undefined;
+  getPlayerAutoRetaliate(id: string): boolean;
+  getPlayerAttackStyle?(id: string): { id: string } | undefined;
+  damagePlayer(id: string, amount: number, source?: string): boolean;
+}
 import {
   isAttackOnCooldownTicks,
   calculateRetaliationDelay,
@@ -497,7 +503,9 @@ export class CombatSystem extends SystemBase {
 
     // Cache PlayerSystem for auto-retaliate checks (hot path optimization)
     // Optional dependency - combat still works without it (defaults to retaliate)
-    this.playerSystem = this.world.getSystem<PlayerSystem>("player");
+    this.playerSystem = this.world.getSystem("player") as unknown as
+      | PlayerSystem
+      | undefined;
 
     // OPTIMIZATION: Cache other systems used in hot paths (damage calc, PvP zone checks)
     this.prayerSystem =
@@ -1058,7 +1066,7 @@ export class CombatSystem extends SystemBase {
     if (attackerType === "player") {
       const playerSystem = this.world.getSystem(
         "player",
-      ) as PlayerSystem | null;
+      ) as unknown as PlayerSystem | null;
       const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
       if (styleData?.id) {
         combatStyle = styleData.id as CombatStyle;
@@ -1306,7 +1314,9 @@ export class CombatSystem extends SystemBase {
 
     // Get player's ranged style for speed modifier
     let rangedStyle: RangedCombatStyle = "accurate";
-    const playerSystem = this.world.getSystem("player") as PlayerSystem | null;
+    const playerSystem = this.world.getSystem(
+      "player",
+    ) as unknown as PlayerSystem | null;
     const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
     if (styleData?.id) {
       const id = styleData.id;
@@ -1907,7 +1917,9 @@ export class CombatSystem extends SystemBase {
 
     // Get player's combat style for OSRS-accurate damage bonuses
     let rangedStyle: RangedCombatStyle = "accurate";
-    const playerSystem = this.world.getSystem("player") as PlayerSystem | null;
+    const playerSystem = this.world.getSystem(
+      "player",
+    ) as unknown as PlayerSystem | null;
     const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
     if (styleData?.id) {
       const id = styleData.id;
@@ -2013,7 +2025,9 @@ export class CombatSystem extends SystemBase {
 
     // Get player's combat style for OSRS-accurate damage bonuses
     let magicStyle: MagicCombatStyle = "accurate";
-    const playerSystem = this.world.getSystem("player") as PlayerSystem | null;
+    const playerSystem = this.world.getSystem(
+      "player",
+    ) as unknown as PlayerSystem | null;
     const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
     if (styleData?.id) {
       const id = styleData.id;
@@ -2394,7 +2408,9 @@ export class CombatSystem extends SystemBase {
     }
 
     // Also check if target is a player marked as dead
-    const playerSystem = this.world.getSystem<PlayerSystem>("player");
+    const playerSystem = this.world.getSystem("player") as unknown as
+      | PlayerSystem
+      | undefined;
     if (playerSystem?.getPlayer) {
       const targetPlayer = playerSystem.getPlayer(String(targetId));
       if (targetPlayer && !targetPlayer.alive) {
@@ -3579,7 +3595,7 @@ export class CombatSystem extends SystemBase {
     if (combatState.attackerType === "player") {
       const playerSystem = this.world.getSystem(
         "player",
-      ) as PlayerSystem | null;
+      ) as unknown as PlayerSystem | null;
       const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
       if (styleData?.id) {
         combatStyle = styleData.id as CombatStyle;

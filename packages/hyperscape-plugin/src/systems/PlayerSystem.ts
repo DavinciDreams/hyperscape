@@ -17,7 +17,7 @@
  * 5. PLAYER_LEAVE → Save final state to database
  *
  * **Attack Styles:**
- * Manages RuneScape-style attack modes:
+ * Manages tile-based MMORPG attack modes:
  * - attack: +3 Attack XP per damage
  * - strength: +3 Strength XP per damage
  * - defense: +3 Defense XP per damage
@@ -25,7 +25,7 @@
  * - ranged: Ranged combat style
  *
  * **Combat Level:**
- * Calculated from combat skills using RuneScape formula:
+ * Calculated from combat skills using tile-based MMORPG formula:
  * Base = 0.25 * (Defense + Constitution + floor(Ranged/2))
  * Melee = 0.325 * (Attack + Strength)
  * Ranged = 0.325 * (Ranged * 1.5)
@@ -34,54 +34,59 @@
  * **Referenced by:** All gameplay systems, database, network
  */
 
-import { getItem } from "../../../data/items";
-import type { PlayerLocal } from "../../../entities/player/PlayerLocal";
-import type { PlayerEntity } from "../../../entities/player/PlayerEntity";
-import { Position3D } from "../../../types";
+// Migrated 2026-04-26 from
+// `packages/shared/src/systems/shared/character/` into
+// `@hyperforge/hyperscape` (Wave 5d). 2418 LOC. Two siblings
+// (EatDelayManager, BuryDelayManager) moved together since they're
+// only consumed by PlayerSystem.
 import {
-  AttackStyle,
-  Player,
-  PlayerAttackStyleState,
-  PlayerMigration,
-  PlayerSpawnData,
-  Skills,
-} from "../../../types/core/core";
-import { WeaponType } from "../../../types/game/item-types";
-import { DeathState } from "../../../types/entities";
-import type { PlayerEntityLike } from "../combat/DeathTypes";
-import {
-  isStyleValidForWeapon,
+  type AttackStyle,
+  type CombatStyleExtended,
+  type DatabaseSystem,
+  DeathState,
+  EntityManager,
+  EventType,
   getAvailableStyles,
   getDefaultStyleForWeapon,
-} from "../../../constants/WeaponStyleConfig";
-// CombatStyle type available from: "../../../utils/game/CombatCalculations"
-import type { CombatStyleExtended } from "../../../types/game/combat-types";
-import type {
-  HealthUpdateEvent,
-  PlayerEnterEvent,
-  PlayerLeaveEvent,
-  PlayerLevelUpEvent,
-} from "../../../types/events";
-import { EventType } from "../../../types/events";
-import type { World } from "../../../types/index";
-import { Logger } from "../../../utils/Logger";
-import { EntityManager } from "..";
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { TerrainSystem } from "..";
-import { PlayerIdMapper } from "../../../utils/PlayerIdMapper";
-import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-import * as THREE from "three";
-import { EatDelayManager } from "./EatDelayManager";
-import { BuryDelayManager } from "./BuryDelayManager";
-import {
   getEatAttackDelayTicks,
+  getItem,
   getMaxHealAmount,
-} from "../../../data/live/combat-live";
-// SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5a).
-// `Skill` constants extracted to `data/skills/SkillConstants` so this
-// in-shared consumer keeps working.
-import { Skill } from "../../../data/skills/SkillConstants";
-import type { CombatSystem } from "../combat/CombatSystem";
+  type HealthUpdateEvent,
+  isStyleValidForWeapon,
+  Logger,
+  // `Player` from the barrel is an alias for `PlayerEntity` (entity
+  // class). PlayerSystem holds the *record* interface (alive,
+  // skills, combat, death) — exported as `PlayerCore`. Renamed
+  // locally to `Player` so the rest of this file reads unchanged.
+  type PlayerCore as Player,
+  type PlayerAttackStyleState,
+  type PlayerEnterEvent,
+  type PlayerEntity,
+  type PlayerEntityLike,
+  PlayerIdMapper,
+  type PlayerLeaveEvent,
+  type PlayerLevelUpEvent,
+  type PlayerLocal,
+  PlayerMigration,
+  type PlayerSpawnData,
+  type Position3D,
+  Skill,
+  type Skills,
+  SystemBase,
+  type TerrainSystem,
+  WeaponType,
+  type World,
+} from "@hyperforge/shared";
+import * as THREE from "three";
+import { EatDelayManager } from "./EatDelayManager.js";
+import { BuryDelayManager } from "./BuryDelayManager.js";
+// CombatSystem still in shared — typed via duck at callsite (only
+// 2 methods are touched: `isPlayerOnAttackCooldown` + `addAttackDelay`,
+// both used by `applyEatAttackDelay`).
+interface CombatSystem {
+  isPlayerOnAttackCooldown?(playerId: string, currentTick: number): boolean;
+  addAttackDelay?(playerId: string, ticks: number): void;
+}
 
 /**
  * PlayerSystem - Central Player Management
@@ -99,10 +104,10 @@ export class PlayerSystem extends SystemBase {
   private saveInterval?: NodeJS.Timeout;
   private _tempVec3 = new THREE.Vector3();
 
-  // Eat delay tracking (OSRS-accurate 3-tick cooldown)
+  // Eat delay tracking (tile-based MMORPG 3-tick cooldown)
   private eatDelayManager = new EatDelayManager();
 
-  // Bury delay tracking (OSRS-accurate 2-tick cooldown)
+  // Bury delay tracking (tile-based MMORPG 2-tick cooldown)
   private buryDelayManager = new BuryDelayManager();
 
   // Player spawn tracking (merged from PlayerSpawnSystem)
@@ -149,7 +154,7 @@ export class PlayerSystem extends SystemBase {
   private playerAttackStyles = new Map<string, PlayerAttackStyleState>();
   private skillSaveTimers = new Map<string, NodeJS.Timeout>();
 
-  // Auto-retaliate tracking (OSRS-style combat preference)
+  // Auto-retaliate tracking (tile-based combat preference)
   /** Player auto-retaliate settings (Map lookup = O(1), no allocations) */
   private playerAutoRetaliate = new Map<string, boolean>();
   private pendingSkillUpdates = new Map<string, Skills>();
@@ -157,7 +162,7 @@ export class PlayerSystem extends SystemBase {
   private autoRetaliateLastToggle = new Map<string, number>();
   private readonly AUTO_RETALIATE_COOLDOWN_MS = 500; // Max 2 toggles/second
 
-  // Attack styles - OSRS-accurate stat bonuses applied via CombatCalculations.getStyleBonus()
+  // Attack styles - tile-based MMORPG stat bonuses applied via CombatCalculations.getStyleBonus()
   // @see https://oldschool.runescape.wiki/w/Combat_Options
   private readonly ATTACK_STYLES: Record<string, AttackStyle> = {
     accurate: {
@@ -212,7 +217,7 @@ export class PlayerSystem extends SystemBase {
       icon: "⚖️",
     },
 
-    // Ranged combat styles (OSRS-accurate)
+    // Ranged combat styles (tile-based MMORPG)
     rapid: {
       id: "rapid",
       name: "Rapid",
@@ -239,7 +244,7 @@ export class PlayerSystem extends SystemBase {
       icon: "🔭",
     },
 
-    // Magic combat styles (OSRS-accurate)
+    // Magic combat styles (tile-based MMORPG)
     autocast: {
       id: "autocast",
       name: "Autocast",
@@ -364,7 +369,7 @@ export class PlayerSystem extends SystemBase {
       ),
     );
 
-    // OSRS-accurate: auto-switch style when weapon changes and current style is invalid
+    // tile-based MMORPG: auto-switch style when weapon changes and current style is invalid
     // Only subscribe on server — style changes are server-authoritative
     if (this.world.isServer) {
       this.subscribe(EventType.PLAYER_EQUIPMENT_CHANGED, (data) => {
@@ -530,7 +535,7 @@ export class PlayerSystem extends SystemBase {
 
     // Load saved combat preferences from database if available
     let savedAttackStyle: string | undefined;
-    let savedAutoRetaliate = true; // Default ON (OSRS behavior)
+    let savedAutoRetaliate = true; // Default ON (tile-based MMORPG behavior)
     if (this.databaseSystem) {
       try {
         const databaseId = PlayerIdMapper.getDatabaseId(data.playerId);
@@ -818,7 +823,7 @@ export class PlayerSystem extends SystemBase {
       );
       player.health.current = player.health.max;
     } else {
-      // Floor to ensure health is always an integer (RuneScape-style)
+      // Floor to ensure health is always an integer (tile-based MMORPG)
       player.health.current = Math.floor(
         Math.max(0, Math.min(validCurrentHealth, player.health.max)),
       );
@@ -918,7 +923,7 @@ export class PlayerSystem extends SystemBase {
       return;
     }
 
-    // Apply damage - floor to ensure health is always an integer (RuneScape-style)
+    // Apply damage - floor to ensure health is always an integer (tile-based MMORPG)
     const newHealth = Math.floor(
       Math.max(0, player.health.current - data.damage),
     );
@@ -1077,7 +1082,7 @@ export class PlayerSystem extends SystemBase {
     if (!player || !player.alive) return false;
 
     const oldHealth = player.health.current;
-    // Floor to ensure health is always an integer (RuneScape-style)
+    // Floor to ensure health is always an integer (tile-based MMORPG)
     player.health.current = Math.floor(
       Math.min(player.health.max, player.health.current + amount),
     );
@@ -1096,13 +1101,13 @@ export class PlayerSystem extends SystemBase {
   }
 
   /**
-   * Handle food consumption with OSRS-accurate timing
+   * Handle food consumption with tile-based MMORPG timing
    *
    * Implements:
    * - 3-tick (1.8s) eat delay between foods
    * - Attack delay when eating during combat
    * - OWASP input validation
-   * - OSRS-style chat message format
+   * - tile-based chat message format
    */
   private handleItemUsed(data: {
     playerId: string;
@@ -1200,11 +1205,11 @@ export class PlayerSystem extends SystemBase {
     // NOTE: healPlayer() emits PLAYER_HEALTH_UPDATED only if health changed
     this.healPlayer(data.playerId, healAmount);
 
-    // OSRS Behavior: Message and attack delay ALWAYS apply when eating,
+    // Behavior: Message and attack delay ALWAYS apply when eating,
     // even at full health. Food is consumed regardless.
     // @see https://oldschool.runescape.wiki/w/Food
 
-    // OSRS-style message (lowercase item name, no heal amount shown)
+    // tile-based message (lowercase item name, no heal amount shown)
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId: data.playerId,
       message: `You eat the ${itemData.name.toLowerCase()}.`,
@@ -1216,9 +1221,9 @@ export class PlayerSystem extends SystemBase {
   }
 
   /**
-   * Apply attack delay when eating during combat (OSRS-accurate)
+   * Apply attack delay when eating during combat (tile-based MMORPG)
    *
-   * OSRS Rule: Foods only add to EXISTING attack delay.
+   * Rule: Foods only add to EXISTING attack delay.
    * If weapon is ready to attack, eating does NOT add delay.
    */
   private applyEatAttackDelay(playerId: string, currentTick: number): void {
@@ -1235,13 +1240,13 @@ export class PlayerSystem extends SystemBase {
       // Add eat delay to attack cooldown
       combatSystem.addAttackDelay?.(playerId, getEatAttackDelayTicks());
     }
-    // If not on cooldown, do nothing (OSRS-accurate behavior)
+    // If not on cooldown, do nothing (tile-based MMORPG behavior)
   }
 
   /**
-   * Handle bone burying for prayer XP (OSRS-accurate)
+   * Handle bone burying for prayer XP (tile-based MMORPG)
    *
-   * OSRS Mechanics:
+   * Mechanics:
    * - 2-tick (1.2s) delay between burials
    * - XP granted immediately upon bury
    * - Some bones require minimum prayer level
@@ -1305,7 +1310,7 @@ export class PlayerSystem extends SystemBase {
       });
     }
 
-    // OSRS-style message
+    // tile-based message
     this.emitTypedEvent(EventType.UI_MESSAGE, {
       playerId,
       message: "You bury the bones.",
@@ -1458,7 +1463,7 @@ export class PlayerSystem extends SystemBase {
         ? player.health.current
         : player.health.max;
 
-    // Floor to ensure health is always an integer (RuneScape-style)
+    // Floor to ensure health is always an integer (tile-based MMORPG)
     player.health.current = Math.floor(
       Math.max(0, currentHealth - validAmount),
     );
@@ -1791,7 +1796,7 @@ export class PlayerSystem extends SystemBase {
   }
 
   private calculateCombatLevel(skills: Skills): number {
-    // OSRS Combat Level Formula:
+    // Combat Level Formula:
     // base = 0.25 × (Defence + Hitpoints + floor(Prayer / 2))
     // melee = 0.325 × (Attack + Strength)
     // ranged = 0.325 × floor(Ranged × 1.5)
@@ -1910,7 +1915,7 @@ export class PlayerSystem extends SystemBase {
       return;
     }
 
-    // Validate style is allowed for equipped weapon (OSRS-accurate)
+    // Validate style is allowed for equipped weapon (tile-based MMORPG)
     const weaponType = this.getPlayerWeaponType(playerId);
 
     if (!isStyleValidForWeapon(weaponType, newStyle as CombatStyleExtended)) {
@@ -1953,7 +1958,7 @@ export class PlayerSystem extends SystemBase {
   }
 
   /**
-   * OSRS-accurate: When weapon changes, validate current style is still available.
+   * tile-based MMORPG: When weapon changes, validate current style is still available.
    * If not, auto-switch to the first valid style for the new weapon type.
    * Example: switching from staff (autocast) to sword → auto-select "accurate"
    */
@@ -2302,7 +2307,7 @@ export class PlayerSystem extends SystemBase {
       }
     }
 
-    // Final fallback: default to true (OSRS behavior)
+    // Final fallback: default to true (tile-based MMORPG behavior)
     enabled = enabled ?? true;
 
     if (data.callback) {

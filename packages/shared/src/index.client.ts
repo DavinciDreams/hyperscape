@@ -1062,7 +1062,7 @@ export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisi
 // HealthRegenSystem do `getSystem<CombatSystem>("combat")`.
 // (Not yet migrated; downstream plugin systems still reference them.)
 export { CombatSystem } from "./systems/shared/combat";
-export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 
 // Spell-visual / arrow-visual config helpers — ProjectileRenderer.
 export {

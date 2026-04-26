@@ -1,9 +1,9 @@
 /**
  * EatDelayManager - Manages eating cooldowns per player
  *
- * Single Responsibility: Track and enforce eat delay timing (OSRS-accurate)
+ * Single Responsibility: Track and enforce eat delay timing (tile-based MMORPG)
  *
- * OSRS Mechanics:
+ * Mechanics:
  * - Standard food has 3-tick (1.8s) eat delay
  * - Player cannot eat again until delay expires
  * - Delay is per-player, not global
@@ -11,7 +11,8 @@
  * Memory: Uses Map with automatic cleanup on player disconnect/death
  */
 
-import { getEatDelayTicks } from "../../../data/live/combat-live";
+// Migrated 2026-04-26 with PlayerSystem cluster.
+import { getEatDelayTicks } from "@hyperforge/shared";
 
 export class EatDelayManager {
   /** Map of playerId → last eat tick */

@@ -14,7 +14,13 @@ import type { CombatEntityResolver } from "../CombatEntityResolver";
 import type { CombatAnimationManager } from "../CombatAnimationManager";
 import type { CombatRotationManager } from "../CombatRotationManager";
 import type { ProjectileService } from "../ProjectileService";
-import type { PlayerSystem } from "../..";
+// PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
+interface PlayerSystem {
+  getPlayer(id: string): { alive?: boolean } | undefined;
+  getPlayerAutoRetaliate(id: string): boolean;
+  getPlayerAttackStyle?(id: string): { id: string } | undefined;
+  damagePlayer(id: string, amount: number, source?: string): boolean;
+}
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // AttackContext only carries the reference; downstream handlers may
 // call `getCombinedBonuses(playerId)`. Local duck-typed shape avoids

@@ -51,6 +51,7 @@ import { PlayerDeathSystem } from "./systems/PlayerDeathSystem.js";
 import { SkillsSystem } from "./systems/SkillsSystem.js";
 import { EquipmentSystem } from "./systems/EquipmentSystem.js";
 import { InventorySystem } from "./systems/InventorySystem.js";
+import { PlayerSystem } from "./systems/PlayerSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -246,6 +247,13 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // `world.getSystem("zone-detection")`, so it must register
       // before SystemLoader runs.
       register("zone-detection", ZoneDetectionSystem);
+
+      // Player — central player lifecycle, stats, health, attack
+      // styles, persistence. Migrated 2026-04-26 (Wave 5d) with
+      // EatDelayManager + BuryDelayManager helpers. Many plugin and
+      // shared systems look this up via `world.getSystem("player")`,
+      // so it registers FIRST in the cluster.
+      register("player", PlayerSystem);
 
       // Inventory — slot-based item storage with stack management
       // + DB persistence. Migrated 2026-04-26 (Wave 5c). Many
