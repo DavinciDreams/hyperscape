@@ -100,6 +100,7 @@ import { SocketManager } from "./socket-management";
 import { PacketPriority } from "./BandwidthBudget";
 import { SpatialIndex } from "./SpatialIndex";
 import type { ISpatialIndex } from "./substrate/spatial-index";
+import type { IBroadcastService } from "./substrate/broadcast-service";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
 import { InitializationManager } from "./initialization";
@@ -420,21 +421,33 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.spawn = getDefaultSpawn();
     this.maxUploadSize = 50; // Default 50MB upload limit
 
-    // Phase B1 (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): construct
+    // Phase B (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): construct
     // engine substrate at register-time and pin to world. Plugin-side
     // consumers (post-migration Pending- and Follow-managers,
-    // TileMovementManager) resolve via `world.spatialIndex` lookup
-    // — works in both server boot order
-    // (`register → onEnable → init`) and PIE boot order
-    // (`register → init → onEnable`) because the constructor fires
-    // at register time in both.
+    // TileMovementManager) resolve via `world.X` lookup — works in
+    // both server boot order (`register → onEnable → init`) and PIE
+    // boot order (`register → init → onEnable`) because the
+    // constructor fires at register time in both.
+    //
+    // Order matters: SpatialIndex first (no deps), BroadcastManager
+    // second (needs the `server-network-factory` bridge — both hosts
+    // register it before ServerNetwork), then wire them.
     this.spatialIndex = new SpatialIndex();
     (world as { spatialIndex?: ISpatialIndex }).spatialIndex =
       this.spatialIndex;
 
-    // Remaining managers (broadcast, region subscriptions, tile
-    // movement) are constructed in `init()` until later Phase B sub-
-    // cuts move them to the constructor too.
+    this.broadcastManager = this.getManagerFactory().createBroadcastManager(
+      this.sockets,
+    );
+    this.broadcastManager.setSpatialIndex(this.spatialIndex);
+    (world as { broadcast?: IBroadcastService }).broadcast =
+      this.broadcastManager;
+
+    // Remaining managers (region subscriptions, tile movement) are
+    // constructed in `init()` until later Phase B sub-cuts move them
+    // to the constructor too. uWS-app wiring (`setUwsApp`) and
+    // pub/sub enabling (`enablePubSub`) stay in init() — they
+    // depend on late-bound transport state.
   }
 
   // Rate Limiting Helper
@@ -532,18 +545,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   private initializeManagers(): void {
-    // Broadcast manager (needed by many others) — created via the
-    // server-network factory bridge so ServerNetwork does not import the
-    // server-only concrete class directly. Registered in
-    // startup/world.ts before ServerNetwork.
-    this.broadcastManager = this.getManagerFactory().createBroadcastManager(
-      this.sockets,
-    );
-
-    // SpatialIndex moved to ServerNetwork constructor (Phase B1).
-    // Wire it into the broadcast manager now that the manager exists.
-    this.broadcastManager.setSpatialIndex(this.spatialIndex);
-
+    // SpatialIndex + BroadcastManager moved to ServerNetwork constructor
+    // (Phase B1 + B2, PLAN_ENGINE_API_EXTRACTION.md). Both are pinned to
+    // `world.spatialIndex` / `world.broadcast` from constructor so plugin
+    // consumers can resolve them at register-time.
+    //
     // Note: uWS pub/sub is wired later via enablePubSub() after uWS server starts
 
     // Tick system for RuneScape-style 600ms ticks
@@ -2482,6 +2488,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.socketManager.destroy();
     this.spatialIndex.destroy();
     delete (this.world as { spatialIndex?: ISpatialIndex }).spatialIndex;
+    delete (this.world as { broadcast?: IBroadcastService }).broadcast;
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
     this.eventBridge.destroy();
