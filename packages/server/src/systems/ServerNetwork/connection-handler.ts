@@ -1325,7 +1325,7 @@ export class ConnectionHandler {
       playerId,
       userId,
       player:
-        socket.player as unknown as import("@hyperforge/shared").PlayerLocal,
+        socket.player as unknown as import("@hyperforge/hyperscape").PlayerLocal,
     });
 
     try {

@@ -25,7 +25,7 @@ import type {
 import { EventType, ALL_WORLD_AREAS } from "@hyperforge/shared";
 import type { BroadcastManager } from "./broadcast";
 import { BankRepository } from "../../database/repositories/BankRepository";
-import type { StoreSystem } from "@hyperforge/shared";
+import type { StoreSystem } from "@hyperforge/hyperscape";
 import type pg from "pg";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "../../database/schema";

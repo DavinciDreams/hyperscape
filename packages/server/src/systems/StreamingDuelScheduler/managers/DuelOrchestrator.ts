@@ -7,6 +7,7 @@
  */
 
 import type { World } from "@hyperforge/shared";
+import { PlayerEntity } from "@hyperforge/hyperscape";
 import {
   AttackType,
   COMBAT_SPELLS,
@@ -16,7 +17,6 @@ import {
   ELEMENTAL_STAVES,
   EventType,
   ITEMS,
-  PlayerEntity,
   SPELL_ORDER,
   UnknownCombatTuningProfileError,
   getDuelArenaConfig,

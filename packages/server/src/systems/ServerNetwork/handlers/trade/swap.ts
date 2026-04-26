@@ -12,7 +12,11 @@ import { type World, EventType, getItem } from "@hyperforge/shared";
 import { sql } from "drizzle-orm";
 import type { ServerSocket } from "../../../../shared/types";
 import { executeSecureTransaction, sendToSocket } from "../common";
-import type { TradingSystem } from "../../../TradingSystem";
+// TradingSystem duck-type interface from shared. Plugin's concrete
+// class structurally satisfies it; using the interface here avoids
+// the post-migration type-mismatch between shared interface (returned
+// by `getTradingSystem(world)`) and plugin's concrete class.
+import type { TradingSystem } from "@hyperforge/shared";
 import type {
   DatabaseConnection,
   InventoryDBRow,
