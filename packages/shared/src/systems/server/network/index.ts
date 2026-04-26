@@ -153,7 +153,7 @@ import {
   getUnknownMessageRateLimiter,
 } from "./services/SlidingWindowRateLimiter";
 import { handleAttackPlayer } from "./handlers/combat";
-import type { ProcessingHandlerContext } from "./handlers/processing";
+import type { ProcessingHandlerContext } from "./substrate/processing-handler-context";
 // PendingAttackManager migrated to @hyperforge/hyperscape (Phase D3,
 // 2026-04-26). Duck-typed locally — covers every method ServerNetwork
 // calls. Plugin's concrete class structurally satisfies it.

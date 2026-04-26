@@ -15,40 +15,9 @@
  * appropriate EventType for the corresponding server-side system.
  */
 
-import type { ServerSocket } from "../server-types";
-import { EventType, World } from "../../../../index";
-// TileMovementManager migrated to @hyperforge/hyperscape (Phase E1,
-// 2026-04-26). Duck-typed locally — only `getIsRunning` is called
-// from the processing handler context.
-interface TileMovementManager {
-  getIsRunning(playerId: string): boolean;
-  stopPlayer(playerId: string): void;
-}
-// PendingCookManager migrated to @hyperforge/hyperscape (Phase D4,
-// 2026-04-26). Duck-typed locally — only `queuePendingCook` is
-// called from the processing handler.
-interface PendingCookManager {
-  queuePendingCook(
-    playerId: string,
-    sourceId: string,
-    sourcePosition: { x: number; y: number; z: number },
-    currentTick: number,
-    runMode?: boolean,
-    fishSlot?: number,
-  ): void;
-}
-// PendingGatherManager migrated to @hyperforge/hyperscape (Phase D5,
-// 2026-04-26). Duck-typed locally — only `queuePendingGather` is
-// called from the processing handler.
-interface PendingGatherManager {
-  queuePendingGather(
-    playerId: string,
-    resourceId: string,
-    currentTick: number,
-    runMode?: boolean,
-  ): void;
-}
-import type { TickSystem } from "../../TickSystem";
+import type { ServerSocket } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import type { ProcessingHandlerContext } from "@hyperforge/shared";
 import type {
   ResourceInteractPayload,
   CookingSourceInteractPayload,
@@ -63,20 +32,10 @@ import type {
   FletchingSourceInteractPayload,
   ProcessingTanningPayload,
   RunecraftingAltarPayload,
-} from "../types";
+} from "@hyperforge/shared";
 
-/**
- * Context passed to processing handlers so they can access shared server state
- * without being coupled to the ServerNetwork class.
- */
-export interface ProcessingHandlerContext {
-  world: World;
-  pendingGatherManager: PendingGatherManager;
-  pendingCookManager: PendingCookManager;
-  tileMovementManager: TileMovementManager;
-  tickSystem: TickSystem;
-  canProcessRequest: (playerId: string) => boolean;
-}
+// Re-export for plugin barrel users.
+export type { ProcessingHandlerContext };
 
 // ============================================================================
 // Resource Interaction (PendingGatherManager path)

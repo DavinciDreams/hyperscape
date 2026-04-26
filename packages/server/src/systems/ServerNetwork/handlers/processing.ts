@@ -1,12 +1,24 @@
 /**
  * @deprecated Re-export shim.
  *
- * Handler relocated to
- * `packages/shared/src/systems/server/network/handlers/processing.ts`
- * as part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 5).
- *
- * Delete after Step 8.
+ * Handler relocated to `@hyperforge/hyperscape`
+ * (Phase F3 batch-3 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export * from "../../../../../shared/src/systems/server/network/handlers/processing";
+export {
+  handleResourceInteract,
+  handleCookingSourceInteract,
+  handleFiremakingRequest,
+  handleCookingRequest,
+  handleSmeltingSourceInteract,
+  handleProcessingSmelting,
+  handleSmithingSourceInteract,
+  handleProcessingSmithing,
+  handleCraftingSourceInteract,
+  handleProcessingCrafting,
+  handleFletchingSourceInteract,
+  handleProcessingFletching,
+  handleProcessingTanning,
+  handleRunecraftingAltarInteract,
+  type ProcessingHandlerContext,
+} from "@hyperforge/hyperscape";

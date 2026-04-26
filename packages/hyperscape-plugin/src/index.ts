@@ -243,6 +243,23 @@ export {
   handleQuestAbandon,
   handleQuestComplete,
 } from "./systems/network-handlers/quest.js";
+export {
+  handleResourceInteract,
+  handleCookingSourceInteract,
+  handleFiremakingRequest,
+  handleCookingRequest,
+  handleSmeltingSourceInteract,
+  handleProcessingSmelting,
+  handleSmithingSourceInteract,
+  handleProcessingSmithing,
+  handleCraftingSourceInteract,
+  handleProcessingCrafting,
+  handleFletchingSourceInteract,
+  handleProcessingFletching,
+  handleProcessingTanning,
+  handleRunecraftingAltarInteract,
+  type ProcessingHandlerContext,
+} from "./systems/network-handlers/processing.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the

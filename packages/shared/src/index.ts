@@ -2229,6 +2229,29 @@ export type {
   IConnectionRegistry,
   PacketHandler,
 } from "./systems/server/network/substrate/connection-registry";
+export type {
+  ProcessingHandlerContext,
+  ProcessingPendingGatherManager,
+  ProcessingPendingCookManager,
+  ProcessingTileMovementManager,
+} from "./systems/server/network/substrate/processing-handler-context";
+// Processing handler packet payloads — needed by the migrated
+// processing handlers in @hyperforge/hyperscape.
+export type {
+  ResourceInteractPayload,
+  CookingSourceInteractPayload,
+  FiremakingRequestPayload,
+  CookingRequestPayload,
+  SmeltingSourceInteractPayload,
+  SmithingSourceInteractPayload,
+  ProcessingSmeltingPayload,
+  ProcessingSmithingPayload,
+  CraftingSourceInteractPayload,
+  ProcessingRecipePayload,
+  FletchingSourceInteractPayload,
+  ProcessingTanningPayload,
+  RunecraftingAltarPayload,
+} from "./systems/server/network/types";
 export {
   InMemorySessionStore,
   type SessionStore,
