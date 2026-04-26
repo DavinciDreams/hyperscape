@@ -114,6 +114,7 @@ import { PendingTradeManager } from "./systems/PendingTradeManager.js";
 import { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
 import { PendingAttackManager } from "./systems/PendingAttackManager.js";
 import { PendingCookManager } from "./systems/PendingCookManager.js";
+import { PendingGatherManager } from "./systems/PendingGatherManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -167,6 +168,7 @@ export { PendingTradeManager } from "./systems/PendingTradeManager.js";
 export { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
 export { PendingAttackManager } from "./systems/PendingAttackManager.js";
 export { PendingCookManager } from "./systems/PendingCookManager.js";
+export { PendingGatherManager } from "./systems/PendingGatherManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -617,6 +619,28 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { pendingCookManager?: PendingCookManager })
             .pendingCookManager;
+        });
+
+        // PendingGatherManager — Phase D5 (2026-04-26). The
+        // broadcast-callback closes over `world.broadcast` (pinned
+        // in ServerNetwork constructor, Phase B2).
+        const broadcast = (
+          ctx.world as {
+            broadcast?: {
+              sendToAll(name: string, data: unknown): void;
+            };
+          }
+        ).broadcast;
+        const pendingGatherManager = new PendingGatherManager(
+          ctx.world,
+          (name, data) => broadcast?.sendToAll(name, data),
+        );
+        (
+          ctx.world as { pendingGatherManager?: PendingGatherManager }
+        ).pendingGatherManager = pendingGatherManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { pendingGatherManager?: PendingGatherManager })
+            .pendingGatherManager;
         });
 
         // Duel system — same manual-lifecycle pattern as

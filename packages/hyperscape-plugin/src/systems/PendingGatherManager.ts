@@ -23,18 +23,18 @@
  * @see FaceDirectionManager - handles OSRS-accurate rotation
  */
 
-import type { World } from "../../../index";
 import {
   EventType,
-  worldToTileInto,
-  tileToWorld,
-  tilesWithinMeleeRange,
-  type TileCoord,
-  type ResourceFootprint,
   FOOTPRINT_SIZES,
-} from "../../../index";
-import { getGatheringRange } from "../../../data/live/gathering-live";
-import type { ITileMovementService } from "./substrate/tile-movement-service";
+  getGatheringRange,
+  type ITileMovementService,
+  type ResourceFootprint,
+  type TileCoord,
+  tilesWithinMeleeRange,
+  tileToWorld,
+  type World,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 /**
  * Pending gather request data

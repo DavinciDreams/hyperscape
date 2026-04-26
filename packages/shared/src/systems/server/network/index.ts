@@ -133,7 +133,18 @@ interface PendingAttackManager {
     attackType?: unknown,
   ): void;
 }
-import { PendingGatherManager } from "./PendingGatherManager";
+// PendingGatherManager migrated to @hyperforge/hyperscape (Phase D5,
+// 2026-04-26).
+interface PendingGatherManager {
+  processTick(tickNumber: number): void;
+  onPlayerDisconnect(playerId: string): void;
+  queuePendingGather(
+    playerId: string,
+    resourceId: string,
+    currentTick: number,
+    runMode?: boolean,
+  ): void;
+}
 // PendingCookManager migrated to @hyperforge/hyperscape (Phase D4,
 // 2026-04-26). Duck-type covers everything ServerNetwork + handlers
 // need; the wider surface (queuePendingCook) is reached through the
@@ -368,7 +379,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private mobTileMovementManager!: MobTileMovementManager;
   // PendingAttackManager removed (Phase D3) — plugin owns the
   // lifecycle. ServerNetwork resolves via the helper below.
-  private pendingGatherManager!: PendingGatherManager;
+  // PendingGatherManager removed (Phase D5) — plugin owns the
+  // lifecycle.
   // PendingCookManager removed (Phase D4) — plugin owns the
   // lifecycle.
   // PendingTradeManager removed (Phase D1) — plugin owns the
@@ -414,7 +426,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   getProcessingHandlerContext(): ProcessingHandlerContext {
     return {
       world: this.world,
-      pendingGatherManager: this.pendingGatherManager,
+      pendingGatherManager: (
+        this.world as { pendingGatherManager?: PendingGatherManager }
+      ).pendingGatherManager as PendingGatherManager,
       pendingCookManager: (
         this.world as { pendingCookManager?: PendingCookManager }
       ).pendingCookManager as PendingCookManager,
@@ -944,17 +958,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "waterRecovery",
     );
 
-    // Pending gather manager - server-authoritative tracking of "walk to resource and gather" actions
-    // Uses same approach as PendingAttackManager: movePlayerToward with meleeRange=1 for cardinal-only
-    this.pendingGatherManager = new PendingGatherManager(
-      this.world,
-      (name, data) => this.broadcastManager.sendToAll(name, data),
-    );
-
-    // Register pending gather processing (same priority as movement)
+    // PendingGatherManager — migrated to @hyperforge/hyperscape
+    // (Phase D5, 2026-04-26). Plugin onEnable owns construction +
+    // the broadcast-callback closure. Tick callback resolves lazily.
     this.tickSystem.onTick(
       (tickNumber) => {
-        this.pendingGatherManager.processTick(tickNumber);
+        const pgm = (
+          this.world as { pendingGatherManager?: PendingGatherManager }
+        ).pendingGatherManager;
+        pgm?.processTick(tickNumber);
       },
       TickPriority.MOVEMENT,
       "pendingGather",
@@ -1721,7 +1733,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.world as { pendingAttackManager?: PendingAttackManager }
       ).pendingAttackManager?.onPlayerDisconnect(event.playerId);
       this.followManager.onPlayerDisconnect(event.playerId);
-      this.pendingGatherManager.onPlayerDisconnect(event.playerId);
+      const pgm = (
+        this.world as { pendingGatherManager?: PendingGatherManager }
+      ).pendingGatherManager;
+      pgm?.onPlayerDisconnect(event.playerId);
       const pcm = (this.world as { pendingCookManager?: PendingCookManager })
         .pendingCookManager;
       pcm?.onPlayerDisconnect(event.playerId);

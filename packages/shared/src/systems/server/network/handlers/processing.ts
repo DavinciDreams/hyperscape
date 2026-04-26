@@ -31,7 +31,17 @@ interface PendingCookManager {
     fishSlot?: number,
   ): void;
 }
-import type { PendingGatherManager } from "../PendingGatherManager";
+// PendingGatherManager migrated to @hyperforge/hyperscape (Phase D5,
+// 2026-04-26). Duck-typed locally — only `queuePendingGather` is
+// called from the processing handler.
+interface PendingGatherManager {
+  queuePendingGather(
+    playerId: string,
+    resourceId: string,
+    currentTick: number,
+    runMode?: boolean,
+  ): void;
+}
 import type { TickSystem } from "../../TickSystem";
 import type {
   ResourceInteractPayload,
