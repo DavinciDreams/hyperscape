@@ -15,13 +15,18 @@
 /** Region size in tiles — matches AggroSystem TOLERANCE_REGION_SIZE */
 const REGION_SIZE = 21;
 
-/** Return value of updatePlayerPosition when a region change occurred */
-export interface RegionChange {
-  oldKey: number;
-  newKey: number;
-}
+import type {
+  ISpatialIndex,
+  RegionChange,
+  RegionSubscriptionDiff,
+} from "./substrate/spatial-index";
 
-export class SpatialIndex {
+// Back-compat re-export — the type used to live here, callers in
+// shared still import it from this file. Future cleanup will switch
+// them to the substrate path; for now both work.
+export type { RegionChange } from "./substrate/spatial-index";
+
+export class SpatialIndex implements ISpatialIndex {
   /** regionKey (numeric) → Set<playerId> - uses numeric keys to avoid string allocations */
   private playersByRegion = new Map<number, Set<string>>();
   /** playerId → regionKey (numeric) */
