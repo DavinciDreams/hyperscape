@@ -2210,7 +2210,14 @@ export {
 export type {
   IDatabaseSystem,
   IFollowManager,
+  IFriendRepository,
 } from "./systems/server/network/interfaces";
+// Social-live getters — needed by friends handler (F3 batch-8).
+export {
+  getMaxFriends,
+  getMaxIgnore,
+  getPrivateMessageMaxLength,
+} from "./data/live/social-live";
 // Handler-utility substrate — needed by migrated network handlers
 // (Phase F3, 2026-04-26).
 export {
@@ -2252,6 +2259,7 @@ export type {
   IHomeTeleportManager,
   HomeTeleportFactory,
 } from "./systems/server/network/substrate/home-teleport-service";
+export type { IFriendsService } from "./systems/server/network/substrate/friends-service";
 // Processing handler packet payloads — needed by the migrated
 // processing handlers in @hyperforge/hyperscape.
 export type {

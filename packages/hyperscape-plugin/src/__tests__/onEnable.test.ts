@@ -244,14 +244,15 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer, plus twelve
+    // Every registration paired with a scope disposer, plus thirteen
     // extra disposers for manually-managed lifecycle systems:
     // TradingSystem + DuelSystem + 5 Pending-managers
     // (Trade/DuelChallenge/Attack/Cook/Gather) + FollowManager +
     // FaceDirectionManager + TileMovementManager +
     // MobTileMovementManager + HomeTeleport (factory pin
-    // installed; F3 batch-7).
-    expect(scope.disposers.length).toBe(world.registered.length + 12);
+    // installed; F3 batch-7) + FriendsService (pin installed;
+    // F3 batch-8).
+    expect(scope.disposers.length).toBe(world.registered.length + 13);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {

@@ -1,16 +1,22 @@
 /**
  * @deprecated Re-export shim.
  *
- * Handler relocated to
- * `packages/shared/src/systems/server/network/handlers/friends.ts`
- * as part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 5).
- *
- * The migrated handler uses `world.getSystem("database") as IDatabaseSystem`
- * + `dbSystem.getFriendRepository()` for FriendRepository access instead of
- * instantiating one via WeakMap cache, so shared has no dependency on pg /
- * drizzle-orm.
- * Delete after Step 8.
+ * Handler relocated to `@hyperforge/hyperscape`
+ * (Phase F3 batch-8 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
+ * Plugin onEnable installs `world.friendsService` so engine-side
+ * shared code (`character-selection.ts`, `socket-management.ts`)
+ * can call `sendFriendsListSync` and `notifyFriendsOfStatusChange`
+ * via the `IFriendsService` substrate interface.
  */
 
-export * from "../../../../../shared/src/systems/server/network/handlers/friends";
+export {
+  handleFriendRequest,
+  handleFriendAccept,
+  handleFriendDecline,
+  handleFriendRemove,
+  handleIgnoreAdd,
+  handleIgnoreRemove,
+  handlePrivateMessage,
+  sendFriendsListSync,
+  notifyFriendsOfStatusChange,
+} from "@hyperforge/hyperscape";

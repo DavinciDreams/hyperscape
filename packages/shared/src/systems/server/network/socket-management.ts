@@ -12,7 +12,7 @@
 
 import type { ServerSocket } from "./server-types";
 import { EventType, World, writePacket } from "../../../index";
-import { notifyFriendsOfStatusChange } from "./handlers/friends";
+import type { IFriendsService } from "./substrate/friends-service";
 import type { IBroadcastManager } from "./interfaces";
 
 const WS_PING_INTERVAL_SEC = parseInt(
@@ -272,15 +272,21 @@ export class SocketManager {
     if (socket.player) {
       const playerId = socket.player.id;
 
-      // Notify friends that this player went offline (fire and forget)
-      notifyFriendsOfStatusChange(playerId, "offline", this.world).catch(
-        (err) => {
+      // Notify friends that this player went offline (fire and forget).
+      // `friendsService` is installed by the @hyperforge/hyperscape
+      // plugin onEnable; in environments without it (PIE editor, tests)
+      // the call is a silent no-op.
+      const friendsService = (
+        this.world as { friendsService?: IFriendsService }
+      ).friendsService;
+      friendsService
+        ?.notifyFriendsOfStatusChange(playerId, "offline", this.world)
+        .catch((err) => {
           console.warn(
             "[SocketManager] Failed to notify friends of disconnect:",
             err,
           );
-        },
-      );
+        });
 
       // Check combat logout timer (OSRS: can't log out for ~10s after combat)
       const combatSystem = this.world.getSystem("combat") as {
@@ -451,14 +457,15 @@ export class SocketManager {
       `[SocketManager] Reconnected ${disconnected.playerId} after ${elapsed}ms`,
     );
 
-    // Notify friends they came back online
-    notifyFriendsOfStatusChange(
-      disconnected.playerId,
-      "online",
-      this.world,
-    ).catch(() => {
-      // Non-critical
-    });
+    // Notify friends they came back online.
+    const reconnectFriendsService = (
+      this.world as { friendsService?: IFriendsService }
+    ).friendsService;
+    reconnectFriendsService
+      ?.notifyFriendsOfStatusChange(disconnected.playerId, "online", this.world)
+      .catch(() => {
+        // Non-critical
+      });
 
     return disconnected.playerId;
   }

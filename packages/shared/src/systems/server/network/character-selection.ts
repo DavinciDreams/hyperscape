@@ -28,10 +28,7 @@ import {
   type EquipmentSyncData,
   type InventorySyncData,
 } from "../../../index";
-import {
-  sendFriendsListSync,
-  notifyFriendsOfStatusChange,
-} from "./handlers/friends";
+import type { IFriendsService } from "./substrate/friends-service";
 import { getDefaultElizaOsApiUrl, getDefaultPublicWsUrl } from "./services";
 
 const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
@@ -1365,18 +1362,29 @@ export async function handleEnterWorld(
         characterId: characterId || spawnedPlayer.id,
       });
 
-      // Send friends list sync to the connecting player
+      // Send friends list sync to the connecting player.
+      // `friendsService` is installed by the @hyperforge/hyperscape
+      // plugin onEnable; in PIE-editor / test environments it may be
+      // absent, in which case we silently skip the sync.
       const playerId = characterId || spawnedPlayer.id;
-      try {
-        await sendFriendsListSync(socket, world, playerId);
-        // Notify this player's friends that they came online
-        await notifyFriendsOfStatusChange(playerId, "online", world);
-      } catch (friendErr) {
-        console.warn(
-          "[CharacterSelection] Failed to sync friends list:",
-          friendErr,
-        );
-        // Non-fatal - continue even if friends sync fails
+      const friendsService = (world as { friendsService?: IFriendsService })
+        .friendsService;
+      if (friendsService) {
+        try {
+          await friendsService.sendFriendsListSync(socket, world, playerId);
+          // Notify this player's friends that they came online
+          await friendsService.notifyFriendsOfStatusChange(
+            playerId,
+            "online",
+            world,
+          );
+        } catch (friendErr) {
+          console.warn(
+            "[CharacterSelection] Failed to sync friends list:",
+            friendErr,
+          );
+          // Non-fatal - continue even if friends sync fails
+        }
       }
     } catch (_err) {}
   }

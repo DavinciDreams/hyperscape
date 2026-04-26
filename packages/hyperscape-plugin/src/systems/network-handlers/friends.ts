@@ -37,16 +37,20 @@ import {
   type SocialErrorCode,
   isValidPlayerID,
   SystemLogger,
-} from "../../../../index";
+} from "@hyperforge/shared";
 import {
   getMaxFriends,
   getMaxIgnore,
   getPrivateMessageMaxLength,
-} from "../../../../data/live/social-live";
-import type { ServerSocket } from "../server-types";
-import type { IDatabaseSystem, IFriendRepository } from "../interfaces";
-import { RateLimitService } from "../services/IntervalRateLimiter";
-import { getPlayerId, sendSuccessToast, sendErrorToast } from "./common";
+} from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
+import type { IDatabaseSystem, IFriendRepository } from "@hyperforge/shared";
+import { RateLimitService } from "@hyperforge/shared";
+import {
+  getPlayerId,
+  sendSuccessToast,
+  sendErrorToast,
+} from "@hyperforge/shared";
 
 // Logger for social system operations
 const logger = new SystemLogger("Social");

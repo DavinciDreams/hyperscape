@@ -158,7 +158,19 @@ import {
 import type {
   HomeTeleportFactory,
   IHomeTeleportManager,
+  IFriendsService,
 } from "@hyperforge/shared";
+import {
+  sendFriendsListSync,
+  notifyFriendsOfStatusChange,
+  handleFriendRequest,
+  handleFriendAccept,
+  handleFriendDecline,
+  handleFriendRemove,
+  handleIgnoreAdd,
+  handleIgnoreRemove,
+  handlePrivateMessage,
+} from "./systems/network-handlers/friends.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -331,6 +343,17 @@ export {
   handleHomeTeleport,
   handleHomeTeleportCancel,
 } from "./systems/network-handlers/home-teleport.js";
+export {
+  handleFriendRequest,
+  handleFriendAccept,
+  handleFriendDecline,
+  handleFriendRemove,
+  handleIgnoreAdd,
+  handleIgnoreRemove,
+  handlePrivateMessage,
+  sendFriendsListSync,
+  notifyFriendsOfStatusChange,
+} from "./systems/network-handlers/friends.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -1286,6 +1309,23 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
             .homeTeleportFactory;
           delete (ctx.world as { homeTeleportManager?: IHomeTeleportManager })
             .homeTeleportManager;
+        });
+
+        // FriendsService — Phase F3 batch-8 (2026-04-26). Engine-side
+        // shared code (character-selection.ts, socket-management.ts)
+        // calls `world.friendsService?.sendFriendsListSync(...)` and
+        // `world.friendsService?.notifyFriendsOfStatusChange(...)` on
+        // login/logout/reconnect, so the plugin installs the service
+        // here.
+        const friendsService: IFriendsService = {
+          sendFriendsListSync,
+          notifyFriendsOfStatusChange,
+        };
+        (ctx.world as { friendsService?: IFriendsService }).friendsService =
+          friendsService;
+        ctx.scope.register(() => {
+          delete (ctx.world as { friendsService?: IFriendsService })
+            .friendsService;
         });
 
         // FaceDirectionManager — Phase D7 (2026-04-26). Plugin owns
