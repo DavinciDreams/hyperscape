@@ -17,7 +17,8 @@ Drafted 2026-04-26.
 - ✅ **Phase E** (TileMovementManager migrated): E1 TileMovementManager, E2 MobTileMovementManager
 - ✅ **Phase F1+F2** (IConnectionRegistry substrate + pinning): shipped 2026-04-26
 - 🟢 **Phase F3** (network handlers): **14/14 handler families fully migrated**. Done: chat, resources, magic, dialogue, entities, player, prayer, quest, processing, duel/* (5 files), trade/* (2 files), combat (full — handleAttackPlayer + handleAttackMob via `ICombatAttackService` substrate; handleChangeAttackStyle + handleSetAutoRetaliate via direct migration), home-teleport (substrate-promote with `IHomeTeleportManager` + factory), friends (substrate-promote with `IFriendsService`). `shared/src/systems/server/network/handlers/` directory is now empty except for `common/` helpers (which are already exported through the shared barrel for plugin-side consumers).
-- ⏳ **Phase G** (character-selection / initialization / save-manager / InteractionSessionManager, ~2149 LOC): needs `ISaveService` and `IDatabaseService` substrate first
+- 🟢 **Phase G-1** (character-selection): **shipped 2026-04-26** via `IPlayerSpawnService` substrate. The 1383 LOC file split: 3 client-facing handlers stayed server-registered (via re-export shim); `handleEnterWorld` + `collectInitialSyncEntities` substrate-promoted into `world.playerSpawnService`. Closed the last Hyperia-specific file in `shared/src/systems/server/network/`.
+- ⏳ **Phase G remainder** (initialization, save-manager, InteractionSessionManager, socket-management, ~766 LOC): re-classified as ENGINE infrastructure rather than game-specific. They consume `ServerNetwork.db` (SystemDatabase) directly and provide periodic-save / world-hydration / UI-session-lifecycle / WebSocket-health for any game built on the engine. **Recommendation: leave them in shared.** Phase G is effectively complete.
 
 Plugin tests stable at 187/187 throughout the phases A–F migrations.
 
