@@ -19,29 +19,26 @@
  */
 
 import {
-  THREE,
+  chaseStep,
+  CollisionMask,
+  type EntityID,
+  getBestUnoccupiedMeleeTile,
+  getChasePathfinder,
+  type Position3D,
   TerrainSystem,
-  World,
+  THREE,
+  type TileCoord,
+  type TileMovementState,
   TILES_PER_TICK_WALK,
-  worldToTile,
-  worldToTileInto,
-  tileToWorld,
+  tileChebyshevDistance,
+  tileKey,
   tilesEqual,
   tilesWithinMeleeRange,
-  tileChebyshevDistance,
-  chaseStep,
-  getChasePathfinder,
-  getBestUnoccupiedMeleeTile,
-  tileKey,
-  // Collision system
-  CollisionMask,
-} from "../../../index";
-import type {
-  TileCoord,
-  TileMovementState,
-  Position3D,
-  EntityID,
-} from "../../../index";
+  tileToWorld,
+  type World,
+  worldToTile,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 /**
  * Extended movement state for mobs

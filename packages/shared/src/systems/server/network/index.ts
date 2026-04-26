@@ -107,7 +107,25 @@ interface TileMovementManager extends ITileMovementService {
   getPlayerCount(): number;
   resetAgilityProgress(playerId: string): void;
 }
-import { MobTileMovementManager } from "./mob-tile-movement";
+// MobTileMovementManager migrated to @hyperforge/hyperscape (Phase E2,
+// 2026-04-26). Plugin onEnable owns construction. ServerNetwork
+// resolves via `world.mobTileMovement` lookup.
+interface MobTileMovementManager {
+  onTick(tickNumber: number): void;
+  requestMoveTo(
+    mobId: string,
+    targetPos: { x: number; y: number; z: number },
+    targetEntityId?: string | null,
+    tilesPerTick?: number,
+    combatRange?: number,
+  ): void;
+  initializeMob(
+    mobId: string,
+    position: { x: number; y: number; z: number },
+    tilesPerTick?: number,
+  ): void;
+  cleanup(mobId: string): void;
+}
 import { ActionQueue } from "./action-queue";
 import { TickSystem, TickPriority } from "../TickSystem";
 import { SocketManager } from "./socket-management";
@@ -421,7 +439,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   // TileMovementManager removed (Phase E1) — plugin owns the
   // lifecycle. Use-sites resolve `world.tileMovement` lazily via
   // the helper getter below.
-  private mobTileMovementManager!: MobTileMovementManager;
+  // MobTileMovementManager removed (Phase E2) — plugin owns the
+  // lifecycle.
   // PendingAttackManager removed (Phase D3) — plugin owns the
   // lifecycle. ServerNetwork resolves via the helper below.
   // PendingGatherManager removed (Phase D5) — plugin owns the
@@ -823,28 +842,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "playerMovement",
     );
 
-    // Mob tile-based movement manager (same tick system as players)
-    // Use sendToNearby for mob movement broadcasts
-    this.mobTileMovementManager = new MobTileMovementManager(
-      this.world,
-      (name: string, data: unknown, ignoreSocketId?: string) => {
-        const payload = data as SpatialBroadcastPayload;
-        const entity = payload?.id
-          ? this.world.entities?.get(payload.id)
-          : null;
-        if (entity?.position) {
-          this.broadcastManager.sendToNearby(
-            name,
-            data,
-            entity.position.x,
-            entity.position.z,
-            ignoreSocketId,
-          );
-        } else {
-          this.broadcastManager.sendToAll(name, data, ignoreSocketId);
-        }
-      },
-    );
+    // MobTileMovementManager — migrated to @hyperforge/hyperscape
+    // (Phase E2, 2026-04-26). Plugin onEnable owns construction.
 
     // OSRS-ACCURATE: Process mob AI BEFORE mob movement each tick
     // AI state machine (IDLE → WANDER → CHASE → ATTACK → RETURN) decides movement targets,
@@ -890,7 +889,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick(
       (tickNumber) => {
         const t0 = Date.now();
-        this.mobTileMovementManager.onTick(tickNumber);
+        (
+          this.world as { mobTileMovement?: MobTileMovementManager }
+        ).mobTileMovement?.onTick(tickNumber);
         this._lastMobMoveTime = Date.now() - t0;
       },
       TickPriority.MOVEMENT,
@@ -1565,7 +1566,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         targetEntityId?: string;
         tilesPerTick?: number;
       };
-      this.mobTileMovementManager.requestMoveTo(
+      (
+        this.world as { mobTileMovement?: MobTileMovementManager }
+      ).mobTileMovement?.requestMoveTo(
         moveEvent.mobId,
         moveEvent.targetPos,
         moveEvent.targetEntityId || null,
@@ -1581,7 +1584,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         mobType: string;
         position: { x: number; y: number; z: number };
       };
-      this.mobTileMovementManager.initializeMob(
+      (
+        this.world as { mobTileMovement?: MobTileMovementManager }
+      ).mobTileMovement?.initializeMob(
         spawnEvent.mobId,
         spawnEvent.position,
         2, // Default walk speed: 2 tiles per tick
@@ -1592,13 +1597,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // This immediately clears stale tile state when mob dies
     this.onWorld(EventType.NPC_DIED, (event) => {
       const diedEvent = event as EventMap[typeof EventType.NPC_DIED];
-      this.mobTileMovementManager.cleanup(diedEvent.mobId);
+      (
+        this.world as { mobTileMovement?: MobTileMovementManager }
+      ).mobTileMovement?.cleanup(diedEvent.mobId);
     });
 
     // Clean up mob tile movement state on mob despawn (backup cleanup)
     this.onWorld(EventType.MOB_NPC_DESPAWNED, (event) => {
       const despawnEvent = event as { mobId: string };
-      this.mobTileMovementManager.cleanup(despawnEvent.mobId);
+      (
+        this.world as { mobTileMovement?: MobTileMovementManager }
+      ).mobTileMovement?.cleanup(despawnEvent.mobId);
     });
 
     // CRITICAL: Reinitialize mob tile state on respawn
@@ -1608,8 +1617,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const respawnEvent =
         event as EventMap[typeof EventType.MOB_NPC_RESPAWNED];
       // Clear old state and initialize at new spawn position
-      this.mobTileMovementManager.cleanup(respawnEvent.mobId);
-      this.mobTileMovementManager.initializeMob(
+      (
+        this.world as { mobTileMovement?: MobTileMovementManager }
+      ).mobTileMovement?.cleanup(respawnEvent.mobId);
+      (
+        this.world as { mobTileMovement?: MobTileMovementManager }
+      ).mobTileMovement?.initializeMob(
         respawnEvent.mobId,
         respawnEvent.position,
         2, // Default walk speed: 2 tiles per tick

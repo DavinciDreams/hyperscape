@@ -119,6 +119,7 @@ import { PendingGatherManager } from "./systems/PendingGatherManager.js";
 import { FollowManager } from "./systems/FollowManager.js";
 import { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 import { TileMovementManager } from "./systems/tile-movement.js";
+import { MobTileMovementManager } from "./systems/mob-tile-movement.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -176,6 +177,7 @@ export { PendingGatherManager } from "./systems/PendingGatherManager.js";
 export { FollowManager } from "./systems/FollowManager.js";
 export { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 export { TileMovementManager } from "./systems/tile-movement.js";
+export { MobTileMovementManager } from "./systems/mob-tile-movement.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -560,6 +562,40 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { tileMovement?: TileMovementManager })
             .tileMovement;
+        });
+
+        // MobTileMovementManager — Phase E2 (2026-04-26). Same
+        // broadcast-callback pattern as TMM but simpler (no
+        // region-subscription updates — mobs don't get their own
+        // pubsub topic). Pinned to `world.mobTileMovement`.
+        const mobTileMovementManager = new MobTileMovementManager(
+          ctx.world,
+          (name: string, data: unknown, ignoreSocketId?: string) => {
+            const payload = data as { id?: string };
+            const entity = payload?.id
+              ? (ctx.world.entities?.get(payload.id) as {
+                  position?: { x: number; y: number; z: number };
+                } | null)
+              : null;
+            if (entity?.position) {
+              tmmBroadcast?.sendToNearby(
+                name,
+                data,
+                entity.position.x,
+                entity.position.z,
+                ignoreSocketId,
+              );
+            } else {
+              tmmBroadcast?.sendToAll(name, data, ignoreSocketId);
+            }
+          },
+        );
+        (
+          ctx.world as { mobTileMovement?: MobTileMovementManager }
+        ).mobTileMovement = mobTileMovementManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { mobTileMovement?: MobTileMovementManager })
+            .mobTileMovement;
         });
 
         // Wire pluggable DropCondition evaluator + boot-time

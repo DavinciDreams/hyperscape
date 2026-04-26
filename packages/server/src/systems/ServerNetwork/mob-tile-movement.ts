@@ -1,12 +1,8 @@
 /**
  * @deprecated Re-export shim.
  *
- * Relocated to
- * `packages/shared/src/systems/server/network/mob-tile-movement.ts` as part
- * of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 1).
- *
- * Delete this shim after Step 8.
+ * `MobTileMovementManager` relocated to `@hyperforge/hyperscape`
+ * (Phase E2 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export { MobTileMovementManager } from "../../../../shared/src/systems/server/network/mob-tile-movement";
+export { MobTileMovementManager } from "@hyperforge/hyperscape";
