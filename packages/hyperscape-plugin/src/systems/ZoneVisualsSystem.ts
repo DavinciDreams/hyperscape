@@ -31,8 +31,8 @@ import {
   THREE,
   type World,
   type WorldArea,
-  ZoneDetectionSystem,
 } from "@hyperforge/shared";
+import { ZoneDetectionSystem } from "./ZoneDetectionSystem.js";
 
 // Zone visual colors
 const ZONE_COLORS = {

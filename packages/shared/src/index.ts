@@ -669,15 +669,22 @@ export { PlayerSystem } from "./systems/shared/character/PlayerSystem";
 // (line ~157) — no duplicate export needed here.
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // StoreSystem migrated to @hyperforge/hyperscape (2026-04-25)
-// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
-// Deps needed by the migrated class (most already exported elsewhere
-// in this barrel; add any missing here).
+// GroundItemSystem + ZoneDetectionSystem migrated to
+// @hyperforge/hyperscape (2026-04-25). Deps needed by the migrated
+// classes (most already exported elsewhere in this barrel; add any
+// missing here).
 export type {
   GroundItemOptions,
   GroundItemData,
   GroundItemPileData,
   GroundItemSystemDuck,
+  ZoneDetectionSystemDuck,
 } from "./types/death/death-types";
+export { getZoneByPosition } from "./data/world-structure";
+export type { ZoneData } from "./data/world-structure";
+export type { WildernessBoundary } from "./types/world/world-types";
+export { ZoneType } from "./types/death/death-types";
+export type { ZoneProperties } from "./types/death/death-types";
 export type { ItemEntityConfig } from "./types/entities";
 export { msToTicks } from "./utils/game/CombatCalculations";
 export { getUntradeableDespawnTicks } from "./data/live/combat-live";
@@ -834,7 +841,8 @@ export {
 // Chat system class + zone-detection class + WorldArea types — used
 // by the migrated ZoneVisualsSystem in @hyperforge/hyperscape.
 export { Chat as ChatSystem } from "./systems/shared/presentation/Chat";
-export { ZoneDetectionSystem } from "./systems/shared/death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// Use the duck-typed `ZoneDetectionSystemDuck` from death-types.
 export type { WorldArea } from "./types/world/world-types";
 export { getEffectiveWorldAreas } from "./world-areas";
 

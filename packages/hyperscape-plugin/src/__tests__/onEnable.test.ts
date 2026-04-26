@@ -87,6 +87,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "mob-npc-spawner",
   "item-spawner",
   "ground-items",
+  "zone-detection",
   "loot",
   "resource",
   "towns",

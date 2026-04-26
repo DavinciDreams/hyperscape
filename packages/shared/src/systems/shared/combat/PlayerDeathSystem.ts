@@ -18,7 +18,8 @@ import type {
 import { calculateDistance } from "../../../utils/game/EntityUtils";
 import { DeathState } from "../../../types/entities";
 import type { EntityManager } from "..";
-import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { ZoneDetectionSystemDuck } from "../../../types/death/death-types";
 // GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { GroundItemSystemDuck } from "../../../types/death/death-types";
 import { DeathStateManager } from "../death/DeathStateManager";
@@ -100,7 +101,7 @@ export class PlayerDeathSystem extends SystemBase {
   private tickSystem: TickSystemLike | null = null;
   private tickUnsubscribe: (() => void) | null = null;
 
-  private zoneDetection!: ZoneDetectionSystem;
+  private zoneDetection!: ZoneDetectionSystemDuck;
   private groundItemSystem!: GroundItemSystemDuck;
   private deathStateManager!: DeathStateManager;
   private safeAreaHandler!: SafeAreaDeathHandler;
@@ -118,8 +119,16 @@ export class PlayerDeathSystem extends SystemBase {
   }
 
   async init(): Promise<void> {
-    this.zoneDetection = new ZoneDetectionSystem(this.world);
-    await this.zoneDetection.init();
+    // ZoneDetectionSystem is registered by SystemLoader / world factory;
+    // look up the shared instance instead of creating a duplicate.
+    // (Previous code did `new ZoneDetectionSystem(world)` here which
+    // created a second copy with its own duplicated cache.)
+    this.zoneDetection = this.world.getSystem(
+      "zone-detection",
+    ) as unknown as ZoneDetectionSystemDuck;
+    if (!this.zoneDetection) {
+      this.logger.error("ZoneDetectionSystem not found");
+    }
 
     this.groundItemSystem = this.world.getSystem(
       "ground-items",

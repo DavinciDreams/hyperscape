@@ -151,6 +151,26 @@ export interface GroundItemSystemDuck {
 }
 
 /**
+ * Duck-typed surface of ZoneDetectionSystem.
+ *
+ * ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+ * In-shared consumers (CombatSystem, PlayerDeathSystem,
+ * PlayerInteractionHandler) reach the system via
+ * `world.getSystem("zone-detection")` and type the reference as this
+ * interface so shared no longer depends on the concrete class.
+ *
+ * Once those consumers all migrate to `@hyperforge/hyperscape`, this
+ * interface can be deleted in favour of the concrete import.
+ */
+export interface ZoneDetectionSystemDuck {
+  isPvPEnabled(position: { x: number; z: number }): boolean;
+  isWilderness(position: { x: number; z: number }): boolean;
+  isSafeZone(position: { x: number; z: number }): boolean;
+  getZoneType(position: { x: number; z: number }): ZoneType;
+  getZoneProperties(position: { x: number; z: number }): ZoneProperties;
+}
+
+/**
  * Ground item pile data - tracks all items at a single tile
  * Used for tile-based item stacking where only top item is visible
  */

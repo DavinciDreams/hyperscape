@@ -187,7 +187,7 @@ import { SocialSystem } from "../../client/SocialSystem";
 import { DuelArenaVisualsSystem } from "../../client/DuelArenaVisualsSystem";
 
 // Zone systems
-import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
 
 import type { CameraSystem as CameraSystemInterface } from "../../../types/systems/physics";
 import { ActionRegistry } from "..";
@@ -530,10 +530,9 @@ export async function registerSystems(world: World): Promise<void> {
   // "item-spawner" registered by @hyperforge/hyperscape plugin
   // onEnable cross-cutting branch (migrated 2026-04-25).
 
-  // Zone Detection System - registered on server only (client registers in createClientWorld.ts)
-  if (world.isServer) {
-    world.register("zone-detection", ZoneDetectionSystem);
-  }
+  // "zone-detection" registered by @hyperforge/hyperscape plugin
+  // onEnable cross-cutting branch (migrated 2026-04-25). Both server
+  // + client get it via the cross-cutting register call.
 
   // Get system instances after world initialization
   // Systems are directly available as properties on the world object after registration

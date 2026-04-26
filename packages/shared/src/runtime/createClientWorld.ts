@@ -129,7 +129,7 @@ import { LODs } from "../systems/shared";
 // WaterfallVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24).
 // BridgeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // ResourceTileDebugSystem migrated to @hyperforge/hyperscape (2026-04-24).
-import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import { InteractionRouter } from "../systems/client/interaction";
 import { Particles } from "../systems/shared";
 import { Wind } from "../systems/shared";
@@ -354,7 +354,7 @@ export function createClientWorld() {
   // Nametags disabled - OSRS pattern: names shown in right-click menu only
   // "healthbars" registered by @hyperforge/hyperscape onEnable (client branch).
   // "equipment-visual" registered by @hyperforge/hyperscape onEnable (client branch).
-  world.register("zone-detection", ZoneDetectionSystem); // Zone type detection (safe/pvp/wilderness)
+  // "zone-detection" registered by @hyperforge/hyperscape plugin onEnable (cross-cutting).
   // "zone-visuals" registered by @hyperforge/hyperscape onEnable (client branch).
   // "waterfall-visuals" registered by @hyperforge/hyperscape onEnable (client branch).
   // "resource-tile-debug" registered by @hyperforge/hyperscape onEnable (client branch).

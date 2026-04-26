@@ -6,18 +6,27 @@
  * Caches results for performance.
  */
 
-import { SystemBase } from "../infrastructure/SystemBase";
-import type { World } from "../../../core/World";
+// Migrated 2026-04-25 from `packages/shared/src/systems/shared/death/`
+// into `@hyperforge/hyperscape`. 436 LOC. Was registered by
+// SystemLoader (server) + createClientWorld (client) — both call
+// sites tombstoned; plugin onEnable cross-cutting branch registers
+// it now. PlayerDeathSystem used to instantiate a SECOND copy via
+// `new ZoneDetectionSystem(world)` in init() — that bug was fixed in
+// the same commit (it now looks up the registered instance).
 import {
+  ALL_WORLD_AREAS,
+  getEffectiveWorldAreas,
   getZoneByPosition,
+  SystemBase,
+  type WildernessBoundary,
+  type World,
+  type WorldArea,
   type ZoneData,
-} from "../../../data/world-structure";
-import { ALL_WORLD_AREAS } from "../../../data/world-areas";
-import { getEffectiveWorldAreas } from "../../../world-areas";
-import type { ZoneType, ZoneProperties } from "../../../types/death";
-import { ZoneType as ZoneTypeEnum } from "../../../types/death";
-import type { WorldArea } from "../../../types/core/core";
-import type { WildernessBoundary } from "../../../types/world/world-types";
+  type ZoneProperties,
+  ZoneType,
+} from "@hyperforge/shared";
+
+const ZoneTypeEnum = ZoneType;
 
 /**
  * Duck-typed TownSystem surface used by ZoneDetectionSystem.

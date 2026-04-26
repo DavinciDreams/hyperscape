@@ -59,7 +59,9 @@ import type { SkillsSystem } from "../systems/shared";
 // GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown`; consumers in shared use
 // the duck-typed `GroundItemSystemDuck` from `types/death/death-types`.
-import type { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+// SystemMap entry below typed as `unknown`; consumers in shared use
+// the duck-typed `ZoneDetectionSystemDuck` from death-types.
 import type { PersistenceSystem } from "../systems/server/PersistenceSystem";
 import type { TerrainSystem } from "../systems/shared/world/TerrainSystem";
 // TownSystem migrated to @hyperforge/hyperscape (2026-04-25).
@@ -152,7 +154,7 @@ export interface SystemMap {
   "mob-npc-spawner": unknown;
   "station-spawner": unknown;
   "item-spawner": unknown;
-  "zone-detection": ZoneDetectionSystem;
+  "zone-detection": unknown;
 
   // Terrain & world
   terrain: TerrainSystem;

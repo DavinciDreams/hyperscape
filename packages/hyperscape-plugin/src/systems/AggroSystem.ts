@@ -37,8 +37,8 @@ import {
   type TileCoord,
   World,
   worldToTile,
-  ZoneDetectionSystem,
 } from "@hyperforge/shared";
+import { ZoneDetectionSystem } from "./ZoneDetectionSystem.js";
 
 /**
  * Tolerance state for a player in a region.

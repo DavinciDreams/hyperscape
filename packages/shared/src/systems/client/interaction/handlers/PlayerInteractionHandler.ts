@@ -22,7 +22,8 @@ import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE, MESSAGE_TYPES } from "../constants";
 import { getCombatLevelColor } from "../utils/combatLevelColor";
 import { calculateCombatLevel } from "../../../../utils/game/CombatLevelCalculator";
-import type { ZoneDetectionSystem } from "../../../shared/death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { ZoneDetectionSystemDuck } from "../../../../types/death/death-types";
 
 export class PlayerInteractionHandler extends BaseInteractionHandler {
   /**
@@ -162,7 +163,9 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     if (!position) return false;
 
     // Use ZoneDetectionSystem
-    const zoneSystem = this.world.getSystem("zone-detection");
+    const zoneSystem = this.world.getSystem("zone-detection") as unknown as
+      | ZoneDetectionSystemDuck
+      | undefined;
     if (!zoneSystem) {
       // Fallback: no zone system = safe (conservative)
       return false;
@@ -182,7 +185,9 @@ export class PlayerInteractionHandler extends BaseInteractionHandler {
     if (!position) return false;
 
     // Use ZoneDetectionSystem
-    const zoneSystem = this.world.getSystem("zone-detection");
+    const zoneSystem = this.world.getSystem("zone-detection") as unknown as
+      | ZoneDetectionSystemDuck
+      | undefined;
     if (!zoneSystem) {
       return false;
     }

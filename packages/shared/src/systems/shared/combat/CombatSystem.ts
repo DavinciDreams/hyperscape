@@ -91,7 +91,8 @@ import {
   isPlayerDamageHandler,
   isMobEntity,
 } from "../../../utils/typeGuards";
-import { ZoneDetectionSystem } from "../death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
+import type { ZoneDetectionSystemDuck } from "../../../types/death/death-types";
 import { tileChebyshevDistance } from "../movement/TileSystem";
 
 // Ranged/Magic combat services (F2P Phase 1)
@@ -153,7 +154,7 @@ export class CombatSystem extends SystemBase {
 
   // OPTIMIZATION: Cache frequently used systems to avoid getSystem() lookups in hot paths
   private prayerSystem?: PrayerSystemLike | null;
-  private zoneDetectionSystem?: ZoneDetectionSystem | null;
+  private zoneDetectionSystem?: ZoneDetectionSystemDuck | null;
   private _systemsCached = false;
 
   // Public for GameTickProcessor access during tick processing
@@ -490,7 +491,9 @@ export class CombatSystem extends SystemBase {
       (this.world.getSystem("prayer") as unknown as PrayerSystemLike | null) ??
       null;
     this.zoneDetectionSystem =
-      this.world.getSystem<ZoneDetectionSystem>("zone-detection") ?? null;
+      (this.world.getSystem(
+        "zone-detection",
+      ) as unknown as ZoneDetectionSystemDuck | null) ?? null;
     this._systemsCached = true;
 
     // Cache PlayerSystem into PlayerDamageHandler for damage application

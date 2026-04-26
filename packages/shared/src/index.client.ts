@@ -931,7 +931,7 @@ export {
 
 // ZoneVisualsSystem (client-only)
 export { Chat as ChatSystem } from "./systems/shared/presentation/Chat";
-export { ZoneDetectionSystem } from "./systems/shared/death/ZoneDetectionSystem";
+// ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
 export type { WorldArea } from "./types/world/world-types";
 export { getEffectiveWorldAreas } from "./world-areas";
 
@@ -1157,13 +1157,20 @@ export type {
 export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
 // (InteractionType already re-exported earlier in this file as a value)
 
-// GroundItemSystem deps — re-exported for the client bundle.
+// GroundItemSystem + ZoneDetectionSystem deps — re-exported for the
+// client bundle.
 export type {
   GroundItemOptions,
   GroundItemData,
   GroundItemPileData,
   GroundItemSystemDuck,
+  ZoneDetectionSystemDuck,
 } from "./types/death/death-types";
+export { getZoneByPosition } from "./data/world-structure";
+export type { ZoneData } from "./data/world-structure";
+export type { WildernessBoundary } from "./types/world/world-types";
+export { ZoneType } from "./types/death/death-types";
+export type { ZoneProperties } from "./types/death/death-types";
 export type { ItemEntityConfig } from "./types/entities";
 export { msToTicks } from "./utils/game/CombatCalculations";
 export { getUntradeableDespawnTicks } from "./data/live/combat-live";
