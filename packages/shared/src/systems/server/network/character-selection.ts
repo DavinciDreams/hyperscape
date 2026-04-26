@@ -942,7 +942,7 @@ export async function handleEnterWorld(
   // Check if player logged out inside a combat arena (server restart edge case)
   // If so, teleport them to the duel arena lobby spawn point
   const { isPositionInsideCombatArena, getDuelArenaConfig } =
-    await import("@hyperforge/shared");
+    await import("../../../data/duel-manifest");
 
   // Duel harness bots should always begin from the normal duel arena lobby.
   if (isLoadTestBot && isDuelBot) {
@@ -1173,8 +1173,9 @@ export async function handleEnterWorld(
     world.emit(EventType.PLAYER_JOINED, {
       playerId: spawnedPlayer.data.id as string,
       userId: characterId || undefined,
-      player:
-        spawnedPlayer as unknown as import("../../../entities/player/PlayerLocal").PlayerLocal,
+      // PlayerLocal migrated to @hyperforge/hyperscape (2026-04-26).
+      // Event payload accepts `unknown` (PlayerLocal in plugin); cast.
+      player: spawnedPlayer as never,
       equipment: equipmentRows,
       inventory: inventoryRows,
       isLoadTestBot,

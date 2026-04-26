@@ -41,8 +41,8 @@ export type {
 export { Entity } from "./entities/Entity";
 export type { EventCallback } from "./entities/Entity";
 // MobEntity migrated to @hyperforge/hyperscape (2026-04-26).
-export { PlayerLocal } from "./entities/player/PlayerLocal";
-export { PlayerRemote } from "./entities/player/PlayerRemote";
+// PlayerLocal, PlayerRemote migrated to
+// @hyperforge/hyperscape (2026-04-26).
 
 // Export System class from core systems
 export { System } from "./systems/shared";
@@ -1199,7 +1199,27 @@ export {
 export {
   AnimationLOD,
   getCameraPosition,
+  ANIMATION_LOD_PRESETS,
 } from "./utils/rendering/AnimationLOD";
+export {
+  DistanceFadeController,
+  ENTITY_FADE_CONFIGS,
+  FadeState,
+} from "./utils/rendering/DistanceFade";
+export { UIRenderer } from "./utils/rendering";
+export { MobInstancedRenderer } from "./utils/rendering/InstancedMeshManager";
+export type {
+  MobAnimationState,
+  MobInstancedHandle,
+} from "./types/rendering/nodes";
+export { getCameraSystem } from "./utils/SystemUtils";
+export type {
+  CameraSystem,
+  PlayerEffect,
+  VRMHooks,
+} from "./types/systems/physics";
+export { essentialEmotes } from "./data/playerEmotes";
+export { getPlayerRenderDistance } from "./data/live/distance-live";
 export { RAYCAST_PROXY } from "./systems/client/interaction/constants";
 
 // Engine ECS — public API for registering entity types.
@@ -1237,8 +1257,22 @@ export { worldAreasRegistry } from "./world-areas";
 export { SHOP_ITEMS } from "./data/items";
 export {
   getEntitiesSystem,
+  getSystem,
   getSystem as getSystemUtil,
 } from "./utils/SystemUtils";
+export { clamp } from "./utils/MathUtils";
+export { vector3ToPxVec3 } from "./utils/physics/PhysicsUtils";
+export { ANIMATION_LOD_ALWAYS_UPDATE } from "./utils/rendering/AnimationLOD";
+export { MeshStandardNodeMaterial } from "./extras/three/three";
+export type {
+  PlayerEntityData,
+  PlayerEntityProperties,
+} from "./types/entities/entities";
+export type {
+  EquipmentComponent,
+  PrayerComponent,
+} from "./types/entities/entity-types";
+export type { Vector3Like, QuaternionLike } from "./types/systems/physics";
 export type {
   BankTransaction,
   PlayerBankStorage,

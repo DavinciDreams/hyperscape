@@ -93,7 +93,7 @@ export const ENTITY_FADE_CONFIGS = {
   },
 };
 
-export const enum FadeState {
+export enum FadeState {
   VISIBLE = 0,
   FADING = 1,
   CULLED = 2,

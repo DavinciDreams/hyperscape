@@ -15,10 +15,10 @@
  * @public
  */
 
-import * as THREE from "../../extras/three/three";
-import { Layers } from "../../physics/Layers";
-import { getPhysX, waitForPhysX } from "../../physics/PhysXManager";
-import type { PhysicsHandle } from "../../systems/shared";
+import * as THREE from "three";
+import { Layers } from "@hyperforge/shared";
+import { getPhysX, waitForPhysX } from "@hyperforge/shared";
+import type { PhysicsHandle } from "@hyperforge/shared";
 import type {
   ActorHandle,
   PxMaterial,
@@ -27,9 +27,9 @@ import type {
   PxCapsuleGeometry,
   PxShape,
   PxVec3,
-} from "../../types/systems/physics";
-import { vector3ToPxVec3 } from "../../utils/physics/PhysicsUtils";
-import type { World } from "../../core/World";
+} from "@hyperforge/shared";
+import { vector3ToPxVec3 } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 
 const UP = new THREE.Vector3(0, 1, 0);
 

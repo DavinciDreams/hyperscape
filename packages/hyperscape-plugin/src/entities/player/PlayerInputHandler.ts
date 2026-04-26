@@ -11,14 +11,11 @@
  * @public
  */
 
-import { EventType } from "../../types/events";
-import type { ControlBinding, TouchInfo } from "../../types/index";
-import type {
-  PlayerStickState,
-  PlayerTouch,
-} from "../../types/systems/physics";
-import { getSystem } from "../../utils/SystemUtils";
-import type { World } from "../../core/World";
+import { EventType } from "@hyperforge/shared";
+import type { ControlBinding, TouchInfo } from "@hyperforge/shared";
+import type { PlayerStickState, PlayerTouch } from "@hyperforge/shared";
+import { getSystem } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 
 // Constants for control priorities
 const ControlPriorities = {

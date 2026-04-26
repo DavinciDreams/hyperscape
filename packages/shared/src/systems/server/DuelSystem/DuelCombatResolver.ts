@@ -15,7 +15,25 @@
  */
 
 import type { World, StakedItem } from "../../../index";
-import { EventType, PlayerEntity } from "../../../index";
+import { EventType } from "../../../index";
+
+// PlayerEntity migrated to @hyperforge/hyperscape (2026-04-26).
+// Detect structurally — PlayerEntity has `clearDeathState`.
+interface PlayerEntity {
+  readonly id: string;
+  clearDeathState(): void;
+  resetDeathState(): void;
+  setHealth(n: number): void;
+  getMaxHealth(): number;
+  setStamina(n: number): void;
+  markNetworkDirty(): void;
+}
+function isPlayerEntity(entity: unknown): entity is PlayerEntity {
+  if (!entity || typeof entity !== "object") return false;
+  return (
+    typeof (entity as Record<string, unknown>).clearDeathState === "function"
+  );
+}
 import type { ServerDuelSession } from "./DuelSessionManager";
 import { AuditLogger, Logger } from "../network/services";
 import { LOBBY_SPAWN_WINNER, LOBBY_SPAWN_LOSER } from "./config";
@@ -484,7 +502,7 @@ export class DuelCombatResolver {
   ): void {
     // Clear death state using PlayerEntity helper method (Law of Demeter)
     const playerEntity = this.world.entities?.get?.(playerId);
-    if (playerEntity instanceof PlayerEntity) {
+    if (isPlayerEntity(playerEntity)) {
       playerEntity.resetDeathState();
 
       // Restore health directly (more reliable than relying on event chain)

@@ -14,12 +14,12 @@
  * @public
  */
 
-import * as THREE from "../../extras/three/three";
-import { Emotes } from "../../data/playerEmotes";
-import { EventType } from "../../types/events";
-import type { ClientLoader, LoadedAvatar } from "../../types/index";
-import type { VRMHooks } from "../../types/systems/physics";
-import type { World } from "../../core/World";
+import * as THREE from "three";
+import { Emotes } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import type { ClientLoader, LoadedAvatar } from "@hyperforge/shared";
+import type { VRMHooks } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 
 interface AvatarInstance {
   destroy(): void;

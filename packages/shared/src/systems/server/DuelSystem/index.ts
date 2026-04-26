@@ -25,7 +25,6 @@
 import type { World } from "../../../index";
 import {
   EventType,
-  PlayerEntity,
   getDuelArenaConfig,
   isPositionInsideCombatArena,
   type DuelRules,
@@ -1357,8 +1356,20 @@ export class DuelSystem {
    * OSRS-accurate: Players always start duels at full stats
    */
   private restorePlayerStats(playerId: string): void {
-    const playerEntity = this.world.entities?.get?.(playerId);
-    if (!(playerEntity instanceof PlayerEntity)) return;
+    // PlayerEntity migrated to @hyperforge/hyperscape (2026-04-26).
+    // Duck-type the surface inline since this is the only ref.
+    const playerEntity = this.world.entities?.get?.(playerId) as unknown as
+      | {
+          clearDeathState(): void;
+          setHealth(n: number): void;
+          getMaxHealth(): number;
+          getComponent(name: string): { data?: { max?: number } } | null;
+          setStamina(n: number): void;
+          markNetworkDirty(): void;
+        }
+      | undefined;
+    if (!playerEntity || typeof playerEntity.clearDeathState !== "function")
+      return;
 
     // Restore health to max
     playerEntity.setHealth(playerEntity.getMaxHealth());

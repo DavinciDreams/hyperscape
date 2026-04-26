@@ -61,12 +61,11 @@ import {
   type PlayerCore as Player,
   type PlayerAttackStyleState,
   type PlayerEnterEvent,
-  type PlayerEntity,
   type PlayerEntityLike,
   PlayerIdMapper,
   type PlayerLeaveEvent,
   type PlayerLevelUpEvent,
-  type PlayerLocal,
+  // PlayerLocal moved — import from local plugin path below
   PlayerMigration,
   type PlayerSpawnData,
   type Position3D,
@@ -80,6 +79,8 @@ import {
 import * as THREE from "three";
 import { EatDelayManager } from "./EatDelayManager.js";
 import { BuryDelayManager } from "./BuryDelayManager.js";
+import type { PlayerEntity } from "../entities/player/PlayerEntity.js";
+import type { PlayerLocal } from "../entities/player/PlayerLocal.js";
 // CombatSystem still in shared — typed via duck at callsite (only
 // 2 methods are touched: `isPlayerOnAttackCooldown` + `addAttackDelay`,
 // both used by `applyEatAttackDelay`).

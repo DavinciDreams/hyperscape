@@ -69,12 +69,12 @@
  */
 
 import type PhysX from "@hyperforge/physx-js-webidl";
-import { createNode } from "../../extras/three/createNode";
-import { Layers } from "../../physics/Layers";
-import { Emotes, essentialEmotes } from "../../data/playerEmotes";
-import THREE from "../../extras/three/three";
+import { createNode } from "@hyperforge/shared";
+import { Layers } from "@hyperforge/shared";
+import { Emotes, essentialEmotes } from "@hyperforge/shared";
+import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { UI, UIText, UIView } from "../../nodes";
+import { UI, UIText, UIView } from "@hyperforge/shared";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local shapes (mirrors `nodes/HealthBar.ts` pattern).
 interface HealthBarHandle {
@@ -92,18 +92,18 @@ interface HealthBarsSystem {
     maxHealth: number,
   ) => HealthBarHandle | null;
 }
-import { getPhysX, waitForPhysX } from "../../physics/PhysXManager";
-import type { PhysicsHandle } from "../../systems/shared";
-import type { TerrainSystem } from "../../systems/shared";
+import { getPhysX, waitForPhysX } from "@hyperforge/shared";
+import type { PhysicsHandle } from "@hyperforge/shared";
+import type { TerrainSystem } from "@hyperforge/shared";
 import type {
-  Player,
+  PlayerCore as Player,
   PlayerCombatData,
   PlayerDeathData,
   PlayerEquipmentItems,
   PlayerHealth,
   Skills,
-} from "../../types/core/core";
-import { EventType } from "../../types/events";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 import {
   ClientLoader,
   ControlBinding,
@@ -111,7 +111,7 @@ import {
   EntityData,
   LoadedAvatar,
   TouchInfo,
-} from "../../types/index";
+} from "@hyperforge/shared";
 import type {
   ActorHandle,
   PlayerStickState,
@@ -125,21 +125,21 @@ import type {
   QuaternionLike,
   Vector3Like,
   VRMHooks,
-} from "../../types/systems/physics";
-import type { HotReloadable } from "../../types";
+} from "@hyperforge/shared";
+import type { HotReloadable } from "@hyperforge/shared";
 
-import { vector3ToPxVec3 } from "../../utils/physics/PhysicsUtils";
-import { getSystem } from "../../utils/SystemUtils";
-import type { World } from "../../core/World";
-import { Entity } from "../Entity";
-import { getCombatTimeoutTicks } from "../../data/live/combat-live";
-import { ticksToMs } from "../../utils/game/CombatCalculations";
+import { vector3ToPxVec3 } from "@hyperforge/shared";
+import { getSystem } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import { Entity } from "@hyperforge/shared";
+import { getCombatTimeoutTicks } from "@hyperforge/shared";
+import { ticksToMs } from "@hyperforge/shared";
 import {
   AnimationLOD,
   ANIMATION_LOD_ALWAYS_UPDATE,
   ANIMATION_LOD_PRESETS,
   getCameraPosition,
-} from "../../utils/rendering/AnimationLOD";
+} from "@hyperforge/shared";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -199,10 +199,9 @@ interface PhysXGlobal {
 }
 
 // Camera system accessor - use the proper utility function
-import {
-  getCameraSystem as getCameraSystemUtil,
-  type CameraSystem,
-} from "../../utils/SystemUtils";
+import { getCameraSystem as getCameraSystemUtil } from "@hyperforge/shared";
+
+type CameraSystem = NonNullable<ReturnType<typeof getCameraSystemUtil>>;
 
 function getCameraSystem(world: World): CameraSystem | null {
   return getCameraSystemUtil(world);

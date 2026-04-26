@@ -2320,8 +2320,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.world.emit(EventType.PLAYER_JOINED, {
           playerId: reconnectedPlayerId,
           userId: reconnectedPlayerId,
-          player:
-            socket.player as unknown as import("../../../index").PlayerLocal,
+          // PlayerLocal migrated to @hyperforge/hyperscape (2026-04-26).
+          player: socket.player as never,
           isReconnect: true,
         });
 

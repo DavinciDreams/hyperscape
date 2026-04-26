@@ -54,19 +54,19 @@ import type {
   HotReloadable,
   NetworkData,
   LoadedAvatar,
-} from "../../types/index";
-import { DeathState } from "../../types/entities/entities";
-import { Emotes, essentialEmotes } from "../../data/playerEmotes";
-import type { World } from "../../core/World";
-import { createNode } from "../../extras/three/createNode";
-import { LerpQuaternion } from "../../extras/animation/LerpQuaternion";
-import { LerpVector3 } from "../../extras/animation/LerpVector3";
-import THREE from "../../extras/three/three";
+} from "@hyperforge/shared";
+import { DeathState } from "@hyperforge/shared";
+import { Emotes, essentialEmotes } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import { createNode } from "@hyperforge/shared";
+import { LerpQuaternion } from "@hyperforge/shared";
+import { LerpVector3 } from "@hyperforge/shared";
+import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { Entity } from "../Entity";
-import { Avatar, Group, Mesh, UI, UIView, UIText } from "../../nodes";
-import { EventType } from "../../types/events";
-import type { PlayerEffect, VRMHooks } from "../../types/systems/physics";
+import { Entity } from "@hyperforge/shared";
+import { Avatar, Group, Mesh, UI, UIView, UIText } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import type { PlayerEffect, VRMHooks } from "@hyperforge/shared";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local shapes (mirrors `nodes/HealthBar.ts` pattern).
 interface HealthBarHandle {
@@ -84,26 +84,26 @@ interface HealthBarsSystem {
     maxHealth: number,
   ) => HealthBarHandle | null;
 }
-import { getCombatTimeoutTicks } from "../../data/live/combat-live";
-import { getPlayerRenderDistance } from "../../data/live/distance-live";
-import { ticksToMs } from "../../utils/game/CombatCalculations";
+import { getCombatTimeoutTicks } from "@hyperforge/shared";
+import { getPlayerRenderDistance } from "@hyperforge/shared";
+import { ticksToMs } from "@hyperforge/shared";
 import {
   AnimationLOD,
   ANIMATION_LOD_PRESETS,
   getCameraPosition,
-} from "../../utils/rendering/AnimationLOD";
+} from "@hyperforge/shared";
 import {
   DistanceFadeController,
   ENTITY_FADE_CONFIGS,
   FadeState,
-} from "../../utils/rendering/DistanceFade";
-import { UIRenderer } from "../../utils/rendering/UIRenderer";
-import { MobInstancedRenderer } from "../../utils/rendering/InstancedMeshManager";
+} from "@hyperforge/shared";
+import { UIRenderer } from "@hyperforge/shared";
+import { MobInstancedRenderer } from "@hyperforge/shared";
 import type {
   MobAnimationState,
   MobInstancedHandle,
   VRMAvatarInstance,
-} from "../../types/rendering/nodes";
+} from "@hyperforge/shared";
 
 interface AvatarWithInstance {
   instance: {

@@ -59,26 +59,27 @@
  * @public
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { EntityData, Vector3 } from "../../types";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import type { EntityData, Vector3 } from "@hyperforge/shared";
 import type {
   EntityInteractionData,
   PlayerEntityData,
   PlayerCombatStyle,
   PlayerEntityProperties,
-} from "../../types/entities";
+} from "@hyperforge/shared";
 import type {
   CombatBonuses,
   EquipmentComponent,
   InventoryItem,
-  Player,
+  PlayerCore as Player,
   PrayerComponent,
   StatsComponent,
-} from "../../types/core/core";
-import { EntityType, InteractionType, DeathState } from "../../types/entities";
-import { clamp } from "../../utils/game/EntityUtils";
-import { CombatantEntity, type CombatantConfig } from "../CombatantEntity";
+} from "@hyperforge/shared";
+import { EntityType, InteractionType, DeathState } from "@hyperforge/shared";
+import { clamp } from "@hyperforge/shared";
+import { CombatantEntity, type CombatantConfig } from "@hyperforge/shared";
 
 export class PlayerEntity extends CombatantEntity {
   // Player interface data - stored privately

@@ -5,7 +5,10 @@
  */
 
 import { Entity } from "../../entities/Entity";
-import { PlayerLocal } from "../../entities/player/PlayerLocal";
+// PlayerLocal migrated to @hyperforge/hyperscape (2026-04-26). Use a
+// loose duck-type for the event payload — any PlayerLocal instance
+// satisfies it. The actual class lives in plugin.
+type PlayerLocal = unknown;
 import { Skills, InventoryItem, Position3D } from "../core/core";
 import type { Item } from "../core/core";
 import type { EntitySpawnedEvent } from "../systems/system-interfaces";
@@ -396,7 +399,7 @@ export interface PlayerRespawnRequestEvent {
 export interface PlayerRegisterEvent {
   id: string;
   playerId: string;
-  entity: import("../../entities/player/PlayerLocal").PlayerLocal;
+  entity: PlayerLocal;
 }
 
 export interface UIMessageEvent {

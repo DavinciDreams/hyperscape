@@ -1,8 +1,4 @@
 /**
- * Player Entities
- * Player character entity classes
+ * Player Entities — all migrated to @hyperforge/hyperscape (2026-04-26).
  */
-
-export * from "./PlayerEntity";
-export * from "./PlayerLocal";
-export * from "./PlayerRemote";
+export {};

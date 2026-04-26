@@ -31,14 +31,11 @@ import type {
   PluginContextBase,
   PluginFactory,
 } from "@hyperforge/gameplay-framework";
-import {
-  PlayerEntity,
-  PlayerLocal,
-  PlayerRemote,
-  registerEntityType,
-  type World,
-} from "@hyperforge/shared";
+import { registerEntityType, type World } from "@hyperforge/shared";
 import { MobEntity } from "./entities/npc/MobEntity.js";
+import { PlayerEntity } from "./entities/player/PlayerEntity.js";
+import { PlayerLocal } from "./entities/player/PlayerLocal.js";
+import { PlayerRemote } from "./entities/player/PlayerRemote.js";
 // Entity classes that migrated to plugin (2026-04-26 follow-up to
 // the Entities decoupling refactor).
 import { AltarEntity } from "./entities/world/AltarEntity.js";

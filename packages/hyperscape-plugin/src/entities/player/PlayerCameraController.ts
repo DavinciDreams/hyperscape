@@ -12,9 +12,9 @@
  * @public
  */
 
-import * as THREE from "../../extras/three/three";
-import { EventType } from "../../types/events";
-import type { World } from "../../core/World";
+import * as THREE from "three";
+import { EventType } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 
 const DEFAULT_CAM_HEIGHT = 1.2;
 const DEG2RAD = Math.PI / 180;

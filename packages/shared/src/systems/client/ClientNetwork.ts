@@ -120,7 +120,40 @@ import { uuid } from "../../utils";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { PendingActionTracker } from "./network/PendingActionTracker";
 import { isStreamingLikeViewport } from "../../runtime/clientViewportMode";
-import { PlayerLocal } from "../../entities/player/PlayerLocal";
+// PlayerLocal migrated to @hyperforge/hyperscape (2026-04-26).
+// Detect "is local player" structurally — PlayerLocal exposes
+// `updateServerPosition` / `push` / `totalWeight` that PlayerRemote
+// (and other entities) don't.
+interface PlayerLocal {
+  readonly id: string;
+  position: {
+    set(x: number, y: number, z: number): void;
+    x: number;
+    y: number;
+    z: number;
+  };
+  updateServerPosition(x: number, y: number, z: number): void;
+  totalWeight: number;
+  push(force: { x: number; y: number; z: number }): void;
+  modify(changes: Record<string, unknown>): void;
+  teleport(
+    position: { x: number; y: number; z: number },
+    rotationY?: number,
+  ): void;
+  base?: {
+    quaternion: { set(x: number, y: number, z: number, w: number): void };
+  };
+  data: Record<string, unknown>;
+}
+function isPlayerLocal(entity: unknown): entity is PlayerLocal {
+  if (!entity || typeof entity !== "object") return false;
+  const e = entity as Record<string, unknown>;
+  return (
+    typeof e.updateServerPosition === "function" &&
+    typeof e.push === "function" &&
+    typeof e.totalWeight === "number"
+  );
+}
 import { TileInterpolator } from "./TileInterpolator";
 import { type TileCoord } from "../shared/movement/TileSystem"; // Internal import within shared package
 
@@ -1375,7 +1408,7 @@ export class ClientNetwork extends SystemBase {
           entityData.owner === this.id
         ) {
           const local = this.world.entities.get(entityData.id);
-          if (local instanceof PlayerLocal) {
+          if (isPlayerLocal(local)) {
             // Force the position immediately
             const pos = entityData.position as [number, number, number];
             local.position.set(pos[0], pos[1], pos[2]);
@@ -1583,7 +1616,7 @@ export class ClientNetwork extends SystemBase {
           );
           pos = [pos[0], 50, pos[2]];
         }
-        if (newEntity instanceof PlayerLocal) {
+        if (isPlayerLocal(newEntity)) {
           newEntity.position.set(pos[0], pos[1], pos[2]);
           newEntity.updateServerPosition(pos[0], pos[1], pos[2]);
         }
@@ -2521,7 +2554,7 @@ export class ClientNetwork extends SystemBase {
     if (
       localPlayer &&
       data.playerId === localPlayer.id &&
-      localPlayer instanceof PlayerLocal
+      isPlayerLocal(localPlayer)
     ) {
       localPlayer.totalWeight = data.weight;
       // Emit event for UI components (e.g., EquipmentPanel) to update weight display
@@ -4658,7 +4691,7 @@ export class ClientNetwork extends SystemBase {
     // Check if this is the local player
     const localPlayer = this.world.entities.player;
     const isLocalPlayer =
-      localPlayer instanceof PlayerLocal && localPlayer.id === data.playerId;
+      isPlayerLocal(localPlayer) && localPlayer.id === data.playerId;
 
     // Convert rotation angle to quaternion if provided
     // Server sends angle as atan2(dx, dz) - need to add PI for VRM models
@@ -4794,7 +4827,7 @@ export class ClientNetwork extends SystemBase {
 
   onPlayerPush = (data: { force: [number, number, number] }) => {
     const player = this.world.entities.player;
-    if (player instanceof PlayerLocal) {
+    if (isPlayerLocal(player)) {
       const force = _v3_1.set(data.force[0], data.force[1], data.force[2]);
       player.push(force);
     }
@@ -4928,7 +4961,7 @@ export class ClientNetwork extends SystemBase {
     serverTick: number;
   }) => {
     const localPlayer = this.world.entities.player;
-    if (!(localPlayer instanceof PlayerLocal)) return;
+    if (!isPlayerLocal(localPlayer)) return;
 
     const pos = _v3_1.set(data.position[0], data.position[1], data.position[2]);
 
