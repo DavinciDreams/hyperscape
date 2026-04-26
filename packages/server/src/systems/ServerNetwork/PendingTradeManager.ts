@@ -1,14 +1,10 @@
 /**
  * @deprecated Re-export shim.
  *
- * Relocated to
- * `packages/shared/src/systems/server/network/PendingTradeManager.ts` as
- * part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 1 — zero-dep leaves).
- *
- * Uses `ITileMovementManager` (narrow interface in shared/interfaces.ts) so
- * shared has no dependency on the concrete TileMovementManager implementation.
- * Delete this shim after Step 8.
+ * `PendingTradeManager` relocated to `@hyperforge/hyperscape`
+ * (Phase D1 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26). Server
+ * callers should import directly from `@hyperforge/hyperscape` once
+ * the shim is removed in a follow-up cleanup.
  */
 
-export { PendingTradeManager } from "../../../../shared/src/systems/server/network/PendingTradeManager";
+export { PendingTradeManager } from "@hyperforge/hyperscape";

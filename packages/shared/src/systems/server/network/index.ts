@@ -118,7 +118,17 @@ import type { ProcessingHandlerContext } from "./handlers/processing";
 import { PendingAttackManager } from "./PendingAttackManager";
 import { PendingGatherManager } from "./PendingGatherManager";
 import { PendingCookManager } from "./PendingCookManager";
-import { PendingTradeManager } from "./PendingTradeManager";
+// PendingTradeManager migrated to @hyperforge/hyperscape (Phase D1,
+// 2026-04-26). ServerNetwork resolves the instance via
+// `world.pendingTradeManager` at use-site (tick callback +
+// disconnect handler). Duck-typed locally to keep shared off the
+// plugin dep graph; plugin's concrete class structurally satisfies
+// this shape.
+interface PendingTradeManager {
+  processTick(): void;
+  onPlayerDisconnect(playerId: string): void;
+  cancelPendingTrade(playerId: string): void;
+}
 import { PendingDuelChallengeManager } from "./PendingDuelChallengeManager";
 import { FollowManager } from "./FollowManager";
 import { FaceDirectionManager } from "./FaceDirectionManager";
@@ -320,7 +330,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private pendingAttackManager!: PendingAttackManager;
   private pendingGatherManager!: PendingGatherManager;
   private pendingCookManager!: PendingCookManager;
-  private pendingTradeManager!: PendingTradeManager;
+  // PendingTradeManager removed (Phase D1) — plugin owns the
+  // lifecycle. ServerNetwork resolves via `world.pendingTradeManager`.
   private pendingDuelChallengeManager!: PendingDuelChallengeManager;
   private followManager!: FollowManager;
   // TradingSystem field removed (2026-04-26) — plugin onEnable now owns
@@ -1002,25 +1013,23 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "followManager",
     );
 
-    // Pending trade manager — server-authoritative
-    // "walk to player and trade" system. Constructor resolves
-    // `world.tileMovement` (pinned in ServerNetwork constructor,
-    // Phase B4) instead of taking the service as a parameter.
-    this.pendingTradeManager = new PendingTradeManager(this.world);
-
-    // Register pending trade processing (same priority as movement)
+    // Pending trade manager — migrated to @hyperforge/hyperscape
+    // (Phase D1). Plugin onEnable owns construction + pinning to
+    // `world.pendingTradeManager`. ServerNetwork registers the tick
+    // callback here; the callback resolves the instance lazily so
+    // the order between `world.init()` (this code path) and
+    // plugin.onEnable doesn't matter — by the first tick fire,
+    // plugin has pinned the instance.
     this.tickSystem.onTick(
       () => {
-        this.pendingTradeManager.processTick();
+        const ptm = (
+          this.world as { pendingTradeManager?: PendingTradeManager }
+        ).pendingTradeManager;
+        ptm?.processTick();
       },
       TickPriority.MOVEMENT,
       "pendingTrade",
     );
-
-    // Store pending trade manager on world so trade handlers can access it
-    (
-      this.world as { pendingTradeManager?: PendingTradeManager }
-    ).pendingTradeManager = this.pendingTradeManager;
 
     // Pending duel challenge manager — server-authoritative
     // "walk to player and challenge" system. Constructor resolves
@@ -1737,7 +1746,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.followManager.onPlayerDisconnect(event.playerId);
       this.pendingGatherManager.onPlayerDisconnect(event.playerId);
       this.pendingCookManager.onPlayerDisconnect(event.playerId);
-      this.pendingTradeManager.onPlayerDisconnect(event.playerId);
+      const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
+        .pendingTradeManager;
+      ptm?.onPlayerDisconnect(event.playerId);
       this.pendingDuelChallengeManager.onPlayerDisconnect(event.playerId);
       const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
       duelSystem?.onPlayerDisconnect(event.playerId);
@@ -3023,7 +3034,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   ): void {
     this.pendingAttackManager.cancelPendingAttack(playerId);
     this.followManager.stopFollowing(playerId);
-    this.pendingTradeManager.cancelPendingTrade(playerId);
+    const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
+      .pendingTradeManager;
+    ptm?.cancelPendingTrade(playerId);
     this.pendingDuelChallengeManager.cancelPendingChallenge(playerId);
     const homeTeleportManager = getHomeTeleportManager();
     if (homeTeleportManager?.isCasting(playerId)) {

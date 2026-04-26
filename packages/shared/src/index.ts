@@ -2165,6 +2165,13 @@ export { Logger as NetworkLogger } from "./systems/server/network/services/Logge
 // ServerSocket type — needed by migrated ScriptQueue (the queued
 // player/NPC action types reference ServerSocket).
 export type { ServerSocket } from "./systems/server/network/server-types";
+// Substrate interfaces — needed by plugin-side game managers
+// (PendingTrade/Duel/Attack/Cook/Gather, Follow) that resolve
+// `world.tileMovement` etc. at construction time.
+export type { ITileMovementService } from "./systems/server/network/substrate/tile-movement-service";
+export type { ISpatialIndex } from "./systems/server/network/substrate/spatial-index";
+export type { IBroadcastService } from "./systems/server/network/substrate/broadcast-service";
+export type { IRegionSubscriptionService } from "./systems/server/network/substrate/region-subscription-service";
 export {
   InMemorySessionStore,
   type SessionStore,

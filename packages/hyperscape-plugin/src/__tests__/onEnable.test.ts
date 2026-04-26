@@ -31,6 +31,7 @@ interface FakeWorld {
   off(event: string, handler: (...args: unknown[]) => void): void;
   tradingSystem?: unknown;
   duelSystem?: unknown;
+  pendingTradeManager?: unknown;
   // DuelSystem registration also writes to `systemsByName` so combat
   // can look it up via `world.getSystem("duel")`.
   systemsByName: Map<string, unknown>;
@@ -40,6 +41,17 @@ interface FakeWorld {
   collision: {
     addFlags(x: number, z: number, flag: number): void;
     removeFlags(x: number, z: number, flag: number): void;
+  };
+  // PendingTradeManager constructor reads `world.tileMovement`
+  // (Phase B4 substrate). A no-op stub satisfies the lookup so the
+  // registration-contract test doesn't need a real ServerNetwork.
+  tileMovement: {
+    movePlayerToward(playerId: string, target: unknown): void;
+    stopPlayer(playerId: string): void;
+    getIsRunning(playerId: string): boolean;
+    findClosestWalkableTile(target: unknown): null;
+    setArrivalEmote(playerId: string, emote: string): void;
+    getPreviousTile(playerId: string): { x: number; z: number };
   };
 }
 
@@ -54,6 +66,20 @@ function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
       },
       removeFlags(_x, _z, _flag) {
         // no-op
+      },
+    },
+    tileMovement: {
+      movePlayerToward(_playerId, _target) {},
+      stopPlayer(_playerId) {},
+      getIsRunning(_playerId) {
+        return false;
+      },
+      findClosestWalkableTile(_target) {
+        return null;
+      },
+      setArrivalEmote(_playerId, _emote) {},
+      getPreviousTile(_playerId) {
+        return { x: 0, z: 0 };
       },
     },
     register(name, Ctor) {
@@ -185,12 +211,13 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer, plus two extra
-    // disposers for the TradingSystem + DuelSystem teardown — both
-    // are instantiated + managed manually rather than via
-    // `world.register()` so they don't appear in `world.registered`
-    // but do appear in `scope.disposers`.
-    expect(scope.disposers.length).toBe(world.registered.length + 2);
+    // Every registration paired with a scope disposer, plus three
+    // extra disposers for manually-managed lifecycle systems:
+    // TradingSystem + DuelSystem + PendingTradeManager. They're
+    // instantiated via `new` (not `world.register()`) so they don't
+    // appear in `world.registered` but do appear in
+    // `scope.disposers`.
+    expect(scope.disposers.length).toBe(world.registered.length + 3);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {

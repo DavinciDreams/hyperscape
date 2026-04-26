@@ -18,7 +18,17 @@ import { sendToSocket, getPlayerId, getEntityPosition } from "../common";
 // `TradingSystem` interface in system-interfaces is the duck-type
 // contract — plugin's concrete class structurally satisfies it.
 import type { TradingSystem } from "../../../../../types/systems/system-interfaces";
-import type { PendingTradeManager } from "../../PendingTradeManager";
+// PendingTradeManager migrated to @hyperforge/hyperscape (Phase D1,
+// 2026-04-26). Duck-typed locally — only `queuePendingTrade` is
+// called from the trade handlers; plugin's concrete class
+// structurally satisfies this shape.
+interface PendingTradeManager {
+  queuePendingTrade(
+    playerId: string,
+    targetId: string,
+    onInRange: () => void,
+  ): void;
+}
 
 // ============================================================================
 // SHARED STATE

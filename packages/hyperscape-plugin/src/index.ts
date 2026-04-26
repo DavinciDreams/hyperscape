@@ -110,6 +110,7 @@ import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
 import { TradingSystem } from "./systems/TradingSystem/index.js";
 import { DuelSystem } from "./systems/DuelSystem/index.js";
+import { PendingTradeManager } from "./systems/PendingTradeManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -155,6 +156,11 @@ export {
   type QueuedScript,
   type ModalState,
 } from "./systems/ScriptQueue.js";
+
+// PendingTradeManager — consumed by `@hyperforge/server`'s
+// PendingTradeManager re-export shim. Migrated from
+// `@hyperforge/shared` (Phase D1, 2026-04-26).
+export { PendingTradeManager } from "./systems/PendingTradeManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -470,6 +476,25 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           tradingSystem.destroy();
           delete (ctx.world as { tradingSystem?: TradingSystem }).tradingSystem;
+        });
+
+        // PendingTradeManager — server-authoritative
+        // "walk to player and trade" state machine. Migrated to plugin
+        // 2026-04-26 (PLAN_ENGINE_API_EXTRACTION.md Phase D1) once
+        // the substrate ITileMovementService was pinned to
+        // `world.tileMovement` from ServerNetwork's constructor
+        // (Phase B4). Constructor reads `world.tileMovement` directly
+        // — by the time onEnable runs, it's populated in both server
+        // and PIE boot orders. ServerNetwork resolves
+        // `world.pendingTradeManager` lazily in its tick callback +
+        // disconnect handler.
+        const pendingTradeManager = new PendingTradeManager(ctx.world);
+        (
+          ctx.world as { pendingTradeManager?: PendingTradeManager }
+        ).pendingTradeManager = pendingTradeManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { pendingTradeManager?: PendingTradeManager })
+            .pendingTradeManager;
         });
 
         // Duel system — same manual-lifecycle pattern as
