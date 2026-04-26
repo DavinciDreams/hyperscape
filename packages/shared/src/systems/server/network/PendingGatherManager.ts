@@ -34,7 +34,7 @@ import {
   FOOTPRINT_SIZES,
 } from "../../../index";
 import { getGatheringRange } from "../../../data/live/gathering-live";
-import type { ITileMovementManager } from "./interfaces";
+import type { ITileMovementService } from "./substrate/tile-movement-service";
 
 /**
  * Pending gather request data
@@ -77,7 +77,7 @@ const PENDING_GATHER_TIMEOUT_TICKS = 20;
 
 export class PendingGatherManager {
   private world: World;
-  private tileMovementManager: ITileMovementManager;
+  private tileMovementManager: ITileMovementService;
   private sendFn: (name: string, data: unknown) => void;
 
   /** Map of playerId → pending gather data */
@@ -89,13 +89,20 @@ export class PendingGatherManager {
   /** Pre-allocated tile for footprint iteration to avoid per-check allocations */
   private readonly _tempFootprintTile: TileCoord = { x: 0, z: 0 };
 
-  constructor(
-    world: World,
-    tileMovementManager: ITileMovementManager,
-    sendFn: (name: string, data: unknown) => void,
-  ) {
+  /**
+   * Phase C (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): the tile-
+   * movement service is resolved from `world.tileMovement` instead of
+   * being passed at construction.
+   */
+  constructor(world: World, sendFn: (name: string, data: unknown) => void) {
+    const svc = (world as { tileMovement?: ITileMovementService }).tileMovement;
+    if (!svc) {
+      throw new Error(
+        "[PendingGatherManager] world.tileMovement not pinned — ensure ServerNetwork constructor ran before PendingGatherManager.",
+      );
+    }
     this.world = world;
-    this.tileMovementManager = tileMovementManager;
+    this.tileMovementManager = svc;
     this.sendFn = sendFn;
   }
 

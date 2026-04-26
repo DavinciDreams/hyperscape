@@ -14,7 +14,7 @@
 
 import type { World, TileCoord } from "../../../index";
 import { worldToTileInto, tilesWithinMeleeRange } from "../../../index";
-import type { ITileMovementManager } from "./interfaces";
+import type { ITileMovementService } from "./substrate/tile-movement-service";
 
 /** Duel challenge interaction range in tiles (1 = adjacent, like trading) */
 const DUEL_CHALLENGE_RANGE = 1;
@@ -36,10 +36,22 @@ export class PendingDuelChallengeManager {
   private readonly _playerTile: TileCoord = { x: 0, z: 0 };
   private readonly _targetTile: TileCoord = { x: 0, z: 0 };
 
-  constructor(
-    private world: World,
-    private tileMovementManager: ITileMovementManager,
-  ) {}
+  /**
+   * Phase C (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): the tile-
+   * movement service is resolved from `world.tileMovement` instead of
+   * being passed at construction.
+   */
+  private readonly tileMovementManager: ITileMovementService;
+
+  constructor(private world: World) {
+    const svc = (world as { tileMovement?: ITileMovementService }).tileMovement;
+    if (!svc) {
+      throw new Error(
+        "[PendingDuelChallengeManager] world.tileMovement not pinned — ensure ServerNetwork constructor ran before PendingDuelChallengeManager.",
+      );
+    }
+    this.tileMovementManager = svc;
+  }
 
   /**
    * Queue a pending duel challenge

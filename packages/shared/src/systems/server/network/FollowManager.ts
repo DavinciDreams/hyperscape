@@ -16,7 +16,7 @@
 
 import type { World, TileCoord } from "../../../index";
 import { tilesEqual, tileToWorldInto, worldToTileInto } from "../../../index";
-import type { ITileMovementManager } from "./interfaces";
+import type { ITileMovementService } from "./substrate/tile-movement-service";
 
 interface FollowState {
   followerId: string;
@@ -42,10 +42,22 @@ export class FollowManager {
     z: 0,
   };
 
-  constructor(
-    private world: World,
-    private tileMovementManager: ITileMovementManager,
-  ) {}
+  /**
+   * Phase C (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): the tile-
+   * movement service is resolved from `world.tileMovement` instead of
+   * being passed at construction.
+   */
+  private readonly tileMovementManager: ITileMovementService;
+
+  constructor(private world: World) {
+    const svc = (world as { tileMovement?: ITileMovementService }).tileMovement;
+    if (!svc) {
+      throw new Error(
+        "[FollowManager] world.tileMovement not pinned — ensure ServerNetwork constructor ran before FollowManager.",
+      );
+    }
+    this.tileMovementManager = svc;
+  }
 
   /**
    * Start following another player

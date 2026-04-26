@@ -823,11 +823,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "mobMovement",
     );
 
-    // Pending attack manager - server-authoritative tracking of "walk to mob and attack" actions
-    // This replaces unreliable client-side tracking with 100% reliable server-side logic
+    // Pending attack manager — server-authoritative tracking of
+    // "walk to mob and attack" actions. Constructor resolves
+    // `world.tileMovement` (Phase B4 pinning) instead of taking the
+    // service as a parameter.
     this.pendingAttackManager = new PendingAttackManager(
       this.world,
-      this.tileMovementManager,
       // getMobPosition helper - get from world entity (mobs spawned via MobNPCSpawnerSystem with gdd_* IDs)
       (mobId: string) => {
         const mobEntity = this.world.entities.get(mobId) as {
@@ -942,7 +943,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Uses same approach as PendingAttackManager: movePlayerToward with meleeRange=1 for cardinal-only
     this.pendingGatherManager = new PendingGatherManager(
       this.world,
-      this.tileMovementManager,
       (name, data) => this.broadcastManager.sendToAll(name, data),
     );
 
@@ -974,7 +974,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     };
     this.pendingCookManager = new PendingCookManager(
       this.world,
-      this.tileMovementManager,
       processingSystem,
     );
 
@@ -987,12 +986,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "pendingCook",
     );
 
-    // Follow manager - server-authoritative tracking of players following other players
-    // OSRS-style: follower walks behind leader, re-paths when leader moves
-    this.followManager = new FollowManager(
-      this.world,
-      this.tileMovementManager,
-    );
+    // Follow manager — server-authoritative tracking of players
+    // following other players. Constructor resolves
+    // `world.tileMovement` (Phase B4 pinning) instead of taking the
+    // service as a parameter.
+    this.followManager = new FollowManager(this.world);
 
     // Register follow processing (same priority as movement)
     // Pass tick number for OSRS-accurate 1-tick delay tracking
@@ -1004,12 +1002,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "followManager",
     );
 
-    // Pending trade manager - server-authoritative "walk to player and trade" system
-    // OSRS-style: if player clicks to trade someone far away, walk up first
-    this.pendingTradeManager = new PendingTradeManager(
-      this.world,
-      this.tileMovementManager,
-    );
+    // Pending trade manager — server-authoritative
+    // "walk to player and trade" system. Constructor resolves
+    // `world.tileMovement` (pinned in ServerNetwork constructor,
+    // Phase B4) instead of taking the service as a parameter.
+    this.pendingTradeManager = new PendingTradeManager(this.world);
 
     // Register pending trade processing (same priority as movement)
     this.tickSystem.onTick(
@@ -1025,11 +1022,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world as { pendingTradeManager?: PendingTradeManager }
     ).pendingTradeManager = this.pendingTradeManager;
 
-    // Pending duel challenge manager - server-authoritative "walk to player and challenge" system
-    // OSRS-style: if player clicks to challenge someone far away, walk up first
+    // Pending duel challenge manager — server-authoritative
+    // "walk to player and challenge" system. Constructor resolves
+    // `world.tileMovement` (Phase B4 pinning) instead of taking the
+    // service as a parameter.
     this.pendingDuelChallengeManager = new PendingDuelChallengeManager(
       this.world,
-      this.tileMovementManager,
     );
 
     // Register pending duel challenge processing (same priority as movement)

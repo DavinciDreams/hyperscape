@@ -28,7 +28,7 @@ import {
   type TileCoord,
 } from "../../../index";
 import { getGatheringRange } from "../../../data/live/gathering-live";
-import type { ITileMovementManager } from "./interfaces";
+import type { ITileMovementService } from "./substrate/tile-movement-service";
 
 /**
  * Fire type - matches the Fire interface from resource-processing-types
@@ -86,7 +86,7 @@ const PENDING_COOK_TIMEOUT_TICKS = 20;
 
 export class PendingCookManager {
   private world: World;
-  private tileMovementManager: ITileMovementManager;
+  private tileMovementManager: ITileMovementService;
   private fireRegistry: FireRegistry;
 
   /** Map of playerId → pending cook data */
@@ -99,17 +99,22 @@ export class PendingCookManager {
   /**
    * Create a new PendingCookManager.
    *
+   * Phase C (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): the tile-
+   * movement service is resolved from `world.tileMovement` instead of
+   * being passed at construction.
+   *
    * @param world - World instance for player lookups
-   * @param tileMovementManager - Movement manager for pathing
    * @param fireRegistry - Injected fire registry for dependency inversion
    */
-  constructor(
-    world: World,
-    tileMovementManager: ITileMovementManager,
-    fireRegistry: FireRegistry,
-  ) {
+  constructor(world: World, fireRegistry: FireRegistry) {
+    const svc = (world as { tileMovement?: ITileMovementService }).tileMovement;
+    if (!svc) {
+      throw new Error(
+        "[PendingCookManager] world.tileMovement not pinned — ensure ServerNetwork constructor ran before PendingCookManager.",
+      );
+    }
     this.world = world;
-    this.tileMovementManager = tileMovementManager;
+    this.tileMovementManager = svc;
     this.fireRegistry = fireRegistry;
   }
 

@@ -26,7 +26,7 @@ import {
   EventType,
   AttackType,
 } from "../../../index";
-import type { ITileMovementManager } from "./interfaces";
+import type { ITileMovementService } from "./substrate/tile-movement-service";
 
 interface PendingAttack {
   playerId: string;
@@ -55,14 +55,28 @@ export class PendingAttackManager {
   /** Pre-allocated target tile for processTick */
   private readonly _targetTile: TileCoord = { x: 0, z: 0 };
 
+  /**
+   * Phase C (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): the tile-
+   * movement service is resolved from `world.tileMovement` instead of
+   * being passed at construction.
+   */
+  private readonly tileMovementManager: ITileMovementService;
+
   constructor(
     private world: World,
-    private tileMovementManager: ITileMovementManager,
     private getMobPosition: (
       mobId: string,
     ) => { x: number; y: number; z: number } | null,
     private isMobAlive: (mobId: string) => boolean,
-  ) {}
+  ) {
+    const svc = (world as { tileMovement?: ITileMovementService }).tileMovement;
+    if (!svc) {
+      throw new Error(
+        "[PendingAttackManager] world.tileMovement not pinned — ensure ServerNetwork constructor ran before PendingAttackManager.",
+      );
+    }
+    this.tileMovementManager = svc;
+  }
 
   /**
    * Queue a pending attack for a player
