@@ -99,6 +99,7 @@ import { SocketManager } from "./socket-management";
 // them only by interface.
 import { PacketPriority } from "./BandwidthBudget";
 import { SpatialIndex } from "./SpatialIndex";
+import type { ISpatialIndex } from "./substrate/spatial-index";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
 import { InitializationManager } from "./initialization";
@@ -419,7 +420,21 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.spawn = getDefaultSpawn();
     this.maxUploadSize = 50; // Default 50MB upload limit
 
-    // Initialize managers will happen in init() after world.db is set
+    // Phase B1 (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26): construct
+    // engine substrate at register-time and pin to world. Plugin-side
+    // consumers (post-migration Pending- and Follow-managers,
+    // TileMovementManager) resolve via `world.spatialIndex` lookup
+    // — works in both server boot order
+    // (`register → onEnable → init`) and PIE boot order
+    // (`register → init → onEnable`) because the constructor fires
+    // at register time in both.
+    this.spatialIndex = new SpatialIndex();
+    (world as { spatialIndex?: ISpatialIndex }).spatialIndex =
+      this.spatialIndex;
+
+    // Remaining managers (broadcast, region subscriptions, tile
+    // movement) are constructed in `init()` until later Phase B sub-
+    // cuts move them to the constructor too.
   }
 
   // Rate Limiting Helper
@@ -525,8 +540,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.sockets,
     );
 
-    // Spatial index for interest management (sendToNearby)
-    this.spatialIndex = new SpatialIndex();
+    // SpatialIndex moved to ServerNetwork constructor (Phase B1).
+    // Wire it into the broadcast manager now that the manager exists.
     this.broadcastManager.setSpatialIndex(this.spatialIndex);
 
     // Note: uWS pub/sub is wired later via enablePubSub() after uWS server starts
@@ -2466,6 +2481,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     this.socketManager.destroy();
     this.spatialIndex.destroy();
+    delete (this.world as { spatialIndex?: ISpatialIndex }).spatialIndex;
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
     this.eventBridge.destroy();
