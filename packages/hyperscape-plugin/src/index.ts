@@ -311,6 +311,10 @@ export {
   handleTradeRequest,
   handleTradeRequestRespond,
 } from "./systems/network-handlers/trade/request.js";
+export {
+  handleChangeAttackStyle,
+  handleSetAutoRetaliate,
+} from "./systems/network-handlers/combat.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
