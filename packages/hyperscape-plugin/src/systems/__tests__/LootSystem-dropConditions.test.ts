@@ -24,8 +24,8 @@ import type { LootTablesManifest } from "@hyperforge/manifest-schema";
 // `packages/shared/src/systems/shared/economy/__tests__/`. Imports
 // updated to match the new home in `@hyperforge/hyperscape`.
 import { LootSystem } from "../LootSystem";
+import { createDropConditionDispatcher } from "../economy/DropConditionDispatcher";
 import {
-  createDropConditionDispatcher,
   defaultDropConditionEvaluator,
   type LootDropConditionEvaluator,
   type LootDropContext,

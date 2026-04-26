@@ -1181,7 +1181,8 @@ export {
 // Deps for world entities (FireEntity, RangeEntity, HeadstoneEntity,
 // ItemEntity, ResourceEntity) migrated to plugin in 2026-04-26 cut.
 export { getFireInteractionRange } from "./data/live/processing-live";
-export { canPlayerLoot } from "./systems/shared/loot/LootPermissionService";
+// canPlayerLoot / LootPermissionService migrated to
+// @hyperforge/hyperscape (2026-04-26).
 export type { MeshUserData } from "./types/entities/entity-types";
 export type {
   ResourceEntityConfig,
@@ -1611,14 +1612,10 @@ export {
   type LootDropConditionEvaluator,
 } from "./types/loot-drops";
 export { LootTableRoller } from "./loot/LootTableRoller";
-// LootTableService already re-exported earlier (line ~1208).
-export {
-  createDropConditionDispatcher,
-  createCustomKindDispatcher,
-  type DropConditionDispatcher,
-  type DropConditionKind,
-  type DropConditionKindHandler,
-} from "./systems/shared/economy/DropConditionDispatcher";
+// LootTableService + DropConditionDispatcher + WorldDropConditionEvaluators
+// migrated to @hyperforge/hyperscape (2026-04-26). Plugin-side
+// LootTableService still consumes the `LootTable` type.
+export type { LootTable } from "./types/game/inventory-types";
 export {
   getGroundItemDespawnTicks,
   getLootProtectionTicks,

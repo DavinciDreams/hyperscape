@@ -31,7 +31,14 @@ import type {
   PluginContextBase,
   PluginFactory,
 } from "@hyperforge/gameplay-framework";
-import { registerEntityType, type World } from "@hyperforge/shared";
+import {
+  lootTablesProvider,
+  mobLootTableMappingsProvider,
+  registerEntityType,
+  type World,
+} from "@hyperforge/shared";
+import { createDropConditionDispatcher } from "./systems/economy/DropConditionDispatcher.js";
+import { installWorldDropConditions } from "./systems/economy/WorldDropConditionEvaluators.js";
 import { MobEntity } from "./entities/npc/MobEntity.js";
 import { PlayerEntity } from "./entities/player/PlayerEntity.js";
 import { PlayerLocal } from "./entities/player/PlayerLocal.js";
@@ -330,8 +337,9 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       register("equipment", EquipmentSystem);
 
       // Loot system — drops mob loot to the ground via
-      // GroundItemSystem on `NPC_DIED`. Boot-time dispatcher install
-      // + authored manifest seed remains in `SystemLoader.init()`.
+      // GroundItemSystem on `NPC_DIED`. Boot-time DropCondition
+      // dispatcher install + authored manifest seeding lives below
+      // in the server-only `if (ctx.world.isServer)` branch.
       register("loot", LootSystem);
 
       // Resource system — gathering nodes (trees, rocks, fishing
@@ -383,6 +391,34 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // client builds don't pay the registration cost.
       if (ctx.world.isServer) {
         register("health-regen", HealthRegenSystem);
+
+        // Wire pluggable DropCondition evaluator + boot-time
+        // authored loot-tables / mob→table mappings seed.
+        // Originally lived in shared SystemLoader.init(); migrated
+        // here 2026-04-26 alongside DropConditionDispatcher /
+        // WorldDropConditionEvaluators / LootTableService /
+        // LootPermissionService.
+        const lootSystem = ctx.world.getSystem("loot") as unknown as {
+          setDropConditionEvaluator(evaluator: unknown): void;
+          setAuthoredLootTables(manifest: unknown): void;
+          setMobLootTableMappings(
+            mappings: ReadonlyMap<string, string> | Record<string, string>,
+          ): void;
+        } | null;
+        if (lootSystem) {
+          const dispatcher = createDropConditionDispatcher();
+          installWorldDropConditions(dispatcher, ctx.world);
+          lootSystem.setDropConditionEvaluator(dispatcher.evaluate);
+
+          if (lootTablesProvider.isLoaded()) {
+            lootSystem.setAuthoredLootTables(lootTablesProvider.getManifest());
+          }
+          if (mobLootTableMappingsProvider.isLoaded()) {
+            lootSystem.setMobLootTableMappings(
+              mobLootTableMappingsProvider.getMappings(),
+            );
+          }
+        }
       }
 
       // Client-only visual feedback systems. Original SystemLoader

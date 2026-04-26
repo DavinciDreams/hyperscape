@@ -128,18 +128,12 @@ import { PersistenceSystem } from "../../server/PersistenceSystem";
 // The barrel file (systems/client/index.ts) exports ClientNetwork which imports PlayerLocal
 // which extends Entity, causing a circular dependency during module initialization
 import { InteractionRouter } from "../../client/interaction";
-// LootSystem migrated to @hyperforge/hyperscape (2026-04-25). The
-// surface SystemLoader needs (3 setters used during boot-time
-// dispatcher install + manifest seeding) is duck-typed locally
-// below so we don't depend on the migrated class.
+// LootSystem + DropCondition wiring migrated to plugin onEnable
+// (2026-04-26). SystemLoader no longer touches the loot system.
 // GravestoneLootSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import { createDropConditionDispatcher } from "../economy/DropConditionDispatcher";
-import { installWorldDropConditions } from "../economy/WorldDropConditionEvaluators";
 import { installWorldDialogueConditions } from "../interaction/WorldDialogueConditionEvaluators";
 import { dialogueConditionBindingsProvider } from "../../../data/DialogueConditionBindingsProvider";
-import { lootTablesProvider } from "../../../data/LootTablesProvider";
-import { mobLootTableMappingsProvider } from "../../../data/MobLootTableMappingsProvider";
 import { dialogueProvider } from "../../../data/DialogueProvider";
 import { npcDialogueBindingsProvider } from "../../../data/NpcDialogueBindingsProvider";
 import { localizationProvider } from "../../../data/LocalizationProvider";
@@ -584,50 +578,11 @@ export async function registerSystems(world: World): Promise<void> {
   // Ground Item System
   systems.groundItems = getSystem(world, "ground-items");
 
-  // LootSystem migrated to @hyperforge/hyperscape (2026-04-25). The
-  // setter surface SystemLoader uses for boot-time dispatcher install
-  // + manifest seeding is duck-typed inline so we don't import the
-  // migrated class. Handlers re-resolve `getSystem` on every call,
-  // so QuestSystem / InventorySystem / SkillsSystem registered later
-  // in init still get picked up without re-installing.
+  // LootSystem + boot-time DropCondition dispatcher install +
+  // authored manifest seeding migrated to plugin onEnable (2026-04-26,
+  // @hyperforge/hyperscape). SystemLoader no longer touches the loot
+  // system.
   systems.loot = getSystem(world, "loot");
-  const lootSystem = systems.loot as
-    | {
-        setDropConditionEvaluator(
-          evaluator:
-            | ReturnType<typeof createDropConditionDispatcher>["evaluate"]
-            | null,
-        ): void;
-        setAuthoredLootTables(manifest: unknown): void;
-        setMobLootTableMappings(
-          mappings: ReadonlyMap<string, string> | Record<string, string>,
-        ): void;
-      }
-    | undefined;
-
-  // Wire pluggable DropCondition evaluator to the live world. The
-  // dispatcher is server-authoritative — loot rolls happen on the
-  // server only, so the install is gated on `isServer`.
-  if (world.isServer && lootSystem) {
-    const dropConditionDispatcher = createDropConditionDispatcher();
-    installWorldDropConditions(dropConditionDispatcher, world);
-    lootSystem.setDropConditionEvaluator(dropConditionDispatcher.evaluate);
-
-    // Boot-time seed: install any authored loot-tables manifest that
-    // DataManager already loaded from disk, plus the authored
-    // mob→table mappings. Gated on `isLoaded()` so servers that don't
-    // ship either manifest stay on the legacy `LootTableService` path
-    // for every mob type. Subsequent edits flow through
-    // `PIEEditorSession.updateManifests` → live `LootSystem` write.
-    if (lootTablesProvider.isLoaded()) {
-      lootSystem.setAuthoredLootTables(lootTablesProvider.getManifest());
-    }
-    if (mobLootTableMappingsProvider.isLoaded()) {
-      lootSystem.setMobLootTableMappings(
-        mobLootTableMappingsProvider.getMappings(),
-      );
-    }
-  }
 
   // Install authored dialogue condition bindings if a manifest was
   // loaded via DataManager (or an equivalent pre-init hook). Gated on

@@ -22,7 +22,7 @@ import {
   type InteractableConfig,
 } from "@hyperforge/shared";
 import { EventType } from "@hyperforge/shared";
-import { canPlayerLoot as checkLootPermission } from "@hyperforge/shared";
+import { canPlayerLoot as checkLootPermission } from "../../systems/loot/LootPermissionService.js";
 import { modelCache } from "@hyperforge/shared";
 
 export class HeadstoneEntity extends InteractableEntity {

@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 
 import type { DropCondition } from "@hyperforge/manifest-schema";
 
-import type { LootDropContext } from "../../../../types/loot-drops";
+import type { LootDropContext } from "@hyperforge/shared";
 import {
   createDropConditionDispatcher,
   createCustomKindDispatcher,

@@ -10,8 +10,8 @@
  * Extracted from LootSystem for Single Responsibility Principle.
  */
 
-import type { LootTable } from "../../../types/core/core";
-import { ALL_NPCS } from "../../../data/npcs";
+import type { LootTable } from "@hyperforge/shared";
+import { ALL_NPCS } from "@hyperforge/shared";
 
 export interface LootDrop {
   itemId: string;

@@ -25,11 +25,11 @@
  */
 import type { DropCondition } from "@hyperforge/manifest-schema";
 
-import type { World } from "../../../types/index";
-import type { Skills } from "../../../types/entities/entity-types";
+import type { World } from "@hyperforge/shared";
+import type { Skills } from "@hyperforge/shared";
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed locally — only 2 methods are called.
-import type { QuestProgress } from "../../../types/game/quest-types";
+import type { QuestProgress } from "@hyperforge/shared";
 interface QuestSystem {
   getActiveQuests(playerId: string): QuestProgress[];
   hasCompletedQuest(playerId: string, questId: string): boolean;
@@ -46,10 +46,10 @@ interface SkillsSystemDuck {
     skill: keyof Skills,
   ): { level: number; xp: number } | undefined;
 }
-import { SystemLogger } from "../../../utils/Logger";
+import { SystemLogger } from "@hyperforge/shared";
 
 import type { DropConditionDispatcher } from "./DropConditionDispatcher";
-import type { LootDropContext } from "../../../types/loot-drops";
+import type { LootDropContext } from "@hyperforge/shared";
 
 const KNOWN_SKILLS: ReadonlySet<keyof Skills> = new Set<keyof Skills>([
   "attack",

@@ -8,8 +8,8 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
-import type { World } from "../../../../types/index";
-import type { LootDropContext } from "../../../../types/loot-drops";
+import type { World } from "@hyperforge/shared";
+import type { LootDropContext } from "@hyperforge/shared";
 import {
   createQuestActiveHandler,
   createQuestCompletedHandler,

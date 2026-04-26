@@ -23,6 +23,7 @@ interface FakeWorld {
   register: (name: string, Ctor: unknown) => void;
   unregister?: (name: string) => boolean;
   registered: Array<{ name: string; ctorName: string }>;
+  getSystem(name: string): unknown;
 }
 
 function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
@@ -38,6 +39,13 @@ function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
     },
     unregister(_name) {
       return true;
+    },
+    // Plugin onEnable now resolves `loot` via getSystem to wire the
+    // DropConditionDispatcher + authored manifest seeding. Returning
+    // null is fine — the wiring branch short-circuits when the loot
+    // system isn't available.
+    getSystem(_name) {
+      return null;
     },
   };
   return w;

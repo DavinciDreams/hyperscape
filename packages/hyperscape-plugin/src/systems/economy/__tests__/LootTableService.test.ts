@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, beforeAll } from "vitest";
 import { LootTableService } from "../LootTableService";
-import { dataManager } from "../../../../data/DataManager";
+import { dataManager } from "@hyperforge/shared";
 
 describe("LootTableService", () => {
   let service: LootTableService;

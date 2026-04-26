@@ -37,11 +37,11 @@ import {
   type LootDropConditionEvaluator,
   type LootDropContext,
   LootTableRoller,
-  LootTableService,
   SystemBase,
   ticksToMs,
   type World,
 } from "@hyperforge/shared";
+import { LootTableService } from "./economy/LootTableService.js";
 
 // GroundItemSystem still lives in shared/. Duck-typed locally —
 // only `spawnGroundItems` is called from this file.
