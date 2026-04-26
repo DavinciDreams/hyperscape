@@ -11,33 +11,32 @@
  * @public
  */
 
-import THREE from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { EntityData } from "../../types";
+import * as THREE from "three";
+import type { World } from "@hyperforge/shared";
+import type { EntityData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
+} from "@hyperforge/shared";
 import type {
   EntityInteractionData,
   ResourceEntityConfig,
-} from "../../types/entities";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { EventType } from "../../types/events";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import { FOOTPRINT_SIZES } from "../../types/game/resource-processing-types";
+} from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { FOOTPRINT_SIZES } from "@hyperforge/shared";
+// Visual strategy modules stay in @hyperforge/shared because
+// createClientWorld/initGLBResourceInstancer also import them.
 import type {
   ResourceVisualStrategy,
   ResourceVisualContext,
-} from "./visuals/ResourceVisualStrategy";
-import { createVisualStrategy } from "./visuals/createVisualStrategy";
+} from "@hyperforge/shared";
+import { createVisualStrategy } from "@hyperforge/shared";
 
 // Re-export types for external use
-export type { ResourceEntityConfig } from "../../types/entities";
+export type { ResourceEntityConfig } from "@hyperforge/shared";
 
 export class ResourceEntity extends InteractableEntity {
   public config: ResourceEntityConfig;

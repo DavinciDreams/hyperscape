@@ -1,56 +1,47 @@
 /**
- * AnvilEntity - Permanent smithing station
+ * FurnaceEntity - Permanent smelting station
  *
- * Represents an anvil that players can use to smith bars into items.
- * Anvils are permanent fixtures in the world, typically found near furnaces.
+ * Represents a furnace that players can use to smelt ores into bars.
+ * Unlike fires (temporary), furnaces are permanent fixtures in the world.
  *
- * **Extends**: InteractableEntity (players can interact to smith)
+ * **Extends**: InteractableEntity (players can interact to smelt)
  *
  * **Interaction**:
- * - Left-click: Opens smithing interface (if player has bars + hammer)
- * - Right-click: Context menu with "Smith" and "Examine" options
+ * - Left-click: Opens smelting interface (if player has ores)
+ * - Right-click: Context menu with "Smelt" and "Examine" options
  *
  * **Visual Representation**:
- * - Classic iron anvil shape
- *
- * **Requirements**:
- * - Player must have a hammer in inventory to smith
- * - Player must have appropriate bars for recipes
+ * - Stone/brick furnace with glowing opening
  *
  * **Runs on**: Server (authoritative), Client (visual)
  *
- * @see SmithingSystem for smithing logic
- * @see ProcessingDataProvider for smithing recipes
+ * @see SmeltingSystem for smelting logic
+ * @see ProcessingDataProvider for smelting recipes
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import { EntityType, InteractionType } from "../../types/entities";
-import type { EntityInteractionData } from "../../types/entities";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { stationDataProvider } from "../../data/StationDataProvider";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import {
-  resolveFootprint,
-  type FootprintSpec,
-} from "../../types/game/resource-processing-types";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { stationDataProvider } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { resolveFootprint, type FootprintSpec } from "@hyperforge/shared";
 
-/** Default interaction range for anvils (in tiles) */
-const ANVIL_INTERACTION_RANGE = 2;
+/** Default interaction range for furnaces (in tiles) */
+const FURNACE_INTERACTION_RANGE = 2;
 
 /**
- * Configuration for creating an AnvilEntity.
+ * Configuration for creating a FurnaceEntity.
  */
-export interface AnvilEntityConfig {
+export interface FurnaceEntityConfig {
   id: string;
   name?: string;
   position: { x: number; y: number; z: number };
@@ -59,8 +50,8 @@ export interface AnvilEntityConfig {
   footprint?: FootprintSpec;
 }
 
-export class AnvilEntity extends InteractableEntity {
-  public readonly entityType = "anvil";
+export class FurnaceEntity extends InteractableEntity {
+  public readonly entityType = "furnace";
   public readonly isInteractable = true;
   public readonly isPermanent = true;
 
@@ -73,12 +64,12 @@ export class AnvilEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
-  constructor(world: World, config: AnvilEntityConfig) {
+  constructor(world: World, config: FurnaceEntityConfig) {
     // Convert to InteractableConfig format
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name || "Anvil",
-      type: EntityType.ANVIL,
+      name: config.name || "Furnace",
+      type: EntityType.FURNACE,
       position: config.position,
       rotation: config.rotation
         ? { ...config.rotation, w: 1 }
@@ -86,18 +77,18 @@ export class AnvilEntity extends InteractableEntity {
       scale: { x: 1, y: 1, z: 1 },
       visible: true,
       interactable: true,
-      interactionType: InteractionType.SMITHING,
-      interactionDistance: ANVIL_INTERACTION_RANGE,
-      description: "An anvil for smithing metal bars into items.",
+      interactionType: InteractionType.SMELTING,
+      interactionDistance: FURNACE_INTERACTION_RANGE,
+      description: "A furnace for smelting ores into bars.",
       model: null,
       interaction: {
-        prompt: "Smith",
-        description: "Smith bars into items",
-        range: ANVIL_INTERACTION_RANGE,
+        prompt: "Smelt",
+        description: "Smelt ores into bars",
+        range: FURNACE_INTERACTION_RANGE,
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,
-        effect: "smithing",
+        effect: "smelting",
       },
       properties: {
         movementComponent: null,
@@ -111,10 +102,10 @@ export class AnvilEntity extends InteractableEntity {
 
     super(world, interactableConfig);
 
-    this.displayName = config.name || "Anvil";
+    this.displayName = config.name || "Furnace";
     // Get footprint from manifest (data-driven), allow per-instance override via config
     this.footprint =
-      config.footprint ?? stationDataProvider.getFootprint("anvil");
+      config.footprint ?? stationDataProvider.getFootprint("furnace");
 
     // Register collision for this station (server-side only)
     // Supports multi-tile footprints (e.g., "large" = 2x2 or { width: 2, depth: 1 })
@@ -177,10 +168,10 @@ export class AnvilEntity extends InteractableEntity {
     }
 
     // Get station data from manifest
-    const stationData = stationDataProvider.getStationData("anvil");
+    const stationData = stationDataProvider.getStationData("furnace");
     const modelPath = stationData?.model ?? null;
     const modelScale = stationData?.modelScale ?? 0.5;
-    const modelYOffset = stationData?.modelYOffset ?? 0.4;
+    const modelYOffset = stationData?.modelYOffset ?? 0.7;
 
     // Try to load 3D model first
     if (modelPath && this.world.loader) {
@@ -188,7 +179,7 @@ export class AnvilEntity extends InteractableEntity {
         const { scene } = await modelCache.loadModel(modelPath, this.world);
 
         this.mesh = scene;
-        this.mesh.name = `Anvil_${this.id}`;
+        this.mesh.name = `Furnace_${this.id}`;
 
         // Scale the model from manifest
         this.mesh.scale.set(modelScale, modelScale, modelScale);
@@ -208,7 +199,7 @@ export class AnvilEntity extends InteractableEntity {
 
         // Set up userData for interaction detection
         this.mesh.userData = {
-          type: "anvil",
+          type: "furnace",
           entityId: this.id,
           name: this.displayName,
           interactable: true,
@@ -217,13 +208,13 @@ export class AnvilEntity extends InteractableEntity {
         // Add to node
         if (this.node) {
           this.node.add(this.mesh);
-          this.node.userData.type = "anvil";
+          this.node.userData.type = "furnace";
           this.node.userData.entityId = this.id;
           this.node.userData.interactable = true;
         }
 
         // Initialize HLOD impostor support
-        await this.initHLOD(`station_anvil_${modelPath}`, {
+        await this.initHLOD(`station_furnace_${modelPath}`, {
           category: "station",
           atlasSize: 1024,
           hemisphere: true,
@@ -232,28 +223,28 @@ export class AnvilEntity extends InteractableEntity {
         return;
       } catch (error) {
         console.warn(
-          `[AnvilEntity] Failed to load anvil model, using placeholder:`,
+          `[FurnaceEntity] Failed to load furnace model, using placeholder:`,
           error,
         );
       }
     }
 
-    // FALLBACK: Create anvil visual (blue box proxy)
-    const geometry = new THREE.BoxGeometry(1.0, 0.8, 0.6);
+    // FALLBACK: Create furnace visual (blue box proxy)
+    const geometry = new THREE.BoxGeometry(1.2, 1.4, 1.2);
     const material = new MeshStandardNodeMaterial({
-      color: 0x0066ff, // Blue for anvil
+      color: 0x0066ff, // Blue for furnace
       roughness: 0.5,
       metalness: 0.3,
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Anvil_${this.id}`;
-    mesh.position.y = 0.4; // Raise so bottom is at ground level
+    mesh.name = `Furnace_${this.id}`;
+    mesh.position.y = 0.7; // Raise so bottom is at ground level
     mesh.castShadow = true;
     mesh.receiveShadow = false;
 
     // Set up userData for interaction detection
     mesh.userData = {
-      type: "anvil",
+      type: "furnace",
       entityId: this.id,
       name: this.displayName,
       interactable: true,
@@ -265,26 +256,26 @@ export class AnvilEntity extends InteractableEntity {
     // Add to node
     if (this.node) {
       this.node.add(mesh);
-      this.node.userData.type = "anvil";
+      this.node.userData.type = "furnace";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;
     }
   }
 
   /**
-   * Handle anvil interaction - opens smithing interface.
+   * Handle furnace interaction - opens smelting interface.
    */
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Emit event to start smithing interaction
-    this.world.emit(EventType.SMITHING_INTERACT, {
+    // Emit event to start smelting interaction
+    this.world.emit(EventType.SMELTING_INTERACT, {
       playerId: data.playerId,
-      anvilId: this.id,
+      furnaceId: this.id,
       position: this.position,
     });
   }
 
   /**
-   * Get context menu actions for this anvil.
+   * Get context menu actions for this furnace.
    */
   public getContextMenuActions(playerId: string): Array<{
     id: string;
@@ -299,15 +290,15 @@ export class AnvilEntity extends InteractableEntity {
       handler: () => void;
     }> = [];
 
-    // Add "Smith" action
+    // Add "Smelt" action
     actions.push({
-      id: "smith",
-      label: "Smith",
+      id: "smelt",
+      label: "Smelt",
       priority: 1,
       handler: () => {
-        this.world.emit(EventType.SMITHING_INTERACT, {
+        this.world.emit(EventType.SMELTING_INTERACT, {
           playerId,
-          anvilId: this.id,
+          furnaceId: this.id,
           position: this.position,
         });
       },
@@ -321,7 +312,7 @@ export class AnvilEntity extends InteractableEntity {
       handler: () => {
         this.world.emit(EventType.UI_MESSAGE, {
           playerId,
-          message: "An anvil for smithing metal bars into weapons and tools.",
+          message: "A furnace for smelting ores into metal bars.",
         });
       },
     });
@@ -338,9 +329,9 @@ export class AnvilEntity extends InteractableEntity {
   }
 
   /**
-   * Client update - anvils are static.
+   * Client update - furnaces are static but could have fire animations.
    */
   protected clientUpdate(_deltaTime: number): void {
-    // Anvil is static, no animation needed
+    // Furnace is static, could add flickering glow animation later
   }
 }

@@ -34,7 +34,6 @@ import {
   isPositionInsideDuelArenaZone,
   type PlayerID,
   type Resource,
-  ResourceEntity,
   type ResourceDrop,
   type ResourceFootprint,
   type ResourceID,
@@ -50,6 +49,7 @@ import {
   type WorldArea,
   worldToTile,
 } from "@hyperforge/shared";
+import { ResourceEntity } from "../entities/world/ResourceEntity.js";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
 
 // SOLID: Extracted pure utility functions

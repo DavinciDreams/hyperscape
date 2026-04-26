@@ -11,36 +11,18 @@
 import { World } from "../../../core/World";
 import { getDefaultNpcLeashRange } from "../../../data/live/combat-live";
 import { Entity, EntityConfig } from "../../../entities/Entity";
-import { ItemEntity } from "../../../entities/world/ItemEntity";
-import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
-import { BankEntity } from "../../../entities/world/BankEntity";
-import {
-  FurnaceEntity,
-  type FurnaceEntityConfig,
-} from "../../../entities/world/FurnaceEntity";
-import {
-  AnvilEntity,
-  type AnvilEntityConfig,
-} from "../../../entities/world/AnvilEntity";
-import {
-  AltarEntity,
-  type AltarEntityConfig,
-} from "../../../entities/world/AltarEntity";
-import {
-  RunecraftingAltarEntity,
-  type RunecraftingAltarEntityConfig,
-} from "../../../entities/world/RunecraftingAltarEntity";
-import {
-  StarterChestEntity,
-  type StarterChestEntityConfig,
-} from "../../../entities/world/StarterChestEntity";
-import {
-  RangeEntity,
-  type RangeEntityConfig,
-} from "../../../entities/world/RangeEntity";
+import { getEntityType } from "./Entities";
+// Game-content entity classes migrated to @hyperforge/hyperscape
+// (2026-04-26). EntityManager looks them up by string type via the
+// public `getEntityType()` API at the registration callsites below
+// (mirroring the same pattern used in Entities.ts).
+//
+// Config types remain imported as type-only — they don't pull the
+// runtime class.
 import { MobEntity } from "../../../entities/npc/MobEntity";
-import { NPCEntity } from "../../../entities/npc/NPCEntity";
-import { ResourceEntity } from "../../../entities/world/ResourceEntity";
+// Config types unused (the resolveType()/getEntityType() pattern
+// constructs entities via the registered ctor; configs are
+// validated at the entity constructor itself).
 import type {
   ItemEntityConfig,
   ItemSpawnData,
@@ -686,59 +668,70 @@ export class EntityManager extends SystemBase {
 
     let entity: Entity;
 
+    // Resolve the entity class via the public registry. Plugins
+    // register their entity types in onEnable
+    // (`registerEntityType("item", ItemEntity)` etc.). MobEntity
+    // stays imported directly because it has additional construction
+    // logic (and is shared between server combat and client viz).
+    const resolveType = (
+      typeKey: string,
+    ): { new (world: World, cfg: EntityConfig): Entity } => {
+      const Ctor = getEntityType(typeKey);
+      if (!Ctor) {
+        throw new Error(
+          `[EntityManager] No entity type registered for "${typeKey}". ` +
+            `Did the plugin's onEnable run?`,
+        );
+      }
+      return Ctor as unknown as {
+        new (world: World, cfg: EntityConfig): Entity;
+      };
+    };
+
     switch (config.type) {
       case "item":
-        entity = new ItemEntity(this.world, config as ItemEntityConfig);
+        entity = new (resolveType("item"))(this.world, config);
         break;
       case EntityType.HEADSTONE:
       case "headstone":
-        entity = new HeadstoneEntity(
-          this.world,
-          config as HeadstoneEntityConfig,
-        );
+        entity = new (resolveType("headstone"))(this.world, config);
         break;
       case EntityType.BANK:
       case "bank":
-        entity = new BankEntity(this.world, config as BankEntityConfig);
+        entity = new (resolveType("bank"))(this.world, config);
         break;
       case "mob":
         entity = new MobEntity(this.world, config as MobEntityConfig);
         break;
       case "resource":
-        entity = new ResourceEntity(this.world, config as ResourceEntityConfig);
+        entity = new (resolveType("resource"))(this.world, config);
         break;
       case "npc":
-        entity = new NPCEntity(this.world, config as NPCEntityConfig);
+        entity = new (resolveType("npc"))(this.world, config);
         break;
       case EntityType.FURNACE:
       case "furnace":
-        entity = new FurnaceEntity(this.world, config as FurnaceEntityConfig);
+        entity = new (resolveType("furnace"))(this.world, config);
         break;
       case EntityType.ANVIL:
       case "anvil":
-        entity = new AnvilEntity(this.world, config as AnvilEntityConfig);
+        entity = new (resolveType("anvil"))(this.world, config);
         break;
       case EntityType.ALTAR:
       case "altar":
-        entity = new AltarEntity(this.world, config as AltarEntityConfig);
+        entity = new (resolveType("altar"))(this.world, config);
         break;
       case EntityType.RUNECRAFTING_ALTAR:
       case "runecrafting_altar":
-        entity = new RunecraftingAltarEntity(
-          this.world,
-          config as unknown as RunecraftingAltarEntityConfig,
-        );
+        entity = new (resolveType("runecrafting_altar"))(this.world, config);
         break;
       case EntityType.STARTER_CHEST:
       case "starter_chest":
-        entity = new StarterChestEntity(
-          this.world,
-          config as StarterChestEntityConfig,
-        );
+        entity = new (resolveType("starter_chest"))(this.world, config);
         break;
       case EntityType.RANGE:
       case "range":
-        entity = new RangeEntity(this.world, config as RangeEntityConfig);
+        entity = new (resolveType("range"))(this.world, config);
         break;
       default:
         throw new Error(`[EntityManager] Unknown entity type: ${config.type}`);

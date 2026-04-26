@@ -1,69 +1,63 @@
 /**
- * RangeEntity - Permanent cooking station
+ * AnvilEntity - Permanent smithing station
  *
- * Represents a cooking range (oven/stove) that players can cook on.
- * Ranges provide lower burn rates than fires for most foods.
- * Unlike fires, ranges are permanent fixtures in the world.
+ * Represents an anvil that players can use to smith bars into items.
+ * Anvils are permanent fixtures in the world, typically found near furnaces.
  *
- * **Extends**: InteractableEntity (players can interact to cook)
+ * **Extends**: InteractableEntity (players can interact to smith)
  *
  * **Interaction**:
- * - Left-click: Opens cook interface (if player has raw food)
- * - Right-click: Context menu with "Cook [item]" options and "Examine"
+ * - Left-click: Opens smithing interface (if player has bars + hammer)
+ * - Right-click: Context menu with "Smith" and "Examine" options
  *
  * **Visual Representation**:
- * - Gray/brown stove-like box
+ * - Classic iron anvil shape
  *
- * **Special Ranges**:
- * - Lumbridge Castle Range: Standard
- * - Hosidius Kitchen Range: 5% burn reduction (requires favor)
+ * **Requirements**:
+ * - Player must have a hammer in inventory to smith
+ * - Player must have appropriate bars for recipes
  *
  * **Runs on**: Server (authoritative), Client (visual)
+ *
+ * @see SmithingSystem for smithing logic
+ * @see ProcessingDataProvider for smithing recipes
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import { EntityType, InteractionType } from "../../types/entities";
-import type { EntityInteractionData } from "../../types/entities";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { getFireInteractionRange } from "../../data/live/processing-live";
-import { stationDataProvider } from "../../data/StationDataProvider";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import {
-  resolveFootprint,
-  type FootprintSpec,
-} from "../../types/game/resource-processing-types";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { stationDataProvider } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { resolveFootprint, type FootprintSpec } from "@hyperforge/shared";
+
+/** Default interaction range for anvils (in tiles) */
+const ANVIL_INTERACTION_RANGE = 2;
 
 /**
- * Configuration for creating a RangeEntity.
+ * Configuration for creating an AnvilEntity.
  */
-export interface RangeEntityConfig {
+export interface AnvilEntityConfig {
   id: string;
   name?: string;
   position: { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
-  /** Burn rate reduction (0 = standard, 0.05 = Hosidius) */
-  burnReduction?: number;
   /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
   footprint?: FootprintSpec;
 }
 
-export class RangeEntity extends InteractableEntity {
-  public readonly entityType = "range";
+export class AnvilEntity extends InteractableEntity {
+  public readonly entityType = "anvil";
   public readonly isInteractable = true;
   public readonly isPermanent = true;
-
-  /** Burn rate reduction (0-1, where 0.05 = 5% reduction) */
-  public burnReduction: number;
 
   /** Display name */
   public displayName: string;
@@ -74,12 +68,12 @@ export class RangeEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
-  constructor(world: World, config: RangeEntityConfig) {
+  constructor(world: World, config: AnvilEntityConfig) {
     // Convert to InteractableConfig format
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name || "Range",
-      type: EntityType.RANGE,
+      name: config.name || "Anvil",
+      type: EntityType.ANVIL,
       position: config.position,
       rotation: config.rotation
         ? { ...config.rotation, w: 1 }
@@ -87,18 +81,18 @@ export class RangeEntity extends InteractableEntity {
       scale: { x: 1, y: 1, z: 1 },
       visible: true,
       interactable: true,
-      interactionType: InteractionType.COOKING,
-      interactionDistance: getFireInteractionRange(),
-      description: "A range for cooking food.",
+      interactionType: InteractionType.SMITHING,
+      interactionDistance: ANVIL_INTERACTION_RANGE,
+      description: "An anvil for smithing metal bars into items.",
       model: null,
       interaction: {
-        prompt: "Cook",
-        description: "Cook food on this range",
-        range: getFireInteractionRange(),
+        prompt: "Smith",
+        description: "Smith bars into items",
+        range: ANVIL_INTERACTION_RANGE,
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,
-        effect: "cooking",
+        effect: "smithing",
       },
       properties: {
         movementComponent: null,
@@ -112,11 +106,10 @@ export class RangeEntity extends InteractableEntity {
 
     super(world, interactableConfig);
 
-    this.displayName = config.name || "Range";
-    this.burnReduction = config.burnReduction || 0;
+    this.displayName = config.name || "Anvil";
     // Get footprint from manifest (data-driven), allow per-instance override via config
     this.footprint =
-      config.footprint ?? stationDataProvider.getFootprint("range");
+      config.footprint ?? stationDataProvider.getFootprint("anvil");
 
     // Register collision for this station (server-side only)
     // Supports multi-tile footprints (e.g., "large" = 2x2 or { width: 2, depth: 1 })
@@ -179,10 +172,10 @@ export class RangeEntity extends InteractableEntity {
     }
 
     // Get station data from manifest
-    const stationData = stationDataProvider.getStationData("range");
+    const stationData = stationDataProvider.getStationData("anvil");
     const modelPath = stationData?.model ?? null;
-    const modelScale = stationData?.modelScale ?? 1.0;
-    const modelYOffset = stationData?.modelYOffset ?? 0;
+    const modelScale = stationData?.modelScale ?? 0.5;
+    const modelYOffset = stationData?.modelYOffset ?? 0.4;
 
     // Try to load 3D model first
     if (modelPath && this.world.loader) {
@@ -190,7 +183,7 @@ export class RangeEntity extends InteractableEntity {
         const { scene } = await modelCache.loadModel(modelPath, this.world);
 
         this.mesh = scene;
-        this.mesh.name = `Range_${this.id}`;
+        this.mesh.name = `Anvil_${this.id}`;
 
         // Scale the model from manifest
         this.mesh.scale.set(modelScale, modelScale, modelScale);
@@ -210,23 +203,22 @@ export class RangeEntity extends InteractableEntity {
 
         // Set up userData for interaction detection
         this.mesh.userData = {
-          type: "range",
+          type: "anvil",
           entityId: this.id,
           name: this.displayName,
           interactable: true,
-          burnReduction: this.burnReduction,
         };
 
         // Add to node
         if (this.node) {
           this.node.add(this.mesh);
-          this.node.userData.type = "range";
+          this.node.userData.type = "anvil";
           this.node.userData.entityId = this.id;
           this.node.userData.interactable = true;
         }
 
         // Initialize HLOD impostor support
-        await this.initHLOD(`station_range_${modelPath}`, {
+        await this.initHLOD(`station_anvil_${modelPath}`, {
           category: "station",
           atlasSize: 1024,
           hemisphere: true,
@@ -235,67 +227,59 @@ export class RangeEntity extends InteractableEntity {
         return;
       } catch (error) {
         console.warn(
-          `[RangeEntity] Failed to load range model, using placeholder:`,
+          `[AnvilEntity] Failed to load anvil model, using placeholder:`,
           error,
         );
       }
     }
 
-    // FALLBACK: Create a red box for the range (placeholder, 1 tile size)
-    const boxHeight = 0.8;
-    const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
+    // FALLBACK: Create anvil visual (blue box proxy)
+    const geometry = new THREE.BoxGeometry(1.0, 0.8, 0.6);
     const material = new MeshStandardNodeMaterial({
-      color: 0xcc3333, // Red (placeholder)
+      color: 0x0066ff, // Blue for anvil
       roughness: 0.5,
       metalness: 0.3,
     });
-
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Range_${this.id}`;
+    mesh.name = `Anvil_${this.id}`;
+    mesh.position.y = 0.4; // Raise so bottom is at ground level
     mesh.castShadow = true;
     mesh.receiveShadow = false;
-    // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
-    mesh.position.y = boxHeight / 2;
-    // Set layer for raycasting (required for interaction detection)
-    mesh.layers.set(1);
-    this.mesh = mesh;
 
     // Set up userData for interaction detection
     mesh.userData = {
-      type: "range",
+      type: "anvil",
       entityId: this.id,
       name: this.displayName,
       interactable: true,
-      burnReduction: this.burnReduction,
     };
 
-    // Add mesh to the entity's node
-    if (this.mesh && this.node) {
-      this.node.add(this.mesh);
+    // Store mesh
+    this.mesh = mesh;
 
-      // Also set userData on node for easier detection
-      this.node.userData.type = "range";
+    // Add to node
+    if (this.node) {
+      this.node.add(mesh);
+      this.node.userData.type = "anvil";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;
     }
   }
 
   /**
-   * Handle range interaction - opens cooking interface.
+   * Handle anvil interaction - opens smithing interface.
    */
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Emit event to start cooking interaction
-    this.world.emit(EventType.COOKING_INTERACT, {
+    // Emit event to start smithing interaction
+    this.world.emit(EventType.SMITHING_INTERACT, {
       playerId: data.playerId,
-      rangeId: this.id,
-      sourceType: "range" as const,
+      anvilId: this.id,
       position: this.position,
-      burnReduction: this.burnReduction,
     });
   }
 
   /**
-   * Get context menu actions for this range.
+   * Get context menu actions for this anvil.
    */
   public getContextMenuActions(playerId: string): Array<{
     id: string;
@@ -310,18 +294,16 @@ export class RangeEntity extends InteractableEntity {
       handler: () => void;
     }> = [];
 
-    // Add "Cook" action
+    // Add "Smith" action
     actions.push({
-      id: "cook",
-      label: "Cook",
+      id: "smith",
+      label: "Smith",
       priority: 1,
       handler: () => {
-        this.world.emit(EventType.COOKING_INTERACT, {
+        this.world.emit(EventType.SMITHING_INTERACT, {
           playerId,
-          rangeId: this.id,
-          sourceType: "range" as const,
+          anvilId: this.id,
           position: this.position,
-          burnReduction: this.burnReduction,
         });
       },
     });
@@ -332,13 +314,9 @@ export class RangeEntity extends InteractableEntity {
       label: "Examine",
       priority: 100,
       handler: () => {
-        const examineText =
-          this.burnReduction > 0
-            ? `A well-maintained range. Cooking here reduces burn chance by ${(this.burnReduction * 100).toFixed(0)}%.`
-            : "A range for cooking food.";
         this.world.emit(EventType.UI_MESSAGE, {
           playerId,
-          message: examineText,
+          message: "An anvil for smithing metal bars into weapons and tools.",
         });
       },
     });
@@ -350,16 +328,14 @@ export class RangeEntity extends InteractableEntity {
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
     buf.displayName = this.displayName;
-    buf.burnReduction = this.burnReduction;
     buf.isPermanent = this.isPermanent;
     return buf;
   }
 
   /**
-   * Client update - ranges are static but could have animations.
+   * Client update - anvils are static.
    */
-  protected clientUpdate(deltaTime: number): void {
-    super.clientUpdate(deltaTime);
-    // Range is static, no animation needed
+  protected clientUpdate(_deltaTime: number): void {
+    // Anvil is static, no animation needed
   }
 }

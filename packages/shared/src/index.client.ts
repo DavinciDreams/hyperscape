@@ -1164,15 +1164,32 @@ export type { PlayerInventory } from "./types/core/core";
 // Entity classes — registered with the engine ECS via the public
 // `registerEntityType()` API in plugin onEnable (decoupled
 // 2026-04-26, post-Wave 6 cleanup).
-export { NPCEntity } from "./entities/npc/NPCEntity";
-export { ItemEntity } from "./entities/world/ItemEntity";
-export { HeadstoneEntity } from "./entities/world/HeadstoneEntity";
-export { BankEntity } from "./entities/world/BankEntity";
-export { FurnaceEntity } from "./entities/world/FurnaceEntity";
-export { AnvilEntity } from "./entities/world/AnvilEntity";
-export { AltarEntity } from "./entities/world/AltarEntity";
-export { RangeEntity } from "./entities/world/RangeEntity";
-export { RunecraftingAltarEntity } from "./entities/world/RunecraftingAltarEntity";
+// NPCEntity migrated to @hyperforge/hyperscape (2026-04-26).
+// ItemEntity, HeadstoneEntity migrated to @hyperforge/hyperscape (2026-04-26).
+// World entities migrated to @hyperforge/hyperscape (2026-04-26).
+
+// Engine entity base classes used by world entities migrated to plugin.
+export {
+  InteractableEntity,
+  type InteractableConfig,
+} from "./entities/InteractableEntity";
+
+// Deps for world entities (FireEntity, RangeEntity, HeadstoneEntity,
+// ItemEntity, ResourceEntity) migrated to plugin in 2026-04-26 cut.
+export { getFireInteractionRange } from "./data/live/processing-live";
+export { canPlayerLoot } from "./systems/shared/loot/LootPermissionService";
+export type { MeshUserData } from "./types/entities/entity-types";
+export type {
+  ResourceEntityConfig,
+  BankEntityConfig,
+  NPCEntityConfig,
+} from "./types/entities/entities";
+export { getNpcRenderDistance } from "./data/live/distance-live";
+export {
+  AnimationLOD,
+  getCameraPosition,
+} from "./utils/rendering/AnimationLOD";
+export { RAYCAST_PROXY } from "./systems/client/interaction/constants";
 
 // Engine ECS — public API for registering entity types.
 export { registerEntityType } from "./systems/shared/entities/Entities";
@@ -1304,8 +1321,14 @@ export {
 } from "./utils/world/townPopulation";
 
 // ResourceSystem deps — mirror to client bundle.
-export { ResourceEntity } from "./entities/world/ResourceEntity";
+// ResourceEntity migrated to @hyperforge/hyperscape (2026-04-26).
 export { disposeFishingSpotTextures } from "./entities/world/visuals/FishingSpotVisualStrategy";
+// Visual strategy API used by ResourceEntity (now in plugin).
+export { createVisualStrategy } from "./entities/world/visuals/createVisualStrategy";
+export type {
+  ResourceVisualStrategy,
+  ResourceVisualContext,
+} from "./entities/world/visuals/ResourceVisualStrategy";
 export type { TerrainResourceSpawnPoint } from "./types/world/terrain";
 export { gatheringResources } from "./gathering/index";
 export type { GatheringToolData } from "./data/DataManager";

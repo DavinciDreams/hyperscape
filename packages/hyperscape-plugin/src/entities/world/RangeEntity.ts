@@ -1,70 +1,67 @@
 /**
- * AltarEntity - Prayer altar for recharging prayer points
+ * RangeEntity - Permanent cooking station
  *
- * Represents an altar where players can restore prayer points.
- * Rendered as a purple box on the client (placeholder).
+ * Represents a cooking range (oven/stove) that players can cook on.
+ * Ranges provide lower burn rates than fires for most foods.
+ * Unlike fires, ranges are permanent fixtures in the world.
  *
- * **Extends**: InteractableEntity (players can interact to pray)
+ * **Extends**: InteractableEntity (players can interact to cook)
  *
  * **Interaction**:
- * - Left-click: Recharges prayer points to max
- * - Right-click: Context menu with "Pray" and "Examine"
+ * - Left-click: Opens cook interface (if player has raw food)
+ * - Right-click: Context menu with "Cook [item]" options and "Examine"
  *
  * **Visual Representation**:
- * - Purple altar-sized box (1 tile)
+ * - Gray/brown stove-like box
+ *
+ * **Special Ranges**:
+ * - Lumbridge Castle Range: Standard
+ * - Hosidius Kitchen Range: 5% burn reduction (requires favor)
  *
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { EntityInteractionData } from "../../types/entities";
-import { EntityType, InteractionType } from "../../types/entities";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { stationDataProvider } from "../../data/StationDataProvider";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import {
-  resolveFootprint,
-  type FootprintSpec,
-} from "../../types/game/resource-processing-types";
-
-/** Default interaction range for altars (in tiles) */
-const ALTAR_INTERACTION_RANGE = 2;
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { getFireInteractionRange } from "@hyperforge/shared";
+import { stationDataProvider } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { resolveFootprint, type FootprintSpec } from "@hyperforge/shared";
 
 /**
- * Configuration for creating an AltarEntity.
- * Simplified config - full InteractableConfig is built internally.
+ * Configuration for creating a RangeEntity.
  */
-export interface AltarEntityConfig {
+export interface RangeEntityConfig {
   id: string;
   name?: string;
   position: { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
+  /** Burn rate reduction (0 = standard, 0.05 = Hosidius) */
+  burnReduction?: number;
   /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
   footprint?: FootprintSpec;
-  /** Optional altar ID for tracking */
-  altarId?: string;
 }
 
-export class AltarEntity extends InteractableEntity {
-  public readonly entityType = "altar";
+export class RangeEntity extends InteractableEntity {
+  public readonly entityType = "range";
   public readonly isInteractable = true;
   public readonly isPermanent = true;
 
+  /** Burn rate reduction (0-1, where 0.05 = 5% reduction) */
+  public burnReduction: number;
+
   /** Display name */
   public displayName: string;
-
-  /** Altar ID for tracking */
-  private altarId: string;
 
   /** Tiles this station occupies for collision (supports multi-tile footprints) */
   private collisionTiles: TileCoord[] = [];
@@ -72,12 +69,12 @@ export class AltarEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
-  constructor(world: World, config: AltarEntityConfig) {
+  constructor(world: World, config: RangeEntityConfig) {
     // Convert to InteractableConfig format
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name || "Altar",
-      type: EntityType.ALTAR,
+      name: config.name || "Range",
+      type: EntityType.RANGE,
       position: config.position,
       rotation: config.rotation
         ? { ...config.rotation, w: 1 }
@@ -85,18 +82,18 @@ export class AltarEntity extends InteractableEntity {
       scale: { x: 1, y: 1, z: 1 },
       visible: true,
       interactable: true,
-      interactionType: InteractionType.ALTAR,
-      interactionDistance: ALTAR_INTERACTION_RANGE,
-      description: "An altar to the gods.",
+      interactionType: InteractionType.COOKING,
+      interactionDistance: getFireInteractionRange(),
+      description: "A range for cooking food.",
       model: null,
       interaction: {
-        prompt: "Pray",
-        description: "Pray at the altar to restore prayer points.",
-        range: ALTAR_INTERACTION_RANGE,
+        prompt: "Cook",
+        description: "Cook food on this range",
+        range: getFireInteractionRange(),
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,
-        effect: "altar",
+        effect: "cooking",
       },
       properties: {
         movementComponent: null,
@@ -109,14 +106,16 @@ export class AltarEntity extends InteractableEntity {
     };
 
     super(world, interactableConfig);
-    this.displayName = config.name || "Altar";
-    this.altarId = config.altarId || config.id;
 
+    this.displayName = config.name || "Range";
+    this.burnReduction = config.burnReduction || 0;
     // Get footprint from manifest (data-driven), allow per-instance override via config
     this.footprint =
-      config.footprint ?? stationDataProvider.getFootprint("altar");
+      config.footprint ?? stationDataProvider.getFootprint("range");
 
     // Register collision for this station (server-side only)
+    // Supports multi-tile footprints (e.g., "large" = 2x2 or { width: 2, depth: 1 })
+    // Collision is CENTERED on the model position, not starting from it
     if (this.world.isServer) {
       const centerTile = worldToTile(config.position.x, config.position.z);
       const size = resolveFootprint(this.footprint);
@@ -175,7 +174,7 @@ export class AltarEntity extends InteractableEntity {
     }
 
     // Get station data from manifest
-    const stationData = stationDataProvider.getStationData("altar");
+    const stationData = stationDataProvider.getStationData("range");
     const modelPath = stationData?.model ?? null;
     const modelScale = stationData?.modelScale ?? 1.0;
     const modelYOffset = stationData?.modelYOffset ?? 0;
@@ -186,7 +185,7 @@ export class AltarEntity extends InteractableEntity {
         const { scene } = await modelCache.loadModel(modelPath, this.world);
 
         this.mesh = scene;
-        this.mesh.name = `Altar_${this.id}`;
+        this.mesh.name = `Range_${this.id}`;
 
         // Scale the model from manifest
         this.mesh.scale.set(modelScale, modelScale, modelScale);
@@ -206,24 +205,23 @@ export class AltarEntity extends InteractableEntity {
 
         // Set up userData for interaction detection
         this.mesh.userData = {
-          type: "altar",
+          type: "range",
           entityId: this.id,
           name: this.displayName,
           interactable: true,
-          altarId: this.altarId,
+          burnReduction: this.burnReduction,
         };
 
         // Add to node
         if (this.node) {
           this.node.add(this.mesh);
-          this.node.userData.type = "altar";
+          this.node.userData.type = "range";
           this.node.userData.entityId = this.id;
           this.node.userData.interactable = true;
-          this.node.userData.altarId = this.altarId;
         }
 
         // Initialize HLOD impostor support
-        await this.initHLOD(`station_altar_${modelPath}`, {
+        await this.initHLOD(`station_range_${modelPath}`, {
           category: "station",
           atlasSize: 1024,
           hemisphere: true,
@@ -232,23 +230,23 @@ export class AltarEntity extends InteractableEntity {
         return;
       } catch (error) {
         console.warn(
-          `[AltarEntity] Failed to load altar model, using placeholder:`,
+          `[RangeEntity] Failed to load range model, using placeholder:`,
           error,
         );
       }
     }
 
-    // FALLBACK: Create a purple box for the altar (1 tile size, altar-like proportions)
+    // FALLBACK: Create a red box for the range (placeholder, 1 tile size)
     const boxHeight = 0.8;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
     const material = new MeshStandardNodeMaterial({
-      color: 0x9932cc, // Bright purple (DarkOrchid)
+      color: 0xcc3333, // Red (placeholder)
       roughness: 0.5,
       metalness: 0.3,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Altar_${this.id}`;
+    mesh.name = `Range_${this.id}`;
     mesh.castShadow = true;
     mesh.receiveShadow = false;
     // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
@@ -259,11 +257,11 @@ export class AltarEntity extends InteractableEntity {
 
     // Set up userData for interaction detection
     mesh.userData = {
-      type: "altar",
+      type: "range",
       entityId: this.id,
       name: this.displayName,
       interactable: true,
-      altarId: this.altarId,
+      burnReduction: this.burnReduction,
     };
 
     // Add mesh to the entity's node
@@ -271,33 +269,92 @@ export class AltarEntity extends InteractableEntity {
       this.node.add(this.mesh);
 
       // Also set userData on node for easier detection
-      this.node.userData.type = "altar";
+      this.node.userData.type = "range";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;
-      this.node.userData.altarId = this.altarId;
     }
   }
 
   /**
-   * Handle altar interaction - emits pray event
+   * Handle range interaction - opens cooking interface.
    */
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Emit event to pray at altar
-    this.world.emit(EventType.ALTAR_PRAY, {
+    // Emit event to start cooking interaction
+    this.world.emit(EventType.COOKING_INTERACT, {
       playerId: data.playerId,
-      altarId: this.id,
+      rangeId: this.id,
+      sourceType: "range" as const,
+      position: this.position,
+      burnReduction: this.burnReduction,
     });
+  }
+
+  /**
+   * Get context menu actions for this range.
+   */
+  public getContextMenuActions(playerId: string): Array<{
+    id: string;
+    label: string;
+    priority: number;
+    handler: () => void;
+  }> {
+    const actions: Array<{
+      id: string;
+      label: string;
+      priority: number;
+      handler: () => void;
+    }> = [];
+
+    // Add "Cook" action
+    actions.push({
+      id: "cook",
+      label: "Cook",
+      priority: 1,
+      handler: () => {
+        this.world.emit(EventType.COOKING_INTERACT, {
+          playerId,
+          rangeId: this.id,
+          sourceType: "range" as const,
+          position: this.position,
+          burnReduction: this.burnReduction,
+        });
+      },
+    });
+
+    // Add "Examine" action
+    actions.push({
+      id: "examine",
+      label: "Examine",
+      priority: 100,
+      handler: () => {
+        const examineText =
+          this.burnReduction > 0
+            ? `A well-maintained range. Cooking here reduces burn chance by ${(this.burnReduction * 100).toFixed(0)}%.`
+            : "A range for cooking food.";
+        this.world.emit(EventType.UI_MESSAGE, {
+          playerId,
+          message: examineText,
+        });
+      },
+    });
+
+    return actions;
   }
 
   // PERF: Mutates buffer in-place instead of creating new objects
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
-    buf.altarId = this.altarId;
+    buf.displayName = this.displayName;
+    buf.burnReduction = this.burnReduction;
+    buf.isPermanent = this.isPermanent;
     return buf;
   }
 
+  /**
+   * Client update - ranges are static but could have animations.
+   */
   protected clientUpdate(deltaTime: number): void {
     super.clientUpdate(deltaTime);
-    // Altar is static, no animation needed
+    // Range is static, no animation needed
   }
 }

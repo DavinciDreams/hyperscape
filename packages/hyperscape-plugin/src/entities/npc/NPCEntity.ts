@@ -57,33 +57,28 @@
  * @public
  */
 
-import THREE, {
-  MeshBasicNodeMaterial,
-  MeshStandardNodeMaterial,
-} from "../../extras/three/three";
-import type { World } from "../../core/World";
-import { Entity } from "../Entity";
+import * as THREE from "three";
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import { Entity } from "@hyperforge/shared";
 import type {
   EntityInteractionData,
   NPCEntityConfig,
-} from "../../types/entities";
+} from "@hyperforge/shared";
 import type {
   EntityData,
   VRMAvatarInstance,
   LoadedAvatar,
-} from "../../types/index";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { EventType } from "../../types/events";
-import { Emotes } from "../../data/playerEmotes";
-import { getNpcRenderDistance } from "../../data/live/distance-live";
-import {
-  AnimationLOD,
-  getCameraPosition,
-} from "../../utils/rendering/AnimationLOD";
-import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
+} from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { Emotes } from "@hyperforge/shared";
+import { getNpcRenderDistance } from "@hyperforge/shared";
+import { AnimationLOD, getCameraPosition } from "@hyperforge/shared";
+import { RAYCAST_PROXY } from "@hyperforge/shared";
 
 // Re-export types for external use
-export type { NPCEntityConfig } from "../../types/entities";
+export type { NPCEntityConfig } from "@hyperforge/shared";
 
 const NPC_IMPOSTOR_DISTANCES = {
   impostorDistance: 50,

@@ -3,5 +3,5 @@
  * Non-player character and mob entity classes
  */
 
-export * from "./NPCEntity";
+// NPCEntity migrated to @hyperforge/hyperscape (2026-04-26).
 export * from "./MobEntity";

@@ -661,22 +661,39 @@ export { ClientActions } from "./systems/client/ClientActions";
 export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
-// Entity classes — registered with the engine ECS via the public
-// `registerEntityType()` API in plugin onEnable (decoupled
-// 2026-04-26, post-Wave 6 cleanup). Stay in shared for now; will
-// move to plugin in a follow-up cut.
-export { NPCEntity } from "./entities/npc/NPCEntity";
-export { ItemEntity } from "./entities/world/ItemEntity";
-export { HeadstoneEntity } from "./entities/world/HeadstoneEntity";
-export { BankEntity } from "./entities/world/BankEntity";
-export { FurnaceEntity } from "./entities/world/FurnaceEntity";
-export { AnvilEntity } from "./entities/world/AnvilEntity";
-export { AltarEntity } from "./entities/world/AltarEntity";
-export { RangeEntity } from "./entities/world/RangeEntity";
-export { RunecraftingAltarEntity } from "./entities/world/RunecraftingAltarEntity";
+// Engine entity base classes used by world entities migrated to plugin.
+export {
+  InteractableEntity,
+  type InteractableConfig,
+} from "./entities/InteractableEntity";
+
+// Deps for world entities (FireEntity, RangeEntity, HeadstoneEntity,
+// ItemEntity, ResourceEntity) migrated to plugin in 2026-04-26 cut.
+export { getFireInteractionRange } from "./data/live/processing-live";
+export { canPlayerLoot } from "./systems/shared/loot/LootPermissionService";
+export type { MeshUserData } from "./types/entities/entity-types";
+export type {
+  ResourceEntityConfig,
+  BankEntityConfig,
+  NPCEntityConfig,
+} from "./types/entities/entities";
+export { getNpcRenderDistance } from "./data/live/distance-live";
+export {
+  AnimationLOD,
+  getCameraPosition,
+} from "./utils/rendering/AnimationLOD";
+export { RAYCAST_PROXY } from "./systems/client/interaction/constants";
 
 // Engine ECS — public API for registering entity types.
+// Plugin (`@hyperforge/hyperscape`) calls this in onEnable for all
+// game entity types (player, mob, npc, item, resource, headstone,
+// bank, furnace, anvil, altar, range, runecrafting_altar).
 export { registerEntityType } from "./systems/shared/entities/Entities";
+
+// `NPCEntity` (and the world entities) migrated to
+// @hyperforge/hyperscape (2026-04-26). PlayerEntity / PlayerLocal /
+// PlayerRemote / MobEntity / ResourceEntity stay in shared for now
+// (engine network code constructs them).
 
 // CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 // Deps needed by the migrated cluster — most already exported
@@ -1174,8 +1191,16 @@ export type {
 
 // ResourceSystem deps — needed by the migrated ResourceSystem in
 // @hyperforge/hyperscape (Wave 1 of heavy-cluster plan).
-export { ResourceEntity } from "./entities/world/ResourceEntity";
+// ResourceEntity migrated to @hyperforge/hyperscape (2026-04-26).
 export { disposeFishingSpotTextures } from "./entities/world/visuals/FishingSpotVisualStrategy";
+// Visual strategy API used by ResourceEntity (now in plugin).
+// Strategies stay in shared because createClientWorld + the GLB
+// instancer warmup paths also use them.
+export { createVisualStrategy } from "./entities/world/visuals/createVisualStrategy";
+export type {
+  ResourceVisualStrategy,
+  ResourceVisualContext,
+} from "./entities/world/visuals/ResourceVisualStrategy";
 export type { TerrainResourceSpawnPoint } from "./types/world/terrain";
 export { gatheringResources } from "./gathering/index";
 export type { GatheringToolData } from "./data/DataManager";

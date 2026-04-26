@@ -1,67 +1,43 @@
 /**
- * FurnaceEntity - Permanent smelting station
+ * BankEntity - Bank booth/chest for storing items
  *
- * Represents a furnace that players can use to smelt ores into bars.
- * Unlike fires (temporary), furnaces are permanent fixtures in the world.
+ * Represents a bank where players can store items securely.
+ * Rendered as a black box on the client.
  *
- * **Extends**: InteractableEntity (players can interact to smelt)
+ * **Extends**: InteractableEntity (players can interact to open bank)
  *
  * **Interaction**:
- * - Left-click: Opens smelting interface (if player has ores)
- * - Right-click: Context menu with "Smelt" and "Examine" options
+ * - Left-click: Opens bank interface
+ * - Right-click: Context menu with "Use Bank" and "Examine"
  *
  * **Visual Representation**:
- * - Stone/brick furnace with glowing opening
+ * - Black chest-sized box (1 tile)
  *
  * **Runs on**: Server (authoritative), Client (visual)
- *
- * @see SmeltingSystem for smelting logic
- * @see ProcessingDataProvider for smelting recipes
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import { EntityType, InteractionType } from "../../types/entities";
-import type { EntityInteractionData } from "../../types/entities";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import type {
+  EntityInteractionData,
+  BankEntityConfig,
+} from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { stationDataProvider } from "../../data/StationDataProvider";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import {
-  resolveFootprint,
-  type FootprintSpec,
-} from "../../types/game/resource-processing-types";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { stationDataProvider } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { resolveFootprint, type FootprintSpec } from "@hyperforge/shared";
 
-/** Default interaction range for furnaces (in tiles) */
-const FURNACE_INTERACTION_RANGE = 2;
-
-/**
- * Configuration for creating a FurnaceEntity.
- */
-export interface FurnaceEntityConfig {
-  id: string;
-  name?: string;
-  position: { x: number; y: number; z: number };
-  rotation?: { x: number; y: number; z: number };
-  /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
-  footprint?: FootprintSpec;
-}
-
-export class FurnaceEntity extends InteractableEntity {
-  public readonly entityType = "furnace";
-  public readonly isInteractable = true;
-  public readonly isPermanent = true;
-
-  /** Display name */
-  public displayName: string;
+export class BankEntity extends InteractableEntity {
+  protected config: BankEntityConfig;
+  private bankId: string;
 
   /** Tiles this station occupies for collision (supports multi-tile footprints) */
   private collisionTiles: TileCoord[] = [];
@@ -69,31 +45,40 @@ export class FurnaceEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
-  constructor(world: World, config: FurnaceEntityConfig) {
-    // Convert to InteractableConfig format
+  /** Default interaction range for banks (in tiles) */
+  private static readonly BANK_INTERACTION_RANGE = 3;
+
+  constructor(world: World, config: BankEntityConfig) {
+    // Convert BankEntityConfig to InteractableConfig format
+    // Provide defaults for optional fields (like FurnaceEntity pattern)
+    const interactionDistance =
+      config.interactionDistance ?? BankEntity.BANK_INTERACTION_RANGE;
+    const description =
+      config.description ?? "A secure place to store your items.";
+
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name || "Furnace",
-      type: EntityType.FURNACE,
+      name: config.name || "Bank",
+      type: EntityType.BANK,
       position: config.position,
       rotation: config.rotation
-        ? { ...config.rotation, w: 1 }
+        ? { ...config.rotation }
         : { x: 0, y: 0, z: 0, w: 1 },
-      scale: { x: 1, y: 1, z: 1 },
-      visible: true,
-      interactable: true,
-      interactionType: InteractionType.SMELTING,
-      interactionDistance: FURNACE_INTERACTION_RANGE,
-      description: "A furnace for smelting ores into bars.",
-      model: null,
+      scale: config.scale ?? { x: 1, y: 1, z: 1 },
+      visible: config.visible ?? true,
+      interactable: config.interactable ?? true,
+      interactionType: InteractionType.BANK,
+      interactionDistance: interactionDistance,
+      description: description,
+      model: config.model ?? null,
       interaction: {
-        prompt: "Smelt",
-        description: "Smelt ores into bars",
-        range: FURNACE_INTERACTION_RANGE,
+        prompt: "Use Bank",
+        description: description,
+        range: interactionDistance,
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,
-        effect: "smelting",
+        effect: "bank",
       },
       properties: {
         movementComponent: null,
@@ -106,11 +91,11 @@ export class FurnaceEntity extends InteractableEntity {
     };
 
     super(world, interactableConfig);
-
-    this.displayName = config.name || "Furnace";
+    this.config = config;
+    this.bankId = config.properties?.bankId || "spawn_bank";
     // Get footprint from manifest (data-driven), allow per-instance override via config
     this.footprint =
-      config.footprint ?? stationDataProvider.getFootprint("furnace");
+      config.footprint ?? stationDataProvider.getFootprint("bank");
 
     // Register collision for this station (server-side only)
     // Supports multi-tile footprints (e.g., "large" = 2x2 or { width: 2, depth: 1 })
@@ -173,10 +158,10 @@ export class FurnaceEntity extends InteractableEntity {
     }
 
     // Get station data from manifest
-    const stationData = stationDataProvider.getStationData("furnace");
+    const stationData = stationDataProvider.getStationData("bank");
     const modelPath = stationData?.model ?? null;
-    const modelScale = stationData?.modelScale ?? 0.5;
-    const modelYOffset = stationData?.modelYOffset ?? 0.7;
+    const modelScale = stationData?.modelScale ?? 1.0;
+    const modelYOffset = stationData?.modelYOffset ?? 0;
 
     // Try to load 3D model first
     if (modelPath && this.world.loader) {
@@ -184,7 +169,7 @@ export class FurnaceEntity extends InteractableEntity {
         const { scene } = await modelCache.loadModel(modelPath, this.world);
 
         this.mesh = scene;
-        this.mesh.name = `Furnace_${this.id}`;
+        this.mesh.name = `Bank_${this.id}`;
 
         // Scale the model from manifest
         this.mesh.scale.set(modelScale, modelScale, modelScale);
@@ -204,22 +189,24 @@ export class FurnaceEntity extends InteractableEntity {
 
         // Set up userData for interaction detection
         this.mesh.userData = {
-          type: "furnace",
+          type: "bank",
           entityId: this.id,
-          name: this.displayName,
+          name: this.config.name,
           interactable: true,
+          bankId: this.bankId,
         };
 
         // Add to node
         if (this.node) {
           this.node.add(this.mesh);
-          this.node.userData.type = "furnace";
+          this.node.userData.type = "bank";
           this.node.userData.entityId = this.id;
           this.node.userData.interactable = true;
+          this.node.userData.bankId = this.bankId;
         }
 
         // Initialize HLOD impostor support
-        await this.initHLOD(`station_furnace_${modelPath}`, {
+        await this.initHLOD(`station_bank_${modelPath}`, {
           category: "station",
           atlasSize: 1024,
           hemisphere: true,
@@ -228,115 +215,80 @@ export class FurnaceEntity extends InteractableEntity {
         return;
       } catch (error) {
         console.warn(
-          `[FurnaceEntity] Failed to load furnace model, using placeholder:`,
+          `[BankEntity] Failed to load bank model, using placeholder:`,
           error,
         );
       }
     }
 
-    // FALLBACK: Create furnace visual (blue box proxy)
-    const geometry = new THREE.BoxGeometry(1.2, 1.4, 1.2);
+    // FALLBACK: Create a black box for the bank (1 tile size, chest-like proportions)
+    const boxHeight = 0.7;
+    const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
     const material = new MeshStandardNodeMaterial({
-      color: 0x0066ff, // Blue for furnace
-      roughness: 0.5,
-      metalness: 0.3,
+      color: 0x111111, // Very dark black
+      roughness: 0.3,
+      metalness: 0.8, // Metallic chest
     });
+
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Furnace_${this.id}`;
-    mesh.position.y = 0.7; // Raise so bottom is at ground level
+    mesh.name = `Bank_${this.id}`;
     mesh.castShadow = true;
     mesh.receiveShadow = false;
+    // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
+    mesh.position.y = boxHeight / 2;
+    this.mesh = mesh;
 
     // Set up userData for interaction detection
     mesh.userData = {
-      type: "furnace",
+      type: "bank",
       entityId: this.id,
-      name: this.displayName,
+      name: this.config.name,
       interactable: true,
+      bankId: this.bankId,
     };
 
-    // Store mesh
-    this.mesh = mesh;
+    // Add mesh to the entity's node
+    if (this.mesh && this.node) {
+      this.node.add(this.mesh);
 
-    // Add to node
-    if (this.node) {
-      this.node.add(mesh);
-      this.node.userData.type = "furnace";
+      // Also set userData on node for easier detection
+      this.node.userData.type = "bank";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;
+      this.node.userData.bankId = this.bankId;
     }
   }
 
   /**
-   * Handle furnace interaction - opens smelting interface.
+   * Handle bank interaction - opens bank interface
    */
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Emit event to start smelting interaction
-    this.world.emit(EventType.SMELTING_INTERACT, {
+    // Emit event to open bank
+    this.world.emit(EventType.BANK_OPEN, {
       playerId: data.playerId,
-      furnaceId: this.id,
-      position: this.position,
-    });
-  }
-
-  /**
-   * Get context menu actions for this furnace.
-   */
-  public getContextMenuActions(playerId: string): Array<{
-    id: string;
-    label: string;
-    priority: number;
-    handler: () => void;
-  }> {
-    const actions: Array<{
-      id: string;
-      label: string;
-      priority: number;
-      handler: () => void;
-    }> = [];
-
-    // Add "Smelt" action
-    actions.push({
-      id: "smelt",
-      label: "Smelt",
-      priority: 1,
-      handler: () => {
-        this.world.emit(EventType.SMELTING_INTERACT, {
-          playerId,
-          furnaceId: this.id,
-          position: this.position,
-        });
-      },
+      bankId: this.bankId,
     });
 
-    // Add "Examine" action
-    actions.push({
-      id: "examine",
-      label: "Examine",
-      priority: 100,
-      handler: () => {
-        this.world.emit(EventType.UI_MESSAGE, {
-          playerId,
-          message: "A furnace for smelting ores into metal bars.",
-        });
-      },
-    });
-
-    return actions;
+    // Send network packet to open bank on client
+    if (this.world.isServer && this.world.network) {
+      const network = this.world.network as {
+        sendTo?: (playerId: string, packet: string, data: unknown) => void;
+      };
+      if (network.sendTo) {
+        network.sendTo(data.playerId, "bankOpen", { bankId: this.bankId });
+      }
+    }
   }
 
   // PERF: Mutates buffer in-place instead of creating new objects
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
-    buf.displayName = this.displayName;
-    buf.isPermanent = this.isPermanent;
+    buf.bankId = this.bankId;
     return buf;
   }
 
-  /**
-   * Client update - furnaces are static but could have fire animations.
-   */
-  protected clientUpdate(_deltaTime: number): void {
-    // Furnace is static, could add flickering glow animation later
+  protected clientUpdate(deltaTime: number): void {
+    super.clientUpdate(deltaTime);
+    // Bank is static, no animation needed
   }
 }

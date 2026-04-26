@@ -64,13 +64,9 @@ import { Entity } from "../../../entities/Entity";
 // (`@hyperforge/hyperscape`) registers all 13 game entity types in its
 // onEnable so this engine-side registry can stay class-agnostic.
 //
-// Config types remain imported as TYPES ONLY — they don't pull the
-// runtime class into the bundle.
-import type { FurnaceEntityConfig } from "../../../entities/world/FurnaceEntity";
-import type { AnvilEntityConfig } from "../../../entities/world/AnvilEntity";
-import type { AltarEntityConfig } from "../../../entities/world/AltarEntity";
-import type { RunecraftingAltarEntityConfig } from "../../../entities/world/RunecraftingAltarEntity";
-import type { RangeEntityConfig } from "../../../entities/world/RangeEntity";
+// Config types removed too (along with classes) — local config
+// builders use `Record<string, unknown>` since the constructors
+// accept the same loose shape via `getEntityType()` lookup.
 import type {
   ComponentDefinition,
   EntityConstructor,
@@ -151,8 +147,13 @@ export function registerEntityType(
 /**
  * Get an entity constructor by type name.
  * Returns undefined if no plugin has registered the type.
+ *
+ * Exported for use by EntityManager (which constructs entities from
+ * spawn configs); plugin code should never need to call this — entity
+ * spawning goes through `entityManager.spawnEntity()` or
+ * `world.entities.add()`.
  */
-function getEntityType(type: string): EntityConstructor | undefined {
+export function getEntityType(type: string): EntityConstructor | undefined {
   return EntityTypes[type];
 }
 
@@ -873,7 +874,7 @@ export class Entities extends SystemBase implements IEntities {
       ];
       const name = data.name || "Furnace";
 
-      const furnaceConfig: FurnaceEntityConfig & { type: string } = {
+      const furnaceConfig: Record<string, unknown> = {
         id: data.id,
         name: name,
         type: "furnace",
@@ -908,7 +909,7 @@ export class Entities extends SystemBase implements IEntities {
       ];
       const name = data.name || "Anvil";
 
-      const anvilConfig: AnvilEntityConfig & { type: string } = {
+      const anvilConfig: Record<string, unknown> = {
         id: data.id,
         name: name,
         type: "anvil",
@@ -943,7 +944,7 @@ export class Entities extends SystemBase implements IEntities {
       ];
       const name = data.name || "Altar";
 
-      const altarConfig: AltarEntityConfig & { type: string } = {
+      const altarConfig: Record<string, unknown> = {
         id: data.id,
         name: name,
         type: "altar",
@@ -981,7 +982,7 @@ export class Entities extends SystemBase implements IEntities {
         data.name ||
         `${runeType.charAt(0).toUpperCase()}${runeType.slice(1)} Altar`;
 
-      const rcAltarConfig: RunecraftingAltarEntityConfig = {
+      const rcAltarConfig: Record<string, unknown> = {
         id: data.id,
         name: name,
         position: {
@@ -1015,7 +1016,7 @@ export class Entities extends SystemBase implements IEntities {
       ];
       const name = data.name || "Cooking Range";
 
-      const rangeConfig: RangeEntityConfig & { type: string } = {
+      const rangeConfig: Record<string, unknown> = {
         id: data.id,
         name: name,
         type: "range",

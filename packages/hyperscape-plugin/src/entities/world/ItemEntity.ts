@@ -53,25 +53,26 @@
  * @public
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { ItemType, MeshUserData, Item } from "../../types/core/core";
-import { EquipmentSlotName, WeaponType } from "../../types/core/core";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import type { ItemType, MeshUserData, Item } from "@hyperforge/shared";
+import { EquipmentSlotName, WeaponType } from "@hyperforge/shared";
 import type {
   EntityInteractionData,
   ItemEntityConfig,
-} from "../../types/entities";
-import type { EntityData } from "../../types";
+} from "@hyperforge/shared";
+import type { EntityData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { isNotedItemId } from "../../data/NoteGenerator";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { isNotedItemId } from "@hyperforge/shared";
 
 // Re-export types for external use
-export type { ItemEntityConfig } from "../../types/entities";
+export type { ItemEntityConfig } from "@hyperforge/shared";
 
 export class ItemEntity extends InteractableEntity {
   protected config: ItemEntityConfig;

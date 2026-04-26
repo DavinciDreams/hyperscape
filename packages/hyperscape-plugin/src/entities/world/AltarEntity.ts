@@ -1,48 +1,65 @@
 /**
- * BankEntity - Bank booth/chest for storing items
+ * AltarEntity - Prayer altar for recharging prayer points
  *
- * Represents a bank where players can store items securely.
- * Rendered as a black box on the client.
+ * Represents an altar where players can restore prayer points.
+ * Rendered as a purple box on the client (placeholder).
  *
- * **Extends**: InteractableEntity (players can interact to open bank)
+ * **Extends**: InteractableEntity (players can interact to pray)
  *
  * **Interaction**:
- * - Left-click: Opens bank interface
- * - Right-click: Context menu with "Use Bank" and "Examine"
+ * - Left-click: Recharges prayer points to max
+ * - Right-click: Context menu with "Pray" and "Examine"
  *
  * **Visual Representation**:
- * - Black chest-sized box (1 tile)
+ * - Purple altar-sized box (1 tile)
  *
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type {
-  EntityInteractionData,
-  BankEntityConfig,
-} from "../../types/entities";
-import { EntityType, InteractionType } from "../../types/entities";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { stationDataProvider } from "../../data/StationDataProvider";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import {
-  resolveFootprint,
-  type FootprintSpec,
-} from "../../types/game/resource-processing-types";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { stationDataProvider } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { resolveFootprint, type FootprintSpec } from "@hyperforge/shared";
 
-export class BankEntity extends InteractableEntity {
-  protected config: BankEntityConfig;
-  private bankId: string;
+/** Default interaction range for altars (in tiles) */
+const ALTAR_INTERACTION_RANGE = 2;
+
+/**
+ * Configuration for creating an AltarEntity.
+ * Simplified config - full InteractableConfig is built internally.
+ */
+export interface AltarEntityConfig {
+  id: string;
+  name?: string;
+  position: { x: number; y: number; z: number };
+  rotation?: { x: number; y: number; z: number };
+  /** Collision footprint - predefined ("standard", "large") or custom { width, depth } */
+  footprint?: FootprintSpec;
+  /** Optional altar ID for tracking */
+  altarId?: string;
+}
+
+export class AltarEntity extends InteractableEntity {
+  public readonly entityType = "altar";
+  public readonly isInteractable = true;
+  public readonly isPermanent = true;
+
+  /** Display name */
+  public displayName: string;
+
+  /** Altar ID for tracking */
+  private altarId: string;
 
   /** Tiles this station occupies for collision (supports multi-tile footprints) */
   private collisionTiles: TileCoord[] = [];
@@ -50,40 +67,31 @@ export class BankEntity extends InteractableEntity {
   /** Footprint specification for this station */
   private footprint: FootprintSpec;
 
-  /** Default interaction range for banks (in tiles) */
-  private static readonly BANK_INTERACTION_RANGE = 3;
-
-  constructor(world: World, config: BankEntityConfig) {
-    // Convert BankEntityConfig to InteractableConfig format
-    // Provide defaults for optional fields (like FurnaceEntity pattern)
-    const interactionDistance =
-      config.interactionDistance ?? BankEntity.BANK_INTERACTION_RANGE;
-    const description =
-      config.description ?? "A secure place to store your items.";
-
+  constructor(world: World, config: AltarEntityConfig) {
+    // Convert to InteractableConfig format
     const interactableConfig: InteractableConfig = {
       id: config.id,
-      name: config.name || "Bank",
-      type: EntityType.BANK,
+      name: config.name || "Altar",
+      type: EntityType.ALTAR,
       position: config.position,
       rotation: config.rotation
-        ? { ...config.rotation }
+        ? { ...config.rotation, w: 1 }
         : { x: 0, y: 0, z: 0, w: 1 },
-      scale: config.scale ?? { x: 1, y: 1, z: 1 },
-      visible: config.visible ?? true,
-      interactable: config.interactable ?? true,
-      interactionType: InteractionType.BANK,
-      interactionDistance: interactionDistance,
-      description: description,
-      model: config.model ?? null,
+      scale: { x: 1, y: 1, z: 1 },
+      visible: true,
+      interactable: true,
+      interactionType: InteractionType.ALTAR,
+      interactionDistance: ALTAR_INTERACTION_RANGE,
+      description: "An altar to the gods.",
+      model: null,
       interaction: {
-        prompt: "Use Bank",
-        description: description,
-        range: interactionDistance,
+        prompt: "Pray",
+        description: "Pray at the altar to restore prayer points.",
+        range: ALTAR_INTERACTION_RANGE,
         cooldown: 0,
         usesRemaining: -1,
         maxUses: -1,
-        effect: "bank",
+        effect: "altar",
       },
       properties: {
         movementComponent: null,
@@ -96,15 +104,14 @@ export class BankEntity extends InteractableEntity {
     };
 
     super(world, interactableConfig);
-    this.config = config;
-    this.bankId = config.properties?.bankId || "spawn_bank";
+    this.displayName = config.name || "Altar";
+    this.altarId = config.altarId || config.id;
+
     // Get footprint from manifest (data-driven), allow per-instance override via config
     this.footprint =
-      config.footprint ?? stationDataProvider.getFootprint("bank");
+      config.footprint ?? stationDataProvider.getFootprint("altar");
 
     // Register collision for this station (server-side only)
-    // Supports multi-tile footprints (e.g., "large" = 2x2 or { width: 2, depth: 1 })
-    // Collision is CENTERED on the model position, not starting from it
     if (this.world.isServer) {
       const centerTile = worldToTile(config.position.x, config.position.z);
       const size = resolveFootprint(this.footprint);
@@ -163,7 +170,7 @@ export class BankEntity extends InteractableEntity {
     }
 
     // Get station data from manifest
-    const stationData = stationDataProvider.getStationData("bank");
+    const stationData = stationDataProvider.getStationData("altar");
     const modelPath = stationData?.model ?? null;
     const modelScale = stationData?.modelScale ?? 1.0;
     const modelYOffset = stationData?.modelYOffset ?? 0;
@@ -174,7 +181,7 @@ export class BankEntity extends InteractableEntity {
         const { scene } = await modelCache.loadModel(modelPath, this.world);
 
         this.mesh = scene;
-        this.mesh.name = `Bank_${this.id}`;
+        this.mesh.name = `Altar_${this.id}`;
 
         // Scale the model from manifest
         this.mesh.scale.set(modelScale, modelScale, modelScale);
@@ -194,24 +201,24 @@ export class BankEntity extends InteractableEntity {
 
         // Set up userData for interaction detection
         this.mesh.userData = {
-          type: "bank",
+          type: "altar",
           entityId: this.id,
-          name: this.config.name,
+          name: this.displayName,
           interactable: true,
-          bankId: this.bankId,
+          altarId: this.altarId,
         };
 
         // Add to node
         if (this.node) {
           this.node.add(this.mesh);
-          this.node.userData.type = "bank";
+          this.node.userData.type = "altar";
           this.node.userData.entityId = this.id;
           this.node.userData.interactable = true;
-          this.node.userData.bankId = this.bankId;
+          this.node.userData.altarId = this.altarId;
         }
 
         // Initialize HLOD impostor support
-        await this.initHLOD(`station_bank_${modelPath}`, {
+        await this.initHLOD(`station_altar_${modelPath}`, {
           category: "station",
           atlasSize: 1024,
           hemisphere: true,
@@ -220,36 +227,38 @@ export class BankEntity extends InteractableEntity {
         return;
       } catch (error) {
         console.warn(
-          `[BankEntity] Failed to load bank model, using placeholder:`,
+          `[AltarEntity] Failed to load altar model, using placeholder:`,
           error,
         );
       }
     }
 
-    // FALLBACK: Create a black box for the bank (1 tile size, chest-like proportions)
-    const boxHeight = 0.7;
+    // FALLBACK: Create a purple box for the altar (1 tile size, altar-like proportions)
+    const boxHeight = 0.8;
     const geometry = new THREE.BoxGeometry(0.9, boxHeight, 0.9);
     const material = new MeshStandardNodeMaterial({
-      color: 0x111111, // Very dark black
-      roughness: 0.3,
-      metalness: 0.8, // Metallic chest
+      color: 0x9932cc, // Bright purple (DarkOrchid)
+      roughness: 0.5,
+      metalness: 0.3,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Bank_${this.id}`;
+    mesh.name = `Altar_${this.id}`;
     mesh.castShadow = true;
     mesh.receiveShadow = false;
     // Offset mesh up so it sits on the ground (BoxGeometry is centered at origin)
     mesh.position.y = boxHeight / 2;
+    // Set layer for raycasting (required for interaction detection)
+    mesh.layers.set(1);
     this.mesh = mesh;
 
     // Set up userData for interaction detection
     mesh.userData = {
-      type: "bank",
+      type: "altar",
       entityId: this.id,
-      name: this.config.name,
+      name: this.displayName,
       interactable: true,
-      bankId: this.bankId,
+      altarId: this.altarId,
     };
 
     // Add mesh to the entity's node
@@ -257,43 +266,33 @@ export class BankEntity extends InteractableEntity {
       this.node.add(this.mesh);
 
       // Also set userData on node for easier detection
-      this.node.userData.type = "bank";
+      this.node.userData.type = "altar";
       this.node.userData.entityId = this.id;
       this.node.userData.interactable = true;
-      this.node.userData.bankId = this.bankId;
+      this.node.userData.altarId = this.altarId;
     }
   }
 
   /**
-   * Handle bank interaction - opens bank interface
+   * Handle altar interaction - emits pray event
    */
   public async handleInteraction(data: EntityInteractionData): Promise<void> {
-    // Emit event to open bank
-    this.world.emit(EventType.BANK_OPEN, {
+    // Emit event to pray at altar
+    this.world.emit(EventType.ALTAR_PRAY, {
       playerId: data.playerId,
-      bankId: this.bankId,
+      altarId: this.id,
     });
-
-    // Send network packet to open bank on client
-    if (this.world.isServer && this.world.network) {
-      const network = this.world.network as {
-        sendTo?: (playerId: string, packet: string, data: unknown) => void;
-      };
-      if (network.sendTo) {
-        network.sendTo(data.playerId, "bankOpen", { bankId: this.bankId });
-      }
-    }
   }
 
   // PERF: Mutates buffer in-place instead of creating new objects
   getNetworkData(): Record<string, unknown> {
     const buf = super.getNetworkData();
-    buf.bankId = this.bankId;
+    buf.altarId = this.altarId;
     return buf;
   }
 
   protected clientUpdate(deltaTime: number): void {
     super.clientUpdate(deltaTime);
-    // Bank is static, no animation needed
+    // Altar is static, no animation needed
   }
 }

@@ -23,17 +23,17 @@
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE from "../../extras/three/three";
+import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import type { World } from "../../core/World";
-import { EntityType, InteractionType } from "../../types/entities";
-import type { EntityInteractionData } from "../../types/entities";
+import type { World } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { getFireInteractionRange } from "../../data/live/processing-live";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { getFireInteractionRange } from "@hyperforge/shared";
 
 /**
  * Configuration for creating a FireEntity.

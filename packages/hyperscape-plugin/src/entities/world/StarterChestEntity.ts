@@ -21,20 +21,18 @@
  * **Runs on**: Server (authoritative), Client (visual)
  */
 
-import THREE, { MeshStandardNodeMaterial } from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { EntityInteractionData } from "../../types/entities";
-import { EntityType, InteractionType } from "../../types/entities";
+import * as THREE from "three";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import type { World } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
 
 /** Starter items given to new players */
 const STARTER_ITEMS = [

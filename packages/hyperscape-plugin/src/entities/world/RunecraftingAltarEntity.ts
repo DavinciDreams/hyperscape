@@ -15,28 +15,22 @@
  * @see RunecraftingSystem for crafting logic
  */
 
-import * as THREE from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { EntityInteractionData } from "../../types/entities";
-import type { EntityData } from "../../types";
-import { EntityType, InteractionType } from "../../types/entities";
+import * as THREE from "three";
+import type { World } from "@hyperforge/shared";
+import type { EntityInteractionData } from "@hyperforge/shared";
+import type { EntityData } from "@hyperforge/shared";
+import { EntityType, InteractionType } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { stationDataProvider } from "../../data/StationDataProvider";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import { CollisionFlag } from "../../systems/shared/movement/CollisionFlags";
-import {
-  worldToTile,
-  type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import {
-  resolveFootprint,
-  type FootprintSpec,
-} from "../../types/game/resource-processing-types";
-import type { ParticleSystem } from "../../systems/shared/presentation/ParticleSystem";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { stationDataProvider } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import { CollisionFlag } from "@hyperforge/shared";
+import { worldToTile, type TileCoord } from "@hyperforge/shared";
+import { resolveFootprint, type FootprintSpec } from "@hyperforge/shared";
+import type { ParticleSystem } from "@hyperforge/shared";
 
 /** Default interaction range for runecrafting altars (in tiles) */
 const RUNECRAFTING_ALTAR_INTERACTION_RANGE = 2;

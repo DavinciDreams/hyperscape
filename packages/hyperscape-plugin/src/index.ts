@@ -32,23 +32,25 @@ import type {
   PluginFactory,
 } from "@hyperforge/gameplay-framework";
 import {
-  AltarEntity,
-  AnvilEntity,
-  BankEntity,
-  FurnaceEntity,
-  HeadstoneEntity,
-  ItemEntity,
   MobEntity,
-  NPCEntity,
   PlayerEntity,
   PlayerLocal,
   PlayerRemote,
-  RangeEntity,
   registerEntityType,
-  ResourceEntity,
-  RunecraftingAltarEntity,
   type World,
 } from "@hyperforge/shared";
+// Entity classes that migrated to plugin (2026-04-26 follow-up to
+// the Entities decoupling refactor).
+import { AltarEntity } from "./entities/world/AltarEntity.js";
+import { AnvilEntity } from "./entities/world/AnvilEntity.js";
+import { BankEntity } from "./entities/world/BankEntity.js";
+import { FurnaceEntity } from "./entities/world/FurnaceEntity.js";
+import { HeadstoneEntity } from "./entities/world/HeadstoneEntity.js";
+import { ItemEntity } from "./entities/world/ItemEntity.js";
+import { NPCEntity } from "./entities/npc/NPCEntity.js";
+import { RangeEntity } from "./entities/world/RangeEntity.js";
+import { ResourceEntity } from "./entities/world/ResourceEntity.js";
+import { RunecraftingAltarEntity } from "./entities/world/RunecraftingAltarEntity.js";
 
 import { AggroSystem } from "./systems/AggroSystem.js";
 import { BankingSystem } from "./systems/BankingSystem.js";

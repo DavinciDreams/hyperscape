@@ -10,20 +10,20 @@
  * @public
  */
 
-import * as THREE from "../../extras/three/three";
-import type { World } from "../../core/World";
+import * as THREE from "three";
+import type { World } from "@hyperforge/shared";
 import type {
   HeadstoneEntityConfig,
   EntityInteractionData,
-} from "../../types/entities";
-import type { InventoryItem, EntityData } from "../../types/core/core";
+} from "@hyperforge/shared";
+import type { InventoryItem, EntityData } from "@hyperforge/shared";
 import {
   InteractableEntity,
   type InteractableConfig,
-} from "../InteractableEntity";
-import { EventType } from "../../types/events";
-import { canPlayerLoot as checkLootPermission } from "../../systems/shared/loot/LootPermissionService";
-import { modelCache } from "../../utils/rendering/ModelCache";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { canPlayerLoot as checkLootPermission } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
 
 export class HeadstoneEntity extends InteractableEntity {
   protected config: HeadstoneEntityConfig;

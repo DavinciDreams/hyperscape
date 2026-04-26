@@ -1,16 +1,6 @@
 /**
- * World Entities
- * World objects like items, resources, and headstones
+ * World Entities — all Hyperia world entity classes migrated to
+ * @hyperforge/hyperscape (2026-04-26). This barrel stays as a stub
+ * so the parent shared barrel still resolves.
  */
-
-export * from "./ItemEntity";
-export * from "./ResourceEntity";
-export * from "./HeadstoneEntity";
-export * from "./FireEntity";
-export * from "./RangeEntity";
-export * from "./FurnaceEntity";
-export * from "./AnvilEntity";
-export * from "./AltarEntity";
-export * from "./BankEntity";
-export * from "./RunecraftingAltarEntity";
-export * from "./StarterChestEntity";
+export {};
