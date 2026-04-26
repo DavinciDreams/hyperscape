@@ -24,11 +24,11 @@ import {
   type World,
   EventType,
   getItem,
-  StoreSystem,
   SessionType,
   getMaxQuantity,
   getMaxInventorySlotsInputLimit,
 } from "@hyperforge/shared";
+import { StoreSystem } from "@hyperforge/hyperscape";
 import type { ServerSocket } from "../../../shared/types";
 import { InventoryRepository } from "../../../database/repositories/InventoryRepository";
 import * as schema from "../../../database/schema";

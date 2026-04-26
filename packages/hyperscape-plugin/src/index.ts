@@ -395,6 +395,11 @@ export { PlayerEntity } from "./entities/player/PlayerEntity.js";
 export { PlayerLocal } from "./entities/player/PlayerLocal.js";
 export { PlayerRemote } from "./entities/player/PlayerRemote.js";
 
+// StoreSystem — needed by server-side store handler (store.ts) which
+// resolves it via `world.getSystem("store") as StoreSystem` and used
+// to import the type from `@hyperforge/shared`.
+export { StoreSystem } from "./systems/StoreSystem.js";
+
 // DuelSystem internals — re-exported so the server-side
 // `packages/server/src/systems/DuelSystem/*` shims can resolve via
 // `@hyperforge/hyperscape` instead of dangling `@hyperforge/shared`
