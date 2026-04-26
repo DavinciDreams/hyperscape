@@ -1012,13 +1012,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Duel system instantiation + `world.duelSystem` pinning +
     // `systemsByName.set("duel", ...)` moved to @hyperforge/hyperscape
-    // plugin onEnable (2026-04-26). Plugin owns the lifecycle.
-    const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
-    if (!duelSystem) {
-      throw new Error(
-        "[ServerNetwork] DuelSystem must be registered by @hyperforge/hyperscape plugin onEnable before ServerNetwork.init()",
-      );
-    }
+    // plugin onEnable (2026-04-26). Plugin owns the lifecycle. The
+    // tickSystem callback + onPlayerDisconnect/Reconnect handlers
+    // resolve `world.duelSystem` lazily, so plugin onEnable can run
+    // either before or after ServerNetwork.init() — by the first
+    // tick the property is set.
 
     // Look up the duel-stake-transfer bridge (registered in
     // startup/world.ts). It resolves ServerNetwork's socket accessor
