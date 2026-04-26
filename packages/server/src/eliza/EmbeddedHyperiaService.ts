@@ -467,7 +467,7 @@ export class EmbeddedHyperiaService implements IEmbeddedHyperiaService {
     this.world.emit(EventType.PLAYER_JOINED, {
       playerId: this.characterId,
       player:
-        addedEntity as unknown as import("@hyperforge/shared").PlayerLocal,
+        addedEntity as unknown as import("@hyperforge/hyperscape").PlayerLocal,
       isEmbeddedAgent: true,
     });
 
