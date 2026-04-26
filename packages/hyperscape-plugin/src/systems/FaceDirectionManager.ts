@@ -13,16 +13,16 @@
  * @see https://osrs-docs.com/docs/packets/outgoing/updating/masks/face-direction/
  */
 
-import type { World } from "../../../index";
 import {
-  quaternionPool,
-  worldToTile,
-  getCardinalFaceDirection,
-  getCardinalFaceAngle,
-  type TileCoord,
   type CardinalDirection,
-} from "../../../index";
-import { DEBUG_FACE_DIRECTION } from "./debug";
+  DEBUG_FACE_DIRECTION,
+  getCardinalFaceAngle,
+  getCardinalFaceDirection,
+  quaternionPool,
+  type TileCoord,
+  type World,
+  worldToTile,
+} from "@hyperforge/shared";
 
 /**
  * Entity interface for face direction operations

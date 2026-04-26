@@ -2166,6 +2166,9 @@ export { Logger as NetworkLogger } from "./systems/server/network/services/Logge
 // ServerSocket type — needed by migrated ScriptQueue (the queued
 // player/NPC action types reference ServerSocket).
 export type { ServerSocket } from "./systems/server/network/server-types";
+// Debug flag for face-direction logging — read by the migrated
+// FaceDirectionManager (Phase D7, 2026-04-26).
+export { DEBUG_FACE_DIRECTION } from "./systems/server/network/debug";
 // Substrate interfaces — needed by plugin-side game managers
 // (PendingTrade/Duel/Attack/Cook/Gather, Follow) that resolve
 // `world.tileMovement` etc. at construction time.

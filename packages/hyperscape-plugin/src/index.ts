@@ -116,6 +116,7 @@ import { PendingAttackManager } from "./systems/PendingAttackManager.js";
 import { PendingCookManager } from "./systems/PendingCookManager.js";
 import { PendingGatherManager } from "./systems/PendingGatherManager.js";
 import { FollowManager } from "./systems/FollowManager.js";
+import { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -171,6 +172,7 @@ export { PendingAttackManager } from "./systems/PendingAttackManager.js";
 export { PendingCookManager } from "./systems/PendingCookManager.js";
 export { PendingGatherManager } from "./systems/PendingGatherManager.js";
 export { FollowManager } from "./systems/FollowManager.js";
+export { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -652,6 +654,50 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           followManager;
         ctx.scope.register(() => {
           delete (ctx.world as { followManager?: FollowManager }).followManager;
+        });
+
+        // FaceDirectionManager — Phase D7 (2026-04-26). Plugin owns
+        // construction + setSendFunction wiring. The send-function
+        // closes over `world.broadcast` (Phase B2 substrate) +
+        // `world.entities`.
+        const fdmBroadcast = (
+          ctx.world as {
+            broadcast?: {
+              sendToNearby(
+                name: string,
+                data: unknown,
+                worldX: number,
+                worldZ: number,
+              ): void;
+              sendToAll(name: string, data: unknown): void;
+            };
+          }
+        ).broadcast;
+        const faceDirectionManager = new FaceDirectionManager(ctx.world);
+        faceDirectionManager.setSendFunction((name, data) => {
+          const payload = data as { id?: string };
+          const entity = payload?.id
+            ? (ctx.world.entities?.get(payload.id) as {
+                position?: { x: number; y: number; z: number };
+              } | null)
+            : null;
+          if (entity?.position) {
+            fdmBroadcast?.sendToNearby(
+              name,
+              data,
+              entity.position.x,
+              entity.position.z,
+            );
+          } else {
+            fdmBroadcast?.sendToAll(name, data);
+          }
+        });
+        (
+          ctx.world as { faceDirectionManager?: FaceDirectionManager }
+        ).faceDirectionManager = faceDirectionManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { faceDirectionManager?: FaceDirectionManager })
+            .faceDirectionManager;
         });
 
         // Duel system — same manual-lifecycle pattern as

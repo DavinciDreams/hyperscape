@@ -37,10 +37,18 @@ interface FakeWorld {
   pendingCookManager?: unknown;
   pendingGatherManager?: unknown;
   followManager?: unknown;
-  // PendingGatherManager constructor closure reads `world.broadcast`
-  // (Phase B2 substrate). A no-op stub satisfies the lookup.
+  faceDirectionManager?: unknown;
+  // PendingGatherManager + FaceDirectionManager constructor closures
+  // read `world.broadcast` (Phase B2 substrate). A no-op stub
+  // satisfies the lookups.
   broadcast: {
     sendToAll(name: string, data: unknown): void;
+    sendToNearby(
+      name: string,
+      data: unknown,
+      worldX: number,
+      worldZ: number,
+    ): void;
   };
   // DuelSystem registration also writes to `systemsByName` so combat
   // can look it up via `world.getSystem("duel")`.
@@ -105,6 +113,7 @@ function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
     },
     broadcast: {
       sendToAll(_name, _data) {},
+      sendToNearby(_name, _data, _worldX, _worldZ) {},
     },
     register(name, Ctor) {
       const ctorName =
@@ -235,11 +244,12 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer, plus eight
+    // Every registration paired with a scope disposer, plus nine
     // extra disposers for manually-managed lifecycle systems:
     // TradingSystem + DuelSystem + 5 Pending-managers
-    // (Trade/DuelChallenge/Attack/Cook/Gather) + FollowManager.
-    expect(scope.disposers.length).toBe(world.registered.length + 8);
+    // (Trade/DuelChallenge/Attack/Cook/Gather) + FollowManager +
+    // FaceDirectionManager.
+    expect(scope.disposers.length).toBe(world.registered.length + 9);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {
