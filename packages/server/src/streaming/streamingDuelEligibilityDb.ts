@@ -41,7 +41,7 @@ export async function isAgentDuelLobbySpawnAllowedFromDb(
     const { agentMappings } = await import("../database/schema.js");
     const { eq, or } = await import("drizzle-orm");
     const rows = await db
-      .select({ eligible: agentMappings.streamingDuelEligible })
+      .select({ eligible: agentMappings.streamingDuelEnabled })
       .from(agentMappings)
       .where(
         or(
@@ -84,7 +84,7 @@ export async function isAgentStreamingDuelEligibleFromDb(
     const { agentMappings } = await import("../database/schema.js");
     const { eq, or } = await import("drizzle-orm");
     const rows = await db
-      .select({ eligible: agentMappings.streamingDuelEligible })
+      .select({ eligible: agentMappings.streamingDuelEnabled })
       .from(agentMappings)
       .where(
         or(
