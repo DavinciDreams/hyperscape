@@ -101,6 +101,8 @@ import { PacketPriority } from "./BandwidthBudget";
 import { SpatialIndex } from "./SpatialIndex";
 import type { ISpatialIndex } from "./substrate/spatial-index";
 import type { IBroadcastService } from "./substrate/broadcast-service";
+import type { IRegionSubscriptionService } from "./substrate/region-subscription-service";
+import { RegionSubscriptionService } from "./RegionSubscriptionService";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
 import { InitializationManager } from "./initialization";
@@ -334,6 +336,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private socketManager!: SocketManager;
   private broadcastManager!: IBroadcastManager;
   private spatialIndex!: SpatialIndex;
+  private regionSubscriptions!: RegionSubscriptionService;
 
   /**
    * PLAN_SERVERNETWORK_MIGRATION.md Step 5d alternative: packet handlers
@@ -443,11 +446,27 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     (world as { broadcast?: IBroadcastService }).broadcast =
       this.broadcastManager;
 
-    // Remaining managers (region subscriptions, tile movement) are
-    // constructed in `init()` until later Phase B sub-cuts move them
-    // to the constructor too. uWS-app wiring (`setUwsApp`) and
-    // pub/sub enabling (`enablePubSub`) stay in init() — they
-    // depend on late-bound transport state.
+    // Region subscription service (Phase B3) — wraps the per-player
+    // pubsub-topic update logic that used to live in ServerNetwork's
+    // private `updatePlayerRegionSubscriptions` /
+    // `resubscribePlayerRegionTopics` methods. Plugin-side movement
+    // code resolves it via `world.regionSubscriptions` lookup.
+    this.regionSubscriptions = new RegionSubscriptionService({
+      spatialIndex: this.spatialIndex,
+      broadcastService: this.broadcastManager,
+      getSpectatorsForPlayer: (playerId) =>
+        this.spectatorsByPlayer.get(playerId),
+    });
+    (
+      world as { regionSubscriptions?: IRegionSubscriptionService }
+    ).regionSubscriptions = this.regionSubscriptions;
+
+    // TileMovementManager is still constructed in `init()` until
+    // Phase B4 moves it (TMM's broadcast callback closes over
+    // ServerNetwork-instance state — needs careful refactoring).
+    // uWS-app wiring (`setUwsApp`) and pub/sub enabling
+    // (`enablePubSub`) stay in init() — they depend on late-bound
+    // transport state.
   }
 
   // Rate Limiting Helper
@@ -2489,6 +2508,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.spatialIndex.destroy();
     delete (this.world as { spatialIndex?: ISpatialIndex }).spatialIndex;
     delete (this.world as { broadcast?: IBroadcastService }).broadcast;
+    delete (this.world as { regionSubscriptions?: IRegionSubscriptionService })
+      .regionSubscriptions;
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
     this.eventBridge.destroy();
@@ -2650,32 +2671,29 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   }
 
   /**
-   * Compute diff of old vs new 3×3 region grids and update subscriptions.
-   * Called on position updates that cross a region boundary.
+   * Update region pubsub subscriptions when a player crosses a region
+   * boundary. Phase B3 (PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26):
+   * delegates to the standalone RegionSubscriptionService pinned to
+   * `world.regionSubscriptions`. ServerNetwork keeps the wrapper
+   * method for in-shared callers; new callers should resolve via
+   * `world.regionSubscriptions.updatePlayerRegionSubscriptions(...)`.
    */
   private updatePlayerRegionSubscriptions(
     playerId: string,
     oldKey: number,
     newKey: number,
   ): void {
-    const diff = this.spatialIndex.getRegionSubscriptionDiff(oldKey, newKey);
-    const adapter = this.getUwsAdapterForPlayer(playerId);
-    if (adapter) {
-      for (const key of diff.unsubscribe) {
-        adapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
-      }
-      for (const key of diff.subscribe) {
-        adapter.subscribe(this.spatialIndex.getRegionTopic(key));
-      }
-    }
-
-    // Also update any spectators following this player
-    this.updateSpectatorRegionSubscriptions(playerId, diff);
+    this.regionSubscriptions.updatePlayerRegionSubscriptions(
+      playerId,
+      oldKey,
+      newKey,
+    );
   }
 
   /**
    * Full region resubscription — unsub all old 9, sub all new 9.
    * Called on teleport/respawn where the player may jump many regions.
+   * Phase B3: delegates to RegionSubscriptionService.
    */
   private resubscribePlayerRegionTopics(
     playerId: string,
@@ -2683,61 +2701,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     worldX: number,
     worldZ: number,
   ): void {
-    // Unsub old 9 regions, sub new 9 regions
-    const oldKeys = this.spatialIndex.getAdjacentRegionKeysFromKey(oldKey);
-    const newKeys = this.spatialIndex.getAdjacentRegionKeys(worldX, worldZ);
-
-    const adapter = this.getUwsAdapterForPlayer(playerId);
-    if (adapter) {
-      for (let i = 0; i < 9; i++) {
-        adapter.unsubscribe(this.spatialIndex.getRegionTopic(oldKeys[i]));
-      }
-      for (let i = 0; i < 9; i++) {
-        adapter.subscribe(this.spatialIndex.getRegionTopic(newKeys[i]));
-      }
-    }
-
-    // Update spectators following this player (embedded agents have no adapter
-    // but may have spectator viewfinders that need region resubscription).
-    const oldKeySet = new Set(oldKeys);
-    const subKeys: number[] = [];
-    const unsubKeys: number[] = [];
-    for (let i = 0; i < 9; i++) {
-      if (!oldKeySet.has(newKeys[i])) subKeys.push(newKeys[i]);
-    }
-    const newKeySet = new Set(newKeys);
-    for (let i = 0; i < 9; i++) {
-      if (!newKeySet.has(oldKeys[i])) unsubKeys.push(oldKeys[i]);
-    }
-    if (subKeys.length > 0 || unsubKeys.length > 0) {
-      this.updateSpectatorRegionSubscriptions(playerId, {
-        subscribe: subKeys,
-        unsubscribe: unsubKeys,
-      });
-    }
-  }
-
-  /**
-   * Update spectator region subscriptions when a followed player changes region.
-   * Typically 0-2 spectators per player.
-   */
-  private updateSpectatorRegionSubscriptions(
-    followedPlayerId: string,
-    diff: { subscribe: number[]; unsubscribe: number[] },
-  ): void {
-    const spectatorIds = this.spectatorsByPlayer.get(followedPlayerId);
-    if (!spectatorIds || spectatorIds.size === 0) return;
-
-    for (const socketId of spectatorIds) {
-      const spectAdapter = this.broadcastManager.getAdapter(socketId);
-      if (!spectAdapter) continue;
-      for (const key of diff.unsubscribe) {
-        spectAdapter.unsubscribe(this.spatialIndex.getRegionTopic(key));
-      }
-      for (const key of diff.subscribe) {
-        spectAdapter.subscribe(this.spatialIndex.getRegionTopic(key));
-      }
-    }
+    this.regionSubscriptions.resubscribePlayerRegionTopics(
+      playerId,
+      oldKey,
+      worldX,
+      worldZ,
+    );
   }
 
   /**
