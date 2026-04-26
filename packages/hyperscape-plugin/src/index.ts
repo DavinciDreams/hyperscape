@@ -50,6 +50,7 @@ import { ZoneDetectionSystem } from "./systems/ZoneDetectionSystem.js";
 import { PlayerDeathSystem } from "./systems/PlayerDeathSystem.js";
 import { SkillsSystem } from "./systems/SkillsSystem.js";
 import { EquipmentSystem } from "./systems/EquipmentSystem.js";
+import { InventorySystem } from "./systems/InventorySystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -246,11 +247,18 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // before SystemLoader runs.
       register("zone-detection", ZoneDetectionSystem);
 
+      // Inventory — slot-based item storage with stack management
+      // + DB persistence. Migrated 2026-04-26 (Wave 5c). Many
+      // plugin systems (PlayerDeathSystem, EquipmentSystem,
+      // QuestSystem, LootSystem, …) depend on it, so it registers
+      // before player-death.
+      register("inventory", InventorySystem);
+
       // Player death — handles inventory drop, gravestone spawn,
       // respawn timer. Migrated 2026-04-26 with its 3 internal
       // helpers (DeathStateManager, SafeAreaDeathHandler,
       // WildernessDeathHandler). Depends on zone-detection +
-      // ground-items so registers after both.
+      // ground-items + inventory so registers after them.
       register("player-death", PlayerDeathSystem);
 
       // Skills — XP table + skill data + combat-level calculation.

@@ -698,7 +698,12 @@ export {
 export type { DeathLocationData } from "./types/core/core";
 // `DeathLock` already exported earlier in this file.
 export type { TransactionContext } from "./types/death";
-export { InventorySystem } from "./systems/shared/character/InventorySystem";
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
+// In-shared consumers use the duck-typed surface (see CombatSystem,
+// AttackContext, WorldDropConditionEvaluators, WorldDialogueConditionEvaluators).
+export type { InventoryItemAddedPayload } from "./types/events";
+export type { InventoryData } from "./types/systems/system-interfaces";
+export type { PlayerInventory } from "./types/core/core";
 export { getEntityPosition } from "./utils/game/EntityPositionUtils";
 export { resolveStarterTownArea } from "./world-areas";
 export type {

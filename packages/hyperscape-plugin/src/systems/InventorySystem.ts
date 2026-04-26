@@ -2,33 +2,36 @@
  * InventorySystem - Manages player inventories
  */
 
-import { getSystem } from "../../../utils/SystemUtils";
-import type { World } from "../../../types";
-import type { InventoryItemAddedPayload } from "../../../types/events";
-import { EventType } from "../../../types/events";
-import { getItem } from "../../../data/items";
-import type { PlayerInventory } from "../../../types/core/core";
-import type {
-  InventoryCanAddEvent,
-  InventoryCheckEvent,
-  InventoryItemInfo,
-  InventorySyncData,
-} from "../../../types/events";
-import { PlayerID } from "../../../types/core/identifiers";
-import type { InventoryData } from "../../../types/systems/system-interfaces";
+// Migrated 2026-04-26 from
+// `packages/shared/src/systems/shared/character/` into
+// `@hyperforge/hyperscape` (Wave 5c). 2420 LOC. Four in-shared
+// consumers (CombatSystem, AttackContext,
+// WorldDropConditionEvaluators, WorldDialogueConditionEvaluators)
+// now duck-type the surface they need.
 import {
   createItemID,
   createPlayerID,
+  type DatabaseSystem,
+  EntityManager,
+  EventType,
+  getItem,
+  getSystemUtil as getSystem,
+  type GroundItemSystemDuck,
+  type InventoryCanAddEvent,
+  type InventoryCheckEvent,
+  type InventoryData,
+  type InventoryItemAddedPayload,
+  type InventoryItemInfo,
+  type InventorySyncData,
   isValidItemID,
   isValidPlayerID,
+  Logger,
+  type PlayerID,
+  type PlayerInventory,
+  SystemBase,
   toPlayerID,
-} from "../../../utils/IdentifierUtils";
-import { EntityManager } from "..";
-import { SystemBase } from "../infrastructure/SystemBase";
-import { Logger } from "../../../utils/Logger";
-import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
-// GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { GroundItemSystemDuck } from "../../../types/death/death-types";
+  type World,
+} from "@hyperforge/shared";
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local interface so InventorySystem doesn't need to import
 // from the plugin (which would create a forward dep). Mirrors the
@@ -42,7 +45,7 @@ interface CoinPouchSystemLike {
   isPlayerInitialized(playerId: string): boolean;
   persistCoinsImmediate(playerId: string): Promise<void>;
 }
-import { DeathState } from "../../../types/entities";
+import { DeathState } from "@hyperforge/shared";
 
 export class InventorySystem extends SystemBase {
   protected playerInventories = new Map<PlayerID, PlayerInventory>();
@@ -821,9 +824,9 @@ export class InventorySystem extends SystemBase {
     // Get all items that will be dropped (for logging)
     const droppedItemCount = inventory.items.length;
 
-    // Clear the inventory (RuneScape-style: all items go to gravestone)
+    // Clear the inventory (tile-based MMORPG: all items go to gravestone)
     inventory.items = [];
-    // NOTE: Coins are protected and remain in coin pouch (RuneScape-style)
+    // NOTE: Coins are protected and remain in coin pouch (tile-based MMORPG)
 
     // CRITICAL: Update UI by emitting inventory update event
     this.emitInventoryUpdate(playerID);
@@ -1102,9 +1105,9 @@ export class InventorySystem extends SystemBase {
   // NOTE: updateCoins() removed - now handled by CoinPouchSystem
 
   /**
-   * Move/swap items between inventory slots (OSRS-style)
+   * Move/swap items between inventory slots (tile-based MMORPG)
    *
-   * Implements OSRS-style SWAP behavior:
+   * Implements tile-based SWAP behavior:
    * - If both slots have items: swap them
    * - If only source has item: move to destination
    * - If source is empty: no-op
@@ -1194,7 +1197,7 @@ export class InventorySystem extends SystemBase {
       return;
     }
 
-    // OSRS-style swap
+    // tile-based swap
     if (toItem) {
       // Both slots occupied - swap
       fromItem.slot = toSlot;
@@ -2166,9 +2169,9 @@ export class InventorySystem extends SystemBase {
 
     const droppedItemCount = inventory.items.length;
 
-    // Clear the inventory (RuneScape-style: all items go to gravestone)
+    // Clear the inventory (tile-based MMORPG: all items go to gravestone)
     inventory.items = [];
-    // NOTE: Coins are protected and remain in coin pouch (RuneScape-style)
+    // NOTE: Coins are protected and remain in coin pouch (tile-based MMORPG)
 
     // CRITICAL: Update UI by emitting inventory update event
     this.emitInventoryUpdate(playerID);

@@ -18,8 +18,8 @@ import {
   EQUIPMENT_SLOT_NAMES,
   type EquipmentSyncData,
   EventType,
-  InventorySystem,
 } from "@hyperforge/shared";
+import { InventorySystem } from "./InventorySystem.js";
 
 /**
  * Helper functions for equipment requirements

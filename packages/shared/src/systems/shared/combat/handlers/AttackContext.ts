@@ -28,7 +28,16 @@ import type { PlayerEquipment } from "../../../../types/core/core";
 interface EquipmentSystemDuck {
   getPlayerEquipment(playerId: string): PlayerEquipment | undefined;
 }
-import type { InventorySystem } from "../../character/InventorySystem";
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
+import type { PlayerInventory } from "../../../../types/core/core";
+interface InventorySystemDuck {
+  hasItem(playerId: string, itemId: string, quantity?: number): boolean;
+  getInventory(playerId: string): PlayerInventory | undefined;
+  removeItemDirect(
+    playerId: string,
+    item: { itemId: string; quantity: number; slot?: number },
+  ): Promise<boolean>;
+}
 import type { TerrainSystem } from "../../world/TerrainSystem";
 import type { PooledTile } from "../../../../utils/pools/TilePool";
 import type { EntityID } from "../../../../types/core/identifiers";
@@ -96,7 +105,7 @@ export interface CombatAttackContext {
   playerSystem?: PlayerSystem;
   prayerSystem?: PrayerSystemLike | null;
   equipmentSystem?: EquipmentSystemDuck;
-  inventorySystem?: InventorySystem;
+  inventorySystem?: InventorySystemDuck;
   terrainSystem?: TerrainSystem;
 
   // Mutable state

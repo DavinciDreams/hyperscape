@@ -122,7 +122,16 @@ import type { PlayerEquipment } from "../../../types/core/core";
 interface EquipmentSystemDuck {
   getPlayerEquipment(playerId: string): PlayerEquipment | undefined;
 }
-import type { InventorySystem } from "../character/InventorySystem";
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
+import type { PlayerInventory } from "../../../types/core/core";
+interface InventorySystemDuck {
+  hasItem(playerId: string, itemId: string, quantity?: number): boolean;
+  getInventory(playerId: string): PlayerInventory | undefined;
+  removeItemDirect(
+    playerId: string,
+    item: { itemId: string; quantity: number; slot?: number },
+  ): Promise<boolean>;
+}
 import type { Item, EquipmentSlot } from "../../../types/game/item-types";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
@@ -202,7 +211,7 @@ export class CombatSystem extends SystemBase {
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
   private equipmentSystem?: EquipmentSystemDuck;
-  private inventorySystem?: InventorySystem;
+  private inventorySystem?: InventorySystemDuck;
 
   // Pre-allocated pooled tiles for hot path calculations (zero GC)
   private readonly _attackerTile: PooledTile = tilePool.acquire();
@@ -510,7 +519,9 @@ export class CombatSystem extends SystemBase {
     this.equipmentSystem = this.world.getSystem("equipment") as unknown as
       | EquipmentSystemDuck
       | undefined;
-    this.inventorySystem = this.world.getSystem<InventorySystem>("inventory");
+    this.inventorySystem = this.world.getSystem("inventory") as unknown as
+      | InventorySystemDuck
+      | undefined;
 
     // Listen for auto-retaliate toggle to start combat if toggled ON while being attacked
     // SERVER-ONLY: Combat state changes must happen on server, client receives via network sync

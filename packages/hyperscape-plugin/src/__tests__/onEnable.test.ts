@@ -88,6 +88,7 @@ const CROSS_CUTTING_REGISTRATIONS = [
   "item-spawner",
   "ground-items",
   "zone-detection",
+  "inventory",
   "player-death",
   "skills",
   "equipment",

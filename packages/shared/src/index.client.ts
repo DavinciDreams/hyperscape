@@ -1159,6 +1159,9 @@ export type {
 export type { EntitySpawnedEvent } from "./types/systems/system-interfaces";
 // (InteractionType already re-exported earlier in this file as a value)
 
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
+export type { PlayerInventory } from "./types/core/core";
+
 // GroundItemSystem + ZoneDetectionSystem deps — re-exported for the
 // client bundle.
 export type {

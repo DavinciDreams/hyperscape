@@ -71,6 +71,7 @@ import type {
   Inventory,
   InventorySlotItem,
   Item,
+  PlayerInventory,
   Position3D,
   Skills,
 } from "../../../types/core/core";
@@ -105,7 +106,7 @@ import { EntityManager } from "..";
 // InventoryInteractionSystem migrated to @hyperforge/hyperscape
 // (2026-04-25). The lone external touchpoint is the
 // `getSystemInfo()` stats reader below — duck-typed inline.
-import { InventorySystem } from "..";
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
 // ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
 // MobNPCSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25)
@@ -216,7 +217,8 @@ export interface Systems {
   actionRegistry?: ActionRegistry;
   database?: DatabaseSystem;
   player?: PlayerSystem;
-  inventory?: InventorySystem;
+  // InventorySystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  inventory?: unknown;
   combat?: CombatSystem;
   // SkillsSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
   skills?: unknown;
@@ -394,7 +396,8 @@ export async function registerSystems(world: World): Promise<void> {
   // systems have registered.
 
   // 10. Inventory system - Item management (depends on player, coin-pouch systems)
-  world.register("inventory", InventorySystem);
+  // "inventory" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-26, Wave 5c).
 
   // 11. Equipment system - Item equipping (depends on inventory system)
   // "equipment" registered by @hyperforge/hyperscape plugin onEnable
@@ -549,7 +552,7 @@ export async function registerSystems(world: World): Promise<void> {
       ? (dbSystem as DatabaseSystem)
       : undefined;
   systems.combat = getSystem(world, "combat") as CombatSystem;
-  systems.inventory = getSystem(world, "inventory") as InventorySystem;
+  systems.inventory = getSystem(world, "inventory");
   systems.skills = getSystem(world, "skills");
   systems.mobNpc = getSystem(world, "mob-npc");
   systems.banking = getSystem(world, "banking");
@@ -773,9 +776,14 @@ function setupAPI(world: World, systems: Systems): void {
     canAttack: (_attackerId: string, _targetId: string) => true, // Combat system doesn't have canAttack method
     isInCombat: (entityId: string) => systems.combat?.isInCombat(entityId),
 
-    // Inventory API
+    // Inventory API — InventorySystem migrated to
+    // @hyperforge/hyperscape (Wave 5c); duck-type the surface inline.
     getInventory: (playerId: string) => {
-      const inventory = systems.inventory?.getInventory(playerId);
+      const inventory = (
+        systems.inventory as
+          | { getInventory(id: string): PlayerInventory | undefined }
+          | undefined
+      )?.getInventory(playerId);
       if (!inventory) return [];
       return inventory.items.map((item) => ({
         itemId: item.itemId,
@@ -812,9 +820,17 @@ function setupAPI(world: World, systems: Systems): void {
       return result;
     },
     hasItem: (playerId: string, itemId: string | number, quantity?: number) =>
-      systems.inventory?.hasItem(playerId, String(itemId), quantity),
+      (
+        systems.inventory as
+          | { hasItem(id: string, item: string, q?: number): boolean }
+          | undefined
+      )?.hasItem(playerId, String(itemId), quantity),
     getArrowCount: (playerId: string) => {
-      const inventory = systems.inventory?.getInventory(playerId);
+      const inventory = (
+        systems.inventory as
+          | { getInventory(id: string): PlayerInventory | undefined }
+          | undefined
+      )?.getInventory(playerId);
       if (!inventory) return 0;
       const arrows = inventory.items.find(
         (item: InventorySlotItem) =>
@@ -823,7 +839,11 @@ function setupAPI(world: World, systems: Systems): void {
       return arrows?.quantity || 0;
     },
     canAddItem: (playerId: string, _item: Item | InventorySlotItem) => {
-      const inventory = systems.inventory?.getInventory(playerId);
+      const inventory = (
+        systems.inventory as
+          | { getInventory(id: string): PlayerInventory | undefined }
+          | undefined
+      )?.getInventory(playerId);
       return inventory ? inventory.items.length < 28 : false; // Default inventory capacity
     },
 

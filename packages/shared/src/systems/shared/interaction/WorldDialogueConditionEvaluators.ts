@@ -28,7 +28,10 @@ interface QuestSystem {
   getActiveQuests(playerId: string): QuestProgress[];
   hasCompletedQuest(playerId: string, questId: string): boolean;
 }
-import type { InventorySystem } from "../character/InventorySystem";
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
+interface InventorySystemDuck {
+  hasItem(playerId: string, itemId: string, quantity?: number): boolean;
+}
 // SkillsSystem migrated to @hyperforge/hyperscape (2026-04-26).
 // `Skills` already imported above.
 interface SkillsSystemDuck {
@@ -138,7 +141,10 @@ export function buildDialoguePredicate(
         return () => false;
       }
       return (args) => {
-        const inv = world.getSystem<InventorySystem>("inventory") ?? null;
+        const inv =
+          (world.getSystem(
+            "inventory",
+          ) as unknown as InventorySystemDuck | null) ?? null;
         if (!inv) return false;
         return inv.hasItem(args.playerId, binding.itemId, qty);
       };

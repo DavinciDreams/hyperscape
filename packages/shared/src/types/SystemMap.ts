@@ -28,7 +28,8 @@ import type { EntityManager } from "../systems/shared";
 // InventoryInteractionSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown` — sole consumer pattern
 // (SystemLoader stats reader) duck-types `getSystemInfo()`.
-import type { InventorySystem } from "../systems/shared";
+// InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
+// SystemMap entry below typed as `unknown`.
 // ItemSpawnerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // LootSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown` — the only consumer
@@ -124,7 +125,7 @@ export interface SystemMap {
   // Combat & interaction
   combat: CombatSystem;
   "coin-pouch": unknown;
-  inventory: InventorySystem;
+  inventory: unknown;
   equipment: unknown;
   skills: unknown;
   prayer: unknown;

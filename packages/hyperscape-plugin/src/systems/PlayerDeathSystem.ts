@@ -24,7 +24,6 @@ import {
   GRAVESTONE_ID_PREFIX,
   type GroundItemSystemDuck,
   type InventoryItem,
-  InventorySystem,
   isPositionInBounds,
   isPositionInsideDuelArenaZone,
   ITEMS_KEPT_ON_DEATH,
@@ -45,6 +44,7 @@ import {
   type ZoneDetectionSystemDuck,
 } from "@hyperforge/shared";
 import { DeathStateManager } from "./DeathStateManager.js";
+import { InventorySystem } from "./InventorySystem.js";
 import { SafeAreaDeathHandler } from "./SafeAreaDeathHandler.js";
 import { WildernessDeathHandler } from "./WildernessDeathHandler.js";
 
