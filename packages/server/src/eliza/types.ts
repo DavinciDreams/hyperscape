@@ -125,6 +125,8 @@ export interface NearbyEntityData {
   mobType?: string;
   itemId?: string;
   resourceType?: string;
+  /** Underlying resource identifier (distinct from `id` / `entity.id`). */
+  resourceId?: string;
   equippedWeapon?: string;
 }
 

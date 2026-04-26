@@ -1000,6 +1000,7 @@ export class EmbeddedHyperiaService implements IEmbeddedHyperiaService {
       entityObj.mobType = entityData.mobType as string | undefined;
       entityObj.itemId = entityData.itemId as string | undefined;
       entityObj.resourceType = entityData.resourceType as string | undefined;
+      entityObj.resourceId = entityData.resourceId as string | undefined;
       entityObj.equippedWeapon = equippedWeapon;
 
       nearby.push(entityObj);
@@ -2776,10 +2777,8 @@ export class EmbeddedHyperiaService implements IEmbeddedHyperiaService {
     return this.playerEntityId;
   }
 
-  /** Expose the world instance for global entity queries (e.g. findGlobalMobTarget). */
-  getWorld(): World {
-    return this.world;
-  }
+  // `getWorld()` defined earlier in this class; second copy was a
+  // duplicate from a refactor — removed.
 
   onGameEvent(event: string, handler: EventHandler): void {
     if (!this.eventHandlers.has(event)) {
