@@ -33,6 +33,7 @@ interface FakeWorld {
   duelSystem?: unknown;
   pendingTradeManager?: unknown;
   pendingDuelChallengeManager?: unknown;
+  pendingAttackManager?: unknown;
   // DuelSystem registration also writes to `systemsByName` so combat
   // can look it up via `world.getSystem("duel")`.
   systemsByName: Map<string, unknown>;
@@ -53,6 +54,12 @@ interface FakeWorld {
     findClosestWalkableTile(target: unknown): null;
     setArrivalEmote(playerId: string, emote: string): void;
     getPreviousTile(playerId: string): { x: number; z: number };
+  };
+  // PendingAttackManager closures (getMobPosition / isMobAlive)
+  // close over `world.entities`. A `get()` returning null is fine
+  // for the registration-contract test.
+  entities: {
+    get(_id: string): null;
   };
 }
 
@@ -81,6 +88,11 @@ function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
       setArrivalEmote(_playerId, _emote) {},
       getPreviousTile(_playerId) {
         return { x: 0, z: 0 };
+      },
+    },
+    entities: {
+      get(_id) {
+        return null;
       },
     },
     register(name, Ctor) {
@@ -212,11 +224,11 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer, plus four
+    // Every registration paired with a scope disposer, plus five
     // extra disposers for manually-managed lifecycle systems:
     // TradingSystem + DuelSystem + PendingTradeManager +
-    // PendingDuelChallengeManager.
-    expect(scope.disposers.length).toBe(world.registered.length + 4);
+    // PendingDuelChallengeManager + PendingAttackManager.
+    expect(scope.disposers.length).toBe(world.registered.length + 5);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {

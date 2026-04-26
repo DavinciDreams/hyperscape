@@ -15,18 +15,19 @@
  * @see https://oldschool.runescape.wiki/w/Pathfinding
  */
 
-import type { World, TileCoord } from "../../../index";
 import {
-  worldToTile,
-  worldToTileInto,
-  tilesWithinMeleeRange,
-  tilesWithinRange,
-  hasLineOfSight,
+  AttackType,
   CollisionMask,
   EventType,
-  AttackType,
-} from "../../../index";
-import type { ITileMovementService } from "./substrate/tile-movement-service";
+  hasLineOfSight,
+  type ITileMovementService,
+  type TileCoord,
+  tilesWithinMeleeRange,
+  tilesWithinRange,
+  type World,
+  worldToTile,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 interface PendingAttack {
   playerId: string;

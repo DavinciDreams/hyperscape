@@ -115,7 +115,24 @@ import {
 } from "./services/SlidingWindowRateLimiter";
 import { handleAttackPlayer } from "./handlers/combat";
 import type { ProcessingHandlerContext } from "./handlers/processing";
-import { PendingAttackManager } from "./PendingAttackManager";
+// PendingAttackManager migrated to @hyperforge/hyperscape (Phase D3,
+// 2026-04-26). Duck-typed locally — covers every method ServerNetwork
+// calls. Plugin's concrete class structurally satisfies it.
+interface PendingAttackManager {
+  processTick(tickNumber: number): void;
+  onPlayerDisconnect(playerId: string): void;
+  cancelPendingAttack(playerId: string): void;
+  hasPendingAttack(playerId: string): boolean;
+  getPendingAttackTarget(playerId: string): string | undefined;
+  queuePendingAttack(
+    playerId: string,
+    targetId: string,
+    currentTick: number,
+    attackRange: number,
+    mode: "mob" | "player",
+    attackType?: unknown,
+  ): void;
+}
 import { PendingGatherManager } from "./PendingGatherManager";
 import { PendingCookManager } from "./PendingCookManager";
 // PendingTradeManager migrated to @hyperforge/hyperscape (Phase D1,
@@ -334,7 +351,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   /** Modular managers */
   private tileMovementManager!: TileMovementManager;
   private mobTileMovementManager!: MobTileMovementManager;
-  private pendingAttackManager!: PendingAttackManager;
+  // PendingAttackManager removed (Phase D3) — plugin owns the
+  // lifecycle. ServerNetwork resolves via the helper below.
   private pendingGatherManager!: PendingGatherManager;
   private pendingCookManager!: PendingCookManager;
   // PendingTradeManager removed (Phase D1) — plugin owns the
@@ -843,68 +861,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "mobMovement",
     );
 
-    // Pending attack manager — server-authoritative tracking of
-    // "walk to mob and attack" actions. Constructor resolves
-    // `world.tileMovement` (Phase B4 pinning) instead of taking the
-    // service as a parameter.
-    this.pendingAttackManager = new PendingAttackManager(
-      this.world,
-      // getMobPosition helper - get from world entity (mobs spawned via MobNPCSpawnerSystem with gdd_* IDs)
-      (mobId: string) => {
-        const mobEntity = this.world.entities.get(mobId) as {
-          position?: { x: number; y: number; z: number };
-          getPosition?: () => { x: number; y: number; z: number };
-          data?: { position?: unknown };
-        } | null;
-        if (!mobEntity) return null;
-        const p = mobEntity.position;
-        if (
-          p &&
-          typeof p.x === "number" &&
-          typeof p.y === "number" &&
-          typeof p.z === "number"
-        ) {
-          return { x: p.x, y: p.y, z: p.z };
-        }
-        if (typeof mobEntity.getPosition === "function") {
-          return mobEntity.getPosition();
-        }
-        const raw = mobEntity.data?.position;
-        if (Array.isArray(raw) && raw.length >= 3) {
-          const [x, y, z] = raw as number[];
-          if (
-            [x, y, z].every((n) => typeof n === "number" && Number.isFinite(n))
-          ) {
-            return { x, y, z };
-          }
-        }
-        return null;
-      },
-      // isMobAlive helper — Entity/MobEntity use getHealth() / data.health; config.currentHealth alone was always undefined → mobs looked dead and pending attacks were cleared every tick.
-      (mobId: string) => {
-        const mobEntity = this.world.entities.get(mobId) as {
-          getHealth?: () => number;
-          data?: { health?: number };
-          config?: { currentHealth?: number };
-        } | null;
-        if (!mobEntity) return false;
-        if (typeof mobEntity.getHealth === "function") {
-          return mobEntity.getHealth() > 0;
-        }
-        if (typeof mobEntity.data?.health === "number") {
-          return mobEntity.data.health > 0;
-        }
-        if (typeof mobEntity.config?.currentHealth === "number") {
-          return mobEntity.config.currentHealth > 0;
-        }
-        return false;
-      },
-    );
-
-    // Register pending attack processing BEFORE combat (so attacks can initiate combat this tick)
+    // PendingAttackManager migrated to @hyperforge/hyperscape (Phase
+    // D3, 2026-04-26). Plugin onEnable owns construction + the
+    // getMobPosition / isMobAlive closures (which only need
+    // `world.entities` — no ServerNetwork-internal state). Tick
+    // callback resolves the instance lazily via `world.pendingAttackManager`.
     this.tickSystem.onTick(
       (tickNumber) => {
-        this.pendingAttackManager.processTick(tickNumber);
+        const pam = (
+          this.world as { pendingAttackManager?: PendingAttackManager }
+        ).pendingAttackManager;
+        pam?.processTick(tickNumber);
       },
       TickPriority.MOVEMENT,
       "pendingAttack",
@@ -1659,7 +1626,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.onWorld(EventType.PENDING_ATTACK_CANCEL, (event) => {
       const { playerId } =
         event as EventMap[typeof EventType.PENDING_ATTACK_CANCEL];
-      this.pendingAttackManager.cancelPendingAttack(playerId);
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.cancelPendingAttack(playerId);
     });
 
     // OSRS-accurate: Move player to adjacent tile after lighting fire
@@ -1746,7 +1715,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Clean up interaction sessions, pending attacks, follows, gathers, cooks, trades, duels, and home teleport when player disconnects
     this.onWorld(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
       this.interactionSessionManager.onPlayerDisconnect(event.playerId);
-      this.pendingAttackManager.onPlayerDisconnect(event.playerId);
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.onPlayerDisconnect(event.playerId);
       this.followManager.onPlayerDisconnect(event.playerId);
       this.pendingGatherManager.onPlayerDisconnect(event.playerId);
       this.pendingCookManager.onPlayerDisconnect(event.playerId);
@@ -1919,7 +1890,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world.emit(EventType.COMBAT_STOP_ATTACK, {
         attackerId: playerEntity.id,
       });
-      this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
       this.actionQueue.cancelActions(playerEntity.id);
       this.followManager.stopFollowing(playerEntity.id);
       if (mobEntity.type !== "mob") {
@@ -1988,7 +1961,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           attackType,
           tick: this.world.currentTick,
         });
-        this.pendingAttackManager.queuePendingAttack(
+        (
+          this.world as { pendingAttackManager?: PendingAttackManager }
+        ).pendingAttackManager?.queuePendingAttack(
           playerEntity.id,
           targetId,
           this.world.currentTick,
@@ -2030,7 +2005,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.world.emit(EventType.COMBAT_STOP_ATTACK, {
         attackerId: playerEntity.id,
       });
-      this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
       this.actionQueue.cancelActions(playerEntity.id);
       this.followManager.stopFollowing(playerEntity.id);
 
@@ -2080,7 +2057,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         }
 
         // Queue pending attack - will move toward target and attack when in range
-        this.pendingAttackManager.queuePendingAttack(
+        (
+          this.world as { pendingAttackManager?: PendingAttackManager }
+        ).pendingAttackManager?.queuePendingAttack(
           playerEntity.id,
           targetPlayerId,
           this.world.currentTick,
@@ -2097,7 +2076,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       if (!playerEntity) return;
 
       // Cancel any pending attack when starting to follow
-      this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
 
       // Validate and start following
       handleFollowPlayer(socket, data, this.world, this.followManager);
@@ -2793,8 +2774,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     }
 
     if (
-      this.pendingAttackManager.hasPendingAttack(playerId) &&
-      this.pendingAttackManager.getPendingAttackTarget(playerId) === targetId
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.hasPendingAttack(playerId) &&
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.getPendingAttackTarget(playerId) === targetId
     ) {
       return "pending_same_target";
     }
@@ -2823,7 +2808,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       return false;
     }
 
-    this.pendingAttackManager.cancelPendingAttack(playerId);
+    (
+      this.world as { pendingAttackManager?: PendingAttackManager }
+    ).pendingAttackManager?.cancelPendingAttack(playerId);
 
     const attackRange = this.getPlayerWeaponRange(playerId);
     const attackType = this.getPlayerAttackType(playerId);
@@ -2846,7 +2833,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         attackType,
       });
     } else {
-      this.pendingAttackManager.queuePendingAttack(
+      (
+        this.world as { pendingAttackManager?: PendingAttackManager }
+      ).pendingAttackManager?.queuePendingAttack(
         playerId,
         targetId,
         this.world.currentTick,
@@ -3041,7 +3030,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     playerId: string,
     socket?: { send: (name: string, data: unknown) => void },
   ): void {
-    this.pendingAttackManager.cancelPendingAttack(playerId);
+    (
+      this.world as { pendingAttackManager?: PendingAttackManager }
+    ).pendingAttackManager?.cancelPendingAttack(playerId);
     this.followManager.stopFollowing(playerId);
     const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
       .pendingTradeManager;

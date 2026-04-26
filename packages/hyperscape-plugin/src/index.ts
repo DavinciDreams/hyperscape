@@ -112,6 +112,7 @@ import { TradingSystem } from "./systems/TradingSystem/index.js";
 import { DuelSystem } from "./systems/DuelSystem/index.js";
 import { PendingTradeManager } from "./systems/PendingTradeManager.js";
 import { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
+import { PendingAttackManager } from "./systems/PendingAttackManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -158,11 +159,12 @@ export {
   type ModalState,
 } from "./systems/ScriptQueue.js";
 
-// PendingTradeManager + PendingDuelChallengeManager — consumed by
-// `@hyperforge/server`'s re-export shims. Migrated from
-// `@hyperforge/shared` (Phase D1 + D2, 2026-04-26).
+// Pending- and Follow-managers — consumed by `@hyperforge/server`'s
+// re-export shims. Migrated from `@hyperforge/shared`
+// (Phases D1-D6, 2026-04-26).
 export { PendingTradeManager } from "./systems/PendingTradeManager.js";
 export { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
+export { PendingAttackManager } from "./systems/PendingAttackManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -515,6 +517,73 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
               pendingDuelChallengeManager?: PendingDuelChallengeManager;
             }
           ).pendingDuelChallengeManager;
+        });
+
+        // PendingAttackManager — server-authoritative
+        // "walk to mob/player and attack" state machine. Phase D3
+        // (2026-04-26). Constructor takes 2 closures
+        // (`getMobPosition`, `isMobAlive`) that close over
+        // `world.entities` only — no ServerNetwork-internal state —
+        // so they move to plugin onEnable cleanly.
+        const pendingAttackManager = new PendingAttackManager(
+          ctx.world,
+          (mobId: string) => {
+            const mobEntity = ctx.world.entities.get(mobId) as {
+              position?: { x: number; y: number; z: number };
+              getPosition?: () => { x: number; y: number; z: number };
+              data?: { position?: unknown };
+            } | null;
+            if (!mobEntity) return null;
+            const p = mobEntity.position;
+            if (
+              p &&
+              typeof p.x === "number" &&
+              typeof p.y === "number" &&
+              typeof p.z === "number"
+            ) {
+              return { x: p.x, y: p.y, z: p.z };
+            }
+            if (typeof mobEntity.getPosition === "function") {
+              return mobEntity.getPosition();
+            }
+            const raw = mobEntity.data?.position;
+            if (Array.isArray(raw) && raw.length >= 3) {
+              const [x, y, z] = raw as number[];
+              if (
+                [x, y, z].every(
+                  (n) => typeof n === "number" && Number.isFinite(n),
+                )
+              ) {
+                return { x, y, z };
+              }
+            }
+            return null;
+          },
+          (mobId: string) => {
+            const mobEntity = ctx.world.entities.get(mobId) as {
+              getHealth?: () => number;
+              data?: { health?: number };
+              config?: { currentHealth?: number };
+            } | null;
+            if (!mobEntity) return false;
+            if (typeof mobEntity.getHealth === "function") {
+              return mobEntity.getHealth() > 0;
+            }
+            if (typeof mobEntity.data?.health === "number") {
+              return mobEntity.data.health > 0;
+            }
+            if (typeof mobEntity.config?.currentHealth === "number") {
+              return mobEntity.config.currentHealth > 0;
+            }
+            return false;
+          },
+        );
+        (
+          ctx.world as { pendingAttackManager?: PendingAttackManager }
+        ).pendingAttackManager = pendingAttackManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { pendingAttackManager?: PendingAttackManager })
+            .pendingAttackManager;
         });
 
         // Duel system — same manual-lifecycle pattern as
