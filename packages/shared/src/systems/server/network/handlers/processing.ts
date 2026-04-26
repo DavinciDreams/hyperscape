@@ -17,7 +17,13 @@
 
 import type { ServerSocket } from "../server-types";
 import { EventType, World } from "../../../../index";
-import type { TileMovementManager } from "../tile-movement";
+// TileMovementManager migrated to @hyperforge/hyperscape (Phase E1,
+// 2026-04-26). Duck-typed locally — only `getIsRunning` is called
+// from the processing handler context.
+interface TileMovementManager {
+  getIsRunning(playerId: string): boolean;
+  stopPlayer(playerId: string): void;
+}
 // PendingCookManager migrated to @hyperforge/hyperscape (Phase D4,
 // 2026-04-26). Duck-typed locally — only `queuePendingCook` is
 // called from the processing handler.

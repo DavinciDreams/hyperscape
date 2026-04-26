@@ -87,7 +87,26 @@ import {
   handleEnterWorld,
   collectInitialSyncEntities,
 } from "./character-selection";
-import { TileMovementManager } from "./tile-movement";
+// TileMovementManager migrated to @hyperforge/hyperscape (Phase E1,
+// 2026-04-26). Plugin onEnable owns construction +
+// setAntiCheatKickCallback wiring. ServerNetwork uses
+// `world.tileMovement` (substrate interface from Phase A4) for the
+// few remaining use-sites.
+import type { ITileMovementService } from "./substrate/tile-movement-service";
+// Local extended duck-type covering the methods ServerNetwork calls
+// beyond the ITileMovementService surface. Plugin's concrete class
+// structurally satisfies this.
+interface TileMovementManager extends ITileMovementService {
+  handleMoveRequest(socket: ServerSocket, data: unknown): void;
+  onTick(tickNumber: number): void;
+  syncPlayerPosition(
+    playerId: string,
+    position: { x: number; y: number; z: number },
+  ): void;
+  cleanup(playerId: string): void;
+  getPlayerCount(): number;
+  resetAgilityProgress(playerId: string): void;
+}
 import { MobTileMovementManager } from "./mob-tile-movement";
 import { ActionQueue } from "./action-queue";
 import { TickSystem, TickPriority } from "../TickSystem";
@@ -103,7 +122,8 @@ import type { ISpatialIndex } from "./substrate/spatial-index";
 import type { IBroadcastService } from "./substrate/broadcast-service";
 import type { IRegionSubscriptionService } from "./substrate/region-subscription-service";
 import { RegionSubscriptionService } from "./RegionSubscriptionService";
-import type { ITileMovementService } from "./substrate/tile-movement-service";
+// `ITileMovementService` already imported at the top of this file
+// (Phase E1 — see TileMovementManager local duck-type).
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
 import { InitializationManager } from "./initialization";
@@ -398,7 +418,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   static MAX_AGENT_DASHBOARD_ENTRIES = 512;
 
   /** Modular managers */
-  private tileMovementManager!: TileMovementManager;
+  // TileMovementManager removed (Phase E1) — plugin owns the
+  // lifecycle. Use-sites resolve `world.tileMovement` lazily via
+  // the helper getter below.
   private mobTileMovementManager!: MobTileMovementManager;
   // PendingAttackManager removed (Phase D3) — plugin owns the
   // lifecycle. ServerNetwork resolves via the helper below.
@@ -455,7 +477,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       pendingCookManager: (
         this.world as { pendingCookManager?: PendingCookManager }
       ).pendingCookManager as PendingCookManager,
-      tileMovementManager: this.tileMovementManager,
+      tileMovementManager: (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement as TileMovementManager,
       tickSystem: this.tickSystem,
       canProcessRequest: this.canProcessRequest.bind(this),
     };
@@ -557,62 +581,14 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     ).regionSubscriptions = this.regionSubscriptions;
 
     // TickSystem and TileMovementManager (Phase B4). TMM's broadcast
-    // callback closes over `this.spatialIndex` /
-    // `this.regionSubscriptions` / `this.broadcastManager` — all
-    // substrate constructed above, so it's safe to construct TMM here
-    // at register-time. Anti-cheat wiring iterates `this.sockets`
-    // (initialized at the top of this constructor); the kick fires
-    // at runtime only, so the empty socket map at register-time is
-    // fine.
+    // TileMovementManager — migrated to @hyperforge/hyperscape (Phase
+    // E1, 2026-04-26). Plugin onEnable owns construction (with the
+    // broadcast callback closing over `world.broadcast` /
+    // `world.spatialIndex` / `world.regionSubscriptions` substrate)
+    // and pins to `world.tileMovement` BEFORE any Pending-/Follow-
+    // manager construction (the Phase D managers' constructors throw
+    // if `world.tileMovement` isn't set).
     this.tickSystem = new TickSystem();
-    this.tileMovementManager = new TileMovementManager(
-      this.world,
-      (name: string, data: unknown, ignoreSocketId?: string) => {
-        const payload = data as SpatialBroadcastPayload;
-        const entity = payload?.id
-          ? this.world.entities?.get(payload.id)
-          : null;
-        if (entity?.position) {
-          if (payload.id) {
-            const moveRegionChange = this.spatialIndex.updatePlayerPosition(
-              payload.id,
-              entity.position.x,
-              entity.position.z,
-            );
-            if (moveRegionChange) {
-              this.regionSubscriptions.updatePlayerRegionSubscriptions(
-                payload.id,
-                moveRegionChange.oldKey,
-                moveRegionChange.newKey,
-              );
-            }
-          }
-          this.broadcastManager.sendToNearby(
-            name,
-            data,
-            entity.position.x,
-            entity.position.z,
-            ignoreSocketId,
-          );
-        } else {
-          this.broadcastManager.sendToAll(name, data, ignoreSocketId);
-        }
-      },
-    );
-    this.tileMovementManager.setAntiCheatKickCallback(
-      (playerId: string, reason: string) => {
-        for (const [, socket] of this.sockets) {
-          if (socket.player?.id === playerId) {
-            const kickPacket = writePacket("kick", reason);
-            socket.ws?.send?.(kickPacket);
-            socket.ws?.close?.(4002, "Anti-cheat kick");
-            break;
-          }
-        }
-      },
-    );
-    (world as { tileMovement?: ITileMovementService }).tileMovement =
-      this.tileMovementManager;
 
     // uWS-app wiring (`setUwsApp`) and pub/sub enabling
     // (`enablePubSub`) stay in init() — they depend on late-bound
@@ -732,7 +708,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Set up action queue handlers - these execute the actual game logic
     this.actionQueue.setHandlers({
       movement: (socket, data) => {
-        this.tileMovementManager.handleMoveRequest(socket, data);
+        (
+          this.world as { tileMovement?: TileMovementManager }
+        ).tileMovement?.handleMoveRequest(socket, data);
       },
       combat: (socket, data) => {
         // Combat actions trigger the combat system
@@ -831,11 +809,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick(
       (tickNumber) => {
         const t0 = Date.now();
-        this.tileMovementManager.onTick(tickNumber);
+        (
+          this.world as { tileMovement?: TileMovementManager }
+        ).tileMovement?.onTick(tickNumber);
         const elapsed = Date.now() - t0;
         if (elapsed > 50) {
           console.warn(
-            `[Tick] playerMovement: ${elapsed}ms for ${this.tileMovementManager.getPlayerCount()} players`,
+            `[Tick] playerMovement: ${elapsed}ms for ${(this.world as { tileMovement?: TileMovementManager }).tileMovement?.getPlayerCount()} players`,
           );
         }
       },
@@ -1165,11 +1145,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
 
       // Clear any in-progress movement by cleaning up the player's movement state
-      this.tileMovementManager.cleanup(playerId);
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.cleanup(playerId);
 
       // CRITICAL: Sync position to TileMovementManager after teleport
       // Without this, movement system uses stale position and player appears stuck
-      this.tileMovementManager.syncPlayerPosition(playerId, position);
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.syncPlayerPosition(playerId, position);
 
       // Clear any pending actions from before teleport (e.g., queued movements, combat actions)
       // This prevents stale actions from executing after teleport
@@ -1216,7 +1200,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const { playerId } = event as PlayerMovementCancelPayload;
 
       // Clear movement state
-      this.tileMovementManager.cleanup(playerId);
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.cleanup(playerId);
     });
 
     // FaceDirectionManager — migrated to @hyperforge/hyperscape
@@ -1425,7 +1411,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Clean up player state when player disconnects (prevents memory leak)
     this.onWorld(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
-      this.tileMovementManager.cleanup(event.playerId);
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.cleanup(event.playerId);
       this.actionQueue.cleanup(event.playerId);
       this.spatialIndex.removePlayer(event.playerId);
       const entityManager = this.world.getSystem("entity-manager") as {
@@ -1491,7 +1479,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.onWorld(EventType.ENTITY_DEATH, (eventData) => {
       const event = eventData as { entityId: string; entityType: string };
       if (event.entityType === "player") {
-        this.tileMovementManager.resetAgilityProgress(event.entityId);
+        (
+          this.world as { tileMovement?: TileMovementManager }
+        ).tileMovement?.resetAgilityProgress(event.entityId);
       }
     });
 
@@ -1514,7 +1504,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           );
           return;
         }
-        this.tileMovementManager.syncPlayerPosition(event.playerId, position);
+        (
+          this.world as { tileMovement?: TileMovementManager }
+        ).tileMovement?.syncPlayerPosition(event.playerId, position);
         const respawnRegionChange = this.spatialIndex.updatePlayerPosition(
           event.playerId,
           position.x,
@@ -1557,10 +1549,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           );
           return;
         }
-        this.tileMovementManager.syncPlayerPosition(
-          event.playerId,
-          event.position,
-        );
+        (
+          this.world as { tileMovement?: TileMovementManager }
+        ).tileMovement?.syncPlayerPosition(event.playerId, event.position);
         // Clear any pending actions from before teleport
         this.actionQueue.cleanup(event.playerId);
       }
@@ -1633,7 +1624,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         event as EventMap[typeof EventType.COMBAT_FOLLOW_TARGET];
       // Use OSRS-style pathfinding with appropriate range and type
       // MELEE: Cardinal-only for range 1, RANGED/MAGIC: Chebyshev distance
-      this.tileMovementManager.movePlayerToward(
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.movePlayerToward(
         followEvent.playerId,
         followEvent.targetPosition,
         true, // Run toward target
@@ -1672,7 +1665,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       // OSRS-accurate: Use tile movement system for smooth walking animation
       // Walking (not running) to adjacent tile, meleeRange=0 means go directly to tile
       // This sends tileMovementStart packet for smooth client interpolation
-      this.tileMovementManager.movePlayerToward(
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.movePlayerToward(
         playerId,
         position,
         false, // OSRS firemaking step is a walk, not a run
@@ -1832,7 +1827,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       if (socket.player) {
         this.cancelAllPendingActions(socket.player.id, socket);
       }
-      this.tileMovementManager.handleMoveRequest(socket, data);
+      (
+        this.world as { tileMovement?: TileMovementManager }
+      ).tileMovement?.handleMoveRequest(socket, data);
     };
 
     this.handlers["onInput"] = (socket, data) => {
@@ -1843,7 +1840,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         if (socket.player) {
           this.cancelAllPendingActions(socket.player.id, socket);
         }
-        this.tileMovementManager.handleMoveRequest(socket, {
+        (
+          this.world as { tileMovement?: TileMovementManager }
+        ).tileMovement?.handleMoveRequest(socket, {
           target: payload.target,
           runMode: payload.runMode,
         });
@@ -2756,11 +2755,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     target: [number, number, number],
     options?: { runMode?: boolean },
   ): boolean {
-    if (!this.tileMovementManager || !this.world.entities.get(playerId)) {
+    if (
+      !(this.world as { tileMovement?: TileMovementManager }).tileMovement ||
+      !this.world.entities.get(playerId)
+    ) {
       return false;
     }
 
-    this.tileMovementManager.movePlayerToward(
+    (
+      this.world as { tileMovement?: TileMovementManager }
+    ).tileMovement?.movePlayerToward(
       playerId,
       { x: target[0], y: target[1], z: target[2] },
       options?.runMode ?? false,
@@ -2773,11 +2777,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    * Server-initiated movement cancel for non-socket actors (embedded agents).
    */
   cancelServerMove(playerId: string): boolean {
-    if (!this.tileMovementManager || !this.world.entities.get(playerId)) {
+    if (
+      !(this.world as { tileMovement?: TileMovementManager }).tileMovement ||
+      !this.world.entities.get(playerId)
+    ) {
       return false;
     }
 
-    this.tileMovementManager.stopPlayer(playerId);
+    (
+      this.world as { tileMovement?: TileMovementManager }
+    ).tileMovement?.stopPlayer(playerId);
     return true;
   }
 
@@ -2832,7 +2841,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     targetType: "mob" | "player" = "mob",
   ): boolean {
     const playerEntity = this.world.entities.get(playerId);
-    if (!this.tileMovementManager || !playerEntity) {
+    if (
+      !(this.world as { tileMovement?: TileMovementManager }).tileMovement ||
+      !playerEntity
+    ) {
       return false;
     }
 

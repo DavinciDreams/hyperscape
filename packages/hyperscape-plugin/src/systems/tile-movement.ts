@@ -11,51 +11,41 @@
  * - Client interpolates visually between tile positions
  */
 
-import type { ServerSocket } from "./server-types";
 import {
-  THREE,
-  TerrainSystem,
-  World,
-  EventType,
-  DeathState,
   AttackType,
-  // Tile movement utilities
-  TILES_PER_TICK_WALK,
+  BFSPathfinder,
+  BuildingCollisionService,
+  CollisionFlag,
+  CollisionMask,
+  createTileMovementState,
+  DeathState,
+  type EntityID,
+  EventType,
+  getPathfindRateLimiter,
+  getTileMovementRateLimiter,
+  getValidMeleeTiles,
+  getValidRangedTiles,
+  hasLineOfSight,
+  MovementAntiCheat,
+  type AntiCheatKickCallback,
+  MovementInputValidator,
+  MovementViolationSeverity,
+  type ServerSocket,
+  TerrainSystem,
+  THREE,
+  type TileCoord,
+  type TileMovementState,
   TILES_PER_TICK_RUN,
-  worldToTile,
-  worldToTileInto,
-  tileToWorld,
-  tileToWorldInto,
+  TILES_PER_TICK_WALK,
   tilesEqual,
   tilesWithinMeleeRange,
   tilesWithinRange,
-  createTileMovementState,
-  BFSPathfinder,
-  // Combat pathfinding: LoS and valid tile generation
-  hasLineOfSight,
-  getValidRangedTiles,
-  getValidMeleeTiles,
-  // Collision system
-  CollisionMask,
-  CollisionFlag,
-  BuildingCollisionService,
-  type EntityID,
-} from "../../../index";
-import type { TileCoord, TileMovementState } from "../../../index";
-
-// Security: Input validation and anti-cheat
-import {
-  MovementInputValidator,
-  MovementViolationSeverity,
-} from "./movement/MovementInputValidator";
-import {
-  MovementAntiCheat,
-  type AntiCheatKickCallback,
-} from "./movement/MovementAntiCheat";
-import {
-  getTileMovementRateLimiter,
-  getPathfindRateLimiter,
-} from "./services/SlidingWindowRateLimiter";
+  tileToWorld,
+  tileToWorldInto,
+  type World,
+  worldToTile,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 // Agility XP constants (batched to prevent visual spam)
 const AGILITY_TILES_PER_XP_GRANT = 100; // Tiles needed before XP is granted

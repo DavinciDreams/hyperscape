@@ -2169,6 +2169,21 @@ export type { ServerSocket } from "./systems/server/network/server-types";
 // Debug flag for face-direction logging — read by the migrated
 // FaceDirectionManager (Phase D7, 2026-04-26).
 export { DEBUG_FACE_DIRECTION } from "./systems/server/network/debug";
+// Movement substrate — engine-level anti-cheat + input validation
+// + rate limiting used by the migrated TileMovementManager
+// (Phase E1, 2026-04-26).
+export {
+  MovementAntiCheat,
+  type AntiCheatKickCallback,
+} from "./systems/server/network/movement/MovementAntiCheat";
+export {
+  MovementInputValidator,
+  MovementViolationSeverity,
+} from "./systems/server/network/movement/MovementInputValidator";
+export {
+  getTileMovementRateLimiter,
+  getPathfindRateLimiter,
+} from "./systems/server/network/services/SlidingWindowRateLimiter";
 // Substrate interfaces — needed by plugin-side game managers
 // (PendingTrade/Duel/Attack/Cook/Gather, Follow) that resolve
 // `world.tileMovement` etc. at construction time.

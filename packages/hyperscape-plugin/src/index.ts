@@ -36,6 +36,7 @@ import {
   mobLootTableMappingsProvider,
   registerEntityType,
   type World,
+  writePacket,
 } from "@hyperforge/shared";
 import { createDropConditionDispatcher } from "./systems/economy/DropConditionDispatcher.js";
 import { installWorldDropConditions } from "./systems/economy/WorldDropConditionEvaluators.js";
@@ -117,6 +118,7 @@ import { PendingCookManager } from "./systems/PendingCookManager.js";
 import { PendingGatherManager } from "./systems/PendingGatherManager.js";
 import { FollowManager } from "./systems/FollowManager.js";
 import { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
+import { TileMovementManager } from "./systems/tile-movement.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -173,6 +175,7 @@ export { PendingCookManager } from "./systems/PendingCookManager.js";
 export { PendingGatherManager } from "./systems/PendingGatherManager.js";
 export { FollowManager } from "./systems/FollowManager.js";
 export { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
+export { TileMovementManager } from "./systems/tile-movement.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -446,6 +449,118 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // client builds don't pay the registration cost.
       if (ctx.world.isServer) {
         register("health-regen", HealthRegenSystem);
+
+        // TileMovementManager — migrated to plugin (Phase E1,
+        // 2026-04-26). MUST construct first in this server-only
+        // branch because Pending-/Follow-managers' constructors
+        // (Phase D) throw if `world.tileMovement` isn't set. The
+        // broadcast callback closes over `world.broadcast` /
+        // `world.spatialIndex` / `world.regionSubscriptions` —
+        // all pinned by ServerNetwork's constructor (Phase B) at
+        // register-time, before either host's onEnable phase. The
+        // anti-cheat kick callback uses `world.broadcast.getPlayerSocket`
+        // (Phase A2 substrate) instead of iterating ServerNetwork's
+        // private `sockets` map.
+        const tmmBroadcast = (
+          ctx.world as {
+            broadcast?: {
+              sendToNearby(
+                name: string,
+                data: unknown,
+                worldX: number,
+                worldZ: number,
+                ignoreSocketId?: string,
+              ): void;
+              sendToAll(
+                name: string,
+                data: unknown,
+                ignoreSocketId?: string,
+              ): void;
+              getPlayerSocket(playerId: string):
+                | {
+                    id: string;
+                    ws?: {
+                      send?: (data: unknown) => void;
+                      close?: (code: number, reason: string) => void;
+                    };
+                  }
+                | undefined;
+            };
+          }
+        ).broadcast;
+        const tmmSpatial = (
+          ctx.world as {
+            spatialIndex?: {
+              updatePlayerPosition(
+                playerId: string,
+                worldX: number,
+                worldZ: number,
+              ): { oldKey: number; newKey: number } | null;
+            };
+          }
+        ).spatialIndex;
+        const tmmRegionSubscriptions = (
+          ctx.world as {
+            regionSubscriptions?: {
+              updatePlayerRegionSubscriptions(
+                playerId: string,
+                oldKey: number,
+                newKey: number,
+              ): void;
+            };
+          }
+        ).regionSubscriptions;
+        const tileMovementManager = new TileMovementManager(
+          ctx.world,
+          (name: string, data: unknown, ignoreSocketId?: string) => {
+            const payload = data as { id?: string };
+            const entity = payload?.id
+              ? (ctx.world.entities?.get(payload.id) as {
+                  position?: { x: number; y: number; z: number };
+                } | null)
+              : null;
+            if (entity?.position) {
+              if (payload.id && tmmSpatial && tmmRegionSubscriptions) {
+                const moveRegionChange = tmmSpatial.updatePlayerPosition(
+                  payload.id,
+                  entity.position.x,
+                  entity.position.z,
+                );
+                if (moveRegionChange) {
+                  tmmRegionSubscriptions.updatePlayerRegionSubscriptions(
+                    payload.id,
+                    moveRegionChange.oldKey,
+                    moveRegionChange.newKey,
+                  );
+                }
+              }
+              tmmBroadcast?.sendToNearby(
+                name,
+                data,
+                entity.position.x,
+                entity.position.z,
+                ignoreSocketId,
+              );
+            } else {
+              tmmBroadcast?.sendToAll(name, data, ignoreSocketId);
+            }
+          },
+        );
+        tileMovementManager.setAntiCheatKickCallback(
+          (playerId: string, reason: string) => {
+            const socket = tmmBroadcast?.getPlayerSocket(playerId);
+            if (!socket) return;
+            const kickPacket = writePacket("kick", reason);
+            socket.ws?.send?.(kickPacket);
+            socket.ws?.close?.(4002, "Anti-cheat kick");
+          },
+        );
+        (ctx.world as { tileMovement?: TileMovementManager }).tileMovement =
+          tileMovementManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { tileMovement?: TileMovementManager })
+            .tileMovement;
+        });
 
         // Wire pluggable DropCondition evaluator + boot-time
         // authored loot-tables / mob→table mappings seed.

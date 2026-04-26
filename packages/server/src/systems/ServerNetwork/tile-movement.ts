@@ -1,15 +1,8 @@
 /**
  * @deprecated Re-export shim.
  *
- * Relocated to
- * `packages/shared/src/systems/server/network/tile-movement.ts` as part of
- * the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 1 — tile-movement cascade).
- *
- * The concrete TileMovementManager class now lives in shared and satisfies
- * the `ITileMovementManager` interface via structural typing.
- *
- * Delete this shim after Step 8.
+ * `TileMovementManager` relocated to `@hyperforge/hyperscape`
+ * (Phase E1 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export { TileMovementManager } from "../../../../shared/src/systems/server/network/tile-movement";
+export { TileMovementManager } from "@hyperforge/hyperscape";
