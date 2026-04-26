@@ -2191,6 +2191,10 @@ export type { ITileMovementService } from "./systems/server/network/substrate/ti
 export type { ISpatialIndex } from "./systems/server/network/substrate/spatial-index";
 export type { IBroadcastService } from "./systems/server/network/substrate/broadcast-service";
 export type { IRegionSubscriptionService } from "./systems/server/network/substrate/region-subscription-service";
+export type {
+  IConnectionRegistry,
+  PacketHandler,
+} from "./systems/server/network/substrate/connection-registry";
 export {
   InMemorySessionStore,
   type SessionStore,

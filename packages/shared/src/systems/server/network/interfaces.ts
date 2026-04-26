@@ -345,42 +345,24 @@ export type ITileMovementManager = ITileMovementService;
 // ============================================================================
 
 /**
- * Function signature for a packet handler: called with the originating
- * socket and the arbitrary packet payload. Return value is ignored; errors
- * should be caught by the handler itself or the dispatcher.
+ * `IPacketHandlerRegistry` was relocated to
+ * `./substrate/connection-registry.ts` and renamed `IConnectionRegistry`
+ * (PLAN_ENGINE_API_EXTRACTION.md Phase F1, 2026-04-26). This alias
+ * keeps existing in-shared callers compiling while consumers
+ * gradually switch to the substrate path.
  */
-export type PacketHandler = (
-  socket: ServerSocket,
-  data: unknown,
-) => void | Promise<void>;
-
-/**
- * Registry of name → handler lookups used by ServerNetwork to dispatch
- * incoming packets without depending on the server-local handler modules.
- *
- * The concrete implementation in server (`PacketHandlerBridgeSystem`)
- * owns the 199-entry registration map of `this.handlers[...]` that today
- * lives inside `ServerNetwork/index.ts::registerHandlers()`. Moving that
- * map behind this interface is the unblocker for Step 6 — it lets
- * `ServerNetwork/index.ts` relocate to shared without pulling in
- * `handlers/bank/*`, `handlers/store.ts`, etc.
- *
- * PIE can implement a minimal registry that only wires the packets
- * needed by the editor (movement, chat, interaction) and no-ops the rest.
- */
-export interface IPacketHandlerRegistry {
-  /** Look up a handler by packet name. Returns `undefined` if none registered. */
-  getHandler(packetName: string): PacketHandler | undefined;
-
-  /** Register (or replace) a packet handler at runtime. */
-  register(packetName: string, handler: PacketHandler): void;
-
-  /** Remove a packet handler. */
-  unregister(packetName: string): void;
-
-  /** All currently registered packet names (for debugging / introspection). */
-  listPackets(): string[];
-}
+import type {
+  IConnectionRegistry,
+  PacketHandler as ConnectionPacketHandler,
+} from "./substrate/connection-registry";
+export type {
+  IConnectionRegistry,
+  PacketHandler,
+} from "./substrate/connection-registry";
+export type IPacketHandlerRegistry = IConnectionRegistry;
+// Compat alias for the local `PacketHandler` usage that already
+// existed below this point in this file.
+type PacketHandler = ConnectionPacketHandler;
 
 // ============================================================================
 // BROADCAST MANAGER
