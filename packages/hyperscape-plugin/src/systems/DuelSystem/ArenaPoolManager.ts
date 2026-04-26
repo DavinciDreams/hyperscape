@@ -22,7 +22,7 @@ import {
   type ICollisionMatrix,
   CollisionFlag,
   getDuelArenaConfig,
-} from "../../../index";
+} from "@hyperforge/shared";
 
 // ============================================================================
 // Types

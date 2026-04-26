@@ -109,6 +109,7 @@ import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
 import { TradingSystem } from "./systems/TradingSystem/index.js";
+import { DuelSystem } from "./systems/DuelSystem/index.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -137,10 +138,11 @@ export {
 
 export { manifest } from "./manifest.js";
 
-// TradingSystem — consumed by `@hyperforge/server` for the trade
-// integration test (re-export shim). Migrated from `@hyperforge/shared`
-// (2026-04-26).
+// TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
+// re-export shims (and DuelSystem also by integration tests).
+// Migrated from `@hyperforge/shared` (2026-04-26).
 export { TradingSystem } from "./systems/TradingSystem/index.js";
+export { DuelSystem } from "./systems/DuelSystem/index.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -456,6 +458,29 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           tradingSystem.destroy();
           delete (ctx.world as { tradingSystem?: TradingSystem }).tradingSystem;
+        });
+
+        // Duel system — same manual-lifecycle pattern as
+        // TradingSystem (migrated 2026-04-26). MUST register BEFORE
+        // ServerNetwork.init() since ServerNetwork now resolves the
+        // instance via `world.duelSystem` at start time and throws if
+        // missing. ServerNetwork's tick processor + onPlayerDisconnect
+        // / onPlayerReconnect handlers also resolve via this property.
+        // The `systemsByName.set("duel", ...)` registration mirrors
+        // the previous ServerNetwork.start() behavior so combat.ts
+        // can `world.getSystem("duel")` to detect duel combat.
+        const duelSystem = new DuelSystem(ctx.world);
+        (ctx.world as { duelSystem?: DuelSystem }).duelSystem = duelSystem;
+        (
+          ctx.world as { systemsByName: Map<string, unknown> }
+        ).systemsByName.set("duel", duelSystem);
+        duelSystem.init();
+        ctx.scope.register(() => {
+          duelSystem.destroy();
+          delete (ctx.world as { duelSystem?: DuelSystem }).duelSystem;
+          (
+            ctx.world as { systemsByName: Map<string, unknown> }
+          ).systemsByName.delete("duel");
         });
       }
 

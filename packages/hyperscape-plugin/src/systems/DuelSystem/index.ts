@@ -22,22 +22,24 @@
  * @see packages/shared/src/types/game/duel-types.ts for type definitions
  */
 
-import type { World } from "../../../index";
 import {
-  EventType,
-  getDuelArenaConfig,
-  isPositionInsideCombatArena,
-  type DuelRules,
-  type DuelState,
-  type StakedItem,
-  type PlayerID,
+  AuditLogger,
+  createItemID,
   createPlayerID,
   createSlotNumber,
-  createItemID,
-  validateRuleCombination,
   DuelErrorCode,
+  type DuelRules,
+  type DuelState,
+  EventType,
+  getDuelArenaConfig,
   getItem,
-} from "../../../index";
+  isPositionInsideCombatArena,
+  NetworkLogger as Logger,
+  type PlayerID,
+  type StakedItem,
+  validateRuleCombination,
+  type World,
+} from "@hyperforge/shared";
 import { PendingDuelManager } from "./PendingDuelManager";
 import { ArenaPoolManager } from "./ArenaPoolManager";
 import {
@@ -52,7 +54,6 @@ import {
   isEntityDeathPayload,
   isPlayerDeath,
 } from "./validation";
-import { AuditLogger, Logger } from "../network/services";
 import {
   DISCONNECT_TIMEOUT_TICKS,
   SETUP_DISCONNECT_GRACE_TICKS,
@@ -65,7 +66,7 @@ import {
   TICK_DURATION_MS,
 } from "./config";
 import { DUEL_ERRORS } from "./error-messages";
-import { getDuelFoodItemForLevels, isDuelFoodItemId } from "../duelFood";
+import { getDuelFoodItemForLevels, isDuelFoodItemId } from "../duelFood.js";
 
 // ============================================================================
 // Helpers

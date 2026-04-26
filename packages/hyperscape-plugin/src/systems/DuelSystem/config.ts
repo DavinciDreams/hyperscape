@@ -9,7 +9,10 @@
  * All distance values are in tiles/units.
  */
 
-import { TICK_DURATION_MS, DUEL_CHALLENGE_TIMEOUT_MS } from "../../../index";
+import {
+  DUEL_CHALLENGE_TIMEOUT_MS,
+  TICK_DURATION_MS,
+} from "@hyperforge/shared";
 
 // ============================================================================
 // TIMING CONFIGURATION (in game ticks, 600ms each)

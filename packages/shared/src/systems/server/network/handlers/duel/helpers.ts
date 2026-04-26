@@ -12,7 +12,10 @@ import {
   isPositionInsideCombatArena,
 } from "../../../../../index";
 import type { ServerSocket } from "../../server-types";
-import type { DuelSystem } from "../../../DuelSystem";
+// DuelSystem migrated to @hyperforge/hyperscape (2026-04-26). The
+// `DuelSystem` interface in system-interfaces is the duck-type
+// contract — plugin's concrete class structurally satisfies it.
+import type { DuelSystem } from "../../../../../types/systems/system-interfaces";
 import type { PendingDuelChallengeManager } from "../../PendingDuelChallengeManager";
 import { Logger, RateLimitService } from "../../services";
 import { sendToSocket, getPlayerId } from "../common";
@@ -123,7 +126,7 @@ export function withDuelAuth(
   world: World,
 ): {
   playerId: string;
-  duelSystem: import("../../../DuelSystem").DuelSystem;
+  duelSystem: DuelSystem;
 } | null {
   const playerId = getPlayerId(socket);
   if (!playerId) {
@@ -184,7 +187,7 @@ type DuelSessionState =
  */
 export function assertDuelState(
   socket: ServerSocket,
-  duelSystem: import("../../../DuelSystem").DuelSystem,
+  duelSystem: DuelSystem,
   duelId: string,
   playerId: string,
   expectedStates: DuelSessionState[],

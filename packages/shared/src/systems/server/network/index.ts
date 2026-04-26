@@ -126,7 +126,11 @@ import {
 // Plugin onEnable owns its lifecycle (instantiate + init + destroy)
 // and pins it to `world.tradingSystem` so trade handlers' lookup
 // helper works unchanged.
-import { DuelSystem } from "../DuelSystem";
+// DuelSystem migrated to @hyperforge/hyperscape (2026-04-26). Plugin
+// onEnable owns the lifecycle; ServerNetwork resolves the instance
+// via `world.duelSystem` (typed as the DuelSystem duck-type interface
+// from system-interfaces) for tick + lifecycle hooks.
+import type { DuelSystem } from "../../../types/systems/system-interfaces";
 import { registerDuelEventListeners } from "./duel-events";
 
 const DEBUG_ATTACK_MOB =
@@ -317,7 +321,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   // TradingSystem field removed (2026-04-26) — plugin onEnable now owns
   // the lifecycle. Handlers reach the instance via
   // `getTradingSystem(world)` which reads `world.tradingSystem`.
-  private duelSystem!: DuelSystem;
+  // DuelSystem field removed (2026-04-26) — plugin onEnable now owns
+  // the lifecycle. ServerNetwork resolves the instance via
+  // `world.duelSystem` for processTick + onPlayerDisconnect /
+  // onPlayerReconnect.
   // DuelScheduler / DuelBettingBridge — no longer owned by ServerNetwork
   // after Step 6; constructed directly in startup/world.ts.
   private actionQueue!: ActionQueue;
@@ -666,7 +673,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // FIGHTING later in the same tick
     this.tickSystem.onTick(
       () => {
-        this.duelSystem.processTick();
+        const duelSystem = (this.world as { duelSystem?: DuelSystem })
+          .duelSystem;
+        duelSystem?.processTick();
       },
       TickPriority.INPUT,
       "duelSystem",
@@ -1001,21 +1010,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // `world.tradingSystem` so the existing `getTradingSystem(world)`
     // helper resolves unchanged.
 
-    // Duel system - server-authoritative player-to-player dueling (tile-based)
-    // Manages duel sessions, rules negotiation, stakes, and combat enforcement
-    this.duelSystem = new DuelSystem(this.world);
-
-    // Store duel system on world so handlers can access it
-    (this.world as { duelSystem?: DuelSystem }).duelSystem = this.duelSystem;
-
-    // Register duel system in systemsByName so it can be found via getSystem("duel")
-    // This is required for combat.ts to detect duel combat and bypass PvP zone checks
-    // NOTE: We use systemsByName directly instead of addSystem() because DuelSystem
-    // doesn't implement the full System lifecycle interface (preTick, postTick, etc.)
-    (this.world as { systemsByName: Map<string, unknown> }).systemsByName.set(
-      "duel",
-      this.duelSystem,
-    );
+    // Duel system instantiation + `world.duelSystem` pinning +
+    // `systemsByName.set("duel", ...)` moved to @hyperforge/hyperscape
+    // plugin onEnable (2026-04-26). Plugin owns the lifecycle.
+    const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
+    if (!duelSystem) {
+      throw new Error(
+        "[ServerNetwork] DuelSystem must be registered by @hyperforge/hyperscape plugin onEnable before ServerNetwork.init()",
+      );
+    }
 
     // Look up the duel-stake-transfer bridge (registered in
     // startup/world.ts). It resolves ServerNetwork's socket accessor
@@ -1046,7 +1049,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         ),
     });
 
-    this.duelSystem.init();
+    // duelSystem.init() now owned by plugin onEnable (2026-04-26).
 
     // DuelScheduler and DuelBettingBridge construction moved to
     // startup/world.ts (post-world.init) as part of PLAN_SERVERNETWORK_MIGRATION.md
@@ -1697,7 +1700,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.pendingCookManager.onPlayerDisconnect(event.playerId);
       this.pendingTradeManager.onPlayerDisconnect(event.playerId);
       this.pendingDuelChallengeManager.onPlayerDisconnect(event.playerId);
-      this.duelSystem.onPlayerDisconnect(event.playerId);
+      const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
+      duelSystem?.onPlayerDisconnect(event.playerId);
       const homeTeleportManager = getHomeTeleportManager();
       if (homeTeleportManager) {
         homeTeleportManager.onPlayerDisconnect(event.playerId);
@@ -1706,7 +1710,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Handle player reconnection (clears disconnect timer if active duel)
     this.onWorld(EventType.PLAYER_JOINED, (event: { playerId: string }) => {
-      this.duelSystem.onPlayerReconnect(event.playerId);
+      const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
+      duelSystem?.onPlayerReconnect(event.playerId);
     });
 
     // Initialization manager
@@ -2458,10 +2463,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Trading system teardown owned by @hyperforge/hyperscape plugin
     // scope disposer (2026-04-26).
 
-    // Destroy duel system - cancels all active duels and pending challenges
-    if (this.duelSystem) {
-      this.duelSystem.destroy();
-    }
+    // Duel system teardown owned by @hyperforge/hyperscape plugin
+    // scope disposer (2026-04-26).
 
     this.socketManager.destroy();
     this.spatialIndex.destroy();

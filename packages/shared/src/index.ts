@@ -2155,6 +2155,17 @@ export { getHammerItemId } from "./data/live/smithing-live";
 // Logger singleton — used by gameplay plugins migrated out of
 // shared/ (CraftingSystem, FletchingSystem, etc.).
 export { Logger } from "./utils/Logger";
+export { AuditLogger } from "./systems/server/network/services/AuditLogger";
+// Network-services Logger (different shape: `static warn(category,
+// msg, ctx?)` vs the singleton `Logger.warn(msg, ctx?)` from
+// `utils/Logger`). Exported under `NetworkLogger` so the
+// migrated DuelSystem keeps its existing 3-arg call style without
+// shadowing the singleton.
+export { Logger as NetworkLogger } from "./systems/server/network/services/Logger";
+export {
+  InMemorySessionStore,
+  type SessionStore,
+} from "./infrastructure/session-store";
 
 // Skill enum — referenced by gameplay plugins to identify which
 // skill grants XP for a given action. Re-exported from SkillsSystem.

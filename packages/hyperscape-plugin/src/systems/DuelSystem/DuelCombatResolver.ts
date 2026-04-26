@@ -14,8 +14,12 @@
  * - Arena management (ArenaPoolManager)
  */
 
-import type { World, StakedItem } from "../../../index";
-import { EventType } from "../../../index";
+import type { World, StakedItem } from "@hyperforge/shared";
+import {
+  AuditLogger,
+  EventType,
+  NetworkLogger as Logger,
+} from "@hyperforge/shared";
 
 // PlayerEntity migrated to @hyperforge/hyperscape (2026-04-26).
 // Detect structurally — PlayerEntity has `clearDeathState`.
@@ -35,7 +39,6 @@ function isPlayerEntity(entity: unknown): entity is PlayerEntity {
   );
 }
 import type { ServerDuelSession } from "./DuelSessionManager";
-import { AuditLogger, Logger } from "../network/services";
 import { LOBBY_SPAWN_WINNER, LOBBY_SPAWN_LOSER } from "./config";
 import crypto from "node:crypto";
 

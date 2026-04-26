@@ -41,8 +41,10 @@ import type {
   DuelRules,
   DuelState,
   EquipmentSlotRestriction,
+  PendingDuelChallenge,
   StakedItem,
 } from "../game/duel-types";
+import type { TradeParticipant, TradeSession } from "../game/trade-types";
 
 // ============================================================================
 // CORE SYSTEM INTERFACES
@@ -407,7 +409,12 @@ export interface TradeOperationResult {
  * 6. Both players must accept the final offer
  * 7. Server atomically swaps items between inventories
  */
-export interface TradingSystem extends System {
+// Migrated to @hyperforge/hyperscape (2026-04-26). The plugin's
+// concrete `TradingSystem` class is a plain class (not a `System`
+// subclass), so this interface is a structural duck-type contract —
+// no `extends System`. Shared code that resolves it via
+// `world.tradingSystem` only ever calls these methods.
+export interface TradingSystem {
   // Trade Lifecycle
   createTradeRequest(
     initiatorId: string,
@@ -465,11 +472,11 @@ export interface TradingSystem extends System {
   ): TradeOperationResult;
 
   // Queries
-  getTradeSession(tradeId: string): unknown | undefined;
-  getPlayerTrade(playerId: string): unknown | undefined;
+  getTradeSession(tradeId: string): TradeSession | undefined;
+  getPlayerTrade(playerId: string): TradeSession | undefined;
   getPlayerTradeId(playerId: string): string | undefined;
   isPlayerInTrade(playerId: string): boolean;
-  getTradePartner(playerId: string): unknown | undefined;
+  getTradePartner(playerId: string): TradeParticipant | undefined;
   isPlayerOnline(playerId: string): boolean;
 }
 
@@ -495,6 +502,10 @@ export interface DuelSessionInfo {
   targetId: string;
   targetName: string;
   rules: DuelRules;
+  // Equipment restriction toggles per slot (helmet, body, etc.).
+  // Plugin's concrete `EquipmentRestrictions` type structurally
+  // satisfies this — handlers only read the boolean values.
+  equipmentRestrictions: Record<string, boolean>;
   challengerStakes: StakedItem[];
   targetStakes: StakedItem[];
   challengerAccepted: boolean;
@@ -522,7 +533,12 @@ export interface DuelSessionInfo {
  * 7. Combat with rule enforcement
  * 8. Winner receives stakes, loser respawns at lobby
  */
-export interface DuelSystem extends System {
+// Migrated to @hyperforge/hyperscape (2026-04-26). The plugin's
+// concrete `DuelSystem` class is a plain class (not a `System`
+// subclass), so this interface is a structural duck-type contract —
+// no `extends System`. Shared code that resolves it via
+// `world.duelSystem` only ever calls these methods.
+export interface DuelSystem {
   // Tick processing (called by GameTickProcessor)
   processTick(): void;
 
@@ -530,9 +546,18 @@ export interface DuelSystem extends System {
   createChallenge(
     challengerId: string,
     challengerName: string,
+    challengerSocketId: string,
+    challengerCombatLevel: number,
     targetId: string,
     targetName: string,
   ): DuelOperationResult & { challengeId?: string };
+
+  // Pending duels manager — handlers walk this to lookup / cancel
+  // challenges. Plugin's concrete class exposes a `PendingDuelManager`.
+  pendingDuels: {
+    getChallenge(challengeId: string): PendingDuelChallenge | undefined;
+    cancelChallenge(challengeId: string): PendingDuelChallenge | undefined;
+  };
 
   respondToChallenge(
     challengeId: string,

@@ -11,8 +11,7 @@
  * Similar pattern to trade request management.
  */
 
-import type { World, PlayerID } from "../../../index";
-import type { PendingDuelChallenge } from "../../../index";
+import type { PendingDuelChallenge, PlayerID, World } from "@hyperforge/shared";
 import {
   CHALLENGE_TIMEOUT_TICKS,
   CHALLENGE_CLEANUP_INTERVAL_TICKS,

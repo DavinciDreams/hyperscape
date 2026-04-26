@@ -30,12 +30,32 @@ interface FakeWorld {
   on(event: string, handler: (...args: unknown[]) => void): void;
   off(event: string, handler: (...args: unknown[]) => void): void;
   tradingSystem?: unknown;
+  duelSystem?: unknown;
+  // DuelSystem registration also writes to `systemsByName` so combat
+  // can look it up via `world.getSystem("duel")`.
+  systemsByName: Map<string, unknown>;
+  // DuelSystem.init() calls `arenaPool.registerArenaWallCollision`
+  // which needs a collision matrix. A no-op stub is fine for the
+  // registration-shape contract test.
+  collision: {
+    addFlags(x: number, z: number, flag: number): void;
+    removeFlags(x: number, z: number, flag: number): void;
+  };
 }
 
 function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
   const w: FakeWorld = {
     isServer: opts.isServer,
     registered: [],
+    systemsByName: new Map(),
+    collision: {
+      addFlags(_x, _z, _flag) {
+        // no-op
+      },
+      removeFlags(_x, _z, _flag) {
+        // no-op
+      },
+    },
     register(name, Ctor) {
       const ctorName =
         typeof Ctor === "function" && "name" in Ctor
@@ -165,12 +185,12 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer, plus one extra
-    // disposer for the TradingSystem teardown (it's instantiated +
-    // managed manually rather than via `world.register()` so it
-    // doesn't appear in `world.registered` but does appear in
-    // `scope.disposers`).
-    expect(scope.disposers.length).toBe(world.registered.length + 1);
+    // Every registration paired with a scope disposer, plus two extra
+    // disposers for the TradingSystem + DuelSystem teardown — both
+    // are instantiated + managed manually rather than via
+    // `world.register()` so they don't appear in `world.registered`
+    // but do appear in `scope.disposers`.
+    expect(scope.disposers.length).toBe(world.registered.length + 2);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {

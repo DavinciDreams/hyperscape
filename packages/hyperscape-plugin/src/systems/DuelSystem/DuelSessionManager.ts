@@ -12,25 +12,21 @@
  * - Arena management (ArenaPoolManager)
  */
 
-import type { World } from "../../../index";
-import type {
-  DuelRules,
-  StakedItem,
-  DuelState,
-  EquipmentRestrictions,
-} from "../../../index";
 import {
   DEFAULT_DUEL_RULES,
   DEFAULT_EQUIPMENT_RESTRICTIONS,
-} from "../../../index";
-import { generateDuelId } from "./config";
-import {
-  type SessionStore,
+  type DuelRules,
+  type DuelState,
+  type EquipmentRestrictions,
   InMemorySessionStore,
-} from "../../../infrastructure/session-store";
+  type SessionStore,
+  type StakedItem,
+  type World,
+} from "@hyperforge/shared";
+import { generateDuelId } from "./config";
 
 // Re-export for consumers that import from this module
-export type { EquipmentRestrictions } from "../../../index";
+export type { EquipmentRestrictions } from "@hyperforge/shared";
 
 /**
  * Server-side duel session structure.
