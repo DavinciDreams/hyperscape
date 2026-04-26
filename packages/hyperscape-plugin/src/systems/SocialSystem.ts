@@ -25,17 +25,17 @@
  * @see packages/client/src/game/panels/FriendsPanel.tsx for UI implementation
  */
 
-import { System } from "../shared/infrastructure/System";
-import type { World } from "../../core/World";
-import type { WorldOptions } from "../../types";
-import type {
-  Friend,
-  FriendRequest,
-  FriendStatus,
-  IgnoredPlayer,
-  FriendsListSyncData,
-  FriendStatusUpdateData,
-} from "../../types/game/social-types";
+import {
+  SystemClass as System,
+  type World,
+  type WorldOptions,
+  type Friend,
+  type FriendRequest,
+  type FriendStatus,
+  type IgnoredPlayer,
+  type FriendsListSyncData,
+  type FriendStatusUpdateData,
+} from "@hyperforge/shared";
 // Note: We use UI_UPDATE with component: "friends" for friend updates
 
 /**

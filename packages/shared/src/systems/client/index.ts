@@ -27,5 +27,4 @@ export { DuelArenaVisualsSystem } from "./DuelArenaVisualsSystem";
 // New interaction system (replaces legacy InteractionSystem)
 export { InteractionRouter } from "./interaction";
 
-// Social system
-export { SocialSystem } from "./SocialSystem";
+// Social system migrated to @hyperforge/hyperscape (2026-04-26).

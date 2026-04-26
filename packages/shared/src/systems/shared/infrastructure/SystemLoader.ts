@@ -178,7 +178,7 @@ interface DialogueSystem {
 // DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
-import { SocialSystem } from "../../client/SocialSystem";
+// SocialSystem migrated to @hyperforge/hyperscape (2026-04-26).
 import { DuelArenaVisualsSystem } from "../../client/DuelArenaVisualsSystem";
 
 // Zone systems
