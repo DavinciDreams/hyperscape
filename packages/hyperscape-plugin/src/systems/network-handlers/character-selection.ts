@@ -11,12 +11,12 @@
  * to improve maintainability and separation of concerns.
  */
 
-import type { ServerSocket, SpawnData } from "./server-types";
+import type { ServerSocket, SpawnData } from "@hyperforge/shared";
 import type {
   IDatabaseSystem,
   IAgentManager,
   IAgentRuntimeLookup,
-} from "./interfaces";
+} from "@hyperforge/shared";
 import {
   EventType,
   uuid,
@@ -27,9 +27,12 @@ import {
   World,
   type EquipmentSyncData,
   type InventorySyncData,
-} from "../../../index";
-import type { IFriendsService } from "./substrate/friends-service";
-import { getDefaultElizaOsApiUrl, getDefaultPublicWsUrl } from "./services";
+} from "@hyperforge/shared";
+import type { IFriendsService } from "@hyperforge/shared";
+import {
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicWsUrl,
+} from "@hyperforge/shared";
 
 const TRUSTED_DUEL_BOT_ACCOUNT_IDS = new Set(
   (
@@ -939,7 +942,7 @@ export async function handleEnterWorld(
   // Check if player logged out inside a combat arena (server restart edge case)
   // If so, teleport them to the duel arena lobby spawn point
   const { isPositionInsideCombatArena, getDuelArenaConfig } =
-    await import("../../../data/duel-manifest");
+    await import("@hyperforge/shared");
 
   // Duel harness bots should always begin from the normal duel arena lobby.
   if (isLoadTestBot && isDuelBot) {

@@ -166,7 +166,7 @@ import {
   handleCharacterListRequest,
   handleCharacterCreate,
   handleCharacterSelected,
-} from "../../../shared/src/systems/server/network/character-selection";
+} from "@hyperforge/hyperscape";
 import {
   handleResourceInteract,
   handleCookingSourceInteract,

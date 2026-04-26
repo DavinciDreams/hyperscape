@@ -164,7 +164,16 @@ import type {
   IHomeTeleportManager,
   IFriendsService,
   ICombatAttackService,
+  IPlayerSpawnService,
 } from "@hyperforge/shared";
+import {
+  loadCharacterList,
+  handleCharacterListRequest,
+  handleCharacterCreate,
+  handleCharacterSelected,
+  collectInitialSyncEntities,
+  handleEnterWorld,
+} from "./systems/network-handlers/character-selection.js";
 import {
   sendFriendsListSync,
   notifyFriendsOfStatusChange,
@@ -361,6 +370,14 @@ export {
   sendFriendsListSync,
   notifyFriendsOfStatusChange,
 } from "./systems/network-handlers/friends.js";
+export {
+  loadCharacterList,
+  handleCharacterListRequest,
+  handleCharacterCreate,
+  handleCharacterSelected,
+  collectInitialSyncEntities,
+  handleEnterWorld,
+} from "./systems/network-handlers/character-selection.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -1352,6 +1369,23 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { combatAttackService?: ICombatAttackService })
             .combatAttackService;
+        });
+
+        // PlayerSpawnService — Phase G-1 (2026-04-26). The engine
+        // `ServerNetwork.handleEnterWorldWithReconnect` resolves
+        // `world.playerSpawnService?.enterWorld(...)` for the normal
+        // spawn flow and `collectInitialSyncEntities(...)` on the
+        // reconnect path.
+        const playerSpawnService: IPlayerSpawnService = {
+          enterWorld: handleEnterWorld,
+          collectInitialSyncEntities,
+        };
+        (
+          ctx.world as { playerSpawnService?: IPlayerSpawnService }
+        ).playerSpawnService = playerSpawnService;
+        ctx.scope.register(() => {
+          delete (ctx.world as { playerSpawnService?: IPlayerSpawnService })
+            .playerSpawnService;
         });
 
         // FaceDirectionManager — Phase D7 (2026-04-26). Plugin owns

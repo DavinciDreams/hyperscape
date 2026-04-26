@@ -2212,7 +2212,14 @@ export type {
   IDatabaseSystem,
   IFollowManager,
   IFriendRepository,
+  IAgentManager,
+  IAgentRuntimeLookup,
 } from "./systems/server/network/interfaces";
+// Public-URL helpers — needed by character-selection (Phase G-1).
+export {
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicWsUrl,
+} from "./systems/server/network/services/PublicUrls";
 // Social-live getters — needed by friends handler (F3 batch-8).
 export {
   getMaxFriends,
@@ -2262,6 +2269,7 @@ export type {
 } from "./systems/server/network/substrate/home-teleport-service";
 export type { IFriendsService } from "./systems/server/network/substrate/friends-service";
 export type { ICombatAttackService } from "./systems/server/network/substrate/combat-attack-service";
+export type { IPlayerSpawnService } from "./systems/server/network/substrate/player-spawn-service";
 // Processing handler packet payloads — needed by the migrated
 // processing handlers in @hyperforge/hyperscape.
 export type {
@@ -2680,14 +2688,10 @@ export {
 
 // ServerNetwork migrated modules — character selection & world entry
 // (PLAN_SERVERNETWORK_MIGRATION.md Step 5e).
-export {
-  loadCharacterList,
-  handleCharacterListRequest,
-  handleCharacterCreate,
-  handleCharacterSelected,
-  collectInitialSyncEntities,
-  handleEnterWorld,
-} from "./systems/server/network/character-selection";
+// Character selection migrated to @hyperforge/hyperscape (Phase G-1,
+// 2026-04-26). Plugin onEnable installs `world.playerSpawnService`
+// (substrate `IPlayerSpawnService`) so ServerNetwork's enter-world
+// dispatcher can resolve the spawn flow without a back-import.
 
 export {
   BehaviorTreeInterpreter,

@@ -82,11 +82,11 @@ import type {
   CorpseLootAllPayload,
 } from "./types";
 
-// Import modular components
-import {
-  handleEnterWorld,
-  collectInitialSyncEntities,
-} from "./character-selection";
+// character-selection migrated to @hyperforge/hyperscape (Phase G-1,
+// 2026-04-26). Plugin onEnable installs `world.playerSpawnService`
+// (substrate `IPlayerSpawnService`) so ServerNetwork can resolve
+// `enterWorld(...)` and `collectInitialSyncEntities(...)` lazily.
+import type { IPlayerSpawnService } from "./substrate/player-spawn-service";
 // TileMovementManager migrated to @hyperforge/hyperscape (Phase E1,
 // 2026-04-26). Plugin onEnable owns construction +
 // setAntiCheatKickCallback wiring. ServerNetwork uses
@@ -2418,9 +2418,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           entity.data.owner = socket.id;
         }
 
+        const playerSpawnService = (
+          this.world as { playerSpawnService?: IPlayerSpawnService }
+        ).playerSpawnService;
         const relevantEntities =
-          entity && "position" in entity
-            ? collectInitialSyncEntities(
+          entity && "position" in entity && playerSpawnService
+            ? playerSpawnService.collectInitialSyncEntities(
                 this.world,
                 entity.position.x,
                 entity.position.z,
@@ -2498,8 +2501,18 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     }
 
-    // Normal spawn flow
-    return handleEnterWorld(
+    // Normal spawn flow — delegated to plugin's IPlayerSpawnService.
+    // Silent no-op if absent (PIE editor / tests without plugin).
+    const playerSpawnService = (
+      this.world as { playerSpawnService?: IPlayerSpawnService }
+    ).playerSpawnService;
+    if (!playerSpawnService) {
+      console.warn(
+        "[ServerNetwork] world.playerSpawnService not installed — enter-world flow unavailable",
+      );
+      return;
+    }
+    return playerSpawnService.enterWorld(
       socket,
       data,
       this.world,
