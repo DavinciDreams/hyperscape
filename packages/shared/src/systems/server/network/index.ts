@@ -103,6 +103,7 @@ import type { ISpatialIndex } from "./substrate/spatial-index";
 import type { IBroadcastService } from "./substrate/broadcast-service";
 import type { IRegionSubscriptionService } from "./substrate/region-subscription-service";
 import { RegionSubscriptionService } from "./RegionSubscriptionService";
+import type { ITileMovementService } from "./substrate/tile-movement-service";
 import { SaveManager } from "./save-manager";
 import { PositionValidator } from "./position-validator";
 import { InitializationManager } from "./initialization";
@@ -461,9 +462,64 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       world as { regionSubscriptions?: IRegionSubscriptionService }
     ).regionSubscriptions = this.regionSubscriptions;
 
-    // TileMovementManager is still constructed in `init()` until
-    // Phase B4 moves it (TMM's broadcast callback closes over
-    // ServerNetwork-instance state — needs careful refactoring).
+    // TickSystem and TileMovementManager (Phase B4). TMM's broadcast
+    // callback closes over `this.spatialIndex` /
+    // `this.regionSubscriptions` / `this.broadcastManager` — all
+    // substrate constructed above, so it's safe to construct TMM here
+    // at register-time. Anti-cheat wiring iterates `this.sockets`
+    // (initialized at the top of this constructor); the kick fires
+    // at runtime only, so the empty socket map at register-time is
+    // fine.
+    this.tickSystem = new TickSystem();
+    this.tileMovementManager = new TileMovementManager(
+      this.world,
+      (name: string, data: unknown, ignoreSocketId?: string) => {
+        const payload = data as SpatialBroadcastPayload;
+        const entity = payload?.id
+          ? this.world.entities?.get(payload.id)
+          : null;
+        if (entity?.position) {
+          if (payload.id) {
+            const moveRegionChange = this.spatialIndex.updatePlayerPosition(
+              payload.id,
+              entity.position.x,
+              entity.position.z,
+            );
+            if (moveRegionChange) {
+              this.regionSubscriptions.updatePlayerRegionSubscriptions(
+                payload.id,
+                moveRegionChange.oldKey,
+                moveRegionChange.newKey,
+              );
+            }
+          }
+          this.broadcastManager.sendToNearby(
+            name,
+            data,
+            entity.position.x,
+            entity.position.z,
+            ignoreSocketId,
+          );
+        } else {
+          this.broadcastManager.sendToAll(name, data, ignoreSocketId);
+        }
+      },
+    );
+    this.tileMovementManager.setAntiCheatKickCallback(
+      (playerId: string, reason: string) => {
+        for (const [, socket] of this.sockets) {
+          if (socket.player?.id === playerId) {
+            const kickPacket = writePacket("kick", reason);
+            socket.ws?.send?.(kickPacket);
+            socket.ws?.close?.(4002, "Anti-cheat kick");
+            break;
+          }
+        }
+      },
+    );
+    (world as { tileMovement?: ITileMovementService }).tileMovement =
+      this.tileMovementManager;
+
     // uWS-app wiring (`setUwsApp`) and pub/sub enabling
     // (`enablePubSub`) stay in init() — they depend on late-bound
     // transport state.
@@ -571,63 +627,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     //
     // Note: uWS pub/sub is wired later via enablePubSub() after uWS server starts
 
-    // Tick system for RuneScape-style 600ms ticks
-    this.tickSystem = new TickSystem();
-
-    // Tile-based movement manager (RuneScape-style)
-    // Use sendToNearby for movement broadcasts — position is extracted from
-    // the data payload's player entity rather than from the packet itself.
-    this.tileMovementManager = new TileMovementManager(
-      this.world,
-      (name: string, data: unknown, ignoreSocketId?: string) => {
-        const payload = data as SpatialBroadcastPayload;
-        const entity = payload?.id
-          ? this.world.entities?.get(payload.id)
-          : null;
-        if (entity?.position) {
-          // Keep SpatialIndex in sync with tile movement so the player
-          // stays within their own broadcast radius
-          if (payload.id) {
-            const moveRegionChange = this.spatialIndex.updatePlayerPosition(
-              payload.id,
-              entity.position.x,
-              entity.position.z,
-            );
-            if (moveRegionChange) {
-              this.updatePlayerRegionSubscriptions(
-                payload.id,
-                moveRegionChange.oldKey,
-                moveRegionChange.newKey,
-              );
-            }
-          }
-          this.broadcastManager.sendToNearby(
-            name,
-            data,
-            entity.position.x,
-            entity.position.z,
-            ignoreSocketId,
-          );
-        } else {
-          this.broadcastManager.sendToAll(name, data, ignoreSocketId);
-        }
-      },
-    );
-
-    // Wire movement anti-cheat auto-kick: when a player exceeds the
-    // violation threshold, disconnect them with a reason packet.
-    this.tileMovementManager.setAntiCheatKickCallback(
-      (playerId: string, reason: string) => {
-        for (const [, socket] of this.sockets) {
-          if (socket.player?.id === playerId) {
-            const kickPacket = writePacket("kick", reason);
-            socket.ws?.send?.(kickPacket);
-            socket.ws?.close?.(4002, "Anti-cheat kick");
-            break;
-          }
-        }
-      },
-    );
+    // TickSystem + TileMovementManager moved to constructor (Phase B4,
+    // PLAN_ENGINE_API_EXTRACTION.md). TMM is pinned to
+    // `world.tileMovement` so plugin-side game managers can resolve
+    // it via lookup at register-time.
 
     // Action queue for OSRS-style input processing
     this.actionQueue = new ActionQueue();
@@ -2510,6 +2513,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     delete (this.world as { broadcast?: IBroadcastService }).broadcast;
     delete (this.world as { regionSubscriptions?: IRegionSubscriptionService })
       .regionSubscriptions;
+    delete (this.world as { tileMovement?: ITileMovementService }).tileMovement;
     this.saveManager.destroy();
     this.interactionSessionManager.destroy();
     this.eventBridge.destroy();
