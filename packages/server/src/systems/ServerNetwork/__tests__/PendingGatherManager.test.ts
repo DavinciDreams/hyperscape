@@ -103,11 +103,12 @@ describe("PendingGatherManager", () => {
     mockTileMovement = createMockTileMovementManager();
     mockSendFn = vi.fn() as (name: string, data: unknown) => void;
 
-    manager = new PendingGatherManager(
-      mockWorld as never,
-      mockTileMovement as never,
-      mockSendFn,
-    );
+    // PendingGatherManager constructor signature changed in Phase D5
+    // (2026-04-26): now `(world, sendFn)`. The manager reads
+    // `world.tileMovement` for the tile-movement substrate.
+    (mockWorld as { tileMovement?: typeof mockTileMovement }).tileMovement =
+      mockTileMovement;
+    manager = new PendingGatherManager(mockWorld as never, mockSendFn);
   });
 
   // ===== QUEUE PENDING GATHER TESTS =====

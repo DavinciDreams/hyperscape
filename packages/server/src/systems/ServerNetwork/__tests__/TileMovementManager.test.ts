@@ -135,18 +135,18 @@ describe("TileMovementManager - Building Integration", () => {
 
   it("does not step onto a tile occupied by another player; path is retained", () => {
     const occ = new EntityOccupancyMap();
-    const mockWorld: ReturnType<typeof createMockWorld> & {
-      entityOccupancy: EntityOccupancyMap;
-    } = {
+    const mockWorld = {
       ...createMockWorld(),
       entityOccupancy: occ,
+    } as unknown as ReturnType<typeof createMockWorld> & {
+      entityOccupancy: EntityOccupancyMap;
     };
 
     const blockerTile = { x: 11, z: 10 };
-    occ.occupy("blocker" as `${string}`, [blockerTile], 1, "player", false);
+    occ.occupy("blocker" as never, [blockerTile], 1, "player", false);
 
     const moverId = "mover";
-    const manager = new TileMovementManager(mockWorld, vi.fn());
+    const manager = new TileMovementManager(mockWorld as never, vi.fn());
 
     manager.syncPlayerPosition(moverId, { x: 10, y: 0, z: 10 });
     const state = (
