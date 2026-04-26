@@ -111,6 +111,7 @@ import { TanningSystem } from "./systems/TanningSystem.js";
 import { TradingSystem } from "./systems/TradingSystem/index.js";
 import { DuelSystem } from "./systems/DuelSystem/index.js";
 import { PendingTradeManager } from "./systems/PendingTradeManager.js";
+import { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -157,10 +158,11 @@ export {
   type ModalState,
 } from "./systems/ScriptQueue.js";
 
-// PendingTradeManager — consumed by `@hyperforge/server`'s
-// PendingTradeManager re-export shim. Migrated from
-// `@hyperforge/shared` (Phase D1, 2026-04-26).
+// PendingTradeManager + PendingDuelChallengeManager — consumed by
+// `@hyperforge/server`'s re-export shims. Migrated from
+// `@hyperforge/shared` (Phase D1 + D2, 2026-04-26).
 export { PendingTradeManager } from "./systems/PendingTradeManager.js";
+export { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -495,6 +497,24 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { pendingTradeManager?: PendingTradeManager })
             .pendingTradeManager;
+        });
+
+        // PendingDuelChallengeManager — same pattern as
+        // PendingTradeManager (Phase D2, 2026-04-26).
+        const pendingDuelChallengeManager = new PendingDuelChallengeManager(
+          ctx.world,
+        );
+        (
+          ctx.world as {
+            pendingDuelChallengeManager?: PendingDuelChallengeManager;
+          }
+        ).pendingDuelChallengeManager = pendingDuelChallengeManager;
+        ctx.scope.register(() => {
+          delete (
+            ctx.world as {
+              pendingDuelChallengeManager?: PendingDuelChallengeManager;
+            }
+          ).pendingDuelChallengeManager;
         });
 
         // Duel system — same manual-lifecycle pattern as

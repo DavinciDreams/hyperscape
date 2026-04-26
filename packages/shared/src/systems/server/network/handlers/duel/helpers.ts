@@ -16,7 +16,16 @@ import type { ServerSocket } from "../../server-types";
 // `DuelSystem` interface in system-interfaces is the duck-type
 // contract — plugin's concrete class structurally satisfies it.
 import type { DuelSystem } from "../../../../../types/systems/system-interfaces";
-import type { PendingDuelChallengeManager } from "../../PendingDuelChallengeManager";
+// PendingDuelChallengeManager migrated to @hyperforge/hyperscape
+// (Phase D2, 2026-04-26). Duck-typed locally — only
+// `queuePendingChallenge` is called from the duel handlers.
+interface PendingDuelChallengeManager {
+  queuePendingChallenge(
+    playerId: string,
+    targetId: string,
+    onInRange: () => void,
+  ): void;
+}
 import { Logger, RateLimitService } from "../../services";
 import { sendToSocket, getPlayerId } from "../common";
 

@@ -12,9 +12,13 @@
  * 5. New click or disconnect cancels pending challenge
  */
 
-import type { World, TileCoord } from "../../../index";
-import { worldToTileInto, tilesWithinMeleeRange } from "../../../index";
-import type { ITileMovementService } from "./substrate/tile-movement-service";
+import {
+  type ITileMovementService,
+  tilesWithinMeleeRange,
+  type TileCoord,
+  type World,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 /** Duel challenge interaction range in tiles (1 = adjacent, like trading) */
 const DUEL_CHALLENGE_RANGE = 1;

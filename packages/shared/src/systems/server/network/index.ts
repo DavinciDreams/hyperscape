@@ -129,7 +129,14 @@ interface PendingTradeManager {
   onPlayerDisconnect(playerId: string): void;
   cancelPendingTrade(playerId: string): void;
 }
-import { PendingDuelChallengeManager } from "./PendingDuelChallengeManager";
+// PendingDuelChallengeManager migrated to @hyperforge/hyperscape
+// (Phase D2, 2026-04-26). Duck-typed locally — only the methods
+// ServerNetwork actually calls.
+interface PendingDuelChallengeManager {
+  processTick(): void;
+  onPlayerDisconnect(playerId: string): void;
+  cancelPendingChallenge(playerId: string): void;
+}
 import { FollowManager } from "./FollowManager";
 import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer } from "./handlers/player";
@@ -332,7 +339,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private pendingCookManager!: PendingCookManager;
   // PendingTradeManager removed (Phase D1) — plugin owns the
   // lifecycle. ServerNetwork resolves via `world.pendingTradeManager`.
-  private pendingDuelChallengeManager!: PendingDuelChallengeManager;
+  // PendingDuelChallengeManager removed (Phase D2) — plugin owns the
+  // lifecycle. ServerNetwork resolves via
+  // `world.pendingDuelChallengeManager`.
   private followManager!: FollowManager;
   // TradingSystem field removed (2026-04-26) — plugin onEnable now owns
   // the lifecycle. Handlers reach the instance via
@@ -1033,27 +1042,22 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Pending duel challenge manager — server-authoritative
     // "walk to player and challenge" system. Constructor resolves
-    // `world.tileMovement` (Phase B4 pinning) instead of taking the
-    // service as a parameter.
-    this.pendingDuelChallengeManager = new PendingDuelChallengeManager(
-      this.world,
-    );
-
-    // Register pending duel challenge processing (same priority as movement)
+    // PendingDuelChallengeManager — migrated to
+    // @hyperforge/hyperscape (Phase D2). Plugin onEnable owns
+    // construction + pinning to `world.pendingDuelChallengeManager`.
+    // ServerNetwork registers the tick callback with lazy lookup.
     this.tickSystem.onTick(
       () => {
-        this.pendingDuelChallengeManager.processTick();
+        const pdcm = (
+          this.world as {
+            pendingDuelChallengeManager?: PendingDuelChallengeManager;
+          }
+        ).pendingDuelChallengeManager;
+        pdcm?.processTick();
       },
       TickPriority.MOVEMENT,
       "pendingDuel",
     );
-
-    // Store pending duel challenge manager on world so handlers can access it
-    (
-      this.world as {
-        pendingDuelChallengeManager?: PendingDuelChallengeManager;
-      }
-    ).pendingDuelChallengeManager = this.pendingDuelChallengeManager;
 
     // Trading system instantiation moved to @hyperforge/hyperscape
     // plugin onEnable (2026-04-26). Plugin pins the instance to
@@ -1749,7 +1753,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
         .pendingTradeManager;
       ptm?.onPlayerDisconnect(event.playerId);
-      this.pendingDuelChallengeManager.onPlayerDisconnect(event.playerId);
+      const pdcm = (
+        this.world as {
+          pendingDuelChallengeManager?: PendingDuelChallengeManager;
+        }
+      ).pendingDuelChallengeManager;
+      pdcm?.onPlayerDisconnect(event.playerId);
       const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
       duelSystem?.onPlayerDisconnect(event.playerId);
       const homeTeleportManager = getHomeTeleportManager();
@@ -3037,7 +3046,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
       .pendingTradeManager;
     ptm?.cancelPendingTrade(playerId);
-    this.pendingDuelChallengeManager.cancelPendingChallenge(playerId);
+    const pdcmCancel = (
+      this.world as {
+        pendingDuelChallengeManager?: PendingDuelChallengeManager;
+      }
+    ).pendingDuelChallengeManager;
+    pdcmCancel?.cancelPendingChallenge(playerId);
     const homeTeleportManager = getHomeTeleportManager();
     if (homeTeleportManager?.isCasting(playerId)) {
       homeTeleportManager.cancelCasting(playerId, "Player moved");
