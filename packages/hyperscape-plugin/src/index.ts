@@ -120,6 +120,7 @@ import { FollowManager } from "./systems/FollowManager.js";
 import { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 import { TileMovementManager } from "./systems/tile-movement.js";
 import { MobTileMovementManager } from "./systems/mob-tile-movement.js";
+import { handleChatAdded } from "./systems/network-handlers/chat.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -178,6 +179,12 @@ export { FollowManager } from "./systems/FollowManager.js";
 export { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 export { TileMovementManager } from "./systems/tile-movement.js";
 export { MobTileMovementManager } from "./systems/mob-tile-movement.js";
+
+// Network packet handlers — Phase F3 (2026-04-26). Each handler is
+// also registered automatically by plugin onEnable via
+// `world.connectionRegistry`; these re-exports are for direct
+// importers in `@hyperforge/server` or tests.
+export { handleChatAdded } from "./systems/network-handlers/chat.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -597,6 +604,28 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           delete (ctx.world as { mobTileMovement?: MobTileMovementManager })
             .mobTileMovement;
         });
+
+        // Network packet handlers — Phase F3 (2026-04-26). Register
+        // each migrated handler family via the substrate
+        // `world.connectionRegistry` (Phase F2 pinning). The
+        // dispatcher in ServerNetwork.onMessage prefers registry
+        // handlers over its legacy static dict.
+        const connectionRegistry = (
+          ctx.world as {
+            connectionRegistry?: import("@hyperforge/shared").IConnectionRegistry;
+          }
+        ).connectionRegistry;
+        if (connectionRegistry) {
+          // Chat — F3 first cut (smallest handler, ~85 LOC).
+          connectionRegistry.register("onChatAdded", (socket, data) => {
+            handleChatAdded(socket, data, ctx.world, (name, payload, ignore) =>
+              tmmBroadcast?.sendToAll(name, payload, ignore),
+            );
+          });
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onChatAdded"),
+          );
+        }
 
         // Wire pluggable DropCondition evaluator + boot-time
         // authored loot-tables / mob→table mappings seed.

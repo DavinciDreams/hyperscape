@@ -2183,6 +2183,7 @@ export {
 export {
   getTileMovementRateLimiter,
   getPathfindRateLimiter,
+  getChatRateLimiter,
 } from "./systems/server/network/services/SlidingWindowRateLimiter";
 // Substrate interfaces — needed by plugin-side game managers
 // (PendingTrade/Duel/Attack/Cook/Gather, Follow) that resolve

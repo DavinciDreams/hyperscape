@@ -5,9 +5,18 @@
  * Validates message content, enforces length limits, and verifies sender identity.
  */
 
-import type { ServerSocket, ChatMessage } from "../server-types";
-import type { World } from "../../../../index";
-import { getChatRateLimiter } from "../services/SlidingWindowRateLimiter";
+import type { ServerSocket, World } from "@hyperforge/shared";
+import { getChatRateLimiter } from "@hyperforge/shared";
+
+// ChatMessage type was previously imported from
+// `network/server-types`. Duck-typed inline since the handler only
+// reads/writes a small set of fields.
+interface ChatMessage {
+  userId?: string;
+  userName?: string;
+  message: string;
+  type?: string;
+}
 
 /** Maximum chat message length */
 const MAX_MESSAGE_LENGTH = 255;

@@ -244,9 +244,11 @@ export function registerMigratedPacketHandlers(world: World): void {
   const broadcast = network.getBroadcastManager();
   const sendToAll = broadcast.sendToAll.bind(broadcast);
 
-  registry.register("onChatAdded", (socket, data) =>
-    handleChatAdded(socket, data, world, sendToAll),
-  );
+  // `onChatAdded` registration migrated to @hyperforge/hyperscape
+  // plugin onEnable (Phase F3 of PLAN_ENGINE_API_EXTRACTION.md,
+  // 2026-04-26). Plugin resolves `world.connectionRegistry` and
+  // registers via the substrate. The local `handleChatAdded` import
+  // above is now unused and can be dropped in a follow-up cleanup.
   registry.register("onEntityModified", (socket, data) =>
     handleEntityModified(socket, data, world, sendToAll),
   );
