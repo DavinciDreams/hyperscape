@@ -242,7 +242,19 @@ export function recordAgentThought(
 
 /** Snapshot of embedded AgentBehaviorTicker.goal (avoid circular import of AgentInstance). */
 export type EmbeddedTickerGoalSnapshot = {
-  type: "questing" | "combat" | "gathering" | "idle";
+  // Aligned with `AgentGoal.type` in AgentBehaviorTicker so the
+  // ticker can pass its goal directly to dashboard snapshot helpers
+  // without narrowing.
+  type:
+    | "questing"
+    | "combat"
+    | "gathering"
+    | "banking"
+    | "cooking"
+    | "smelting"
+    | "smithing"
+    | "exploring"
+    | "idle";
   description: string;
   questId?: string;
   questName?: string;
