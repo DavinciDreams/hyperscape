@@ -11,8 +11,8 @@ export * from "./Physics";
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./WorldDialogueConditionEvaluators";
 
-// ItemTargetingSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./TargetValidator";
+// ItemTargetingSystem + TargetValidator migrated to
+// @hyperforge/hyperscape (2026-04-25 / 2026-04-26).
 
 // Smelting/Smithing/Crafting/Fletching all migrated to
 // @hyperforge/hyperscape (2026-04-24).

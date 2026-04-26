@@ -6,8 +6,8 @@
  * and cooking (raw food → fire/range).
  */
 
-import { processingDataProvider } from "../../../data/ProcessingDataProvider";
-import type { TargetType, SourceItem } from "../../../types/item-targeting";
+import { processingDataProvider } from "@hyperforge/shared";
+import type { TargetType, SourceItem } from "@hyperforge/shared";
 
 /**
  * Validation result for an item use action.

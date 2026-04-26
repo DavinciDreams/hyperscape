@@ -1286,7 +1286,8 @@ export { groundToTerrain } from "./utils/game/EntityUtils";
 // ProcessingSystem deps — re-exported for the client bundle.
 export { ITEM_IDS } from "./constants/GameConstants";
 export type { ProcessingAction } from "./types/game/resource-processing-types";
-export { getTargetValidator } from "./systems/shared/interaction/TargetValidator";
+// getTargetValidator / TargetValidator migrated to
+// @hyperforge/hyperscape (2026-04-26).
 export { modelCache } from "./utils/rendering/ModelCache";
 export { ParticleSystem } from "./systems/shared/presentation/ParticleSystem";
 // (calculateDistance2D + GroundItemSystem are already in client barrel)

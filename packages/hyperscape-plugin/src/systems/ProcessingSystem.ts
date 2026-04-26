@@ -26,7 +26,6 @@ import {
   calculateDistance2D,
   EventType,
   type Fire,
-  getTargetValidator,
   type GroundItemSystemDuck,
   ITEM_IDS,
   modelCache,
@@ -40,6 +39,7 @@ import {
   type World,
   worldToTile,
 } from "@hyperforge/shared";
+import { getTargetValidator } from "./interaction/TargetValidator.js";
 
 /**
  * Debug logging flag for processing system.

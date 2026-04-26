@@ -21,7 +21,6 @@ import {
   EquipmentSlotName,
   EventType,
   getMaxInventorySlotsInputLimit,
-  getTargetValidator,
   type Item,
   type ItemAction,
   type ItemContextMenu,
@@ -33,6 +32,7 @@ import {
   SystemBase,
   type World,
 } from "@hyperforge/shared";
+import { getTargetValidator } from "./interaction/TargetValidator.js";
 
 // Re-export for backward compatibility
 export type { DragData, DropTarget };
