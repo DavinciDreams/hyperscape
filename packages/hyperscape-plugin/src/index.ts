@@ -135,6 +135,10 @@ import {
 import { handleSetAutocast } from "./systems/network-handlers/magic.js";
 import { handleResourceGather } from "./systems/network-handlers/resources.js";
 import {
+  handleAttackPlayer as handleAttackPlayerImpl,
+  handleAttackMob as handleAttackMobImpl,
+} from "./systems/network-handlers/combat.js";
+import {
   handleFollowPlayer,
   handleChangePlayerName,
 } from "./systems/network-handlers/player.js";
@@ -159,6 +163,7 @@ import type {
   HomeTeleportFactory,
   IHomeTeleportManager,
   IFriendsService,
+  ICombatAttackService,
 } from "@hyperforge/shared";
 import {
   sendFriendsListSync,
@@ -335,6 +340,8 @@ export {
 export {
   handleChangeAttackStyle,
   handleSetAutoRetaliate,
+  handleAttackPlayer,
+  handleAttackMob,
 } from "./systems/network-handlers/combat.js";
 export {
   HomeTeleportManager,
@@ -1326,6 +1333,25 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { friendsService?: IFriendsService })
             .friendsService;
+        });
+
+        // CombatAttackService — Phase F3 batch-9 (2026-04-26). The
+        // engine `ServerNetwork.onAttackPlayer` inline block calls
+        // `world.combatAttackService?.attackPlayer(socket, data, world)`
+        // after its own preprocessing (target lookup, range check,
+        // pending-attack queueing). The plugin installs the service
+        // here so the in-range PvP/duel branch reaches the validating
+        // handler.
+        const combatAttackService: ICombatAttackService = {
+          attackPlayer: handleAttackPlayerImpl,
+          attackMob: handleAttackMobImpl,
+        };
+        (
+          ctx.world as { combatAttackService?: ICombatAttackService }
+        ).combatAttackService = combatAttackService;
+        ctx.scope.register(() => {
+          delete (ctx.world as { combatAttackService?: ICombatAttackService })
+            .combatAttackService;
         });
 
         // FaceDirectionManager — Phase D7 (2026-04-26). Plugin owns

@@ -2204,6 +2204,7 @@ export {
   getQuestAcceptRateLimiter,
   getQuestAbandonRateLimiter,
   getQuestCompleteRateLimiter,
+  getCombatRateLimiter,
 } from "./systems/server/network/services/SlidingWindowRateLimiter";
 // Network handler interfaces — needed by Phase F3 migrated handlers
 // (player, prayer, quest, etc.) that look up systems at the world level.
@@ -2260,6 +2261,7 @@ export type {
   HomeTeleportFactory,
 } from "./systems/server/network/substrate/home-teleport-service";
 export type { IFriendsService } from "./systems/server/network/substrate/friends-service";
+export type { ICombatAttackService } from "./systems/server/network/substrate/combat-attack-service";
 // Processing handler packet payloads — needed by the migrated
 // processing handlers in @hyperforge/hyperscape.
 export type {

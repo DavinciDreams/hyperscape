@@ -152,7 +152,13 @@ import {
   getGlobalSocketRateLimiter,
   getUnknownMessageRateLimiter,
 } from "./services/SlidingWindowRateLimiter";
-import { handleAttackPlayer } from "./handlers/combat";
+// `handleAttackPlayer` migrated to @hyperforge/hyperscape (Phase F3
+// batch-9, 2026-04-26). The engine inline `onAttackPlayer` block
+// resolves `world.combatAttackService` via the
+// `ICombatAttackService` substrate and calls `attackPlayer()`
+// AFTER its own preprocessing (target lookup, range check,
+// pending-attack queueing).
+import type { ICombatAttackService } from "./substrate/combat-attack-service";
 import type { ProcessingHandlerContext } from "./substrate/processing-handler-context";
 // PendingAttackManager migrated to @hyperforge/hyperscape (Phase D3,
 // 2026-04-26). Duck-typed locally — covers every method ServerNetwork
@@ -2099,8 +2105,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       if (
         this.isInAttackRange(playerTile, targetTile, attackType, attackRange)
       ) {
-        // In range - validate zones and start combat immediately
-        handleAttackPlayer(socket, data, this.world);
+        // In range - delegate to plugin's combat attack service for
+        // duel/PvP-zone validation + COMBAT_ATTACK_REQUEST emit.
+        // The plugin installs `world.combatAttackService` at onEnable
+        // (Phase F3 batch-9 substrate). If absent (PIE editor / tests
+        // without the plugin loaded), the call is a silent no-op.
+        const combatAttackService = (
+          this.world as { combatAttackService?: ICombatAttackService }
+        ).combatAttackService;
+        combatAttackService?.attackPlayer(socket, data, this.world);
       } else {
         // Not in range - validate zones first, then queue pending attack
         // Zone validation happens in handleAttackPlayer, so we do basic checks here
