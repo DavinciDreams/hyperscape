@@ -113,6 +113,7 @@ import { DuelSystem } from "./systems/DuelSystem/index.js";
 import { PendingTradeManager } from "./systems/PendingTradeManager.js";
 import { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
 import { PendingAttackManager } from "./systems/PendingAttackManager.js";
+import { PendingCookManager } from "./systems/PendingCookManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -165,6 +166,7 @@ export {
 export { PendingTradeManager } from "./systems/PendingTradeManager.js";
 export { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManager.js";
 export { PendingAttackManager } from "./systems/PendingAttackManager.js";
+export { PendingCookManager } from "./systems/PendingCookManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -584,6 +586,37 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { pendingAttackManager?: PendingAttackManager })
             .pendingAttackManager;
+        });
+
+        // PendingCookManager — Phase D4 (2026-04-26). FireRegistry
+        // dep is the ProcessingSystem (registered earlier in this
+        // same onEnable; resolves via getSystem).
+        const processingSystem = ctx.world.getSystem(
+          "processing",
+        ) as unknown as {
+          getActiveFires: () => Map<
+            string,
+            {
+              id: string;
+              position: { x: number; y: number; z: number };
+              isActive: boolean;
+              playerId: string;
+              createdAt: number;
+              duration: number;
+              mesh?: unknown;
+            }
+          >;
+        };
+        const pendingCookManager = new PendingCookManager(
+          ctx.world,
+          processingSystem,
+        );
+        (
+          ctx.world as { pendingCookManager?: PendingCookManager }
+        ).pendingCookManager = pendingCookManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { pendingCookManager?: PendingCookManager })
+            .pendingCookManager;
         });
 
         // Duel system — same manual-lifecycle pattern as

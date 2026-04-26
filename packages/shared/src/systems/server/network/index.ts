@@ -134,7 +134,22 @@ interface PendingAttackManager {
   ): void;
 }
 import { PendingGatherManager } from "./PendingGatherManager";
-import { PendingCookManager } from "./PendingCookManager";
+// PendingCookManager migrated to @hyperforge/hyperscape (Phase D4,
+// 2026-04-26). Duck-type covers everything ServerNetwork + handlers
+// need; the wider surface (queuePendingCook) is reached through the
+// `getProcessingHandlerContext()` return shape.
+interface PendingCookManager {
+  processTick(tickNumber: number): void;
+  onPlayerDisconnect(playerId: string): void;
+  queuePendingCook(
+    playerId: string,
+    sourceId: string,
+    sourcePosition: { x: number; y: number; z: number },
+    currentTick: number,
+    runMode?: boolean,
+    fishSlot?: number,
+  ): void;
+}
 // PendingTradeManager migrated to @hyperforge/hyperscape (Phase D1,
 // 2026-04-26). ServerNetwork resolves the instance via
 // `world.pendingTradeManager` at use-site (tick callback +
@@ -354,7 +369,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   // PendingAttackManager removed (Phase D3) — plugin owns the
   // lifecycle. ServerNetwork resolves via the helper below.
   private pendingGatherManager!: PendingGatherManager;
-  private pendingCookManager!: PendingCookManager;
+  // PendingCookManager removed (Phase D4) — plugin owns the
+  // lifecycle.
   // PendingTradeManager removed (Phase D1) — plugin owns the
   // lifecycle. ServerNetwork resolves via `world.pendingTradeManager`.
   // PendingDuelChallengeManager removed (Phase D2) — plugin owns the
@@ -399,7 +415,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     return {
       world: this.world,
       pendingGatherManager: this.pendingGatherManager,
-      pendingCookManager: this.pendingCookManager,
+      pendingCookManager: (
+        this.world as { pendingCookManager?: PendingCookManager }
+      ).pendingCookManager as PendingCookManager,
       tileMovementManager: this.tileMovementManager,
       tickSystem: this.tickSystem,
       canProcessRequest: this.canProcessRequest.bind(this),
@@ -942,32 +960,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       "pendingGather",
     );
 
-    // Pending cook manager - server-authoritative tracking of "walk to fire and cook" actions
-    // Uses same approach as PendingGatherManager: movePlayerToward with meleeRange=1 for cardinal-only
-    // FireRegistry is now injected via constructor (DIP)
-    const processingSystem = this.world.getSystem("processing") as unknown as {
-      getActiveFires: () => Map<
-        string,
-        {
-          id: string;
-          position: { x: number; y: number; z: number };
-          isActive: boolean;
-          playerId: string;
-          createdAt: number;
-          duration: number;
-          mesh?: unknown;
-        }
-      >;
-    };
-    this.pendingCookManager = new PendingCookManager(
-      this.world,
-      processingSystem,
-    );
-
-    // Register pending cook processing (same priority as movement)
+    // PendingCookManager — migrated to @hyperforge/hyperscape
+    // (Phase D4, 2026-04-26). Plugin onEnable owns construction +
+    // the FireRegistry injection (looks up
+    // `world.getSystem("processing")` itself). Tick callback
+    // resolves lazily.
     this.tickSystem.onTick(
       (tickNumber) => {
-        this.pendingCookManager.processTick(tickNumber);
+        const pcm = (this.world as { pendingCookManager?: PendingCookManager })
+          .pendingCookManager;
+        pcm?.processTick(tickNumber);
       },
       TickPriority.MOVEMENT,
       "pendingCook",
@@ -1720,7 +1722,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       ).pendingAttackManager?.onPlayerDisconnect(event.playerId);
       this.followManager.onPlayerDisconnect(event.playerId);
       this.pendingGatherManager.onPlayerDisconnect(event.playerId);
-      this.pendingCookManager.onPlayerDisconnect(event.playerId);
+      const pcm = (this.world as { pendingCookManager?: PendingCookManager })
+        .pendingCookManager;
+      pcm?.onPlayerDisconnect(event.playerId);
       const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
         .pendingTradeManager;
       ptm?.onPlayerDisconnect(event.playerId);

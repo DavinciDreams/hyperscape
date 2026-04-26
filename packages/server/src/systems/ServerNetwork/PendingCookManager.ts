@@ -1,17 +1,8 @@
 /**
  * @deprecated Re-export shim.
  *
- * Relocated to
- * `packages/shared/src/systems/server/network/PendingCookManager.ts` as part
- * of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 1 — zero-dep leaves).
- *
- * Uses `ITileMovementManager` (narrow interface in shared/interfaces.ts) so
- * shared has no dependency on the concrete TileMovementManager implementation.
- * Delete this shim after Step 8.
+ * `PendingCookManager` relocated to `@hyperforge/hyperscape`
+ * (Phase D4 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export {
-  PendingCookManager,
-  type FireRegistry,
-} from "../../../../shared/src/systems/server/network/PendingCookManager";
+export { PendingCookManager } from "@hyperforge/hyperscape";

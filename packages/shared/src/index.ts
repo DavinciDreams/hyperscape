@@ -1264,6 +1264,7 @@ export {
   getDefaultSuccessRate,
   getFishingSpotMove,
   getFishingSuccessRates,
+  getGatheringRange,
   getGatheringRateLimitMs,
   getGatheringSkillMechanics,
   getMaxResourceIdLength,

@@ -20,15 +20,15 @@
  * @see PendingAttackManager - combat equivalent
  */
 
-import type { World } from "../../../index";
 import {
   EventType,
-  worldToTileInto,
-  tilesWithinMeleeRange,
+  getGatheringRange,
+  type ITileMovementService,
   type TileCoord,
-} from "../../../index";
-import { getGatheringRange } from "../../../data/live/gathering-live";
-import type { ITileMovementService } from "./substrate/tile-movement-service";
+  tilesWithinMeleeRange,
+  type World,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 /**
  * Fire type - matches the Fire interface from resource-processing-types

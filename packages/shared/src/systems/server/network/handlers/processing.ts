@@ -18,7 +18,19 @@
 import type { ServerSocket } from "../server-types";
 import { EventType, World } from "../../../../index";
 import type { TileMovementManager } from "../tile-movement";
-import type { PendingCookManager } from "../PendingCookManager";
+// PendingCookManager migrated to @hyperforge/hyperscape (Phase D4,
+// 2026-04-26). Duck-typed locally — only `queuePendingCook` is
+// called from the processing handler.
+interface PendingCookManager {
+  queuePendingCook(
+    playerId: string,
+    sourceId: string,
+    sourcePosition: { x: number; y: number; z: number },
+    currentTick: number,
+    runMode?: boolean,
+    fishSlot?: number,
+  ): void;
+}
 import type { PendingGatherManager } from "../PendingGatherManager";
 import type { TickSystem } from "../../TickSystem";
 import type {

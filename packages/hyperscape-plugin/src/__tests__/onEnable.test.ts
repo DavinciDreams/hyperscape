@@ -34,6 +34,7 @@ interface FakeWorld {
   pendingTradeManager?: unknown;
   pendingDuelChallengeManager?: unknown;
   pendingAttackManager?: unknown;
+  pendingCookManager?: unknown;
   // DuelSystem registration also writes to `systemsByName` so combat
   // can look it up via `world.getSystem("duel")`.
   systemsByName: Map<string, unknown>;
@@ -224,11 +225,12 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer, plus five
+    // Every registration paired with a scope disposer, plus six
     // extra disposers for manually-managed lifecycle systems:
     // TradingSystem + DuelSystem + PendingTradeManager +
-    // PendingDuelChallengeManager + PendingAttackManager.
-    expect(scope.disposers.length).toBe(world.registered.length + 5);
+    // PendingDuelChallengeManager + PendingAttackManager +
+    // PendingCookManager.
+    expect(scope.disposers.length).toBe(world.registered.length + 6);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {
