@@ -24,6 +24,12 @@ interface FakeWorld {
   unregister?: (name: string) => boolean;
   registered: Array<{ name: string; ctorName: string }>;
   getSystem(name: string): unknown;
+  // EventEmitter surface used by manually-instantiated systems (e.g.
+  // TradingSystem subscribes to PLAYER_LEFT / PLAYER_LOGOUT /
+  // ENTITY_DEATH in init()).
+  on(event: string, handler: (...args: unknown[]) => void): void;
+  off(event: string, handler: (...args: unknown[]) => void): void;
+  tradingSystem?: unknown;
 }
 
 function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
@@ -46,6 +52,13 @@ function makeFakeWorld(opts: { isServer: boolean }): FakeWorld {
     // system isn't available.
     getSystem(_name) {
       return null;
+    },
+    on(_event, _handler) {
+      // no-op — TradingSystem subscribes to player-lifecycle events
+      // here; the test only asserts registration not event delivery.
+    },
+    off(_event, _handler) {
+      // no-op companion for `on`.
     },
   };
   return w;
@@ -152,9 +165,12 @@ describe("HyperscapePlugin.onEnable — registration contract", () => {
       ...CROSS_CUTTING_REGISTRATIONS,
       ...SERVER_ONLY_REGISTRATIONS,
     ]);
-    // Every registration paired with a scope disposer (so
-    // session.stop() unwinds them via world.unregister).
-    expect(scope.disposers.length).toBe(world.registered.length);
+    // Every registration paired with a scope disposer, plus one extra
+    // disposer for the TradingSystem teardown (it's instantiated +
+    // managed manually rather than via `world.register()` so it
+    // doesn't appear in `world.registered` but does appear in
+    // `scope.disposers`).
+    expect(scope.disposers.length).toBe(world.registered.length + 1);
   });
 
   it("registers cross-cutting + client-only systems on the client world", () => {

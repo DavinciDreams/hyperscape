@@ -2211,7 +2211,12 @@ export {
 } from "./data/live/combat-live";
 
 // Live getters — provider-first reads of boot-captured TRADE_CONSTANTS fields.
-export { getMaxTradeSlots } from "./data/live/trading-live";
+export {
+  getActivityTimeoutMs,
+  getMaxTradeSlots,
+  getRequestCooldownMs,
+  getRequestTimeoutMs,
+} from "./data/live/trading-live";
 
 // Live getters — provider-first reads of boot-captured BANKING_CONSTANTS fields.
 export {

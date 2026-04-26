@@ -108,6 +108,7 @@ import { RunecraftingSystem } from "./systems/RunecraftingSystem.js";
 import { SmeltingSystem } from "./systems/SmeltingSystem.js";
 import { SmithingSystem } from "./systems/SmithingSystem.js";
 import { TanningSystem } from "./systems/TanningSystem.js";
+import { TradingSystem } from "./systems/TradingSystem/index.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -135,6 +136,11 @@ export {
 } from "@hyperforge/skills";
 
 export { manifest } from "./manifest.js";
+
+// TradingSystem — consumed by `@hyperforge/server` for the trade
+// integration test (re-export shim). Migrated from `@hyperforge/shared`
+// (2026-04-26).
+export { TradingSystem } from "./systems/TradingSystem/index.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -436,6 +442,21 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
             );
           }
         }
+
+        // Trading system — instantiation + init + destroy lifecycle
+        // owned by the plugin (migrated from `ServerNetwork.start()` /
+        // `.destroy()` 2026-04-26). The instance is pinned to
+        // `world.tradingSystem` so the existing
+        // `getTradingSystem(world)` lookup helper used by trade
+        // network handlers resolves unchanged.
+        const tradingSystem = new TradingSystem(ctx.world);
+        tradingSystem.init();
+        (ctx.world as { tradingSystem?: TradingSystem }).tradingSystem =
+          tradingSystem;
+        ctx.scope.register(() => {
+          tradingSystem.destroy();
+          delete (ctx.world as { tradingSystem?: TradingSystem }).tradingSystem;
+        });
       }
 
       // Client-only visual feedback systems. Original SystemLoader

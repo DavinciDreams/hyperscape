@@ -23,28 +23,24 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import type { World } from "../../../core/World";
-import { EventType } from "../../../types/events";
 import {
+  createItemID,
+  createPlayerID,
+  createSlotNumber,
+  EventType,
   getActivityTimeoutMs,
   getMaxTradeSlots,
   getRequestCooldownMs,
   getRequestTimeoutMs,
-} from "../../../data/live/trading-live";
-import {
-  type TradeSession,
-  type TradeParticipant,
-  type TradeOfferItem,
-  type TradeCancelReason,
-} from "../../../types/game/trade-types";
-import type { PlayerID } from "../../../types/core/identifiers";
-import {
-  createPlayerID,
-  createItemID,
-  createSlotNumber,
   isValidPlayerID,
   isValidSlotNumber,
-} from "../../../utils/IdentifierUtils";
+  type PlayerID,
+  type TradeCancelReason,
+  type TradeOfferItem,
+  type TradeParticipant,
+  type TradeSession,
+  type World,
+} from "@hyperforge/shared";
 
 // ============================================================================
 // Types

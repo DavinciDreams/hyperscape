@@ -14,7 +14,33 @@ import {
 import type { ServerSocket } from "../../server-types";
 import { RateLimitService } from "../../services";
 import { sendToSocket, getPlayerId, getEntityPosition } from "../common";
-import type { TradingSystem } from "../../../TradingSystem";
+// TradingSystem migrated to @hyperforge/hyperscape (2026-04-26).
+// Duck-typed locally to keep shared off the plugin dep graph; the
+// plugin's `TradingSystem` class structurally satisfies this shape.
+import type { TradeSession } from "../../../../../types/game/trade-types";
+import type { TradeOperationResult } from "../../../../../types/systems/system-interfaces";
+export interface TradingSystem {
+  createTradeRequest(
+    initiatorId: string,
+    initiatorName: string,
+    initiatorSocketId: string,
+    recipientId: string,
+  ): TradeOperationResult & { tradeId?: string };
+  respondToTradeRequest(
+    tradeId: string,
+    recipientId: string,
+    recipientName: string,
+    recipientSocketId: string,
+    accept: boolean,
+  ): TradeOperationResult;
+  cancelTrade(
+    tradeId: string,
+    reason: string,
+    cancelledBy?: string,
+  ): TradeOperationResult;
+  getTradeSession(tradeId: string): TradeSession | undefined;
+  isPlayerOnline(playerId: string): boolean;
+}
 import type { PendingTradeManager } from "../../PendingTradeManager";
 
 // ============================================================================

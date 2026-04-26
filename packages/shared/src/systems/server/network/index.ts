@@ -122,7 +122,10 @@ import {
   initHomeTeleportManager,
   getHomeTeleportManager,
 } from "./handlers/home-teleport";
-import { TradingSystem } from "../TradingSystem";
+// TradingSystem migrated to @hyperforge/hyperscape (2026-04-26).
+// Plugin onEnable owns its lifecycle (instantiate + init + destroy)
+// and pins it to `world.tradingSystem` so trade handlers' lookup
+// helper works unchanged.
 import { DuelSystem } from "../DuelSystem";
 import { registerDuelEventListeners } from "./duel-events";
 
@@ -311,7 +314,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private pendingTradeManager!: PendingTradeManager;
   private pendingDuelChallengeManager!: PendingDuelChallengeManager;
   private followManager!: FollowManager;
-  private tradingSystem!: TradingSystem;
+  // TradingSystem field removed (2026-04-26) — plugin onEnable now owns
+  // the lifecycle. Handlers reach the instance via
+  // `getTradingSystem(world)` which reads `world.tradingSystem`.
   private duelSystem!: DuelSystem;
   // DuelScheduler / DuelBettingBridge — no longer owned by ServerNetwork
   // after Step 6; constructed directly in startup/world.ts.
@@ -991,16 +996,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     ).pendingDuelChallengeManager = this.pendingDuelChallengeManager;
 
-    // Trading system - server-authoritative player-to-player trading
-    // Manages trade sessions, item offers, acceptance state, and atomic swaps
-    this.tradingSystem = new TradingSystem(this.world);
-    this.tradingSystem.init();
+    // Trading system instantiation moved to @hyperforge/hyperscape
+    // plugin onEnable (2026-04-26). Plugin pins the instance to
+    // `world.tradingSystem` so the existing `getTradingSystem(world)`
+    // helper resolves unchanged.
 
-    // Store trading system on world so handlers can access it
-    (this.world as { tradingSystem?: TradingSystem }).tradingSystem =
-      this.tradingSystem;
-
-    // Duel system - server-authoritative player-to-player dueling (OSRS-style)
+    // Duel system - server-authoritative player-to-player dueling (tile-based)
     // Manages duel sessions, rules negotiation, stakes, and combat enforcement
     this.duelSystem = new DuelSystem(this.world);
 
@@ -2454,10 +2455,8 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.cleanupDuelEventListeners = null;
     }
 
-    // Destroy trading system first - cancels all active trades and clears cleanup interval
-    if (this.tradingSystem) {
-      this.tradingSystem.destroy();
-    }
+    // Trading system teardown owned by @hyperforge/hyperscape plugin
+    // scope disposer (2026-04-26).
 
     // Destroy duel system - cancels all active duels and pending challenges
     if (this.duelSystem) {
