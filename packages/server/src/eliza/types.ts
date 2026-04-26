@@ -36,6 +36,8 @@ export interface AgentCharacterConfig {
   username?: string;
   system?: string;
   bio?: string[];
+  /** Backstory paragraphs (ElizaOS standard field) */
+  lore?: string[];
   topics?: string[];
   adjectives?: string[];
   plugins?: string[];
