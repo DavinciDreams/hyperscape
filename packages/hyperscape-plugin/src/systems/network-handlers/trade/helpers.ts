@@ -10,14 +10,18 @@ import {
   getItem,
   type TradeOfferView,
   type TradeOfferItem,
-} from "../../../../../index";
-import type { ServerSocket } from "../../server-types";
-import { RateLimitService } from "../../services";
-import { sendToSocket, getPlayerId, getEntityPosition } from "../common";
+} from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
+import { RateLimitService } from "@hyperforge/shared";
+import {
+  sendToSocket,
+  getPlayerId,
+  getEntityPosition,
+} from "@hyperforge/shared";
 // TradingSystem migrated to @hyperforge/hyperscape (2026-04-26). The
 // `TradingSystem` interface in system-interfaces is the duck-type
 // contract — plugin's concrete class structurally satisfies it.
-import type { TradingSystem } from "../../../../../types/systems/system-interfaces";
+import type { TradingSystem } from "@hyperforge/shared";
 // PendingTradeManager migrated to @hyperforge/hyperscape (Phase D1,
 // 2026-04-26). Duck-typed locally — only `queuePendingTrade` is
 // called from the trade handlers; plugin's concrete class
@@ -396,4 +400,4 @@ export function sendTradeConfirmScreen(
 }
 
 // Re-export common utilities for convenience
-export { sendToSocket, getPlayerId } from "../common";
+export { sendToSocket, getPlayerId } from "@hyperforge/shared";

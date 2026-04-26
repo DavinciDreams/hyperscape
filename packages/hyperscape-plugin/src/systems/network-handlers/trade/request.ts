@@ -6,9 +6,12 @@
  * - handleTradeRequestRespond: Player B accepts/declines trade request
  */
 
-import { type World, isValidPlayerID, uuid } from "../../../../../index";
-import type { ServerSocket } from "../../server-types";
-import { sendSuccessToast, hasActiveInterfaceSession } from "../common";
+import { type World, isValidPlayerID, uuid } from "@hyperforge/shared";
+import type { ServerSocket } from "@hyperforge/shared";
+import {
+  sendSuccessToast,
+  hasActiveInterfaceSession,
+} from "@hyperforge/shared";
 import {
   rateLimiter,
   getTradingSystem,

@@ -1,11 +1,11 @@
 /**
  * @deprecated Re-export shim.
  *
- * Relocated to
- * `packages/shared/src/systems/server/network/handlers/trade/request.ts`
- * as part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 5).
- * Delete after Step 8.
+ * Relocated to `@hyperforge/hyperscape`
+ * (Phase F3 batch-5 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
  */
 
-export * from "../../../../../../shared/src/systems/server/network/handlers/trade/request";
+export {
+  handleTradeRequest,
+  handleTradeRequestRespond,
+} from "@hyperforge/hyperscape";

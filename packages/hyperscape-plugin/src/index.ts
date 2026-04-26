@@ -276,8 +276,8 @@ export {
   rateLimiter,
   getDuelSystem,
   getPendingDuelChallengeManager,
-  getPlayerName,
-  getPlayerCombatLevel,
+  getPlayerName as getPlayerNameForDuel,
+  getPlayerCombatLevel as getPlayerCombatLevelForDuel,
   isPlayerOnline,
   getSocketByPlayerId,
   sendDuelError,
@@ -293,6 +293,24 @@ export {
   arePlayersInChallengeRange,
   arePlayersAdjacent,
 } from "./systems/network-handlers/duel/helpers.js";
+export {
+  TRADE_PROXIMITY_TILES,
+  getTradingSystem,
+  getPendingTradeManager,
+  getPlayerName,
+  getPlayerCombatLevel,
+  chebyshevDistance,
+  arePlayersInTradeRange,
+  sendTradeError,
+  calculateOfferValue,
+  calculateFreeSlots,
+  sendTradeUpdate,
+  sendTradeConfirmScreen,
+} from "./systems/network-handlers/trade/helpers.js";
+export {
+  handleTradeRequest,
+  handleTradeRequestRespond,
+} from "./systems/network-handlers/trade/request.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the

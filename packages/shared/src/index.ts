@@ -2172,7 +2172,10 @@ export {
 // DuelSystem duck-type interface — concrete class lives in
 // @hyperforge/hyperscape; this shape is how shared code refers to
 // the system without a back-reference.
-export type { DuelSystem } from "./types/systems/system-interfaces";
+export type {
+  DuelSystem,
+  TradingSystem,
+} from "./types/systems/system-interfaces";
 // ServerSocket type — needed by migrated ScriptQueue (the queued
 // player/NPC action types reference ServerSocket).
 export type { ServerSocket } from "./systems/server/network/server-types";
