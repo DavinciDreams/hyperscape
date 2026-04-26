@@ -2248,6 +2248,10 @@ export type {
   ProcessingPendingCookManager,
   ProcessingTileMovementManager,
 } from "./systems/server/network/substrate/processing-handler-context";
+export type {
+  IHomeTeleportManager,
+  HomeTeleportFactory,
+} from "./systems/server/network/substrate/home-teleport-service";
 // Processing handler packet payloads — needed by the migrated
 // processing handlers in @hyperforge/hyperscape.
 export type {

@@ -7,8 +7,13 @@
  * - Blocked by combat/death
  */
 
-import type { ServerSocket, SpawnData } from "../server-types";
-import { World, EventType, TerrainSystem, Emotes } from "../../../../index";
+import type {
+  ServerSocket,
+  SpawnData,
+  HomeTeleportFactory,
+  IHomeTeleportManager,
+} from "@hyperforge/shared";
+import { World, EventType, TerrainSystem, Emotes } from "@hyperforge/shared";
 
 // CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 interface CombatSystem {
@@ -18,7 +23,7 @@ import {
   getHomeTeleportCastTimeMs,
   getHomeTeleportCastTimeTicks,
   getHomeTeleportCooldownMs,
-} from "../../../../data/live/game-live";
+} from "@hyperforge/shared";
 
 interface CastingState {
   endTick: number;
@@ -31,7 +36,7 @@ type PlayerEntity = {
   data?: { position?: number[] };
 };
 
-class HomeTeleportManager {
+export class HomeTeleportManager implements IHomeTeleportManager {
   private cooldowns = new Map<string, number>();
   private castingStates = new Map<string, CastingState>();
   private world: World;
@@ -230,19 +235,24 @@ export function formatCooldownRemaining(remainingMs: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-let homeTeleportManager: HomeTeleportManager | null = null;
-
-export function initHomeTeleportManager(
-  world: World,
-  spawnPoint: SpawnData,
-  sendFn: (name: string, data: unknown, ignoreSocketId?: string) => void,
-): HomeTeleportManager {
-  homeTeleportManager = new HomeTeleportManager(world, spawnPoint, sendFn);
-  return homeTeleportManager;
+/**
+ * Plugin-side factory the engine substrate consumes. Installed on
+ * `world.homeTeleportFactory` at plugin onEnable; ServerNetwork's
+ * `start()` calls it after the spawn point loads, pins the result
+ * to `world.homeTeleportManager`, and lifecycle hooks (tick,
+ * onPlayerMove, onPlayerDisconnect) lazy-resolve through the
+ * pinned reference.
+ */
+export function createHomeTeleportFactory(world: World): HomeTeleportFactory {
+  return (spawnPoint, sendFn) =>
+    new HomeTeleportManager(world, spawnPoint, sendFn);
 }
 
-export function getHomeTeleportManager(): HomeTeleportManager | null {
-  return homeTeleportManager;
+/** Resolve the manager from the engine-pinned world property. */
+function getManagerFromWorld(world: World): HomeTeleportManager | null {
+  const pinned = (world as { homeTeleportManager?: IHomeTeleportManager })
+    .homeTeleportManager;
+  return (pinned as HomeTeleportManager | undefined) ?? null;
 }
 
 export function handleHomeTeleport(
@@ -251,7 +261,8 @@ export function handleHomeTeleport(
   world: World,
   currentTick: number,
 ): void {
-  if (!homeTeleportManager) {
+  const manager = getManagerFromWorld(world);
+  if (!manager) {
     console.error("[HomeTeleport] Manager not initialized");
     // Always send a response so clients/tests don't hang
     socket.send("homeTeleportFailed", {
@@ -260,10 +271,10 @@ export function handleHomeTeleport(
     return;
   }
 
-  const error = homeTeleportManager.startCasting(socket, currentTick);
+  const error = manager.startCasting(socket, currentTick);
   if (error) {
     const remainingMs = socket.player
-      ? homeTeleportManager.getCooldownRemaining(socket.player.id)
+      ? manager.getCooldownRemaining(socket.player.id)
       : 0;
     socket.send("homeTeleportFailed", {
       reason: error,
@@ -276,11 +287,13 @@ export function handleHomeTeleport(
 export function handleHomeTeleportCancel(
   socket: ServerSocket,
   _data: unknown,
+  world: World,
 ): void {
+  const manager = getManagerFromWorld(world);
   const player = socket.player;
-  if (!player || !homeTeleportManager?.isCasting(player.id)) return;
+  if (!player || !manager?.isCasting(player.id)) return;
 
-  homeTeleportManager.cancelCasting(player.id, "Canceled by player");
+  manager.cancelCasting(player.id, "Canceled by player");
   // Send failed packet so client resets state (consistent with other cancel paths)
   socket.send("homeTeleportFailed", { reason: "Canceled by player" });
   socket.send("showToast", { message: "Home teleport canceled", type: "info" });

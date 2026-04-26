@@ -160,10 +160,8 @@ import {
 } from "../systems/ServerNetwork/handlers/entities";
 import { handleChatAdded } from "../systems/ServerNetwork/handlers/chat";
 import { handleResourceGather } from "../systems/ServerNetwork/handlers/resources";
-import {
-  handleHomeTeleport,
-  handleHomeTeleportCancel,
-} from "../systems/ServerNetwork/handlers/home-teleport";
+// Home teleport handlers migrated to @hyperforge/hyperscape plugin
+// onEnable (Phase F3 batch-7, 2026-04-26).
 import {
   handleCharacterListRequest,
   handleCharacterCreate,
@@ -553,21 +551,11 @@ export function registerMigratedPacketHandlers(world: World): void {
   registry.register("onCorpseLootAll", corpseLootAll);
   registry.register("corpseLootAll", corpseLootAll);
 
-  // Home teleport handlers — need current game tick (exposed via network
-  // getter) plus world. Both `onHomeTeleport` and legacy `homeTeleport`.
-  const homeTeleport = (
-    socket: Parameters<typeof handleHomeTeleport>[0],
-    data: unknown,
-  ) => handleHomeTeleport(socket, data, world, network.getCurrentTick());
-  registry.register("onHomeTeleport", homeTeleport);
-  registry.register("homeTeleport", homeTeleport);
-
-  const homeTeleportCancel = (
-    socket: Parameters<typeof handleHomeTeleportCancel>[0],
-    data: unknown,
-  ) => handleHomeTeleportCancel(socket, data);
-  registry.register("onHomeTeleportCancel", homeTeleportCancel);
-  registry.register("homeTeleportCancel", homeTeleportCancel);
+  // Home teleport handlers (`onHomeTeleport`, `homeTeleport`,
+  // `onHomeTeleportCancel`, `homeTeleportCancel`) migrated to
+  // @hyperforge/hyperscape plugin onEnable (Phase F3 batch-7,
+  // 2026-04-26). The plugin reads current tick via
+  // `world.getSystem("tick").getCurrentTick()`.
 
   // Character selection handlers — list/create/selected. Create and selected
   // use `broadcast.sendToSocket` for ack messages, list is world-only.

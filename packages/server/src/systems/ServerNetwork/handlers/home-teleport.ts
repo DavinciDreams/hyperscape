@@ -1,11 +1,17 @@
 /**
  * @deprecated Re-export shim.
  *
- * Handler relocated to
- * `packages/shared/src/systems/server/network/handlers/home-teleport.ts`
- * as part of the ServerNetwork → @hyperforge/shared migration
- * (PLAN_SERVERNETWORK_MIGRATION.md Step 5).
- * Delete after Step 8.
+ * Handler + manager relocated to `@hyperforge/hyperscape`
+ * (Phase F3 batch-7 of PLAN_ENGINE_API_EXTRACTION.md, 2026-04-26).
+ * Plugin onEnable installs `world.homeTeleportFactory`;
+ * ServerNetwork.start() calls it after the spawn point loads
+ * and pins `world.homeTeleportManager`.
  */
 
-export * from "../../../../../shared/src/systems/server/network/handlers/home-teleport";
+export {
+  HomeTeleportManager,
+  createHomeTeleportFactory,
+  formatCooldownRemaining,
+  handleHomeTeleport,
+  handleHomeTeleportCancel,
+} from "@hyperforge/hyperscape";

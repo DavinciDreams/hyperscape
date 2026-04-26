@@ -150,6 +150,15 @@ import {
   handleQuestAbandon,
   handleQuestComplete,
 } from "./systems/network-handlers/quest.js";
+import {
+  createHomeTeleportFactory,
+  handleHomeTeleport,
+  handleHomeTeleportCancel,
+} from "./systems/network-handlers/home-teleport.js";
+import type {
+  HomeTeleportFactory,
+  IHomeTeleportManager,
+} from "@hyperforge/shared";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -315,6 +324,13 @@ export {
   handleChangeAttackStyle,
   handleSetAutoRetaliate,
 } from "./systems/network-handlers/combat.js";
+export {
+  HomeTeleportManager,
+  createHomeTeleportFactory,
+  formatCooldownRemaining,
+  handleHomeTeleport,
+  handleHomeTeleportCancel,
+} from "./systems/network-handlers/home-teleport.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -1008,6 +1024,42 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           ctx.scope.register(() =>
             connectionRegistry.unregister("questComplete"),
           );
+
+          // Home teleport — F3 batch-7. The handlers read the manager
+          // from `world.homeTeleportManager`, which is pinned by
+          // ServerNetwork.start() once it has constructed it via the
+          // factory installed below. Current tick is read from
+          // `world.currentTick` (engine-updated each tick at INPUT
+          // priority).
+          const homeTeleport = (
+            socket: Parameters<typeof handleHomeTeleport>[0],
+            data: unknown,
+          ) =>
+            handleHomeTeleport(socket, data, ctx.world, ctx.world.currentTick);
+          connectionRegistry.register("onHomeTeleport", homeTeleport);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onHomeTeleport"),
+          );
+          connectionRegistry.register("homeTeleport", homeTeleport);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("homeTeleport"),
+          );
+
+          const homeTeleportCancel = (
+            socket: Parameters<typeof handleHomeTeleportCancel>[0],
+            data: unknown,
+          ) => handleHomeTeleportCancel(socket, data, ctx.world);
+          connectionRegistry.register(
+            "onHomeTeleportCancel",
+            homeTeleportCancel,
+          );
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("onHomeTeleportCancel"),
+          );
+          connectionRegistry.register("homeTeleportCancel", homeTeleportCancel);
+          ctx.scope.register(() =>
+            connectionRegistry.unregister("homeTeleportCancel"),
+          );
         }
 
         // Wire pluggable DropCondition evaluator + boot-time
@@ -1217,6 +1269,23 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
           followManager;
         ctx.scope.register(() => {
           delete (ctx.world as { followManager?: FollowManager }).followManager;
+        });
+
+        // HomeTeleport — Phase F3 batch-7 (2026-04-26). Manager
+        // construction is deferred: ServerNetwork.start() calls
+        // `world.homeTeleportFactory(spawn, sendFn)` after the spawn
+        // point loads, then pins the result to
+        // `world.homeTeleportManager`. We just install the factory
+        // here.
+        const homeTeleportFactory = createHomeTeleportFactory(ctx.world);
+        (
+          ctx.world as { homeTeleportFactory?: HomeTeleportFactory }
+        ).homeTeleportFactory = homeTeleportFactory;
+        ctx.scope.register(() => {
+          delete (ctx.world as { homeTeleportFactory?: HomeTeleportFactory })
+            .homeTeleportFactory;
+          delete (ctx.world as { homeTeleportManager?: IHomeTeleportManager })
+            .homeTeleportManager;
         });
 
         // FaceDirectionManager — Phase D7 (2026-04-26). Plugin owns

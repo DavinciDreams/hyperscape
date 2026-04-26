@@ -248,10 +248,16 @@ interface FaceDirectionManager {
 // 2026-04-26). Plugin onEnable registers `onFollowPlayer` via
 // `world.connectionRegistry`. Pre-handler logic that cancelled
 // `pendingAttackManager` lives plugin-side now.
-import {
-  initHomeTeleportManager,
-  getHomeTeleportManager,
-} from "./handlers/home-teleport";
+// HomeTeleportManager migrated to @hyperforge/hyperscape (Phase F3
+// batch-7, 2026-04-26). Plugin onEnable installs
+// `world.homeTeleportFactory`; ServerNetwork.start() calls it after
+// the spawn point loads and pins the result to
+// `world.homeTeleportManager`. Lifecycle hooks (tick callback,
+// onPlayerMove, onPlayerDisconnect) lazy-resolve the manager.
+import type {
+  IHomeTeleportManager,
+  HomeTeleportFactory,
+} from "./substrate/home-teleport-service";
 // TradingSystem migrated to @hyperforge/hyperscape (2026-04-26).
 // Plugin onEnable owns its lifecycle (instantiate + init + destroy)
 // and pins it to `world.tradingSystem` so trade handlers' lookup
@@ -1341,7 +1347,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Handles cast completion and combat interruption checks
     this.tickSystem.onTick(
       (tickNumber) => {
-        const manager = getHomeTeleportManager();
+        const manager = (
+          this.world as { homeTeleportManager?: IHomeTeleportManager }
+        ).homeTeleportManager;
         if (manager) {
           manager.processTick(tickNumber, (playerId: string) => {
             return this.broadcastManager.getPlayerSocket(playerId);
@@ -1788,10 +1796,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       pdcm?.onPlayerDisconnect(event.playerId);
       const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
       duelSystem?.onPlayerDisconnect(event.playerId);
-      const homeTeleportManager = getHomeTeleportManager();
-      if (homeTeleportManager) {
-        homeTeleportManager.onPlayerDisconnect(event.playerId);
-      }
+      const homeTeleportManager = (
+        this.world as { homeTeleportManager?: IHomeTeleportManager }
+      ).homeTeleportManager;
+      homeTeleportManager?.onPlayerDisconnect(event.playerId);
     });
 
     // Handle player reconnection (clears disconnect timer if active duel)
@@ -2510,12 +2518,25 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Load spawn configuration
     this.spawn = await this.initializationManager.loadSpawnPoint();
 
-    // Initialize home teleport manager with spawn point
-    initHomeTeleportManager(
-      this.world,
-      this.spawn,
-      this.broadcastManager.sendToAll.bind(this.broadcastManager),
-    );
+    // Initialize home teleport manager with spawn point. The plugin
+    // installs `world.homeTeleportFactory` at onEnable; we call it
+    // here (after spawn loads) and pin the result to
+    // `world.homeTeleportManager` for lifecycle hooks to consume.
+    const factory = (
+      this.world as { homeTeleportFactory?: HomeTeleportFactory }
+    ).homeTeleportFactory;
+    if (factory) {
+      (
+        this.world as { homeTeleportManager?: IHomeTeleportManager }
+      ).homeTeleportManager = factory(
+        this.spawn,
+        this.broadcastManager.sendToAll.bind(this.broadcastManager),
+      );
+    } else {
+      console.warn(
+        "[ServerNetwork] world.homeTeleportFactory not installed — home teleport handler will be unavailable",
+      );
+    }
 
     // Hydrate entities from database
     await this.initializationManager.hydrateEntities();
@@ -3115,7 +3136,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     ).pendingDuelChallengeManager;
     pdcmCancel?.cancelPendingChallenge(playerId);
-    const homeTeleportManager = getHomeTeleportManager();
+    const homeTeleportManager = (
+      this.world as { homeTeleportManager?: IHomeTeleportManager }
+    ).homeTeleportManager;
     if (homeTeleportManager?.isCasting(playerId)) {
       homeTeleportManager.cancelCasting(playerId, "Player moved");
       if (socket) {
