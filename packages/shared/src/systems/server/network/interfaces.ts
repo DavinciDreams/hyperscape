@@ -329,46 +329,16 @@ import type { TileCoord, AttackType } from "../../../index";
  * pulling in the full movement implementation. Structural typing: the
  * concrete class satisfies this interface without `implements`.
  */
-export interface ITileMovementManager {
-  /**
-   * Server-initiated movement toward a target position.
-   * Used for combat follow, pending interactions, and post-teleport routing.
-   */
-  movePlayerToward(
-    playerId: string,
-    targetPosition: { x: number; y: number; z: number },
-    running?: boolean,
-    attackRange?: number,
-    attackType?: AttackType,
-  ): void;
-
-  /** Cancel any active path for a player. */
-  stopPlayer(playerId: string): void;
-
-  /** Whether the player is currently running (vs walking). */
-  getIsRunning(playerId: string): boolean;
-
-  /**
-   * BFS outward from a world position for the closest walkable tile.
-   * Returns null if no walkable tile is found within the search radius.
-   */
-  findClosestWalkableTile(
-    targetPos: { x: number; z: number },
-    maxSearchRadius?: number,
-  ): TileCoord | null;
-
-  /**
-   * Register an emote to play when the player arrives at their destination.
-   * Used for gathering animations (fishing, etc.).
-   */
-  setArrivalEmote(playerId: string, emote: string): void;
-
-  /**
-   * Return the tile the player occupied before their current tile. Used by
-   * FollowManager to implement OSRS-style follow mechanics.
-   */
-  getPreviousTile(playerId: string): TileCoord;
-}
+/**
+ * `ITileMovementManager` was relocated to
+ * `./substrate/tile-movement-service.ts` and renamed
+ * `ITileMovementService` (PLAN_ENGINE_API_EXTRACTION.md Phase A4,
+ * 2026-04-26). This alias keeps existing in-shared callers compiling
+ * while consumers gradually switch to the substrate path.
+ */
+import type { ITileMovementService } from "./substrate/tile-movement-service";
+export type { ITileMovementService } from "./substrate/tile-movement-service";
+export type ITileMovementManager = ITileMovementService;
 
 // ============================================================================
 // PACKET HANDLER REGISTRY
