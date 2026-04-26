@@ -115,6 +115,7 @@ import { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManag
 import { PendingAttackManager } from "./systems/PendingAttackManager.js";
 import { PendingCookManager } from "./systems/PendingCookManager.js";
 import { PendingGatherManager } from "./systems/PendingGatherManager.js";
+import { FollowManager } from "./systems/FollowManager.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
@@ -169,6 +170,7 @@ export { PendingDuelChallengeManager } from "./systems/PendingDuelChallengeManag
 export { PendingAttackManager } from "./systems/PendingAttackManager.js";
 export { PendingCookManager } from "./systems/PendingCookManager.js";
 export { PendingGatherManager } from "./systems/PendingGatherManager.js";
+export { FollowManager } from "./systems/FollowManager.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
@@ -641,6 +643,15 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.scope.register(() => {
           delete (ctx.world as { pendingGatherManager?: PendingGatherManager })
             .pendingGatherManager;
+        });
+
+        // FollowManager — Phase D6 (2026-04-26). Vanilla pattern,
+        // constructor reads `world.tileMovement` only.
+        const followManager = new FollowManager(ctx.world);
+        (ctx.world as { followManager?: FollowManager }).followManager =
+          followManager;
+        ctx.scope.register(() => {
+          delete (ctx.world as { followManager?: FollowManager }).followManager;
         });
 
         // Duel system — same manual-lifecycle pattern as

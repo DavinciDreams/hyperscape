@@ -14,9 +14,14 @@
  * @see https://runescape.wiki/w/Follow
  */
 
-import type { World, TileCoord } from "../../../index";
-import { tilesEqual, tileToWorldInto, worldToTileInto } from "../../../index";
-import type { ITileMovementService } from "./substrate/tile-movement-service";
+import {
+  type ITileMovementService,
+  type TileCoord,
+  tilesEqual,
+  tileToWorldInto,
+  type World,
+  worldToTileInto,
+} from "@hyperforge/shared";
 
 interface FollowState {
   followerId: string;

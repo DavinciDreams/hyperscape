@@ -180,7 +180,16 @@ interface PendingDuelChallengeManager {
   onPlayerDisconnect(playerId: string): void;
   cancelPendingChallenge(playerId: string): void;
 }
-import { FollowManager } from "./FollowManager";
+// FollowManager migrated to @hyperforge/hyperscape (Phase D6,
+// 2026-04-26). Shape matches the existing IFollowManager interface
+// in `interfaces.ts` (used by `handleFollowPlayer` handler) plus the
+// extra methods ServerNetwork calls.
+interface FollowManager {
+  processTick(tickNumber: number): void;
+  onPlayerDisconnect(playerId: string): void;
+  stopFollowing(playerId: string): void;
+  startFollowing(followerId: string, targetId: string): void;
+}
 import { FaceDirectionManager } from "./FaceDirectionManager";
 import { handleFollowPlayer } from "./handlers/player";
 import {
@@ -388,7 +397,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   // PendingDuelChallengeManager removed (Phase D2) — plugin owns the
   // lifecycle. ServerNetwork resolves via
   // `world.pendingDuelChallengeManager`.
-  private followManager!: FollowManager;
+  // FollowManager removed (Phase D6) — plugin owns the lifecycle.
   // TradingSystem field removed (2026-04-26) — plugin onEnable now owns
   // the lifecycle. Handlers reach the instance via
   // `getTradingSystem(world)` which reads `world.tradingSystem`.
@@ -991,13 +1000,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // following other players. Constructor resolves
     // `world.tileMovement` (Phase B4 pinning) instead of taking the
     // service as a parameter.
-    this.followManager = new FollowManager(this.world);
+    // FollowManager — migrated to @hyperforge/hyperscape (Phase D6,
+    // 2026-04-26). Plugin onEnable owns construction.
 
     // Register follow processing (same priority as movement)
     // Pass tick number for OSRS-accurate 1-tick delay tracking
     this.tickSystem.onTick(
       (tickNumber) => {
-        this.followManager.processTick(tickNumber);
+        (
+          this.world as { followManager?: FollowManager }
+        ).followManager?.processTick(tickNumber);
       },
       TickPriority.MOVEMENT,
       "followManager",
@@ -1732,7 +1744,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       (
         this.world as { pendingAttackManager?: PendingAttackManager }
       ).pendingAttackManager?.onPlayerDisconnect(event.playerId);
-      this.followManager.onPlayerDisconnect(event.playerId);
+      (
+        this.world as { followManager?: FollowManager }
+      ).followManager?.onPlayerDisconnect(event.playerId);
       const pgm = (
         this.world as { pendingGatherManager?: PendingGatherManager }
       ).pendingGatherManager;
@@ -1913,7 +1927,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.world as { pendingAttackManager?: PendingAttackManager }
       ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
       this.actionQueue.cancelActions(playerEntity.id);
-      this.followManager.stopFollowing(playerEntity.id);
+      (
+        this.world as { followManager?: FollowManager }
+      ).followManager?.stopFollowing(playerEntity.id);
       if (mobEntity.type !== "mob") {
         traceAttackMob("drop:target_not_mob", {
           playerId: playerEntity.id,
@@ -2028,7 +2044,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         this.world as { pendingAttackManager?: PendingAttackManager }
       ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
       this.actionQueue.cancelActions(playerEntity.id);
-      this.followManager.stopFollowing(playerEntity.id);
+      (
+        this.world as { followManager?: FollowManager }
+      ).followManager?.stopFollowing(playerEntity.id);
 
       // Get player's weapon range and attack type from equipment system
       const attackRange = this.getPlayerWeaponRange(playerEntity.id);
@@ -2100,7 +2118,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       ).pendingAttackManager?.cancelPendingAttack(playerEntity.id);
 
       // Validate and start following
-      handleFollowPlayer(socket, data, this.world, this.followManager);
+      const fm = (this.world as { followManager?: FollowManager })
+        .followManager;
+      if (fm) {
+        handleFollowPlayer(socket, data, this.world, fm);
+      }
     };
 
     // Combat-style toggles (onChangeAttackStyle, onSetAutoRetaliate),
@@ -3052,7 +3074,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     (
       this.world as { pendingAttackManager?: PendingAttackManager }
     ).pendingAttackManager?.cancelPendingAttack(playerId);
-    this.followManager.stopFollowing(playerId);
+    (
+      this.world as { followManager?: FollowManager }
+    ).followManager?.stopFollowing(playerId);
     const ptm = (this.world as { pendingTradeManager?: PendingTradeManager })
       .pendingTradeManager;
     ptm?.cancelPendingTrade(playerId);
