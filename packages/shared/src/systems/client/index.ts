@@ -18,7 +18,7 @@ export { ControlPriorities } from "./ControlPriorities";
 // EquipmentVisualSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // DamageSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // DuelCountdownSplatSystem migrated to @hyperforge/hyperscape (2026-04-24)
-export { XPDropSystem } from "./XPDropSystem";
+// XPDropSystem migrated to @hyperforge/hyperscape (2026-04-26).
 // ProjectileRenderer migrated to @hyperforge/hyperscape (2026-04-24)
 // ZoneVisualsSystem migrated to @hyperforge/hyperscape (2026-04-24)
 // ResourceTileDebugSystem migrated to @hyperforge/hyperscape (2026-04-24)

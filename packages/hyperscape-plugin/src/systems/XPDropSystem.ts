@@ -1,8 +1,8 @@
 /**
- * XPDropSystem - RuneScape 3-style XP Drops
+ * XPDropSystem - Classic MMORPG-style XP Drops
  *
  * Creates visual XP numbers that float up from the player when experience is gained.
- * Mimics RuneScape 3's iconic XP drop feedback system.
+ * Classic tile-based MMORPG XP drop feedback system.
  *
  * Features:
  * - Gold/yellow XP text with skill icon
@@ -17,13 +17,15 @@
  * - Auto-returns to pool after animation completes
  */
 
-import * as THREE from "../../extras/three/three";
-import { System } from "../shared/infrastructure/System";
-import { EventType } from "../../types/events";
-import { SKILL_ICONS } from "../../data/skill-icons";
-import { getEffectiveSkillIcon } from "../../skill-icons";
-import type { World } from "../../core/World";
-import type { WorldOptions } from "../../types/index";
+import * as THREE from "three";
+import {
+  EventType,
+  getEffectiveSkillIcon,
+  SKILL_ICONS,
+  SystemClass as System,
+  type World,
+  type WorldOptions,
+} from "@hyperforge/shared";
 
 /** Pooled GPU resources for a single XP drop sprite. Reused across events. */
 interface XPDropPoolItem {
