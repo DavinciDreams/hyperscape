@@ -1,10 +1,12 @@
 /**
  * @deprecated Re-export shim.
  *
- * `duelFood` relocated to
- * `packages/shared/src/systems/server/duelFood.ts`
- * as part of the engine/game separation (PLAN_SERVERNETWORK_MIGRATION.md Step 4).
- * Delete after Step 8.
+ * `duelFood` relocated to `@hyperforge/hyperscape`
+ * (DuelSystem migration session, 2026-04-26).
  */
 
-export * from "../../../shared/src/systems/server/duelFood";
+export {
+  DUEL_FOOD_ITEM_IDS,
+  getDuelFoodItemForLevels,
+  isDuelFoodItemId,
+} from "@hyperforge/hyperscape";

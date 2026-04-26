@@ -378,6 +378,14 @@ export {
   collectInitialSyncEntities,
   handleEnterWorld,
 } from "./systems/network-handlers/character-selection.js";
+// Duel-food helpers (migrated from shared during DuelSystem session,
+// 2026-04-26). Consumed by server-side duel handlers + agent
+// integration tests via the deprecated shim.
+export {
+  DUEL_FOOD_ITEM_IDS,
+  getDuelFoodItemForLevels,
+  isDuelFoodItemId,
+} from "./systems/duelFood.js";
 
 /**
  * Per-plugin context for the meta-plugin. Empty today — the
