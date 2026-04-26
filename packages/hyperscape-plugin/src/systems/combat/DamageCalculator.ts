@@ -5,17 +5,17 @@
  * Extracted from CombatSystem to improve testability and reuse.
  */
 
-import { Entity } from "../../../entities/Entity";
-import { MobEntity } from "../../../entities/npc/MobEntity";
-import { AttackType } from "../../../types/core/core";
-import type { MeleeAttackStyle } from "../../../constants/CombatConstants";
+import { Entity } from "@hyperforge/shared";
+import { MobEntity } from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
+import type { MeleeAttackStyle } from "@hyperforge/shared";
 import {
   calculateDamage,
   CombatStats,
   CombatStyle,
   PrayerCombatBonuses,
-} from "../../../utils/game/CombatCalculations";
-import { isMobEntity } from "../../../utils/typeGuards";
+} from "@hyperforge/shared";
+import { isMobEntity } from "@hyperforge/shared";
 
 /**
  * Equipment stats for damage bonus calculation

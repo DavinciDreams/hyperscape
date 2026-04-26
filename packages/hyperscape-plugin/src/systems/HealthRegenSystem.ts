@@ -22,7 +22,6 @@
  */
 
 import {
-  type CombatSystem,
   getHealthRegenCooldownTicks,
   getHealthRegenIntervalTicks,
   getHealthRegenRate,
@@ -30,6 +29,7 @@ import {
   type World,
 } from "@hyperforge/shared";
 import type { PlayerSystem } from "./PlayerSystem.js";
+import type { CombatSystem } from "./combat/CombatSystem.js";
 
 /**
  * Minimal player snapshot shape this system needs. Inlined because

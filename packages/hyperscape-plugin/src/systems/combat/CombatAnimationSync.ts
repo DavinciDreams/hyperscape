@@ -10,15 +10,15 @@
  * 3. Hitsplat displays synchronized with damage
  */
 
-import type { World } from "../../../core/World";
+import type { World } from "@hyperforge/shared";
 import {
   getAnimationConfig,
   getDefaultAttackSpeedTicks,
   getHitDelayConfig,
-} from "../../../data/live/combat-live";
+} from "@hyperforge/shared";
 import type { CombatAnimationManager } from "./CombatAnimationManager";
-import type { HitDelayAttackType } from "../../../utils/game/HitDelayCalculator";
-import type { EntityID } from "../../../types/core/identifiers";
+import type { HitDelayAttackType } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
 
 /**
  * Scheduled attack data for tracking coordinated animations

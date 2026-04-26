@@ -5,8 +5,8 @@
  * the subset of CombatSystem they need without coupling to the full class.
  */
 
-import type { World } from "../../../../core/World";
-import type { SystemLogger } from "../../../../utils/Logger";
+import type { World } from "@hyperforge/shared";
+import type { SystemLogger } from "@hyperforge/shared";
 import type { CombatAntiCheat } from "../CombatAntiCheat";
 import type { EntityIdValidator } from "../EntityIdValidator";
 import type { CombatRateLimiter } from "../CombatRateLimiter";
@@ -25,17 +25,17 @@ interface PlayerSystem {
 // AttackContext only carries the reference; downstream handlers may
 // call `getCombinedBonuses(playerId)`. Local duck-typed shape avoids
 // a forward dep on the plugin.
-import type { PrayerBonuses } from "../../../../types/game/prayer-types";
+import type { PrayerBonuses } from "@hyperforge/shared";
 interface PrayerSystemLike {
   getCombinedBonuses(playerId: string): Partial<PrayerBonuses>;
 }
 // EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
-import type { PlayerEquipment } from "../../../../types/core/core";
+import type { PlayerEquipment } from "@hyperforge/shared";
 interface EquipmentSystemDuck {
   getPlayerEquipment(playerId: string): PlayerEquipment | undefined;
 }
 // InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
-import type { PlayerInventory } from "../../../../types/core/core";
+import type { PlayerInventory } from "@hyperforge/shared";
 interface InventorySystemDuck {
   hasItem(playerId: string, itemId: string, quantity?: number): boolean;
   getInventory(playerId: string): PlayerInventory | undefined;
@@ -44,14 +44,14 @@ interface InventorySystemDuck {
     item: { itemId: string; quantity: number; slot?: number },
   ): Promise<boolean>;
 }
-import type { TerrainSystem } from "../../world/TerrainSystem";
-import type { PooledTile } from "../../../../utils/pools/TilePool";
-import type { EntityID } from "../../../../types/core/identifiers";
-import type { AttackType } from "../../../../types/core/core";
-import type { Entity } from "../../../../entities/Entity";
-import type { MobEntity } from "../../../../entities/npc/MobEntity";
-import type { CombatStyle } from "../../../../utils/game/CombatCalculations";
-import type { Item, EquipmentSlot } from "../../../../types/game/item-types";
+import type { TerrainSystem } from "@hyperforge/shared";
+import type { PooledTile } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
+import type { AttackType } from "@hyperforge/shared";
+import type { Entity } from "@hyperforge/shared";
+import type { MobEntity } from "@hyperforge/shared";
+import type { CombatStyle } from "@hyperforge/shared";
+import type { Item, EquipmentSlot } from "@hyperforge/shared";
 
 /** Equipment stats cache entry shape */
 export interface EquipmentStatsCache {
@@ -160,14 +160,14 @@ export interface CombatAttackContext {
 }
 
 // Shared utilities used by multiple attack handlers
-import { getEntityPosition } from "../../../../utils/game/EntityPositionUtils";
-import { tilePool } from "../../../../utils/pools/TilePool";
-import { tileChebyshevDistance } from "../../movement/TileSystem";
-import { EventType } from "../../../../types/events";
-import { createEntityID } from "../../../../utils/IdentifierUtils";
-import { getNPCById } from "../../../../data/npcs";
-import type { NPCData } from "../../../../types/entities/npc-mob-types";
-import type { Position3D } from "../../../../types/core/base-types";
+import { getEntityPosition } from "@hyperforge/shared";
+import { tilePool } from "@hyperforge/shared";
+import { tileChebyshevDistance } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { createEntityID } from "@hyperforge/shared";
+import { getNPCById } from "@hyperforge/shared";
+import type { NPCData } from "@hyperforge/shared";
+import type { Position3D } from "@hyperforge/shared";
 
 /**
  * Shared projectile range check for Ranged and Magic handlers.

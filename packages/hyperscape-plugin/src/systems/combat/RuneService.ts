@@ -7,9 +7,9 @@
  * - Consume runes on spell cast
  */
 
-import type { Item } from "../../../types/game/item-types";
-import { ELEMENTAL_STAVES, RUNE_NAMES, VALID_RUNES } from "../../../data/runes";
-import { runesRegistry } from "../../../runes";
+import type { Item } from "@hyperforge/shared";
+import { ELEMENTAL_STAVES, RUNE_NAMES, VALID_RUNES } from "@hyperforge/shared";
+import { runesRegistry } from "@hyperforge/shared";
 
 /**
  * Rune requirement for a spell

@@ -1,26 +1,9 @@
 /**
- * Combat Systems
- * Combat mechanics, aggro management, and death handling
+ * Combat barrel — most files migrated to @hyperforge/hyperscape
+ * (2026-04-26, Wave 6). DeathTypes + DeathUtils stay in shared
+ * because PlayerSystem/PlayerDeathSystem (now in plugin) still
+ * import them via the top-level @hyperforge/shared barrel.
  */
 
-export * from "./CombatSystem";
-// AggroSystem migrated to @hyperforge/hyperscape (2026-04-25)
-// PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
-// MobDeathSystem migrated to @hyperforge/hyperscape (2026-04-24)
-// — first slice of the Hyperscape→meta-plugin extraction.
-
-export * from "./CombatStateService";
-export * from "./CombatEntityResolver";
-export * from "./DamageCalculator";
-export * from "./RangedDamageCalculator";
-export * from "./MagicDamageCalculator";
-export * from "./AmmunitionService";
-export * from "./RuneService";
-export * from "./SpellService";
-export * from "./ProjectileService";
-export * from "./CombatAnimationManager";
-export * from "./CombatRotationManager";
-export * from "./CombatAnimationSync";
-export * from "./CombatAntiCheat";
-// RangeSystem migrated to @hyperforge/hyperscape (2026-04-25)
-export * from "./PidManager";
+export * from "./DeathTypes";
+export * from "./DeathUtils";

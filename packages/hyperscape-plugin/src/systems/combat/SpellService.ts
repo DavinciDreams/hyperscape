@@ -10,12 +10,8 @@
  */
 
 import type { RuneRequirement } from "./RuneService";
-import {
-  COMBAT_SPELLS,
-  SPELL_ORDER,
-  type SpellData,
-} from "../../../data/combat-spells";
-import { combatSpellsRegistry } from "../../../combat-spells";
+import { COMBAT_SPELLS, SPELL_ORDER, type SpellData } from "@hyperforge/shared";
+import { combatSpellsRegistry } from "@hyperforge/shared";
 
 /**
  * Spell definition — re-exported from data manifest for backwards compatibility

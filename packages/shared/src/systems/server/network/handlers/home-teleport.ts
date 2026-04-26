@@ -8,13 +8,12 @@
  */
 
 import type { ServerSocket, SpawnData } from "../server-types";
-import {
-  World,
-  EventType,
-  TerrainSystem,
-  CombatSystem,
-  Emotes,
-} from "../../../../index";
+import { World, EventType, TerrainSystem, Emotes } from "../../../../index";
+
+// CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
+interface CombatSystem {
+  stateService?: { isInCombat(playerId: string): boolean };
+}
 import {
   getHomeTeleportCastTimeMs,
   getHomeTeleportCastTimeTicks,
@@ -91,7 +90,9 @@ class HomeTeleportManager {
       return `Home teleport on cooldown (${formatCooldownRemaining(remainingMs)} remaining)`;
     }
 
-    const combatSystem = this.world.getSystem("combat") as CombatSystem | null;
+    const combatSystem = this.world.getSystem(
+      "combat",
+    ) as unknown as CombatSystem | null;
     if (combatSystem?.stateService?.isInCombat(playerId)) {
       return "You can't teleport during combat!";
     }
@@ -147,7 +148,7 @@ class HomeTeleportManager {
       } else {
         const combatSystem = this.world.getSystem(
           "combat",
-        ) as CombatSystem | null;
+        ) as unknown as CombatSystem | null;
         if (combatSystem?.stateService?.isInCombat(playerId)) {
           this.cancelCasting(playerId, "Entered combat");
           getSocket(playerId)?.send("homeTeleportFailed", {

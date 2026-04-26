@@ -98,7 +98,7 @@ function isTruthy(value: string | undefined): boolean {
 // — registered by the plugin's onEnable cross-cutting branch.
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // — registered by the plugin's onEnable cross-cutting branch.
-import { CombatSystem } from "..";
+// CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 import type { DatabaseSystem } from "../../../types/systems/system-interfaces";
 // PlayerDeathSystem migrated to @hyperforge/hyperscape (2026-04-26).
 import { EntityManager } from "..";
@@ -220,7 +220,8 @@ export interface Systems {
   player?: unknown;
   // InventorySystem migrated to @hyperforge/hyperscape — typed as `unknown`.
   inventory?: unknown;
-  combat?: CombatSystem;
+  // CombatSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
+  combat?: unknown;
   // SkillsSystem migrated to @hyperforge/hyperscape — typed as `unknown`.
   skills?: unknown;
   // Migrated to @hyperforge/hyperscape — typed as `unknown` so
@@ -388,7 +389,8 @@ export async function registerSystems(world: World): Promise<void> {
   // These systems handle player-world interactions
 
   // 8. Combat system - Core combat mechanics (depends on player & mob systems)
-  world.register("combat", CombatSystem);
+  // "combat" registered by @hyperforge/hyperscape plugin onEnable
+  // cross-cutting branch (migrated 2026-04-26, Wave 6).
 
   // 9. Coin pouch system — registered by @hyperforge/hyperscape plugin
   // onEnable cross-cutting branch (migrated 2026-04-25). The original
@@ -553,7 +555,7 @@ export async function registerSystems(world: World): Promise<void> {
     dbSystem && "getPlayer" in dbSystem
       ? (dbSystem as DatabaseSystem)
       : undefined;
-  systems.combat = getSystem(world, "combat") as CombatSystem;
+  systems.combat = getSystem(world, "combat");
   systems.inventory = getSystem(world, "inventory");
   systems.skills = getSystem(world, "skills");
   systems.mobNpc = getSystem(world, "mob-npc");
@@ -789,13 +791,23 @@ function setupAPI(world: World, systems: Systems): void {
     teleportPlayer: (playerId: string, position: Position3D) =>
       systems.movementSystem?.teleportPlayer?.(playerId, position),
 
-    // Combat API
+    // Combat API — CombatSystem migrated to @hyperforge/hyperscape
+    // (Wave 6); duck-type the surface inline.
     startCombat: (attackerId: string, targetId: string) =>
-      systems.combat?.startCombat(attackerId, targetId),
+      (
+        systems.combat as
+          | { startCombat(a: string, t: string): boolean }
+          | undefined
+      )?.startCombat(attackerId, targetId),
     stopCombat: (attackerId: string) =>
-      systems.combat?.forceEndCombat(attackerId),
+      (
+        systems.combat as { forceEndCombat(id: string): void } | undefined
+      )?.forceEndCombat(attackerId),
     canAttack: (_attackerId: string, _targetId: string) => true, // Combat system doesn't have canAttack method
-    isInCombat: (entityId: string) => systems.combat?.isInCombat(entityId),
+    isInCombat: (entityId: string) =>
+      (
+        systems.combat as { isInCombat(id: string): boolean } | undefined
+      )?.isInCombat(entityId),
 
     // Inventory API — InventorySystem migrated to
     // @hyperforge/hyperscape (Wave 5c); duck-type the surface inline.

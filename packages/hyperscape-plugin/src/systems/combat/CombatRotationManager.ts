@@ -1,10 +1,10 @@
 /** Handles entity facing/rotation towards targets using pooled quaternions */
 
-import type { World } from "../../../core/World";
-import type { Position3D } from "../../../types";
-import { quaternionPool } from "../../../utils/pools/QuaternionPool";
-import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
-import { Logger } from "../../../utils/Logger";
+import type { World } from "@hyperforge/shared";
+import type { Position3D } from "@hyperforge/shared";
+import { quaternionPool } from "@hyperforge/shared";
+import { getEntityPosition } from "@hyperforge/shared";
+import { Logger } from "@hyperforge/shared";
 
 const DEBUG_PVP_ROTATION = process.env.DEBUG_PVP_ROTATION === "true";
 

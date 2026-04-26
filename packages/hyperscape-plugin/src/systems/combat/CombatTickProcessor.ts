@@ -11,25 +11,25 @@
  * direct coupling, following the proven CombatAttackContext pattern.
  */
 
-import { EventType } from "../../../types/events";
-import { AttackType } from "../../../types/core/core";
-import type { EntityID } from "../../../types/core/identifiers";
-import type { Entity } from "../../../entities/Entity";
-import type { MobEntity } from "../../../entities/npc/MobEntity";
-import { getCombatTimeoutTicks } from "../../../data/live/combat-live";
-import type { CombatStyle } from "../../../utils/game/CombatCalculations";
-import { calculateRetaliationDelay } from "../../../utils/game/CombatCalculations";
-import { createEntityID } from "../../../utils/IdentifierUtils";
-import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
-import { tilePool } from "../../../utils/pools/TilePool";
+import { EventType } from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
+import type { Entity } from "@hyperforge/shared";
+import type { MobEntity } from "@hyperforge/shared";
+import { getCombatTimeoutTicks } from "@hyperforge/shared";
+import type { CombatStyle } from "@hyperforge/shared";
+import { calculateRetaliationDelay } from "@hyperforge/shared";
+import { createEntityID } from "@hyperforge/shared";
+import { getEntityPosition } from "@hyperforge/shared";
+import { tilePool } from "@hyperforge/shared";
 import {
   tilesWithinMeleeRange,
   tilesWithinRange,
   worldToTile,
-} from "../movement/TileSystem";
-import { isMobEntity } from "../../../utils/typeGuards";
-import { getGameRng } from "../../../utils/SeededRandom";
-import { GameEventType } from "../EventStore";
+} from "@hyperforge/shared";
+import { isMobEntity } from "@hyperforge/shared";
+import { getGameRng } from "@hyperforge/shared";
+import { GameEventType } from "@hyperforge/shared";
 import type { CombatData } from "./CombatStateService";
 import type { CombatAttackContext } from "./handlers/AttackContext";
 import type { CombatAnimationManager } from "./CombatAnimationManager";
@@ -40,12 +40,12 @@ import type { PidManager } from "./PidManager";
 import type { ProjectileService } from "./ProjectileService";
 // PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 // Was imported here but never used; safe to drop.
-import type { PooledTile } from "../../../utils/pools/TilePool";
-import type { SystemLogger } from "../../../utils/Logger";
-import type { World } from "../../../core/World";
+import type { PooledTile } from "@hyperforge/shared";
+import type { SystemLogger } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 // GroundItemSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Use the duck-typed surface from death-types.
-import type { GroundItemSystemDuck } from "../../../types/death/death-types";
+import type { GroundItemSystemDuck } from "@hyperforge/shared";
 
 /**
  * The subset of CombatSystem that tick processing needs.

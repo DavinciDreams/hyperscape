@@ -16,7 +16,8 @@ import type { ActionRegistry } from "../systems/shared";
 // CoinPouchSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // SystemMap entry below typed as `unknown` — same pattern as
 // HealthBars; consumers locally duck-type the surface they need.
-import type { CombatSystem } from "../systems/shared";
+// CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
+// SystemMap entry below typed as `unknown`.
 // DialogueSystem migrated to @hyperforge/hyperscape (2026-04-25).
 import type { EntityManager } from "../systems/shared";
 // EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
@@ -124,7 +125,7 @@ export interface SystemMap {
   "mob-npc": unknown;
 
   // Combat & interaction
-  combat: CombatSystem;
+  combat: unknown;
   "coin-pouch": unknown;
   inventory: unknown;
   equipment: unknown;

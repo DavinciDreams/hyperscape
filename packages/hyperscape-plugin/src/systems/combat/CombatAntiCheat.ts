@@ -5,8 +5,8 @@
  * Monitors patterns over time to identify potential bad actors.
  */
 
-import type { EntityID } from "../../../types/core/identifiers";
-import { Logger } from "../../../utils/Logger";
+import type { EntityID } from "@hyperforge/shared";
+import { Logger } from "@hyperforge/shared";
 
 /**
  * Combat violation severity levels

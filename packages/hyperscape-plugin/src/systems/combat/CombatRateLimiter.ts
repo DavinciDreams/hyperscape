@@ -1,7 +1,7 @@
 /** Prevents request flooding via per-tick and per-second limits */
 
-import type { EntityID } from "../../../types/core/identifiers";
-import { Logger } from "../../../utils/Logger";
+import type { EntityID } from "@hyperforge/shared";
+import { Logger } from "@hyperforge/shared";
 
 /** 2 ticks at 600ms/tick = 1.2 seconds — closest discrete window to 1 second */
 const SECOND_WINDOW_TICKS = 2;

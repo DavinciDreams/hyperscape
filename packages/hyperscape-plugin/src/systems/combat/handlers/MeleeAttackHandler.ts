@@ -10,21 +10,21 @@ import type {
   MeleeAttackData,
   AttackValidationResult,
 } from "./AttackContext";
-import type { Entity } from "../../../../entities/Entity";
-import type { MobEntity } from "../../../../entities/npc/MobEntity";
-import { EntityID } from "../../../../types/core/identifiers";
-import { AttackType } from "../../../../types/core/core";
-import { EventType } from "../../../../types/events";
-import { createEntityID } from "../../../../utils/IdentifierUtils";
+import type { Entity } from "@hyperforge/shared";
+import type { MobEntity } from "@hyperforge/shared";
+import { EntityID } from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { createEntityID } from "@hyperforge/shared";
 import {
   CombatViolationType,
   CombatViolationSeverity,
 } from "../CombatAntiCheat";
-import { getEntityPosition } from "../../../../utils/game/EntityPositionUtils";
-import { tilesWithinMeleeRange } from "../../movement/TileSystem";
-import { tilePool } from "../../../../utils/pools/TilePool";
-import { isMobEntity } from "../../../../utils/typeGuards";
-import type { CombatStyle } from "../../../../utils/game/CombatCalculations";
+import { getEntityPosition } from "@hyperforge/shared";
+import { tilesWithinMeleeRange } from "@hyperforge/shared";
+import { tilePool } from "@hyperforge/shared";
+import { isMobEntity } from "@hyperforge/shared";
+import type { CombatStyle } from "@hyperforge/shared";
 
 export class MeleeAttackHandler {
   constructor(private readonly ctx: CombatAttackContext) {}

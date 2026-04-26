@@ -8,8 +8,8 @@
  * this interface, allowing CombatSystem to treat all entities uniformly.
  */
 
-import type { EntityID } from "../../../../types/core/identifiers";
-import type { Entity } from "../../../../entities/Entity";
+import type { EntityID } from "@hyperforge/shared";
+import type { Entity } from "@hyperforge/shared";
 
 /**
  * Result of applying damage to a target

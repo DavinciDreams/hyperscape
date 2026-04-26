@@ -5,8 +5,8 @@
  * Shuffles every 60-150 seconds so no player has permanent advantage.
  */
 
-import type { EntityID } from "../../../types/core/identifiers";
-import type { SeededRandom } from "../../../utils/SeededRandom";
+import type { EntityID } from "@hyperforge/shared";
+import type { SeededRandom } from "@hyperforge/shared";
 
 const PID_SHUFFLE_MIN_TICKS = 100;
 const PID_SHUFFLE_MAX_TICKS = 250;

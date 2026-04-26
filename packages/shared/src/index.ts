@@ -609,8 +609,7 @@ export type {
 } from "./systems/client/EquipmentVisualHelpers";
 
 // Export spell service for magic combat
-export { spellService } from "./systems/shared/combat/SpellService";
-export type { Spell } from "./systems/shared/combat/SpellService";
+// SpellService migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 
 // Export combat spell manifest data (used by duel orchestrator for best-spell selection)
 export { COMBAT_SPELLS, SPELL_ORDER } from "./data/combat-spells";
@@ -662,7 +661,58 @@ export { ClientActions } from "./systems/client/ClientActions";
 export { EventBus } from "./systems/shared";
 export { System as SystemClass } from "./systems/shared";
 export { SystemBase } from "./systems/shared";
-export { CombatSystem } from "./systems/shared/combat";
+// CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
+// Deps needed by the migrated cluster — most already exported
+// elsewhere; add the gaps here.
+export {
+  calculateRetaliationDelay,
+  calculateDamage,
+  calculateHitChance,
+} from "./utils/game/CombatCalculations";
+export type {
+  PrayerCombatBonuses,
+  CombatStats,
+} from "./utils/game/CombatCalculations";
+export type { PooledTile } from "./utils/pools/TilePool";
+export { EventStore, GameEventType } from "./systems/shared/EventStore";
+export type {
+  GameStateInfo,
+  EntitySnapshot,
+  CombatSnapshot,
+} from "./systems/shared/EventStore";
+export {
+  RANGED_STYLE_BONUSES,
+  MAGIC_STYLE_BONUSES,
+} from "./constants/CombatConstants";
+export type {
+  RangedCombatStyle,
+  MagicCombatStyle,
+  MeleeAttackStyle,
+} from "./constants/CombatConstants";
+export {
+  getCombatTimeoutTicks,
+  getDefaultMagicRange,
+  getHitDelayConfig,
+  getSpellLaunchDelayMs,
+  getArrowLaunchDelayMs,
+  getDefaultNpcAttackSpeedTicks,
+  getDefaultRangedRange,
+  getDamageBaseConstant,
+  getEffectiveLevelConstant,
+  getDamageDivisor,
+  getTickDurationMs,
+} from "./data/live/combat-live";
+export { RUNE_NAMES, VALID_RUNES } from "./data/runes";
+export { runesRegistry } from "./runes/index";
+export { ARROW_DATA, BOW_TIERS } from "./data/ammunition";
+export type { ArrowData } from "./data/ammunition";
+export {
+  getAnimationConfig,
+  getDefaultAttackSpeedTicks,
+  getAfkDisableRetaliateTicks,
+} from "./data/live/combat-live";
+export { WEAPON_DEFAULT_ATTACK_STYLE } from "./constants/CombatConstants";
+export { isAttackOnCooldownTicks } from "./utils/game/CombatCalculations";
 // PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25)
 // `Player` type already exported from the shared types block above

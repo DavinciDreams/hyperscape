@@ -11,7 +11,13 @@
  */
 
 import type { ServerSocket } from "../server-types";
-import { EventType, World, spellService } from "../../../../index";
+// SpellService migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
+// Read straight from the COMBAT_SPELLS data map (still in shared) for
+// the simple `isValidSpell` check.
+import { COMBAT_SPELLS, EventType, World } from "../../../../index";
+const spellService = {
+  isValidSpell: (spellId: string) => spellId in COMBAT_SPELLS,
+};
 import { validateRequestTimestamp } from "../services/InputValidation";
 
 /**

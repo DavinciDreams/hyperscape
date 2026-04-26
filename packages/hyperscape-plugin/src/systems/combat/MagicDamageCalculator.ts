@@ -15,17 +15,14 @@
  * @see https://oldschool.runescape.wiki/w/Magic_Damage
  */
 
-import {
-  MagicCombatStyle,
-  MAGIC_STYLE_BONUSES,
-} from "../../../types/game/combat-types";
-import type { PrayerBonuses } from "../../../types/game/prayer-types";
-import { getGameRng, SeededRandom } from "../../../utils/SeededRandom";
-import { calculateHitChance } from "../../../utils/game/CombatCalculations";
+import { MagicCombatStyle, MAGIC_STYLE_BONUSES } from "@hyperforge/shared";
+import type { PrayerBonuses } from "@hyperforge/shared";
+import { getGameRng, SeededRandom } from "@hyperforge/shared";
+import { calculateHitChance } from "@hyperforge/shared";
 import {
   getDamageBaseConstant,
   getEffectiveLevelConstant,
-} from "../../../data/live/combat-live";
+} from "@hyperforge/shared";
 
 /**
  * Parameters for magic damage calculation

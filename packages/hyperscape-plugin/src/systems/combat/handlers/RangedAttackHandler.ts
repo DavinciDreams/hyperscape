@@ -10,23 +10,23 @@ import {
   checkProjectileRange,
   prepareMobAttack,
 } from "./AttackContext";
-import { EntityID } from "../../../../types/core/identifiers";
-import { AttackType } from "../../../../types/core/core";
-import { EventType } from "../../../../types/events";
+import { EntityID } from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 import {
   getArrowLaunchDelayMs,
   getDefaultNpcAttackSpeedTicks,
   getDefaultRangedRange,
   getHitDelayConfig,
   getTickDurationMs,
-} from "../../../../data/live/combat-live";
-import { createEntityID } from "../../../../utils/IdentifierUtils";
+} from "@hyperforge/shared";
+import { createEntityID } from "@hyperforge/shared";
 import {
   CombatViolationType,
   CombatViolationSeverity,
 } from "../CombatAntiCheat";
-import { getEntityPosition } from "../../../../utils/game/EntityPositionUtils";
-import { isMobEntity } from "../../../../utils/typeGuards";
+import { getEntityPosition } from "@hyperforge/shared";
+import { isMobEntity } from "@hyperforge/shared";
 import {
   calculateRangedDamage,
   type RangedDamageParams,
@@ -34,13 +34,13 @@ import {
 import {
   type RangedCombatStyle,
   RANGED_STYLE_BONUSES,
-} from "../../../../types/game/combat-types";
+} from "@hyperforge/shared";
 import { ammunitionService } from "../AmmunitionService";
 import type { CreateProjectileParams } from "../ProjectileService";
-import { getGameRng } from "../../../../utils/SeededRandom";
-import type { Entity } from "../../../../entities/Entity";
-import type { MobEntity } from "../../../../entities/npc/MobEntity";
-import { getNPCById } from "../../../../data/npcs";
+import { getGameRng } from "@hyperforge/shared";
+import type { Entity } from "@hyperforge/shared";
+import type { MobEntity } from "@hyperforge/shared";
+import { getNPCById } from "@hyperforge/shared";
 
 export class RangedAttackHandler {
   /**

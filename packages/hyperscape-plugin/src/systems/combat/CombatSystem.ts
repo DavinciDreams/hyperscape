@@ -2,12 +2,12 @@
  * CombatSystem - Handles all combat mechanics
  */
 
-import { EventType } from "../../../types/events";
-import type { World } from "../../../core/World";
+import { EventType } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 import {
   WEAPON_DEFAULT_ATTACK_STYLE,
   type MeleeAttackStyle,
-} from "../../../constants/CombatConstants";
+} from "@hyperforge/shared";
 import {
   getAfkDisableRetaliateTicks,
   getArrowLaunchDelayMs,
@@ -18,11 +18,11 @@ import {
   getHitDelayConfig,
   getSpellLaunchDelayMs,
   getTickDurationMs,
-} from "../../../data/live/combat-live";
-import { AttackType } from "../../../types/core/core";
-import { EntityID } from "../../../types/core/identifiers";
-import { MobEntity } from "../../../entities/npc/MobEntity";
-import { Entity } from "../../../entities/Entity";
+} from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
+import { EntityID } from "@hyperforge/shared";
+import { MobEntity } from "@hyperforge/shared";
+import { Entity } from "@hyperforge/shared";
 // NOTE: Import directly to avoid circular dependency through barrel file
 // PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 interface PlayerSystem {
@@ -36,27 +36,27 @@ import {
   calculateRetaliationDelay,
   CombatStyle,
   PrayerCombatBonuses,
-} from "../../../utils/game/CombatCalculations";
+} from "@hyperforge/shared";
 // PrayerSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local interface; CombatSystem only calls
 // `getCombinedBonuses(playerId)` and passes the result to damage
 // handlers as opaque attacker/defender bonus blobs.
-import type { PrayerBonuses } from "../../../types/game/prayer-types";
+import type { PrayerBonuses } from "@hyperforge/shared";
 interface PrayerSystemLike {
   getCombinedBonuses(playerId: string): Partial<PrayerBonuses>;
 }
-import { createEntityID } from "../../../utils/IdentifierUtils";
+import { createEntityID } from "@hyperforge/shared";
 // NOTE: Import directly to avoid circular dependency through barrel file
-import { EntityManager } from "../entities/EntityManager";
+import { EntityManager } from "@hyperforge/shared";
 // MobNPCSystem migrated to @hyperforge/hyperscape (2026-04-25, Wave 3a).
 // Was imported here only for the dead `mobSystem` field below.
-import { SystemBase } from "../infrastructure/SystemBase";
+import { SystemBase } from "@hyperforge/shared";
 import {
   tilesWithinMeleeRange,
   tilesWithinRange,
   worldToTile,
-} from "../movement/TileSystem";
-import { tilePool, PooledTile } from "../../../utils/pools/TilePool";
+} from "@hyperforge/shared";
+import { tilePool, PooledTile } from "@hyperforge/shared";
 import { CombatAnimationManager } from "./CombatAnimationManager";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
@@ -65,8 +65,8 @@ import {
   CombatViolationType,
   CombatViolationSeverity,
 } from "./CombatAntiCheat";
-import { getEntityPosition } from "../../../utils/game/EntityPositionUtils";
-import { quaternionPool } from "../../../utils/pools/QuaternionPool";
+import { getEntityPosition } from "@hyperforge/shared";
+import { quaternionPool } from "@hyperforge/shared";
 import { EntityIdValidator } from "./EntityIdValidator";
 import { CombatRateLimiter } from "./CombatRateLimiter";
 import { CombatEntityResolver } from "./CombatEntityResolver";
@@ -77,18 +77,15 @@ import {
   type GameStateInfo,
   type EntitySnapshot,
   type CombatSnapshot,
-} from "../EventStore";
-import {
-  getGameRngState,
-  type SeededRandomState,
-} from "../../../utils/SeededRandom";
+} from "@hyperforge/shared";
+import { getGameRngState, type SeededRandomState } from "@hyperforge/shared";
 import {
   DamageHandler,
   PlayerDamageHandler,
   MobDamageHandler,
 } from "./handlers";
 import { PidManager } from "./PidManager";
-import { getGameRng } from "../../../utils/SeededRandom";
+import { getGameRng } from "@hyperforge/shared";
 import {
   isEntityDead,
   getMobRetaliates,
@@ -96,10 +93,10 @@ import {
   clearPendingAttacker,
   isPlayerDamageHandler,
   isMobEntity,
-} from "../../../utils/typeGuards";
+} from "@hyperforge/shared";
 // ZoneDetectionSystem migrated to @hyperforge/hyperscape (2026-04-25).
-import type { ZoneDetectionSystemDuck } from "../../../types/death/death-types";
-import { tileChebyshevDistance } from "../movement/TileSystem";
+import type { ZoneDetectionSystemDuck } from "@hyperforge/shared";
+import { tileChebyshevDistance } from "@hyperforge/shared";
 
 // Ranged/Magic combat services (F2P Phase 1)
 import {
@@ -114,7 +111,7 @@ import {
   type RangedCombatStyle,
   type MagicCombatStyle,
   RANGED_STYLE_BONUSES,
-} from "../../../types/game/combat-types";
+} from "@hyperforge/shared";
 import { ammunitionService } from "./AmmunitionService";
 import { runeService } from "./RuneService";
 import { spellService, type Spell } from "./SpellService";
@@ -122,14 +119,14 @@ import {
   ProjectileService,
   type CreateProjectileParams,
 } from "./ProjectileService";
-import { getNPCById } from "../../../data/npcs";
+import { getNPCById } from "@hyperforge/shared";
 // EquipmentSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5b).
-import type { PlayerEquipment } from "../../../types/core/core";
+import type { PlayerEquipment } from "@hyperforge/shared";
 interface EquipmentSystemDuck {
   getPlayerEquipment(playerId: string): PlayerEquipment | undefined;
 }
 // InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
-import type { PlayerInventory } from "../../../types/core/core";
+import type { PlayerInventory } from "@hyperforge/shared";
 interface InventorySystemDuck {
   hasItem(playerId: string, itemId: string, quantity?: number): boolean;
   getInventory(playerId: string): PlayerInventory | undefined;
@@ -138,7 +135,7 @@ interface InventorySystemDuck {
     item: { itemId: string; quantity: number; slot?: number },
   ): Promise<boolean>;
 }
-import type { Item, EquipmentSlot } from "../../../types/game/item-types";
+import type { Item, EquipmentSlot } from "@hyperforge/shared";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";

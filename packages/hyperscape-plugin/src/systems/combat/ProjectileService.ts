@@ -11,13 +11,13 @@
  * - Cancel projectiles when target dies/escapes
  */
 
-import { AttackType } from "../../../types/game/item-types";
+import { AttackType } from "@hyperforge/shared";
 import {
   createProjectile as createProjectileData,
   calculateTileDistance,
   type ProjectileData,
   type HitDelayAttackType,
-} from "../../../utils/game/HitDelayCalculator";
+} from "@hyperforge/shared";
 
 /**
  * Extended projectile data with additional combat context

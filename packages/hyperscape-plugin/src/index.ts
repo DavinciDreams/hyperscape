@@ -52,6 +52,7 @@ import { SkillsSystem } from "./systems/SkillsSystem.js";
 import { EquipmentSystem } from "./systems/EquipmentSystem.js";
 import { InventorySystem } from "./systems/InventorySystem.js";
 import { PlayerSystem } from "./systems/PlayerSystem.js";
+import { CombatSystem } from "./systems/combat/CombatSystem.js";
 import { PathfindingDebugSystem } from "./systems/PathfindingDebugSystem.js";
 import { PrayerSystem } from "./systems/PrayerSystem.js";
 import { ProcessingSystem } from "./systems/ProcessingSystem.js";
@@ -261,6 +262,14 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // QuestSystem, LootSystem, …) depend on it, so it registers
       // before player-death.
       register("inventory", InventorySystem);
+
+      // Combat — full melee/ranged/magic engine + handlers + state
+      // services + anti-cheat. Migrated 2026-04-26 (Wave 6) — last
+      // big migration. ~9000 LOC across 25 files
+      // (CombatSystem, AmmunitionService, RuneService, SpellService,
+      // CombatAnimationManager, CombatAntiCheat, CombatStateService,
+      // PidManager, etc.).
+      register("combat", CombatSystem);
 
       // Player death — handles inventory drop, gravestone spawn,
       // respawn timer. Migrated 2026-04-26 with its 3 internal

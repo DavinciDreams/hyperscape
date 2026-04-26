@@ -5,12 +5,12 @@
  * Handles the combatStates Map, entity sync, and state queries.
  */
 
-import type { World } from "../../../core/World";
-import { AttackType } from "../../../types/core/core";
-import { EntityID } from "../../../types/core/identifiers";
-import { createEntityID } from "../../../utils/IdentifierUtils";
-import { getCombatTimeoutTicks } from "../../../data/live/combat-live";
-import { Logger } from "../../../utils/Logger";
+import type { World } from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
+import { EntityID } from "@hyperforge/shared";
+import { createEntityID } from "@hyperforge/shared";
+import { getCombatTimeoutTicks } from "@hyperforge/shared";
+import { Logger } from "@hyperforge/shared";
 
 /**
  * Combat data for a single combatant

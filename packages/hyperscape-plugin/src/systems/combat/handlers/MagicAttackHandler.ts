@@ -14,37 +14,34 @@ import {
   checkProjectileRange,
   prepareMobAttack,
 } from "./AttackContext";
-import { AttackType } from "../../../../types/core/core";
-import { EventType } from "../../../../types/events";
+import { AttackType } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 import {
   getDefaultMagicRange,
   getHitDelayConfig,
   getSpellLaunchDelayMs,
   getTickDurationMs,
-} from "../../../../data/live/combat-live";
-import { createEntityID } from "../../../../utils/IdentifierUtils";
+} from "@hyperforge/shared";
+import { createEntityID } from "@hyperforge/shared";
 import {
   CombatViolationType,
   CombatViolationSeverity,
 } from "../CombatAntiCheat";
-import { getEntityPosition } from "../../../../utils/game/EntityPositionUtils";
-import { isMobEntity } from "../../../../utils/typeGuards";
+import { getEntityPosition } from "@hyperforge/shared";
+import { isMobEntity } from "@hyperforge/shared";
 import {
   calculateMagicDamage,
   type MagicDamageParams,
 } from "../MagicDamageCalculator";
-import {
-  type MagicCombatStyle,
-  MAGIC_STYLE_BONUSES,
-} from "../../../../types/game/combat-types";
+import { type MagicCombatStyle, MAGIC_STYLE_BONUSES } from "@hyperforge/shared";
 import { runeService } from "../RuneService";
 import { spellService, type Spell } from "../SpellService";
 import type { CreateProjectileParams } from "../ProjectileService";
-import { getGameRng } from "../../../../utils/SeededRandom";
-import type { Entity } from "../../../../entities/Entity";
-import type { MobEntity } from "../../../../entities/npc/MobEntity";
-import type { Item } from "../../../../types/game/item-types";
-import { getNPCById } from "../../../../data/npcs";
+import { getGameRng } from "@hyperforge/shared";
+import type { Entity } from "@hyperforge/shared";
+import type { MobEntity } from "@hyperforge/shared";
+import type { Item } from "@hyperforge/shared";
+import { getNPCById } from "@hyperforge/shared";
 
 export class MagicAttackHandler {
   /**

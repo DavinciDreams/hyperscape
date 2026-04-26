@@ -38,7 +38,8 @@ import {
   isDatabaseInstance,
   World,
   EventType,
-  CombatSystem,
+  // CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
+  // Duck-typed inline at the single callsite below.
   // ResourceSystem migrated to @hyperforge/hyperscape (2026-04-25).
   // Duck-typed inline at the single callsite below.
   worldToTile,
@@ -1217,9 +1218,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.tickSystem.onTick(
       (tickNumber) => {
         const t0 = Date.now();
-        const combatSystem = this.world.getSystem(
-          "combat",
-        ) as CombatSystem | null;
+        const combatSystem = this.world.getSystem("combat") as unknown as {
+          processCombatTick(n: number): void;
+        } | null;
         if (combatSystem) {
           combatSystem.processCombatTick(tickNumber);
         }

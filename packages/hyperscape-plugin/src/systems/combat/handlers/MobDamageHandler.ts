@@ -7,13 +7,13 @@
  * Extracted from CombatSystem to eliminate player/mob conditionals.
  */
 
-import type { World } from "../../../../core/World";
-import { Logger } from "../../../../utils/Logger";
+import type { World } from "@hyperforge/shared";
+import { Logger } from "@hyperforge/shared";
 import type { DamageHandler, DamageApplicationResult } from "./DamageHandler";
-import type { EntityID } from "../../../../types/core/identifiers";
-import type { Entity } from "../../../../entities/Entity";
-import { EventType } from "../../../../types/events";
-import { getMobRetaliates } from "../../../../utils/typeGuards";
+import type { EntityID } from "@hyperforge/shared";
+import type { Entity } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import { getMobRetaliates } from "@hyperforge/shared";
 
 /**
  * Mob interface for damage operations

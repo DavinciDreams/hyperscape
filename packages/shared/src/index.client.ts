@@ -274,8 +274,7 @@ export type {
 } from "./data/PrayerDataProvider";
 
 // Export spell service for magic spellbook UI
-export { spellService } from "./systems/shared/combat/SpellService";
-export type { Spell } from "./systems/shared/combat/SpellService";
+// SpellService migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 
 // Export CLIENT system classes only (NO SERVER SYSTEMS)
 export { Entities } from "./systems/shared";
@@ -1061,7 +1060,7 @@ export { BuildingCollisionService } from "./systems/shared/world/BuildingCollisi
 // Combat + Player system class refs — Hyperscape plugins like
 // HealthRegenSystem do `getSystem<CombatSystem>("combat")`.
 // (Not yet migrated; downstream plugin systems still reference them.)
-export { CombatSystem } from "./systems/shared/combat";
+// CombatSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
 // PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).
 
 // Spell-visual / arrow-visual config helpers — ProjectileRenderer.

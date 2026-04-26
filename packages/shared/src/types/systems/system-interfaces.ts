@@ -10,7 +10,10 @@
 
 import { Entity } from "../../entities/Entity";
 import * as THREE from "../../extras/three/three";
-import type { CombatData } from "../../systems/shared";
+// CombatStateService (which exports CombatData) migrated to
+// @hyperforge/hyperscape (2026-04-26, Wave 6). Use `unknown` here to
+// avoid pulling the plugin runtime back into shared.
+type CombatData = unknown;
 import type { System } from "../../systems/shared";
 import type { World } from "../../core/World";
 import type {

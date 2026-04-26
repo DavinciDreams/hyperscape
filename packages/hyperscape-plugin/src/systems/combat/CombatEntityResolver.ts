@@ -5,13 +5,13 @@
  * Extracted from CombatSystem to reduce god class size.
  */
 
-import type { World } from "../../../core/World";
-import type { EntityID } from "../../../types/core/identifiers";
-import { MobEntity } from "../../../entities/npc/MobEntity";
-import { Entity } from "../../../entities/Entity";
-import { getDefaultAttackSpeedTicks } from "../../../data/live/combat-live";
-import { getItem } from "../../../data/items";
-import { isMobEntity } from "../../../utils/typeGuards";
+import type { World } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
+import { MobEntity } from "@hyperforge/shared";
+import { Entity } from "@hyperforge/shared";
+import { getDefaultAttackSpeedTicks } from "@hyperforge/shared";
+import { getItem } from "@hyperforge/shared";
+import { isMobEntity } from "@hyperforge/shared";
 
 /**
  * Interface for entity manager operations

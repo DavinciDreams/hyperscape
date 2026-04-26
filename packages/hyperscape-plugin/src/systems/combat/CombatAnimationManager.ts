@@ -5,12 +5,12 @@
  * Handles setting attack emotes and scheduling tick-aligned resets.
  */
 
-import type { World } from "../../../core/World";
-import { Emotes } from "../../../data/playerEmotes";
-import { getNPCById } from "../../../data/npcs";
-import { hasServerEmote, isEquipmentSystem } from "../../../utils/typeGuards";
-import { Logger } from "../../../utils/Logger";
-import { DeathState } from "../../../types/entities/entities";
+import type { World } from "@hyperforge/shared";
+import { Emotes } from "@hyperforge/shared";
+import { getNPCById } from "@hyperforge/shared";
+import { hasServerEmote, isEquipmentSystem } from "@hyperforge/shared";
+import { Logger } from "@hyperforge/shared";
+import { DeathState } from "@hyperforge/shared";
 
 const DEBUG_COMBAT_ANIMATION =
   typeof process !== "undefined" &&

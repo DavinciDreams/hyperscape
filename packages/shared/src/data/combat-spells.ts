@@ -26,7 +26,13 @@ import {
 import { combatSpellsRegistry } from "../combat-spells/index.js";
 
 import combatSpellsManifestJson from "./combat-spells.json" with { type: "json" };
-import type { RuneRequirement } from "../systems/shared/combat/RuneService";
+// RuneService migrated to @hyperforge/hyperscape (2026-04-26, Wave 6).
+// Inline the small RuneRequirement type so combat-spells.ts (data layer)
+// doesn't depend on the plugin runtime.
+interface RuneRequirement {
+  runeId: string;
+  quantity: number;
+}
 
 export interface SpellData {
   id: string;

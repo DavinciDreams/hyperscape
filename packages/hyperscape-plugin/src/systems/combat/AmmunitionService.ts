@@ -10,12 +10,8 @@
  * - Get ranged strength bonus from equipped arrows
  */
 
-import {
-  ARROW_DATA,
-  BOW_TIERS,
-  type ArrowData,
-} from "../../../data/ammunition";
-import type { Item, EquipmentSlot } from "../../../types/game/item-types";
+import { ARROW_DATA, BOW_TIERS, type ArrowData } from "@hyperforge/shared";
+import type { Item, EquipmentSlot } from "@hyperforge/shared";
 
 // Re-export ArrowData so consumers importing it from this module's
 // barrel (`systems/shared/combat/index.ts`) keep working unchanged.
