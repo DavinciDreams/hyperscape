@@ -1,3 +1,4 @@
+import { MobEntity } from "../../../entities/npc/MobEntity.js";
 /**
  * CombatAttackContext - Interface for attack handlers to interact with CombatSystem.
  *
@@ -49,7 +50,6 @@ import type { PooledTile } from "@hyperforge/shared";
 import type { EntityID } from "@hyperforge/shared";
 import type { AttackType } from "@hyperforge/shared";
 import type { Entity } from "@hyperforge/shared";
-import type { MobEntity } from "@hyperforge/shared";
 import type { CombatStyle } from "@hyperforge/shared";
 import type { Item, EquipmentSlot } from "@hyperforge/shared";
 

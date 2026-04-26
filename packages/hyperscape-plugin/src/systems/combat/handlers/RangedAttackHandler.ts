@@ -1,3 +1,4 @@
+import { MobEntity } from "../../../entities/npc/MobEntity.js";
 /**
  * RangedAttackHandler - Handles ranged attack validation, projectile creation, and damage.
  *
@@ -39,7 +40,6 @@ import { ammunitionService } from "../AmmunitionService";
 import type { CreateProjectileParams } from "../ProjectileService";
 import { getGameRng } from "@hyperforge/shared";
 import type { Entity } from "@hyperforge/shared";
-import type { MobEntity } from "@hyperforge/shared";
 import { getNPCById } from "@hyperforge/shared";
 
 export class RangedAttackHandler {

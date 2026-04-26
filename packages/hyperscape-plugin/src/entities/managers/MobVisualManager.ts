@@ -9,22 +9,19 @@
  * Constructor takes a MobVisualContext interface that bridges back to the entity.
  */
 
-import * as THREE from "../../extras/three/three";
-import type { MeshUserData } from "../../types";
-import type { MobEntityConfig } from "../../types/entities";
-import { MobAIState } from "../../types/entities";
-import type { World } from "../../core/World";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import type {
-  VRMAvatarInstance,
-  LoadedAvatar,
-} from "../../types/rendering/nodes";
-import { Emotes } from "../../data/playerEmotes";
-import { TICK_DURATION_MS } from "../../systems/shared/movement/TileSystem";
-import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
-import { getAnimationConfig } from "../../data/live/combat-live";
-import { getNPCById } from "../../data/npcs";
-import { GLTFLoader } from "../../libs/gltfloader/GLTFLoader";
+import * as THREE from "three";
+import type { MeshUserData } from "@hyperforge/shared";
+import type { MobEntityConfig } from "@hyperforge/shared";
+import { MobAIState } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import type { VRMAvatarInstance, LoadedAvatar } from "@hyperforge/shared";
+import { Emotes } from "@hyperforge/shared";
+import { TICK_DURATION_MS } from "@hyperforge/shared";
+import { RAYCAST_PROXY } from "@hyperforge/shared";
+import { getAnimationConfig } from "@hyperforge/shared";
+import { getNPCById } from "@hyperforge/shared";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /**
  * Context interface that MobVisualManager uses to interact with MobEntity.

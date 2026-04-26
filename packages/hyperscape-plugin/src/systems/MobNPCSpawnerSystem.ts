@@ -1,3 +1,4 @@
+import { MobEntity } from "../entities/npc/MobEntity.js";
 /**
  * MobNPCSpawnerSystem - Spawns mob NPCs from world-areas.json
  *
@@ -25,7 +26,6 @@ import {
   InteractionType,
   isBanditMobForGlobalCap,
   type LevelRange,
-  MobEntity,
   type MobSpawnStats,
   type NPCData,
   SystemBase,

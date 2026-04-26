@@ -1,3 +1,4 @@
+import { MobEntity } from "../../entities/npc/MobEntity.js";
 /**
  * CombatSystem - Handles all combat mechanics
  */
@@ -21,7 +22,6 @@ import {
 } from "@hyperforge/shared";
 import { AttackType } from "@hyperforge/shared";
 import { EntityID } from "@hyperforge/shared";
-import { MobEntity } from "@hyperforge/shared";
 import { Entity } from "@hyperforge/shared";
 // NOTE: Import directly to avoid circular dependency through barrel file
 // PlayerSystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5d).

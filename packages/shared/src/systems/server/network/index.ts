@@ -51,7 +51,8 @@ import {
   type EventMap,
   writePacket,
   TICK_DURATION_MS,
-  MobEntity,
+  // MobEntity migrated to @hyperforge/hyperscape (2026-04-26).
+  // Duck-typed inline at the single callsite below.
   getRandomSpawnPoint,
 } from "../../../index";
 import { getWaterThreshold } from "../../../data/live/game-live";
@@ -735,10 +736,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         let mobCount = 0;
         for (const entry of mobs) {
           const entity = this.world.entities.get(entry.id);
-          if (!entity || !(entity instanceof MobEntity)) continue;
+          // Duck-type MobEntity by `runAITick` method presence.
+          const mob = entity as { runAITick?: (dt: number) => void } | null;
+          if (!mob || typeof mob.runAITick !== "function") continue;
           // Run for ALL mobs including dead ones — runAITick handles death state
           // (position locking, respawn timer) since mobs are no longer in the hot set
-          entity.runAITick(MOB_AI_DELTA_SECONDS);
+          mob.runAITick(MOB_AI_DELTA_SECONDS);
           mobCount++;
         }
         const mobAIMs = Date.now() - t0;

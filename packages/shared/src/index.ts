@@ -138,7 +138,7 @@ export { Entity } from "./entities/Entity";
 export { PlayerEntity } from "./entities/player/PlayerEntity";
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
-export { MobEntity } from "./entities/npc/MobEntity";
+// MobEntity migrated to @hyperforge/hyperscape (2026-04-26).
 export type { EventCallback } from "./entities/Entity";
 
 // Export all types from types/index.ts
@@ -666,6 +666,10 @@ export {
   InteractableEntity,
   type InteractableConfig,
 } from "./entities/InteractableEntity";
+export {
+  CombatantEntity,
+  type CombatantConfig,
+} from "./entities/CombatantEntity";
 
 // Deps for world entities (FireEntity, RangeEntity, HeadstoneEntity,
 // ItemEntity, ResourceEntity) migrated to plugin in 2026-04-26 cut.
@@ -676,8 +680,15 @@ export type {
   ResourceEntityConfig,
   BankEntityConfig,
   NPCEntityConfig,
+  MobEntityConfig,
 } from "./types/entities/entities";
-export { getNpcRenderDistance } from "./data/live/distance-live";
+export { MobAIState } from "./types/entities/entities";
+export type { MobEntityData } from "./types/entities/npc-mob-types";
+export { generateKillToken } from "./utils/game/KillTokenUtils";
+export {
+  getNpcRenderDistance,
+  getMobRenderDistance,
+} from "./data/live/distance-live";
 export {
   AnimationLOD,
   getCameraPosition,
@@ -808,8 +819,11 @@ export { PlayerIdMapper } from "./utils/PlayerIdMapper";
 export {
   getEatAttackDelayTicks,
   getEatDelayTicks,
+  getLogoutPreventionTicks,
   getMaxHealAmount,
+  getMovementSlerpSpeed,
 } from "./data/live/combat-live";
+export type { IEntityOccupancy } from "./systems/shared/movement/EntityOccupancyMap";
 export { getEntityPosition } from "./utils/game/EntityPositionUtils";
 export { resolveStarterTownArea } from "./world-areas";
 export type {

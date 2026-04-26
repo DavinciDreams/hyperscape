@@ -9,27 +9,27 @@
  * Constructor takes a MobMovementContext interface that bridges back to the entity.
  */
 
-import * as THREE from "../../extras/three/three";
-import type { Position3D } from "../../types";
-import type { MobEntityConfig } from "../../types/entities";
-import { MobAIState } from "../../types/entities";
-import type { World } from "../../core/World";
+import * as THREE from "three";
+import type { Position3D } from "@hyperforge/shared";
+import type { MobEntityConfig } from "@hyperforge/shared";
+import { MobAIState } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
 import {
   worldToTile,
   tileToWorld,
   TICK_DURATION_MS,
   tileChebyshevDistance,
   type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import { CollisionMask } from "../../systems/shared/movement/CollisionFlags";
-import type { EntityID } from "../../types/core/identifiers";
+} from "@hyperforge/shared";
+import { CollisionMask } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
 import { getNPCSize, getOccupiedTiles } from "../npc/LargeNPCSupport";
-import { isTerrainSystem } from "../../utils/typeGuards";
+import { isTerrainSystem } from "@hyperforge/shared";
 import {
   getDefaultNpcLeashRange,
   getMovementSlerpSpeed,
-} from "../../data/live/combat-live";
-import { EventType } from "../../types/events";
+} from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
 
 /**
  * Context interface that MobMovementManager uses to interact with MobEntity.

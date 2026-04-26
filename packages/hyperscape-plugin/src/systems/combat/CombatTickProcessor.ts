@@ -1,3 +1,4 @@
+import { MobEntity } from "../../entities/npc/MobEntity.js";
 /**
  * CombatTickProcessor - Extracts per-tick combat processing from CombatSystem.
  *
@@ -15,7 +16,6 @@ import { EventType } from "@hyperforge/shared";
 import { AttackType } from "@hyperforge/shared";
 import type { EntityID } from "@hyperforge/shared";
 import type { Entity } from "@hyperforge/shared";
-import type { MobEntity } from "@hyperforge/shared";
 import { getCombatTimeoutTicks } from "@hyperforge/shared";
 import type { CombatStyle } from "@hyperforge/shared";
 import { calculateRetaliationDelay } from "@hyperforge/shared";

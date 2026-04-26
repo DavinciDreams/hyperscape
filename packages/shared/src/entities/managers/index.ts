@@ -1,14 +1,6 @@
 /**
- * Entity Managers
- * State machines and behavior managers for entities
+ * Entity Managers — most migrated to @hyperforge/hyperscape (2026-04-26).
+ * particleManager stays (engine-side particle helper).
  */
 
-export * from "./AIStateMachine";
-export * from "./AggroManager";
-export * from "./CombatStateManager";
-export * from "./DeathStateManager";
-export * from "./RespawnManager";
-export * from "./MobVisualManager";
-export * from "./MobMovementManager";
-export * from "./MobHealthBarManager";
 export * from "./particleManager";

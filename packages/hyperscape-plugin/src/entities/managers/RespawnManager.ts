@@ -22,8 +22,8 @@
  * @see https://oldschool.runescape.wiki/w/Respawn_rate
  */
 
-import type { Position3D } from "../../types";
-import { msToTicks, ticksToMs } from "../../utils/game/CombatCalculations";
+import type { Position3D } from "@hyperforge/shared";
+import { msToTicks, ticksToMs } from "@hyperforge/shared";
 
 export interface RespawnConfig {
   /** Center of the spawn area */

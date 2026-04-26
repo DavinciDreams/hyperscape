@@ -1,3 +1,4 @@
+import { MobEntity } from "../../entities/npc/MobEntity.js";
 /**
  * DamageCalculator - Melee damage calculation utilities for combat
  *
@@ -6,7 +7,6 @@
  */
 
 import { Entity } from "@hyperforge/shared";
-import { MobEntity } from "@hyperforge/shared";
 import { AttackType } from "@hyperforge/shared";
 import type { MeleeAttackStyle } from "@hyperforge/shared";
 import {

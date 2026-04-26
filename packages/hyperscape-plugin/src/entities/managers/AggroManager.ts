@@ -9,13 +9,13 @@
  * @see https://oldschool.runescape.wiki/w/Aggressiveness
  */
 
-import type { Position3D } from "../../types";
+import type { Position3D } from "@hyperforge/shared";
 import {
   worldToTile,
   tilesWithinRange,
   tileChebyshevDistance,
   type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
+} from "@hyperforge/shared";
 
 export interface AggroConfig {
   aggroRange: number;

@@ -1,3 +1,4 @@
+import { MobEntity } from "../../entities/npc/MobEntity.js";
 /**
  * CombatEntityResolver - Entity lookup and query utilities for combat
  *
@@ -7,7 +8,6 @@
 
 import type { World } from "@hyperforge/shared";
 import type { EntityID } from "@hyperforge/shared";
-import { MobEntity } from "@hyperforge/shared";
 import { Entity } from "@hyperforge/shared";
 import { getDefaultAttackSpeedTicks } from "@hyperforge/shared";
 import { getItem } from "@hyperforge/shared";

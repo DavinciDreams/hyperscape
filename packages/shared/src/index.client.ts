@@ -40,7 +40,7 @@ export type {
 // Export entity classes
 export { Entity } from "./entities/Entity";
 export type { EventCallback } from "./entities/Entity";
-export { MobEntity } from "./entities/npc/MobEntity";
+// MobEntity migrated to @hyperforge/hyperscape (2026-04-26).
 export { PlayerLocal } from "./entities/player/PlayerLocal";
 export { PlayerRemote } from "./entities/player/PlayerRemote";
 
@@ -1173,6 +1173,10 @@ export {
   InteractableEntity,
   type InteractableConfig,
 } from "./entities/InteractableEntity";
+export {
+  CombatantEntity,
+  type CombatantConfig,
+} from "./entities/CombatantEntity";
 
 // Deps for world entities (FireEntity, RangeEntity, HeadstoneEntity,
 // ItemEntity, ResourceEntity) migrated to plugin in 2026-04-26 cut.
@@ -1183,8 +1187,15 @@ export type {
   ResourceEntityConfig,
   BankEntityConfig,
   NPCEntityConfig,
+  MobEntityConfig,
 } from "./types/entities/entities";
-export { getNpcRenderDistance } from "./data/live/distance-live";
+export { MobAIState } from "./types/entities/entities";
+export type { MobEntityData } from "./types/entities/npc-mob-types";
+export { generateKillToken } from "./utils/game/KillTokenUtils";
+export {
+  getNpcRenderDistance,
+  getMobRenderDistance,
+} from "./data/live/distance-live";
 export {
   AnimationLOD,
   getCameraPosition,

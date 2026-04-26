@@ -14,13 +14,10 @@
  * @see MOB_AGGRO_IMPLEMENTATION_PLAN.md
  */
 
-import type { TileCoord } from "../../systems/shared/movement/TileSystem";
-import type { Position3D } from "../../types";
-import {
-  TILE_SIZE,
-  worldToTile,
-} from "../../systems/shared/movement/TileSystem";
-import { npcSizesRegistry } from "../../npc-sizes";
+import type { TileCoord } from "@hyperforge/shared";
+import type { Position3D } from "@hyperforge/shared";
+import { TILE_SIZE, worldToTile } from "@hyperforge/shared";
+import { npcSizesRegistry } from "@hyperforge/shared";
 
 /**
  * NPC size in tiles

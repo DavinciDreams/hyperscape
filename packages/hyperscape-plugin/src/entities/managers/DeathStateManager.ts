@@ -3,8 +3,8 @@
  * Flow: die() → animation (4.5s) → hide mesh → respawn (15s).
  */
 
-import * as THREE from "../../extras/three/three";
-import type { Position3D } from "../../types";
+import * as THREE from "three";
+import type { Position3D } from "@hyperforge/shared";
 
 export interface DeathStateConfig {
   respawnTime: number;

@@ -32,13 +32,13 @@ import type {
   PluginFactory,
 } from "@hyperforge/gameplay-framework";
 import {
-  MobEntity,
   PlayerEntity,
   PlayerLocal,
   PlayerRemote,
   registerEntityType,
   type World,
 } from "@hyperforge/shared";
+import { MobEntity } from "./entities/npc/MobEntity.js";
 // Entity classes that migrated to plugin (2026-04-26 follow-up to
 // the Entities decoupling refactor).
 import { AltarEntity } from "./entities/world/AltarEntity.js";

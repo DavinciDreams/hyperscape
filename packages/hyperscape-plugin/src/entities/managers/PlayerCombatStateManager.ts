@@ -24,8 +24,8 @@ import {
   getAfkDisableRetaliateTicks,
   getCombatTimeoutTicks,
   getLogoutPreventionTicks,
-} from "../../data/live/combat-live";
-import type { EntityID } from "../../types/core/identifiers";
+} from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
 
 export interface PlayerCombatStateConfig {
   /** Attack speed in TICKS (e.g., 4 = attack every 4 ticks / 2.4 seconds) */

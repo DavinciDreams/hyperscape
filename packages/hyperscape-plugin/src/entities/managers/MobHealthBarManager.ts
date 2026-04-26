@@ -9,9 +9,9 @@
  * Constructor takes a MobHealthBarContext interface that bridges back to the entity.
  */
 
-import * as THREE from "../../extras/three/three";
-import type { World } from "../../core/World";
-import type { MobEntityConfig } from "../../types/entities";
+import * as THREE from "three";
+import type { World } from "@hyperforge/shared";
+import type { MobEntityConfig } from "@hyperforge/shared";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local shapes (mirrors `nodes/HealthBar.ts` pattern).
 interface HealthBarHandle {
@@ -29,8 +29,8 @@ interface HealthBarsSystem {
     maxHealth: number,
   ) => HealthBarHandle | null;
 }
-import { getCombatTimeoutTicks } from "../../data/live/combat-live";
-import { ticksToMs } from "../../utils/game/CombatCalculations";
+import { getCombatTimeoutTicks } from "@hyperforge/shared";
+import { ticksToMs } from "@hyperforge/shared";
 
 /**
  * Context interface that MobHealthBarManager uses to interact with MobEntity.

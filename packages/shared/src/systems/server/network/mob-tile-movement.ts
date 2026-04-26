@@ -31,7 +31,6 @@ import {
   tileChebyshevDistance,
   chaseStep,
   getChasePathfinder,
-  MobEntity,
   getBestUnoccupiedMeleeTile,
   tileKey,
   // Collision system
@@ -98,6 +97,26 @@ function createMobTileState(
  * Mobs walk directly toward their target and get stuck behind
  * obstacles (enabling safespotting gameplay).
  */
+
+/**
+ * Duck-typed MobEntity surface used by mob tile movement.
+ * MobEntity migrated to @hyperforge/hyperscape (2026-04-26); we
+ * detect it by structural shape (presence of getSpawnPoint /
+ * getLeashRange methods) instead of `instanceof`.
+ */
+interface MobEntityLike {
+  getSpawnPoint(): { x: number; y: number; z: number } | null;
+  getLeashRange(): number;
+  updateOccupancy(): void;
+}
+function asMobEntity(entity: unknown): MobEntityLike | null {
+  if (!entity || typeof entity !== "object") return null;
+  const e = entity as Record<string, unknown>;
+  return typeof e.getSpawnPoint === "function" &&
+    typeof e.getLeashRange === "function"
+    ? (entity as MobEntityLike)
+    : null;
+}
 
 /**
  * Duck-typed TownSystem surface used by mob tile movement.
@@ -445,7 +464,7 @@ export class MobTileMovementManager {
 
     // OSRS-ACCURATE LEASH RANGE CAP: Get spawn point and leash range
     // Mobs cannot move beyond leashRange from their spawn point
-    const mobEntity = entity instanceof MobEntity ? entity : null;
+    const mobEntity = asMobEntity(entity);
     const spawnPoint = mobEntity?.getSpawnPoint();
     const leashRange = mobEntity?.getLeashRange() ?? 10;
     const spawnTile = spawnPoint
@@ -730,7 +749,7 @@ export class MobTileMovementManager {
 
           // OSRS-ACCURATE LEASH RANGE CAP: Get spawn point and leash range
           // Mobs cannot move beyond leashRange from their spawn point
-          const mobEntity = entity instanceof MobEntity ? entity : null;
+          const mobEntity = asMobEntity(entity);
           const spawnPoint = mobEntity?.getSpawnPoint();
           const leashRange = mobEntity?.getLeashRange() ?? 10;
           // Zero-allocation: use pre-allocated spawn tile buffer
@@ -1005,14 +1024,15 @@ export class MobTileMovementManager {
         entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
       }
 
-      // Update entity occupancy after movement (OSRS-accurate tile collision)
+      // Update entity occupancy after movement (tile-based MMORPG)
       // This updates the EntityOccupancyMap to reflect the mob's new position
-      if (entity instanceof MobEntity) {
+      const mobE = asMobEntity(entity);
+      if (mobE) {
         if (this.DEBUG_MODE)
           console.log(
             `[MobTileMovement] OCCUPANCY UPDATE: ${mobId} now at tile (${state.currentTile.x},${state.currentTile.z})`,
           );
-        entity.updateOccupancy();
+        mobE.updateOccupancy();
       }
 
       // Calculate rotation based on movement direction (zero allocation - use pre-allocated tile)
@@ -1158,7 +1178,7 @@ export class MobTileMovementManager {
 
         // OSRS-ACCURATE LEASH RANGE CAP: Get spawn point and leash range
         // Mobs cannot move beyond leashRange from their spawn point
-        const mobEntity = entity instanceof MobEntity ? entity : null;
+        const mobEntity = asMobEntity(entity);
         const spawnPoint = mobEntity?.getSpawnPoint();
         const leashRange = mobEntity?.getLeashRange() ?? 10;
 
@@ -1307,9 +1327,10 @@ export class MobTileMovementManager {
       entity.data.position = [worldPos.x, worldPos.y, worldPos.z];
     }
 
-    // Update entity occupancy after movement (OSRS-accurate tile collision)
-    if (entity instanceof MobEntity) {
-      entity.updateOccupancy();
+    // Update entity occupancy after movement (tile-based MMORPG)
+    const mobE2 = asMobEntity(entity);
+    if (mobE2) {
+      mobE2.updateOccupancy();
     }
 
     // Calculate rotation based on movement direction (zero allocation - use pre-allocated tile)

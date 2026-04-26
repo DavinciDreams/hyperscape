@@ -19,7 +19,8 @@ import { getEntityType } from "./Entities";
 //
 // Config types remain imported as type-only — they don't pull the
 // runtime class.
-import { MobEntity } from "../../../entities/npc/MobEntity";
+// MobEntity migrated to @hyperforge/hyperscape (2026-04-26). Looked
+// up via getEntityType("mob") at the spawn switch below.
 // Config types unused (the resolveType()/getEntityType() pattern
 // constructs entities via the registered ctor; configs are
 // validated at the entity constructor itself).
@@ -701,7 +702,7 @@ export class EntityManager extends SystemBase {
         entity = new (resolveType("bank"))(this.world, config);
         break;
       case "mob":
-        entity = new MobEntity(this.world, config as MobEntityConfig);
+        entity = new (resolveType("mob"))(this.world, config);
         break;
       case "resource":
         entity = new (resolveType("resource"))(this.world, config);

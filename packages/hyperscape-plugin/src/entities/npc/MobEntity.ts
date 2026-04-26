@@ -69,31 +69,26 @@
  * @public
  */
 
-import THREE, {
-  MeshBasicNodeMaterial,
-  MeshStandardNodeMaterial,
-} from "../../extras/three/three";
+import * as THREE from "three";
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
 import type {
   EntityData,
   MeshUserData,
   MobEntityData,
   Position3D,
-} from "../../types";
-import { AttackType } from "../../types/core/core";
+} from "@hyperforge/shared";
+import { AttackType } from "@hyperforge/shared";
 import type {
   EntityInteractionData,
   MobEntityConfig,
-} from "../../types/entities";
-import { MobAIState } from "../../types/entities";
-import { EventType } from "../../types/events";
-import type { World } from "../../core/World";
-import { CombatantEntity, type CombatantConfig } from "../CombatantEntity";
-import { modelCache } from "../../utils/rendering/ModelCache";
-import type {
-  VRMAvatarInstance,
-  LoadedAvatar,
-} from "../../types/rendering/nodes";
-import { Emotes } from "../../data/playerEmotes";
+} from "@hyperforge/shared";
+import { MobAIState } from "@hyperforge/shared";
+import { EventType } from "@hyperforge/shared";
+import type { World } from "@hyperforge/shared";
+import { CombatantEntity, type CombatantConfig } from "@hyperforge/shared";
+import { modelCache } from "@hyperforge/shared";
+import type { VRMAvatarInstance, LoadedAvatar } from "@hyperforge/shared";
+import { Emotes } from "@hyperforge/shared";
 // NOTE: Loot drops are handled by LootSystem, not MobEntity directly
 import { DeathStateManager } from "../managers/DeathStateManager";
 import { CombatStateManager } from "../managers/CombatStateManager";
@@ -101,7 +96,7 @@ import {
   AIStateMachine,
   type AIStateContext,
 } from "../managers/AIStateMachine";
-import { generateKillToken } from "../../utils/game/KillTokenUtils";
+import { generateKillToken } from "@hyperforge/shared";
 import { RespawnManager } from "../managers/RespawnManager";
 // HealthBars migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local shapes (mirrors `nodes/HealthBar.ts` pattern).
@@ -123,9 +118,9 @@ interface HealthBarsSystem {
 import {
   getCombatTimeoutTicks,
   getDefaultNpcLeashRange,
-} from "../../data/live/combat-live";
-import { getMobRenderDistance } from "../../data/live/distance-live";
-import { ticksToMs } from "../../utils/game/CombatCalculations";
+} from "@hyperforge/shared";
+import { getMobRenderDistance } from "@hyperforge/shared";
+import { ticksToMs } from "@hyperforge/shared";
 import { AggroManager } from "../managers/AggroManager";
 import {
   worldToTile,
@@ -134,17 +129,14 @@ import {
   tileChebyshevDistance,
   getBestStepOutTile,
   type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import { CollisionMask } from "../../systems/shared/movement/CollisionFlags";
-import type { EntityID } from "../../types/core/identifiers";
+} from "@hyperforge/shared";
+import { CollisionMask } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
 import { getNPCSize, getOccupiedTiles } from "./LargeNPCSupport";
-import { getGameRng } from "../../utils/SeededRandom";
-import { isTerrainSystem } from "../../utils/typeGuards";
-import {
-  AnimationLOD,
-  getCameraPosition,
-} from "../../utils/rendering/AnimationLOD";
-import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
+import { getGameRng } from "@hyperforge/shared";
+import { isTerrainSystem } from "@hyperforge/shared";
+import { AnimationLOD, getCameraPosition } from "@hyperforge/shared";
+import { RAYCAST_PROXY } from "@hyperforge/shared";
 // AggroSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed locally — only `getPlayersInNearbyRegions` is called.
 // Returns objects shaped to feed into `aggroManager.findNearbyPlayer`,
@@ -1685,10 +1677,11 @@ export class MobEntity extends CombatantEntity {
     this.combatManager.exitCombat();
 
     // Clear any combat state in CombatSystem
-    const combatSystem =
-      this.world.getSystem<
-        import("../../types/systems/system-interfaces").CombatSystem
-      >("combat");
+    // CombatSystem migrated to plugin (2026-04-26). Duck-type inline.
+    const combatSystem = this.world.getSystem("combat") as unknown as {
+      takeDamage(playerId: string, attackerId: string, damage: number): void;
+      forceEndCombat(entityId: string): void;
+    } | null;
     if (combatSystem) {
       combatSystem.forceEndCombat(this.id);
     }

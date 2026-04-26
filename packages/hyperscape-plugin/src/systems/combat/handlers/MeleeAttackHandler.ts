@@ -1,3 +1,4 @@
+import { MobEntity } from "../../../entities/npc/MobEntity.js";
 /**
  * MeleeAttackHandler - Handles melee attack validation and execution.
  *
@@ -11,7 +12,6 @@ import type {
   AttackValidationResult,
 } from "./AttackContext";
 import type { Entity } from "@hyperforge/shared";
-import type { MobEntity } from "@hyperforge/shared";
 import { EntityID } from "@hyperforge/shared";
 import { AttackType } from "@hyperforge/shared";
 import { EventType } from "@hyperforge/shared";

@@ -15,8 +15,8 @@
  * infinite loops when target is on the same tile but different world position.
  */
 
-import type { Position3D } from "../../types";
-import { MobAIState } from "../../types/entities";
+import type { Position3D } from "@hyperforge/shared";
+import { MobAIState } from "@hyperforge/shared";
 import {
   worldToTileInto,
   tilesEqual,
@@ -25,9 +25,9 @@ import {
   getBestUnoccupiedMeleeTile,
   tileToWorld,
   type TileCoord,
-} from "../../systems/shared/movement/TileSystem";
-import type { IEntityOccupancy } from "../../systems/shared/movement/EntityOccupancyMap";
-import type { EntityID } from "../../types/core/identifiers";
+} from "@hyperforge/shared";
+import type { IEntityOccupancy } from "@hyperforge/shared";
+import type { EntityID } from "@hyperforge/shared";
 
 export interface AIStateContext {
   // Position & Movement
