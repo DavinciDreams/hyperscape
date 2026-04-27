@@ -46,8 +46,12 @@ export interface ResolvedVfxSpawn {
   cullable: boolean;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type VfxReloadListener = () => void;
+
 export class VfxRegistry {
   private _byId = new Map<string, VfxEffect>();
+  private _reloadListeners = new Set<VfxReloadListener>();
 
   constructor(manifest?: VfxManifest) {
     if (manifest) this.load(manifest);
@@ -56,10 +60,37 @@ export class VfxRegistry {
   load(manifest: VfxManifest): void {
     this._byId.clear();
     for (const e of manifest) this._byId.set(e.id, e);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(VfxManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: VfxReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[vfxRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get size(): number {

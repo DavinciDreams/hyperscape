@@ -92,10 +92,14 @@ export interface DialogueRegistryOptions {
   runnerOptions?: RunnerOptions;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type DialogueReloadListener = () => void;
+
 export class DialogueRegistry {
   private treesById = new Map<string, DialogueTree>();
   private sessionsById = new Map<string, DialogueSession>();
   private readonly runnerOptions: RunnerOptions;
+  private _reloadListeners = new Set<DialogueReloadListener>();
 
   constructor(
     manifest?: DialogueManifest,
@@ -103,6 +107,32 @@ export class DialogueRegistry {
   ) {
     this.runnerOptions = options.runnerOptions ?? {};
     if (manifest !== undefined) this.load(manifest);
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: DialogueReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[dialogueRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   /**
@@ -119,13 +149,14 @@ export class DialogueRegistry {
     }
     if (!opts.preserveOpenSessionsByTreeId) {
       this.sessionsById.clear();
-      return;
-    }
-    for (const [sessionId, session] of this.sessionsById.entries()) {
-      if (!this.treesById.has(session.treeId)) {
-        this.sessionsById.delete(sessionId);
+    } else {
+      for (const [sessionId, session] of this.sessionsById.entries()) {
+        if (!this.treesById.has(session.treeId)) {
+          this.sessionsById.delete(sessionId);
+        }
       }
     }
+    this._emitReloaded();
   }
 
   /** Validate-and-load untrusted JSON. Throws the Zod error on bad input. */

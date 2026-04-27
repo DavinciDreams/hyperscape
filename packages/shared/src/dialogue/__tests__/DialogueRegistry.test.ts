@@ -305,3 +305,39 @@ describe("DialogueRegistry", () => {
     expect(reg.hasSession("p1")).toBe(false);
   });
 });
+
+describe("DialogueRegistry — onReloaded", () => {
+  it("fires after every successful load()", () => {
+    const r = new DialogueRegistry();
+    const cb = vi.fn();
+    r.onReloaded(cb);
+    r.load(twoTreeManifest);
+    r.load(twoTreeManifest);
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const r = new DialogueRegistry();
+    const cb = vi.fn();
+    const off = r.onReloaded(cb);
+    r.load(twoTreeManifest);
+    off();
+    r.load(twoTreeManifest);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing listener does not break subsequent listeners", () => {
+    const r = new DialogueRegistry();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const good = vi.fn();
+    r.onReloaded(bad);
+    r.onReloaded(good);
+    r.load(twoTreeManifest);
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});
