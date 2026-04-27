@@ -18,9 +18,11 @@ interface ModelConfig {
 }
 
 /**
- * AI SDK Service for providing configured language models
+ * AI SDK Service for providing configured language models.
+ * Exported (vs internal) so unit tests can construct fresh instances
+ * with controlled env var state per case.
  */
-class AISDKService {
+export class AISDKService {
   private openai: ReturnType<typeof createOpenAI> | null = null;
   private modelConfigs: Record<ModelQuality, ModelConfig>;
   public readonly isEnabled: boolean;
