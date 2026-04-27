@@ -74,6 +74,7 @@ import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatEventRecorder } from "./CombatEventRecorder";
 import { CombatFollowController } from "./CombatFollowController";
 import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
+import { CombatMeleeAttackHandler } from "./CombatMeleeAttackHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatProjectileHitProcessor } from "./CombatProjectileHitProcessor";
 import { CombatRotationManager } from "./CombatRotationManager";
@@ -248,6 +249,10 @@ export class CombatSystem extends SystemBase {
   // slice. Pairs with CombatLifecycleHandler (endCombat) for the full
   // lifecycle.
   private readonly enterLifecycleHandler: CombatEnterLifecycleHandler;
+
+  // Inbound + execute pair for melee attacks extracted as the
+  // fourteenth slice. Wraps handleMeleeAttack + executeMeleeAttack.
+  private readonly meleeAttackHandler: CombatMeleeAttackHandler;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -476,6 +481,26 @@ export class CombatSystem extends SystemBase {
       this.lastInputTick,
       (type, payload) => this.emitTypedEvent(type, payload),
       () => this.zoneDetectionSystem,
+      () => this.playerSystem,
+    );
+
+    // Melee attack handler (slice 14). Inbound entry +
+    // execute pair. Closure for late-bound playerSystem.
+    this.meleeAttackHandler = new CombatMeleeAttackHandler(
+      world,
+      this.entityIdValidator,
+      this.logger,
+      this.antiCheat,
+      this.rateLimiter,
+      this.attackValidator,
+      this.entityResolver,
+      this.rotationManager,
+      this.animationManager,
+      this.damageOrchestrator,
+      this.damageApplicator,
+      this.eventEmitter,
+      this.enterLifecycleHandler,
+      this.nextAttackTicks,
       () => this.playerSystem,
     );
   }
@@ -737,161 +762,13 @@ export class CombatSystem extends SystemBase {
     }
   }
 
-  /**
-   * Main melee attack handler - orchestrates validation and execution
-   * Refactored for clarity: validation logic extracted to validateMeleeAttack(),
-   * execution logic extracted to executeMeleeAttack()
-   */
+  // handleMeleeAttack + executeMeleeAttack moved to
+  // ./CombatMeleeAttackHandler (slice 14). Call sites delegate via
+  // this.meleeAttackHandler.handleMeleeAttack(data).
+
+  /** Thin proxy — delegates to CombatMeleeAttackHandler. */
   private handleMeleeAttack(data: MeleeAttackData): void {
-    const { attackerId, targetId, attackerType } = data;
-    const currentTick = this.world.currentTick ?? 0;
-
-    if (!this.entityIdValidator.isValid(attackerId)) {
-      const sanitized = this.entityIdValidator.sanitizeForLogging(attackerId);
-      this.logger.warn("Invalid attacker ID rejected", {
-        attackerId: sanitized,
-        reason: "invalid_format",
-      });
-      this.antiCheat.recordInvalidEntityId(
-        String(attackerId).slice(0, 64),
-        String(attackerId),
-      );
-      return;
-    }
-
-    if (!this.entityIdValidator.isValid(targetId)) {
-      const sanitized = this.entityIdValidator.sanitizeForLogging(targetId);
-      this.logger.warn("Invalid target ID rejected", {
-        attackerId,
-        targetId: sanitized,
-        reason: "invalid_format",
-      });
-      this.antiCheat.recordInvalidEntityId(attackerId, String(targetId));
-      return;
-    }
-
-    if (attackerType === "player") {
-      const rateResult = this.rateLimiter.checkLimit(attackerId, currentTick);
-      if (!rateResult.allowed) {
-        this.logger.warn("Attack rate limited", {
-          attackerId,
-          reason: rateResult.reason,
-          cooldownUntil: rateResult.cooldownUntil,
-        });
-        return;
-      }
-      this.antiCheat.trackAttack(attackerId, currentTick);
-    }
-
-    // Validate the attack (entities exist, alive, in range, etc.)
-    const validation = this.attackValidator.validateMeleeAttack(
-      data,
-      currentTick,
-    );
-    if (!validation.valid) {
-      return;
-    }
-
-    // Check cooldown before executing
-    if (
-      !this.attackValidator.checkAttackCooldown(
-        validation.typedAttackerId!,
-        currentTick,
-      )
-    ) {
-      return;
-    }
-
-    // Execute the attack
-    this.executeMeleeAttack(data, validation, currentTick);
-  }
-
-  // validateMeleeAttack, isWithinCombatRange, checkAttackCooldown
-  // moved to ./CombatAttackValidator (slice 7). Call sites delegate
-  // via this.attackValidator.{method}(...).
-
-  /**
-   * Execute a validated melee attack
-   * Handles rotation, animation, damage, and combat state
-   */
-  private executeMeleeAttack(
-    data: MeleeAttackData,
-    validation: AttackValidationResult,
-    currentTick: number,
-  ): void {
-    const { attackerId, targetId, attackerType, targetType } = data;
-    const { attacker, target, typedAttackerId, typedTargetId } = validation;
-
-    if (!attacker || !target || !typedAttackerId || !typedTargetId) return;
-
-    // Get attack speed
-    const entityType = attacker.type === "mob" ? "mob" : "player";
-    const attackSpeedTicks = this.entityResolver.getAttackSpeed(
-      typedAttackerId,
-      entityType,
-    );
-
-    // Face target
-    this.rotationManager.rotateTowardsTarget(
-      attackerId,
-      targetId,
-      attackerType,
-      targetType,
-    );
-
-    // Play attack animation with attack speed for proper animation duration
-    this.animationManager.setCombatEmote(
-      attackerId,
-      attackerType,
-      currentTick,
-      attackSpeedTicks,
-    );
-
-    // Get player's combat style for OSRS-accurate damage bonuses
-    let combatStyle: CombatStyle = "accurate";
-    if (attackerType === "player") {
-      const playerSystem = this.world.getSystem(
-        "player",
-      ) as unknown as PlayerSystem | null;
-      const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
-      if (styleData?.id) {
-        combatStyle = styleData.id as CombatStyle;
-      }
-    }
-
-    // Calculate and apply damage
-    const rawDamage = this.damageOrchestrator.calculateMeleeDamage(
-      attacker,
-      target,
-      combatStyle,
-    );
-    const currentHealth = this.entityResolver.getHealth(target);
-    const damage = Math.min(rawDamage, currentHealth);
-
-    this.damageApplicator.applyDamage(targetId, targetType, damage, attackerId);
-
-    // Emit damage event using pre-allocated payload (zero allocation)
-    const targetPosition = getEntityPosition(target);
-    this.eventEmitter.emitDamageDealt(
-      attackerId,
-      targetId,
-      damage,
-      undefined,
-      targetType,
-      targetPosition,
-    );
-
-    if (!this.entityResolver.isAlive(target, targetType)) {
-      return;
-    }
-
-    // Set cooldown and enter combat state
-    this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-    this.enterLifecycleHandler.enterCombat(
-      typedAttackerId,
-      typedTargetId,
-      attackSpeedTicks,
-    );
+    this.meleeAttackHandler.handleMeleeAttack(data);
   }
 
   /**
