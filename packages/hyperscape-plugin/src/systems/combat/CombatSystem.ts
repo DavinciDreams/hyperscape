@@ -76,6 +76,7 @@ import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
+import { CombatTickAttackWorker } from "./CombatTickAttackWorker";
 import {
   CombatAntiCheat,
   CombatViolationType,
@@ -225,6 +226,11 @@ export class CombatSystem extends SystemBase {
   // Tile-follow + weapon attack-type lookup extracted as the eighth
   // slice. Wraps checkRangeAndFollow + getAttackTypeFromWeapon.
   private readonly followController: CombatFollowController;
+
+  // Per-tick auto-attack worker cluster extracted as the tenth slice.
+  // Wraps executeAttackDamage + updateCombatTickState +
+  // handlePlayerRetaliation + emitCombatEvents.
+  private readonly tickAttackWorker: CombatTickAttackWorker;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -388,6 +394,24 @@ export class CombatSystem extends SystemBase {
       this.lastCombatTargetTile,
       () => this.equipmentSystem,
       () => this.zoneDetectionSystem,
+    );
+
+    // Per-tick auto-attack worker (slice 10). Closure captures
+    // late-bound playerSystem (assigned in start()). Shared mutable
+    // refs: nextAttackTicks Map + lastInputTick Map.
+    this.tickAttackWorker = new CombatTickAttackWorker(
+      this.rotationManager,
+      this.animationManager,
+      this.damageOrchestrator,
+      this.entityResolver,
+      this.damageApplicator,
+      this.eventEmitter,
+      this.eventRecorder,
+      this.stateService,
+      this.nextAttackTicks,
+      this.lastInputTick,
+      (type, payload) => this.emitTypedEvent(type, payload),
+      () => this.playerSystem,
     );
   }
 
@@ -2446,208 +2470,9 @@ export class CombatSystem extends SystemBase {
   // ./CombatAttackValidator (slice 7). Call sites delegate via
   // this.attackValidator.{method}(...).
 
-  /**
-   * Execute the attack: rotation, animation, damage calculation, and application
-   * @returns The damage dealt (capped at target's current health)
-   */
-  private executeAttackDamage(
-    attackerId: string,
-    targetId: string,
-    attacker: Entity | MobEntity,
-    target: Entity | MobEntity,
-    combatState: CombatData,
-    tickNumber: number,
-  ): number {
-    // OSRS-STYLE: Update entity facing to face target
-    this.rotationManager.rotateTowardsTarget(
-      attackerId,
-      targetId,
-      combatState.attackerType,
-      combatState.targetType,
-    );
-
-    // Play attack animation with attack speed for proper animation duration
-    this.animationManager.setCombatEmote(
-      attackerId,
-      combatState.attackerType,
-      tickNumber,
-      combatState.attackSpeedTicks,
-    );
-
-    // Get player's combat style for OSRS-accurate damage bonuses
-    let combatStyle: CombatStyle = "accurate";
-    if (combatState.attackerType === "player") {
-      const playerSystem = this.world.getSystem(
-        "player",
-      ) as unknown as PlayerSystem | null;
-      const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
-      if (styleData?.id) {
-        combatStyle = styleData.id as CombatStyle;
-      }
-    }
-
-    // MVP: Melee-only damage calculation
-    const rawDamage = this.damageOrchestrator.calculateMeleeDamage(
-      attacker,
-      target,
-      combatStyle,
-    );
-
-    // OSRS-STYLE: Cap damage at target's current health (no overkill)
-    const currentHealth = this.entityResolver.getHealth(target);
-    const damage = Math.min(rawDamage, currentHealth);
-
-    // Apply capped damage
-    this.damageApplicator.applyDamage(
-      targetId,
-      combatState.targetType,
-      damage,
-      attackerId,
-    );
-
-    // Emit damage splatter event using pre-allocated payload (zero allocation)
-    const targetPosition = getEntityPosition(target);
-    this.eventEmitter.emitDamageDealt(
-      attackerId,
-      targetId,
-      damage,
-      undefined,
-      combatState.targetType,
-      targetPosition,
-    );
-
-    this.eventRecorder.record(GameEventType.COMBAT_ATTACK, attackerId, {
-      targetId,
-      attackerType: combatState.attackerType,
-      targetType: combatState.targetType,
-      attackSpeedTicks: combatState.attackSpeedTicks,
-    });
-
-    if (damage > 0) {
-      this.eventRecorder.record(GameEventType.COMBAT_DAMAGE, attackerId, {
-        targetId,
-        damage,
-        rawDamage,
-        targetHealth: currentHealth,
-        targetPosition: targetPosition
-          ? { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z }
-          : undefined,
-      });
-    } else {
-      this.eventRecorder.record(GameEventType.COMBAT_MISS, attackerId, {
-        targetId,
-        rawDamage,
-      });
-    }
-
-    return damage;
-  }
-
-  /**
-   * Update combat state tick tracking after a successful attack
-   */
-  private updateCombatTickState(
-    combatState: CombatData,
-    typedAttackerId: EntityID,
-    tickNumber: number,
-  ): void {
-    combatState.lastAttackTick = tickNumber;
-    combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
-    combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
-    this.nextAttackTicks.set(typedAttackerId, combatState.nextAttackTick);
-  }
-
-  /**
-   * Handle player auto-retaliation when attacked
-   * Creates retaliation state if player needs to fight back
-   */
-  private handlePlayerRetaliation(
-    targetId: string,
-    attackerId: string,
-    typedAttackerId: EntityID,
-    attackerType: "player" | "mob",
-    tickNumber: number,
-  ): void {
-    const targetPlayerState = this.stateService.getCombatData(targetId);
-    let shouldRetaliate =
-      this.playerSystem?.getPlayerAutoRetaliate(targetId) ?? true;
-
-    if (shouldRetaliate && this.isAFKTooLong(targetId, tickNumber)) {
-      shouldRetaliate = false;
-    }
-
-    // Player needs a new retaliation state if:
-    // 1. They have auto-retaliate ON, AND
-    // 2. They have no combat state, OR their current target is dead/invalid
-    if (!shouldRetaliate) return;
-
-    const needsNewTarget =
-      !targetPlayerState ||
-      !targetPlayerState.inCombat ||
-      !this.entityResolver.isAlive(
-        this.entityResolver.resolve(
-          String(targetPlayerState.targetId),
-          targetPlayerState.targetType,
-        ),
-        targetPlayerState.targetType,
-      );
-
-    if (!needsNewTarget) return;
-
-    // Create retaliation state for player targeting this attacker
-    const playerAttackSpeed = this.entityResolver.getAttackSpeed(
-      createEntityID(targetId),
-      "player",
-    );
-    const retaliationDelay = calculateRetaliationDelay(playerAttackSpeed);
-
-    this.stateService.createRetaliatorState(
-      createEntityID(targetId),
-      typedAttackerId,
-      "player",
-      attackerType,
-      tickNumber,
-      retaliationDelay,
-      playerAttackSpeed,
-    );
-
-    // Sync combat state to player entity
-    this.stateService.syncCombatStateToEntity(targetId, attackerId, "player");
-
-    // Face the attacker
-    this.rotationManager.rotateTowardsTarget(
-      targetId,
-      attackerId,
-      "player",
-      attackerType,
-    );
-
-    // Clear any server face target since player now has combat target
-    this.eventEmitter.emitClearFaceTarget(targetId);
-  }
-
-  /**
-   * Emit combat events for UI feedback
-   * NOTE: COMBAT_MELEE_ATTACK is NOT emitted here to avoid duplicate processing.
-   * Damage splats are handled by COMBAT_DAMAGE_DEALT which is already emitted
-   * by executeAttackDamage() and bridged to clients via EventBridge.
-   */
-  private emitCombatEvents(
-    attackerId: string,
-    _targetId: string,
-    target: Entity | MobEntity,
-    damage: number,
-    combatState: CombatData,
-  ): void {
-    // Emit UI message for player attacks (chat feedback)
-    if (combatState.attackerType === "player") {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: attackerId,
-        message: `You hit the ${this.entityResolver.getDisplayName(target)} for ${damage} damage!`,
-        type: "combat",
-      });
-    }
-  }
+  // executeAttackDamage, updateCombatTickState, handlePlayerRetaliation,
+  // emitCombatEvents moved to ./CombatTickAttackWorker (slice 10). Call
+  // sites delegate via this.tickAttackWorker.{method}(...).
 
   /**
    * Process projectile hits for ranged/magic attacks
@@ -2786,7 +2611,7 @@ export class CombatSystem extends SystemBase {
     }
 
     // Step 3: Execute melee attack (rotation, animation, damage)
-    const damage = this.executeAttackDamage(
+    const damage = this.tickAttackWorker.executeAttackDamage(
       attackerId,
       targetId,
       attacker,
@@ -2801,11 +2626,15 @@ export class CombatSystem extends SystemBase {
     }
 
     // Step 5: Update combat tick state
-    this.updateCombatTickState(combatState, typedAttackerId, tickNumber);
+    this.tickAttackWorker.updateCombatTickState(
+      combatState,
+      typedAttackerId,
+      tickNumber,
+    );
 
     // Step 6: Handle player retaliation if target is a player
     if (combatState.targetType === "player") {
-      this.handlePlayerRetaliation(
+      this.tickAttackWorker.handlePlayerRetaliation(
         targetId,
         attackerId,
         typedAttackerId,
@@ -2815,7 +2644,12 @@ export class CombatSystem extends SystemBase {
     }
 
     // Step 7: Emit combat events
-    this.emitCombatEvents(attackerId, targetId, target, damage, combatState);
+    this.tickAttackWorker.emitCombatEvents(
+      attackerId,
+      target,
+      damage,
+      combatState,
+    );
   }
 
   // Combat event recording (record / buildGameStateInfo /
