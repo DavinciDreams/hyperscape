@@ -32,8 +32,12 @@ export class UnknownTownSizeError extends Error {
 
 export type TownSizeKey = "hamlet" | "village" | "town" | "city";
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type WorldConfigReloadListener = () => void;
+
 export class WorldConfigRegistry {
   private _manifest: WorldConfigManifest | null = null;
+  private _reloadListeners = new Set<WorldConfigReloadListener>();
 
   constructor(manifest?: WorldConfigManifest) {
     if (manifest) this.load(manifest);
@@ -41,10 +45,37 @@ export class WorldConfigRegistry {
 
   load(manifest: WorldConfigManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(WorldConfigManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: WorldConfigReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[worldConfigRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): WorldConfigManifest {

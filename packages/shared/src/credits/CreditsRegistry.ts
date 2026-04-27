@@ -37,9 +37,13 @@ export class UnknownCreditSectionError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type CreditsReloadListener = () => void;
+
 export class CreditsRegistry {
   private _manifest: CreditsManifest | null = null;
   private _byId = new Map<string, CreditSection>();
+  private _reloadListeners = new Set<CreditsReloadListener>();
 
   constructor(manifest?: CreditsManifest) {
     if (manifest) this.load(manifest);
@@ -53,6 +57,33 @@ export class CreditsRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const s of manifest.sections) this._byId.set(s.id, s);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: CreditsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[creditsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   loadFromJson(raw: unknown): void {

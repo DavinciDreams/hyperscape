@@ -59,9 +59,13 @@ export class UnknownTooltipError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type TooltipReloadListener = () => void;
+
 export class TooltipRegistry {
   private _manifest: TooltipsManifest | null = null;
   private _byId = new Map<string, TooltipEntry>();
+  private _reloadListeners = new Set<TooltipReloadListener>();
 
   constructor(manifest?: TooltipsManifest) {
     if (manifest) this.load(manifest);
@@ -75,6 +79,33 @@ export class TooltipRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const e of manifest.entries) this._byId.set(e.id, e);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: TooltipReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[tooltipRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   loadFromJson(raw: unknown): void {
