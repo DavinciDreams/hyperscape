@@ -118,8 +118,12 @@ describe("Hyperscape meta-plugin — multi-widget contribution", () => {
 
     // Both registrations made it through the widget contribution
     // adapter — the meta-plugin contributes a multi-widget set.
+    // Length is `>= 2` rather than exact-2 so future widget
+    // additions don't churn this test (each widget should add its
+    // own positive `expect.toContain` assertion in its own test
+    // file rather than tightening this one).
     expect(registered).toContain(xpOrbRegistration);
     expect(registered).toContain(levelUpToastRegistration);
-    expect(registered).toHaveLength(2);
+    expect(registered.length).toBeGreaterThanOrEqual(2);
   });
 });
