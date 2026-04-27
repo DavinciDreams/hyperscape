@@ -33,6 +33,11 @@ export {
   type ManifestWidgetShellProps,
 } from "./ManifestRenderer";
 
+export {
+  useRegistryReload,
+  type ReloadableRegistry,
+} from "./useRegistryReload";
+
 // Re-export individual widget components + their prop interfaces so
 // test harnesses and Storybook-ish previews can mount them directly.
 export { ActionBarWidget } from "./widgets/ActionBarWidget";
