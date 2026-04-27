@@ -173,3 +173,8 @@ export type {
   ThemeValidationIssue,
   ThemeValidationResult,
 } from "./theme";
+
+// Phase D8 — DataSourceRegistry. Pluggable namespace provider for the
+// runtime bindings layer.
+export { DataSourceRegistry } from "./dataSourceRegistry";
+export type { DataSource } from "./dataSourceRegistry";

@@ -30,7 +30,10 @@ export {
   getDefaultUILayoutForGame,
 } from "./defaultLayout";
 
-export { buildPlayerDataContext } from "./dataContext";
+export {
+  buildPlayerDataContext,
+  playerDataSourceRegistry,
+} from "./dataContext";
 export type { PlayerDataSnapshot } from "./dataContext";
 
 export { ManifestRenderer } from "./ManifestRenderer";

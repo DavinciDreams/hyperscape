@@ -4,20 +4,27 @@
  *
  * The runtime-bindings expression language operates over a flat
  * `DataContext` shape: `{ player: {...}, inventory: {...}, ... }`.
- * This module is the one place that knows how to project the client's
- * internal state (world entities, event-driven stores, player-data
- * hook) into that shape, so every widget adapter can remain agnostic
- * of concrete event/store types.
+ * This module owns the host-side `DataSourceRegistry` instance and
+ * registers the 4 built-in player namespaces against it. At render
+ * time `buildPlayerDataContext` delegates to the registry's
+ * `buildContext`, which projects the snapshot through every
+ * registered source.
  *
- * Namespaces currently exposed:
+ * Plugins can extend the surface without touching this file by
+ * importing `playerDataSourceRegistry` and calling `.register({
+ * key, build })` at boot time. New namespaces become available to
+ * any layout binding immediately.
+ *
+ * Phase D8 — `DataSourceRegistry` was introduced 2026-04-27 (top-10
+ * #7 cleanup). The legacy `buildPlayerDataContext` helper is kept as
+ * a thin wrapper for callers that already import it (`ManifestHud`).
+ *
+ * Built-in namespaces:
  *
  *   $player      player stats + health/prayer/combat level
  *   $inventory   items + coin count
- *   $equipment   slot → item map
+ *   $equipment   slot → item map + flat `items` array
  *   $skills      per-skill level/xp rows + totals
- *
- * Extend by adding a new namespace branch and projection helper — no
- * widget adapter changes required.
  */
 
 import {
@@ -25,7 +32,11 @@ import {
   type PlayerStats,
   type Skills,
 } from "@hyperforge/shared";
-import type { DataContext } from "@hyperforge/ui-framework";
+import {
+  DataSourceRegistry,
+  type DataContext,
+  type DataSource,
+} from "@hyperforge/ui-framework";
 import type { PlayerEquipmentItems } from "../types";
 import type { InventorySlotViewItem } from "../game/types";
 
@@ -97,6 +108,52 @@ type EquipmentNamespace = Record<
   EquipmentSlotValue | ReadonlyArray<EquipmentItemsRow>
 >;
 
+interface SkillsNamespace {
+  items: ReadonlyArray<{
+    key: string;
+    label: string;
+    icon: string;
+    level: number;
+    xp: number;
+  }>;
+  total: number;
+  combatLevel: number;
+}
+
+// ============================================================================
+// Namespace builders — one per built-in source.
+// ============================================================================
+
+function buildPlayerNamespace(
+  playerStats: PlayerStats | null,
+): PlayerNamespace {
+  const player: PlayerNamespace = {};
+  if (playerStats) {
+    if (playerStats.health) {
+      player.hp = playerStats.health.current;
+      player.maxHp = playerStats.health.max;
+    }
+    if (playerStats.prayerPoints) {
+      player.prayer = playerStats.prayerPoints.current;
+      player.maxPrayer = playerStats.prayerPoints.max;
+    }
+    if (typeof playerStats.combatLevel === "number") {
+      player.combatLevel = playerStats.combatLevel;
+    }
+    player.inCombat = Boolean(playerStats.inCombat);
+  }
+  return player;
+}
+
+function buildInventoryNamespace(
+  state: PlayerDataSnapshot,
+): InventoryNamespace {
+  return {
+    items: state.inventory,
+    coins: state.coins,
+  };
+}
+
 function buildEquipmentNamespace(
   equipment: PlayerEquipmentItems | null,
 ): EquipmentNamespace {
@@ -115,18 +172,6 @@ function buildEquipmentNamespace(
   }
   out.items = items;
   return out;
-}
-
-interface SkillsNamespace {
-  items: ReadonlyArray<{
-    key: string;
-    label: string;
-    icon: string;
-    level: number;
-    xp: number;
-  }>;
-  total: number;
-  combatLevel: number;
 }
 
 /**
@@ -158,42 +203,59 @@ function buildSkillsNamespace(stats: PlayerStats | null): SkillsNamespace {
   return { items, total, combatLevel };
 }
 
+// ============================================================================
+// Built-in DataSource bindings.
+// ============================================================================
+
+const playerSource: DataSource<PlayerDataSnapshot, PlayerNamespace> = {
+  key: "player",
+  build: (state) => buildPlayerNamespace(state.playerStats),
+};
+
+const inventorySource: DataSource<PlayerDataSnapshot, InventoryNamespace> = {
+  key: "inventory",
+  build: buildInventoryNamespace,
+};
+
+const equipmentSource: DataSource<PlayerDataSnapshot, EquipmentNamespace> = {
+  key: "equipment",
+  build: (state) => buildEquipmentNamespace(state.equipment),
+};
+
+const skillsSource: DataSource<PlayerDataSnapshot, SkillsNamespace> = {
+  key: "skills",
+  build: (state) => buildSkillsNamespace(state.playerStats),
+};
+
+// ============================================================================
+// Host-owned registry — extension surface for plugins.
+// ============================================================================
+
+/**
+ * Singleton `DataSourceRegistry` instance owned by the client. Plugins
+ * extend the bindings surface by importing this registry and calling
+ * `.register({ key, build })` at boot time. The 4 built-in player
+ * sources are registered eagerly below so existing layouts work
+ * unchanged.
+ */
+export const playerDataSourceRegistry =
+  new DataSourceRegistry<PlayerDataSnapshot>();
+
+playerDataSourceRegistry.register(playerSource);
+playerDataSourceRegistry.register(inventorySource);
+playerDataSourceRegistry.register(equipmentSource);
+playerDataSourceRegistry.register(skillsSource);
+
 /**
  * Build a `DataContext` from the client's player-data state. Safe to
  * call when `playerStats` is `null` — the namespace is still returned,
- * populated with zeros, so bindings like `$player.hp` resolve to `0`
- * rather than `undefined`.
+ * populated with empty defaults, so bindings like `$player.hp`
+ * resolve to `undefined` and widgets fall back to their static prop.
+ *
+ * Thin wrapper over `playerDataSourceRegistry.buildContext(state)`.
+ * Kept as a named export for callers that already import it
+ * (`ManifestHud`).
  */
 export function buildPlayerDataContext(state: PlayerDataSnapshot): DataContext {
-  const playerStats: PlayerStats | null = state.playerStats;
-
-  const player: PlayerNamespace = {};
-  if (playerStats) {
-    if (playerStats.health) {
-      player.hp = playerStats.health.current;
-      player.maxHp = playerStats.health.max;
-    }
-    if (playerStats.prayerPoints) {
-      player.prayer = playerStats.prayerPoints.current;
-      player.maxPrayer = playerStats.prayerPoints.max;
-    }
-    if (typeof playerStats.combatLevel === "number") {
-      player.combatLevel = playerStats.combatLevel;
-    }
-    player.inCombat = Boolean(playerStats.inCombat);
-  }
-
-  const inventory: InventoryNamespace = {
-    items: state.inventory,
-    coins: state.coins,
-  };
-
-  // Equipment map is keyed by slot name (`mainhand`, `body`, …) AND
-  // also exposes an `items` array matching the equipment widget's
-  // schema. Both shapes are available via bindings.
-  const equipment = buildEquipmentNamespace(state.equipment);
-
-  const skills = buildSkillsNamespace(playerStats);
-
-  return { player, inventory, equipment, skills };
+  return playerDataSourceRegistry.buildContext(state);
 }
