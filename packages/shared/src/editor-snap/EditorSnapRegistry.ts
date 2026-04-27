@@ -28,8 +28,12 @@ export function snapToStep(value: number, step: number): number {
   return Math.round(value / step) * step;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type EditorSnapReloadListener = () => void;
+
 export class EditorSnapRegistry {
   private _manifest: EditorSnapManifest | null = null;
+  private _reloadListeners = new Set<EditorSnapReloadListener>();
 
   constructor(manifest?: EditorSnapManifest) {
     if (manifest) this.load(manifest);
@@ -37,10 +41,37 @@ export class EditorSnapRegistry {
 
   load(manifest: EditorSnapManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(EditorSnapManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: EditorSnapReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[editorSnapRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

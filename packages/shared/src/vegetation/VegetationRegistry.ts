@@ -34,10 +34,14 @@ export class UnknownVegetationAssetError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type VegetationReloadListener = () => void;
+
 export class VegetationRegistry {
   private _manifest: VegetationManifest | null = null;
   private _byId = new Map<string, VegetationAsset>();
   private _byCategory = new Map<string, VegetationAsset[]>();
+  private _reloadListeners = new Set<VegetationReloadListener>();
 
   constructor(manifest?: VegetationManifest) {
     if (manifest) this.load(manifest);
@@ -53,10 +57,37 @@ export class VegetationRegistry {
       if (arr) arr.push(asset);
       else this._byCategory.set(asset.category, [asset]);
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(VegetationManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: VegetationReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[vegetationRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

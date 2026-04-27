@@ -74,10 +74,14 @@ const PRIORITY_ORDER: Record<NewsPriority, number> = {
   low: 3,
 };
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type NewsFeedReloadListener = () => void;
+
 export class NewsFeedRegistry {
   private _manifest: NewsFeedManifest | null = null;
   private _entriesById = new Map<string, NewsEntry>();
   private _categoriesById = new Map<string, NewsCategory>();
+  private _reloadListeners = new Set<NewsFeedReloadListener>();
 
   constructor(manifest?: NewsFeedManifest) {
     if (manifest) this.load(manifest);
@@ -89,10 +93,37 @@ export class NewsFeedRegistry {
     this._categoriesById.clear();
     for (const e of manifest.entries) this._entriesById.set(e.id, e);
     for (const c of manifest.categories) this._categoriesById.set(c.id, c);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(NewsFeedManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: NewsFeedReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[newsFeedRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
