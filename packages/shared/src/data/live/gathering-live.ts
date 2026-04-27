@@ -94,7 +94,7 @@ export function getTimerRegenPerTick(): number {
   );
 }
 
-/** OSRS woodcutting success-rate matrix (tree → tool → {low, high}). */
+/** classic MMORPG woodcutting success-rate matrix (tree → tool → {low, high}). */
 export function getWoodcuttingSuccessRates(): WoodcuttingRateTable {
   return (
     gatheringProvider.getManifest()?.woodcuttingSuccessRates ??
@@ -102,7 +102,7 @@ export function getWoodcuttingSuccessRates(): WoodcuttingRateTable {
   );
 }
 
-/** OSRS mining success-rate table (rock → {low, high}). */
+/** classic MMORPG mining success-rate table (rock → {low, high}). */
 export function getMiningSuccessRates(): FlatRateTable {
   return (
     gatheringProvider.getManifest()?.miningSuccessRates ??
@@ -110,7 +110,7 @@ export function getMiningSuccessRates(): FlatRateTable {
   );
 }
 
-/** OSRS fishing success-rate table (spot → {low, high}). */
+/** classic MMORPG fishing success-rate table (spot → {low, high}). */
 export function getFishingSuccessRates(): FlatRateTable {
   return (
     gatheringProvider.getManifest()?.fishingSuccessRates ??

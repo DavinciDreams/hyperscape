@@ -351,7 +351,7 @@ export function createClientWorld() {
   // These systems enhance visual fidelity and user experience
 
   world.register("lods", LODs); // Level-of-detail mesh management
-  // Nametags disabled - OSRS pattern: names shown in right-click menu only
+  // Nametags disabled - classic MMORPG pattern: names shown in right-click menu only
   // "healthbars" registered by @hyperforge/hyperscape onEnable (client branch).
   // "equipment-visual" registered by @hyperforge/hyperscape onEnable (client branch).
   // "zone-detection" registered by @hyperforge/hyperscape plugin onEnable (cross-cutting).

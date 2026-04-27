@@ -102,7 +102,7 @@ export function hasActiveInterfaceSession(
 
 /**
  * Position type for entity lookups.
- * Uses x/z for ground plane (OSRS-style), y optional for elevation.
+ * Uses x/z for ground plane (tile-based-MMORPG-style), y optional for elevation.
  */
 export interface EntityPosition {
   readonly x: number;

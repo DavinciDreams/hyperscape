@@ -2,7 +2,7 @@
  * Parity diff between the legacy SkillsSystem hardcoded XP formula and
  * the canonical `rs-classic` curve in `XPCurveRegistry`.
  *
- * Both are attempts at the Old-School RuneScape XP table, but they
+ * Both are attempts at the classic MMORPG XP table, but they
  * differ in *where* the `Math.floor` is applied:
  *
  *   legacy (SkillsSystem.generateXPTable):
@@ -14,7 +14,7 @@
  *           per-term floor under a single outer floor
  *
  * These differ by ≤ ~37 at L=99 due to floor-distribution order.
- * The canonical version matches the published OSRS wiki values
+ * The canonical version matches the published classic MMORPG wiki values
  * (L99 = 13_034_431). The legacy version produces L99 = 13_034_394.
  *
  * This test DOES NOT enforce equality. It documents the divergence so
@@ -49,11 +49,11 @@ describe("XpCurve legacy-vs-canonical parity", () => {
     expect(table[99]).toBe(13_034_394);
   });
 
-  it("canonical rs-classic at L99 is 13_034_431 (matches OSRS wiki)", () => {
+  it("canonical rs-classic at L99 is 13_034_431 (matches classic MMORPG wiki)", () => {
     xpCurveRegistry.load([
       {
         id: CANONICAL_CURVE_ID,
-        name: "Parity test OSRS Classic",
+        name: "Parity test classic MMORPG Classic",
         description: "",
         kind: "formula",
         formula: "rs-classic",
@@ -75,7 +75,7 @@ describe("XpCurve legacy-vs-canonical parity", () => {
     xpCurveRegistry.load([
       {
         id: CANONICAL_CURVE_ID,
-        name: "Parity test OSRS Classic",
+        name: "Parity test classic MMORPG Classic",
         description: "",
         kind: "formula",
         formula: "rs-classic",
@@ -118,7 +118,7 @@ describe("XpCurve legacy-vs-canonical parity", () => {
     xpCurveRegistry.load([
       {
         id: CANONICAL_CURVE_ID,
-        name: "Parity test OSRS Classic",
+        name: "Parity test classic MMORPG Classic",
         description: "",
         kind: "formula",
         formula: "rs-classic",

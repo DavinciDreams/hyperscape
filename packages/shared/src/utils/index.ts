@@ -12,7 +12,7 @@ export * from "./IdentifierUtils";
 export * from "./PlayerIdMapper";
 export * from "./ExternalAssetUtils";
 export * from "./downloadFile";
-export * from "./SeededRandom"; // OSRS-accurate deterministic RNG
+export * from "./SeededRandom"; // tile-based-MMORPG-accurate deterministic RNG
 export * from "./FrameBudgetManager"; // Frame time budget management for reducing jank
 
 // Export ValidationUtils without calculateDistance* (they re-export from MathUtils)
@@ -38,5 +38,5 @@ export * from "./rendering"; // Rendering, mesh, model cache, UI
 export * from "./spatial"; // Spatial data structures for culling
 export * from "./workers"; // Web worker utilities for parallel processing
 
-// Distance utilities (OSRS-style Chebyshev)
+// Distance utilities (tile-based-MMORPG-style Chebyshev)
 export * from "./distance";

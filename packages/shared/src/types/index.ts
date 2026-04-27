@@ -411,7 +411,7 @@ export interface Entities extends System {
 export type ChatMessageType =
   | "chat" // Normal chat message
   | "system" // System messages
-  | "trade_request"; // OSRS-style trade request (pink clickable)
+  | "trade_request"; // tile-based-MMORPG-style trade request (pink clickable)
 
 // Chat message interface with all required properties
 export interface ChatMessage {

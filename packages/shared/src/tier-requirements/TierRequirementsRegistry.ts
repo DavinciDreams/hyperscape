@@ -2,7 +2,7 @@
  * Tier requirements registry.
  *
  * Runtime consumer for `@hyperforge/manifest-schema`'s
- * `tier-requirements.ts`. Lookup of skill requirements for OSRS-style
+ * `tier-requirements.ts`. Lookup of skill requirements for tile-based-MMORPG-style
  * equipment/tool tiers across four families (melee/tools/ranged/magic).
  */
 

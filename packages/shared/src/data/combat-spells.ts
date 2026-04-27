@@ -15,7 +15,7 @@
  * intentionally NOT `Object.freeze`d so the hot-reload path can clear
  * and refill them.
  *
- * @see https://oldschool.runescape.wiki/w/Spells
+ * @see
  */
 
 import {

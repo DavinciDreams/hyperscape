@@ -173,7 +173,7 @@ export function getTerrainTileSize(): number {
 
 // === CONTEXT MENU COLORS ===
 
-/** OSRS-style context-menu name color for item entries (hex #RRGGBB). */
+/** tile-based-MMORPG-style context-menu name color for item entries (hex #RRGGBB). */
 export function getContextMenuItemColor(): string {
   return (
     gameProvider.getManifest()?.contextMenuColors.item ??
@@ -181,14 +181,14 @@ export function getContextMenuItemColor(): string {
   );
 }
 
-/** OSRS-style context-menu name color for NPC/mob entries (hex #RRGGBB). */
+/** tile-based-MMORPG-style context-menu name color for NPC/mob entries (hex #RRGGBB). */
 export function getContextMenuNpcColor(): string {
   return (
     gameProvider.getManifest()?.contextMenuColors.npc ?? CONTEXT_MENU_COLORS.NPC
   );
 }
 
-/** OSRS-style context-menu name color for world-object/resource entries. */
+/** tile-based-MMORPG-style context-menu name color for world-object/resource entries. */
 export function getContextMenuObjectColor(): string {
   return (
     gameProvider.getManifest()?.contextMenuColors.object ??
@@ -196,7 +196,7 @@ export function getContextMenuObjectColor(): string {
   );
 }
 
-/** OSRS-style context-menu name color for player entries (hex #RRGGBB). */
+/** tile-based-MMORPG-style context-menu name color for player entries (hex #RRGGBB). */
 export function getContextMenuPlayerColor(): string {
   return (
     gameProvider.getManifest()?.contextMenuColors.player ??

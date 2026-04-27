@@ -8,7 +8,7 @@
  *
  * Defines bow tiers and arrow data for ranged combat.
  * F2P scope: standard arrows only (no bolts, no thrown weapons).
- * @see https://oldschool.runescape.wiki/w/Ammunition
+ * @see
  *
  * **Hot-reload**: `BOW_TIERS` and `ARROW_DATA` are mutable maps with
  * stable top-level references. `hotReloadAmmunition(manifest)` clears

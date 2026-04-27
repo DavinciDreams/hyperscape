@@ -2,7 +2,7 @@
  * SkillUnlocksProvider
  *
  * Singleton persistence layer for the authored skill-unlocks
- * manifest — OSRS-style content unlock arrays keyed by skill name,
+ * manifest — tile-based-MMORPG-style content unlock arrays keyed by skill name,
  * displayed in the level-up notification popup.
  *
  * Baseline `{skills:{}}` is schema-valid. Runtime falls back to

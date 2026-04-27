@@ -519,7 +519,7 @@ export interface DuelSessionInfo {
 }
 
 /**
- * DuelSystem - Server-authoritative player-to-player dueling (OSRS-accurate)
+ * DuelSystem - Server-authoritative player-to-player dueling (tile-based-MMORPG-accurate)
  *
  * Manages duel sessions with rules negotiation, stakes, and combat enforcement.
  *

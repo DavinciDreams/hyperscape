@@ -59,12 +59,12 @@ export const SessionType = Object.freeze({
 }
 
 // ============================================================================
-// DISTANCE CONFIGURATION (OSRS-style Chebyshev)
+// DISTANCE CONFIGURATION (tile-based-MMORPG-style Chebyshev)
 // ============================================================================
 
 /**
  * Maximum interaction distances per session type.
- * Uses Chebyshev distance (max of |dx|, |dz|) - OSRS standard.
+ * Uses Chebyshev distance (max of |dx|, |dz|) - classic MMORPG standard.
  */
 export const INTERACTION_DISTANCE: Readonly<Record<SessionType, number>> =
   Object.freeze({

@@ -4,7 +4,7 @@
  * Types for the manifest-driven prayer system.
  * Includes type guards for runtime validation.
  *
- * @see https://oldschool.runescape.wiki/w/Prayer
+ * @see
  */
 
 // === Constants ===

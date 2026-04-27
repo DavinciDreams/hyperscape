@@ -221,7 +221,7 @@ export class World extends EventEmitter {
   accumulator = 0;
 
   /**
-   * Current server tick number (OSRS-style 600ms ticks).
+   * Current server tick number (tile-based-MMORPG-style 600ms ticks).
    * Set by TickSystem on the server, used by mobs/NPCs for tick-aligned AI.
    * On client, this is 0 (client uses frame-based updates).
    *
@@ -605,7 +605,7 @@ export class World extends EventEmitter {
 
   /**
    * Unified collision matrix for tile-based collision.
-   * Stores OSRS-accurate bitmask flags per tile in zone-based chunks.
+   * Stores tile-based-MMORPG-accurate bitmask flags per tile in zone-based chunks.
    *
    * Key features:
    * - Static objects (trees, rocks, furnaces) set BLOCKED flag

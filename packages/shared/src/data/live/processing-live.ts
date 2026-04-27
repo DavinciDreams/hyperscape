@@ -38,7 +38,7 @@ export function getFireInteractionRange(): number {
   );
 }
 
-/** Ticks-per-cook (OSRS: 4 by default). */
+/** Ticks-per-cook (classic MMORPG: 4 by default). */
 export function getCookingTicksPerItem(): number {
   return (
     processingProvider.getManifest()?.skillMechanics.cooking.ticksPerItem ??
@@ -46,7 +46,7 @@ export function getCookingTicksPerItem(): number {
   );
 }
 
-/** Base firemaking roll window in ticks (OSRS: 20). */
+/** Base firemaking roll window in ticks (classic MMORPG: 20). */
 export function getFiremakingBaseRollTicks(): number {
   return (
     processingProvider.getManifest()?.skillMechanics.firemaking.baseRollTicks ??
@@ -62,7 +62,7 @@ export function getFireWalkPriority(): readonly string[] {
   );
 }
 
-/** OSRS firemaking success-rate LERP endpoints (numerator over /256). */
+/** classic MMORPG firemaking success-rate LERP endpoints (numerator over /256). */
 export function getFiremakingSuccessRate(): { low: number; high: number } {
   return (
     processingProvider.getManifest()?.firemakingSuccessRate ??

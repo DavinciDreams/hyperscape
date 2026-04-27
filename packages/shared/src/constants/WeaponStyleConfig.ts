@@ -1,7 +1,7 @@
 /**
  * WeaponStyleConfig — MANIFEST FAÇADE
  *
- * As of Phase A8 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the OSRS-accurate
+ * As of Phase A8 of PLAN_WORLD_STUDIO_AAA_COMPLETION.md, the tile-based-MMORPG-accurate
  * combat style availability table lives in `weapon-styles.json`, validated
  * at module load time against `WeaponStylesManifestSchema` from
  * `@hyperforge/manifest-schema`.
@@ -12,9 +12,9 @@
  * A runtime integrity check asserts every `WeaponType` enum value has a
  * style list in the JSON.
  *
- * In OSRS, different weapon types have different available combat styles.
+ * In classic MMORPG, different weapon types have different available combat styles.
  *
- * @see https://oldschool.runescape.wiki/w/Combat_Options
+ * @see
  */
 
 import { WeaponStylesManifestSchema } from "@hyperforge/manifest-schema";
@@ -27,7 +27,7 @@ const manifest = WeaponStylesManifestSchema.parse(weaponStylesManifestJson);
 
 /**
  * Combat styles available for each weapon type.
- * OSRS-accurate: Not all weapons have all 4 styles.
+ * tile-based-MMORPG-accurate: Not all weapons have all 4 styles.
  *
  * Built at module load by iterating `WeaponType` enum values and looking
  * up the manifest. Fails fast if any enum value is missing from the JSON.

@@ -73,7 +73,7 @@ export class ValidationService implements ITransactionValidator {
       };
     }
 
-    // 5. Check distance (Chebyshev/OSRS-style)
+    // 5. Check distance (Chebyshev/tile-based-MMORPG-style)
     const distance = chebyshevDistance(player.position, target.position);
     const maxDistance = getInteractionDistanceFor(requiredType);
 

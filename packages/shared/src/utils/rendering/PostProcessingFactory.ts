@@ -3,7 +3,7 @@
  *
  * Provides WebGPU-compatible post-processing effects including:
  * - 3D LUT color grading for cinematic looks
- * - Depth-based camera blur (DoF) for RuneScape-style depth of field
+ * - Depth-based camera blur (DoF) for tile-based-MMORPG-style depth of field
  * - Tone mapping control
  * - Entity outline highlighting (RS3-style hover effect)
  *
@@ -62,7 +62,7 @@ type ShaderNodeLike = {
   mul: (other: unknown) => ShaderNodeLike;
 };
 
-/** Default depth blur parameters (RuneScape-style DoF) */
+/** Default depth blur parameters (tile-based-MMORPG-style DoF) */
 export const DEPTH_BLUR_DEFAULTS = {
   /** Focus distance in world units - objects at this distance are sharpest */
   focusDistance: 100,

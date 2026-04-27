@@ -473,7 +473,7 @@ export class TerrainSystem extends System {
    * No fallback material - roads require the full shader to render correctly.
    */
   private initTerrainMaterial(): void {
-    // Create the shared terrain material (uses procedural OSRS-style colors, no textures needed)
+    // Create the shared terrain material (uses procedural tile-based-MMORPG-style colors, no textures needed)
     // This material reads the roadInfluence attribute and blends road colors
     this.terrainMaterial = createTerrainMaterial();
 
@@ -1617,7 +1617,7 @@ export class TerrainSystem extends System {
   }
 
   // World Configuration - Your Specifications
-  // OSRS-STYLE: Rolling terrain with visible hills
+  // classic MMORPG-STYLE: Rolling terrain with visible hills
   private readonly CONFIG = {
     // Core World Specs
     // Provider-first live reads — PIE manifest hot-reload of

@@ -13,7 +13,7 @@ function makeManifest(): XpCurvesManifest {
   return XpCurvesManifestSchema.parse([
     {
       id: "rs",
-      name: "RuneScape Classic",
+      name: "classic MMORPG Classic",
       kind: "formula",
       formula: "rs-classic",
       maxLevel: 99,
@@ -91,7 +91,7 @@ describe("XPCurveRegistry — registry basics", () => {
   });
 });
 
-describe("XPCurveRegistry — rs-classic formula (OSRS values)", () => {
+describe("XPCurveRegistry — rs-classic formula (classic MMORPG values)", () => {
   const reg = new XPCurveRegistry(makeManifest());
 
   it("level 1 is 0 XP", () => {

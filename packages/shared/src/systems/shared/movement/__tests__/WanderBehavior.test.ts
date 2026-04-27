@@ -1,7 +1,7 @@
 /**
  * WanderBehavior Unit Tests
  *
- * Tests OSRS-accurate probabilistic wandering behavior.
+ * Tests tile-based-MMORPG-accurate probabilistic wandering behavior.
  *
  * Key behaviors tested:
  * - Probabilistic wander chance (~26% per tick)

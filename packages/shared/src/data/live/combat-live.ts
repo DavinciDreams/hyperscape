@@ -124,7 +124,7 @@ export function getDefaultMagicRange(): number {
   );
 }
 
-/** Milliseconds per server tick (canonical OSRS cadence). */
+/** Milliseconds per server tick (canonical classic MMORPG cadence). */
 export function getTickDurationMs(): number {
   return (
     combatProvider.getManifest()?.ticks.tickDurationMs ??
@@ -179,7 +179,7 @@ export function getHealthRegenCooldownTicks(): number {
   );
 }
 
-/** Ticks between consecutive HP regen drips (OSRS: 100 = 60s). */
+/** Ticks between consecutive HP regen drips (classic MMORPG: 100 = 60s). */
 export function getHealthRegenIntervalTicks(): number {
   return (
     combatProvider.getManifest()?.ticks.healthRegenIntervalTicks ??
@@ -203,7 +203,7 @@ export function getMeleeRangeStandard(): number {
   );
 }
 
-/** Damage-formula "base constant" (OSRS: +8 before multiplication). */
+/** Damage-formula "base constant" (classic MMORPG: +8 before multiplication). */
 export function getDamageBaseConstant(): number {
   return (
     combatProvider.getManifest()?.damage.baseConstant ??
@@ -211,7 +211,7 @@ export function getDamageBaseConstant(): number {
   );
 }
 
-/** Damage-formula "effective level constant" (OSRS: +8 or +9). */
+/** Damage-formula "effective level constant" (classic MMORPG: +8 or +9). */
 export function getEffectiveLevelConstant(): number {
   return (
     combatProvider.getManifest()?.damage.effectiveLevelConstant ??
@@ -219,7 +219,7 @@ export function getEffectiveLevelConstant(): number {
   );
 }
 
-/** Max-hit divisor in OSRS damage formula (typically 640). */
+/** Max-hit divisor in classic MMORPG damage formula (typically 640). */
 export function getDamageDivisor(): number {
   return (
     combatProvider.getManifest()?.damage.damageDivisor ??

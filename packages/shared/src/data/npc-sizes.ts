@@ -7,7 +7,7 @@
  * `@hyperforge/manifest-schema`.
  *
  * Most NPCs are 1×1 tiles. Bosses occupy larger footprints.
- * @see https://oldschool.runescape.wiki/w/Non-player_character
+ * @see
  *
  * **Hot-reload**: `NPC_SIZES` is a mutable `Record<string, NPCSize>`
  * with a stable top-level reference. `hotReloadNPCSizes(manifest)`

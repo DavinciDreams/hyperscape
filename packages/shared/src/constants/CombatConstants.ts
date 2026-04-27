@@ -14,7 +14,7 @@
  * To tune combat values, edit the JSON — not this file. The JSON → façade
  * mapping below is deliberately mechanical.
  *
- * @see https://oldschool.runescape.wiki/w/Game_tick
+ * @see
  */
 
 import { CombatManifestSchema } from "@hyperforge/manifest-schema";
@@ -25,11 +25,11 @@ const manifest = CombatManifestSchema.parse(combatManifestJson);
 
 /**
  * Melee attack style determines which per-style attack/defence bonuses are used.
- * OSRS: Each weapon type has a default style (e.g., swords slash, daggers stab).
+ * classic MMORPG: Each weapon type has a default style (e.g., swords slash, daggers stab).
  */
 export type MeleeAttackStyle = "stab" | "slash" | "crush";
 
-/** Default melee attack style per weapon type (OSRS-accurate) */
+/** Default melee attack style per weapon type (tile-based-MMORPG-accurate) */
 export const WEAPON_DEFAULT_ATTACK_STYLE: Record<string, MeleeAttackStyle> =
   Object.freeze({
     ...(manifest.weaponDefaultAttackStyle as Record<string, MeleeAttackStyle>),
@@ -54,7 +54,7 @@ export const COMBAT_CONSTANTS = Object.freeze({
   HEALTH_REGEN_INTERVAL_TICKS: manifest.ticks.healthRegenIntervalTicks,
   AFK_DISABLE_RETALIATE_TICKS: manifest.ticks.afkDisableRetaliateTicks,
 
-  // === Food Consumption (OSRS-accurate) ===
+  // === Food Consumption (tile-based-MMORPG-accurate) ===
   EAT_DELAY_TICKS: manifest.food.eatDelayTicks,
   EAT_ATTACK_DELAY_TICKS: manifest.food.eatAttackDelayTicks,
   MAX_HEAL_AMOUNT: manifest.food.maxHealAmount,
@@ -250,7 +250,7 @@ function buildMagicStyleBonuses(): Readonly<
   );
 }
 
-/** Pre-allocated frozen style bonuses for ranged combat (OSRS-accurate) */
+/** Pre-allocated frozen style bonuses for ranged combat (tile-based-MMORPG-accurate) */
 export const RANGED_STYLE_BONUSES = buildRangedStyleBonuses();
 
 /** Pre-allocated frozen style bonuses for magic combat */

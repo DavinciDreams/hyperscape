@@ -1,19 +1,19 @@
 /**
  * Combat Level Color Utility
  *
- * OSRS-accurate combat level color calculation for context menus.
+ * tile-based-MMORPG-accurate combat level color calculation for context menus.
  *
  * Colors range from bright green (-10 or lower difference) through
  * yellow (same level) to bright red (+10 or higher difference).
  *
- * @see https://oldschool.runescape.wiki/w/Combat_level
- * @see https://oldschool.runescape.wiki/w/Choose_Option
+ * @see
+ * @see
  */
 
 /**
  * Get the color for a combat level relative to the player's level.
  *
- * OSRS color gradient:
+ * classic MMORPG color gradient:
  * - +10 or higher: #ff0000 (bright red)
  * - 0 (same level): #ffff00 (yellow)
  * - -10 or lower: #00ff00 (bright green)
@@ -30,7 +30,7 @@ export function getCombatLevelColor(
 ): string {
   const diff = targetLevel - playerLevel;
 
-  // Clamp to -10 to +10 range (OSRS behavior)
+  // Clamp to -10 to +10 range (classic MMORPG behavior)
   const clampedDiff = Math.max(-10, Math.min(10, diff));
 
   if (clampedDiff === 0) {

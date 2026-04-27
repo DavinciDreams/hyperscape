@@ -2,7 +2,7 @@
  * Skill unlocks registry.
  *
  * Runtime consumer for `@hyperforge/manifest-schema`'s
- * `skill-unlocks.ts`. Lookup of OSRS-style content unlocks per skill
+ * `skill-unlocks.ts`. Lookup of tile-based-MMORPG-style content unlocks per skill
  * level. Used by the level-up UI popup.
  */
 

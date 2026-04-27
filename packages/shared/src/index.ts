@@ -253,7 +253,7 @@ export type {
   StreamingGuardrailPhase,
 } from "./utils/rendering/streamingGuardrails";
 
-// Export SeededRandom and game RNG utilities (OSRS-accurate deterministic RNG)
+// Export SeededRandom and game RNG utilities (tile-based-MMORPG-accurate deterministic RNG)
 export {
   SeededRandom,
   initializeGameRng,
@@ -1045,7 +1045,7 @@ export { getEffectiveWorldAreas } from "./world-areas";
 
 // Equipment-slot ordering tuple — referenced by the migrated
 // EquipmentVisualSystem in @hyperforge/hyperscape (and any other
-// consumer that needs the canonical OSRS slot iteration order).
+// consumer that needs the canonical classic MMORPG slot iteration order).
 export { EQUIPMENT_SLOT_NAMES } from "./constants/EquipmentConstants";
 
 // Player-id coercion helper + DatabaseSystem interface — needed by
@@ -1558,7 +1558,7 @@ export { ControlPriorities } from "./systems/client/ControlPriorities";
 export { downloadFile } from "./utils/downloadFile";
 export * from "./utils/typeGuards";
 
-// Item type detection helpers (OSRS-accurate inventory actions)
+// Item type detection helpers (tile-based-MMORPG-accurate inventory actions)
 export {
   isFood,
   isPotion,
@@ -2029,7 +2029,7 @@ export {
   tileKey as buildingTileKey,
 } from "./types/world/building-collision-types";
 
-// Export tile movement system (RuneScape-style)
+// Export tile movement system (tile-based-MMORPG-style)
 export {
   // Constants
   TILE_SIZE,
@@ -2384,10 +2384,10 @@ export { PLAYER_CONSTANTS } from "./constants/GameConstants";
 // Gathering constants (tick-based timing, ranges, etc.)
 export { GATHERING_CONSTANTS } from "./constants/GatheringConstants";
 
-// Context menu colors (OSRS-accurate styling)
+// Context menu colors (tile-based-MMORPG-accurate styling)
 export { CONTEXT_MENU_COLORS } from "./constants/GameConstants";
 
-// Weapon style configuration (OSRS-accurate style restrictions per weapon)
+// Weapon style configuration (tile-based-MMORPG-accurate style restrictions per weapon)
 export {
   WEAPON_STYLE_CONFIG,
   getAvailableStyles,
@@ -2395,7 +2395,7 @@ export {
   getDefaultStyleForWeapon,
 } from "./constants/WeaponStyleConfig";
 
-// Hit delay calculator (OSRS-accurate projectile delays)
+// Hit delay calculator (tile-based-MMORPG-accurate projectile delays)
 export {
   calculateHitDelay,
   calculateMeleeHitDelay,
@@ -2414,7 +2414,7 @@ export type {
   HitDelayResult,
 } from "./utils/game/HitDelayCalculator";
 
-// Distance utilities (OSRS-style Chebyshev)
+// Distance utilities (tile-based-MMORPG-style Chebyshev)
 export {
   chebyshevDistance,
   isWithinDistance,

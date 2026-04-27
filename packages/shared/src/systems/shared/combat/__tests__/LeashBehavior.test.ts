@@ -1,18 +1,16 @@
 /**
- * OSRS-Accurate Leash Behavior Tests
+ * tile-based-MMORPG-accurate Leash Behavior Tests
  *
  * Tests the two-tier range system and leash behavior:
  * - wanderRadius: Area where NPCs randomly wander (smaller, ~5 tiles)
  * - leashRange: Maximum chase distance from spawn (larger, ~10 tiles)
  *
- * Key OSRS behaviors tested:
+ * Key classic MMORPG behaviors tested:
  * - NPCs can chase beyond wander radius but within leash range
  * - NPCs stop in place when exceeding leash range (no walk-back)
  * - NPCs transition to IDLE, not RETURN, when leashed
  * - Wander targets are relative to spawn (natural drift back)
  *
- * @see https://oldschool.runescape.wiki/w/Aggression
- * @see OSRS_LEASH_BEHAVIOR_PLAN.md
  */
 
 import { describe, it, expect } from "vitest";
@@ -78,7 +76,7 @@ function createMockContext(
     getTime: () => Date.now(),
     markNetworkDirty: () => {},
     emitEvent: () => {},
-    // Entity occupancy for OSRS-accurate collision
+    // Entity occupancy for tile-based-MMORPG-accurate collision
     getEntityId: () => "test-mob-1",
     getEntityOccupancy: () => ({
       isBlocked: () => false,
@@ -96,7 +94,7 @@ function createMockContext(
   };
 }
 
-describe("OSRS-Accurate Leash Behavior", () => {
+describe("tile-based-MMORPG-accurate Leash Behavior", () => {
   describe("two-tier range system", () => {
     it("allows NPC to chase beyond wander radius but within leash range", () => {
       const chaseState = new ChaseState();
@@ -256,7 +254,7 @@ describe("OSRS-Accurate Leash Behavior", () => {
       const chaseState = new ChaseState();
 
       // Player at exactly aggression range (leashRange + combatRange = 11)
-      // OSRS-accurate: Leash is based on PLAYER distance from spawn, not mob distance
+      // tile-based-MMORPG-accurate: Leash is based on PLAYER distance from spawn, not mob distance
       const context = createMockContext({
         distanceFromSpawn: 10,
         leashRange: 10,

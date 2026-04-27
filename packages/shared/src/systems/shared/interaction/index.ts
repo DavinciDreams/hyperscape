@@ -18,6 +18,6 @@ export * from "./WorldDialogueConditionEvaluators";
 // @hyperforge/hyperscape (2026-04-24).
 
 // TanningSystem migrated to @hyperforge/hyperscape (2026-04-24)
-// — NPC tanner: hides → leather, OSRS-specific gameplay.
+// — NPC tanner: hides → leather, classic MMORPG-specific gameplay.
 
 // RunecraftingSystem migrated to @hyperforge/hyperscape (2026-04-24)

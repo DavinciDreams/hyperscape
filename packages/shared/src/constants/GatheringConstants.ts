@@ -14,9 +14,9 @@
  *
  * To tune gathering values, edit the JSON — not this file.
  *
- * @see https://oldschool.runescape.wiki/w/Woodcutting
- * @see https://oldschool.runescape.wiki/w/Mining
- * @see https://oldschool.runescape.wiki/w/Fishing
+ * @see
+ * @see
+ * @see
  */
 
 import { GatheringManifestSchema } from "@hyperforge/manifest-schema";
@@ -28,7 +28,7 @@ const manifest = GatheringManifestSchema.parse(gatheringManifestJson);
 const validResourceIdRegex = new RegExp(manifest.resourceIdRules.validPattern);
 
 export const GATHERING_CONSTANTS = Object.freeze({
-  // === Skill-Specific Mechanics (OSRS-accurate) ===
+  // === Skill-Specific Mechanics (tile-based-MMORPG-accurate) ===
   SKILL_MECHANICS: Object.freeze({
     woodcutting: Object.freeze({
       type: manifest.skillMechanics.woodcutting.type,

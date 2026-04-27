@@ -1,7 +1,7 @@
 /**
  * PidManager Unit Tests
  *
- * Tests for OSRS-style Player ID (PID) combat priority system:
+ * Tests for tile-based-MMORPG-style Player ID (PID) combat priority system:
  * - PID assignment on player join
  * - PID removal on player leave
  * - Combat priority comparison (lower PID = higher priority)
@@ -9,7 +9,7 @@
  * - Periodic PID shuffle for fairness
  * - Statistics and debugging
  *
- * @see https://oldschool.runescape.wiki/w/PID
+ * @see
  */
 
 import { describe, it, expect, beforeEach } from "vitest";

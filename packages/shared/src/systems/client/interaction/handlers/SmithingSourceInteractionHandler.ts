@@ -3,15 +3,15 @@
  *
  * Handles interactions with anvils for smithing bars into items.
  *
- * OSRS Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
+ * classic MMORPG Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
  * - "Smith Anvil" (cyan #00ffff for "Anvil")
  * - "Walk here"
  * - "Examine Anvil" (cyan #00ffff for "Anvil")
  *
  * Note: Player needs a hammer in inventory to smith.
  *
- * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
- * @see https://oldschool.runescape.wiki/w/Anvil for anvil info
+ * @see  for classic MMORPG menu format
+ * @see  for anvil info
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
@@ -19,7 +19,7 @@ import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE } from "../constants";
 import { EventType } from "../../../../types/events/event-types";
 
-/** OSRS scenery/object color (cyan) for context menu target names */
+/** classic MMORPG scenery/object color (cyan) for context menu target names */
 const SCENERY_COLOR = "#00ffff";
 
 /**
@@ -50,7 +50,7 @@ export class SmithingSourceInteractionHandler extends BaseInteractionHandler {
   /**
    * Right-click: Show Smith action and other options
    *
-   * OSRS-accurate format:
+   * tile-based-MMORPG-accurate format:
    * - "Smith Anvil" (action white, target cyan)
    * - "Walk here"
    * - "Examine Anvil" (action white, target cyan)
@@ -59,7 +59,7 @@ export class SmithingSourceInteractionHandler extends BaseInteractionHandler {
     const actions: ContextMenuAction[] = [];
     const targetName = target.name || "Anvil";
 
-    // Smith action (primary) - OSRS: "Smith Anvil"
+    // Smith action (primary) - classic MMORPG: "Smith Anvil"
     actions.push({
       id: "smith",
       label: `Smith ${targetName}`,
@@ -82,7 +82,7 @@ export class SmithingSourceInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine - OSRS: "Examine Anvil"
+    // Examine - classic MMORPG: "Examine Anvil"
     actions.push({
       id: "examine",
       label: `Examine ${targetName}`,

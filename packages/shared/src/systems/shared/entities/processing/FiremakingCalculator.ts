@@ -1,10 +1,10 @@
 /**
  * Firemaking Calculator
  *
- * OSRS-accurate firemaking success rate calculations.
+ * tile-based-MMORPG-accurate firemaking success rate calculations.
  * Uses data from items.json manifest via ProcessingDataProvider.
  *
- * @see https://oldschool.runescape.wiki/w/Firemaking
+ * @see
  */
 
 import {
@@ -14,9 +14,9 @@ import {
 import { processingDataProvider } from "../../../../data/ProcessingDataProvider";
 
 /**
- * Calculate firemaking success rate using OSRS LERP formula.
+ * Calculate firemaking success rate using classic MMORPG LERP formula.
  *
- * OSRS Formula: successChance = (low + (high - low) * (level - 1) / 98) / 256
+ * classic MMORPG Formula: successChance = (low + (high - low) * (level - 1) / 98) / 256
  * - At level 1: 65/256 = 25.4%
  * - At level 43: 256/256 = 100% (capped)
  * - At level 99: 513/256 = 100% (capped)
@@ -24,7 +24,7 @@ import { processingDataProvider } from "../../../../data/ProcessingDataProvider"
  * @param level - Player's firemaking level (1-99)
  * @returns Success probability (0-1)
  *
- * @see https://oldschool.runescape.wiki/w/Firemaking
+ * @see
  */
 export function calculateFiremakingSuccess(level: number): number {
   const { low, high } = getFiremakingSuccessRate();
@@ -80,7 +80,7 @@ export function isValidLog(itemId: string): boolean {
 /**
  * Get random fire duration in ticks.
  *
- * OSRS: Fires last 60-119 seconds (per Mod Ash).
+ * classic MMORPG: Fires last 60-119 seconds (per Mod Ash).
  * At 600ms/tick: 100-198 ticks.
  *
  * @returns Duration in ticks

@@ -11,7 +11,7 @@
  *       ↓ xpCurveRegistry.load(provider.getCurves())   (registry seed)
  *   xpCurveRegistry (singleton)
  *       ↓ xpCurveRegistry.xpForLevel(id, L)            (consumer query)
- *   canonical OSRS spot-check: xp(99) === 13_034_431
+ *   canonical classic MMORPG spot-check: xp(99) === 13_034_431
  *
  * This is the exact chain DataManager.ts runs on boot
  * (both browser fetch path @ line 2085-2089 and Node fs path @
@@ -49,12 +49,12 @@ const MANIFEST_PATH = path.resolve(
 );
 
 /**
- * Canonical OSRS XP spot-checks. These are the values the official
- * Old-School RuneScape wiki publishes and that the existing
+ * Canonical classic MMORPG XP spot-checks. These are the values the official
+ * classic MMORPG wiki publishes and that the existing
  * XPCurveRegistry unit test already asserts. If the file-on-disk
  * diverges from these, everybody's level-up thresholds shift.
  */
-const OSRS_SPOT_CHECKS: ReadonlyArray<{ level: number; xp: number }> = [
+const CLASSIC_MMO_SPOT_CHECKS: ReadonlyArray<{ level: number; xp: number }> = [
   { level: 1, xp: 0 },
   { level: 2, xp: 83 },
   { level: 10, xp: 1154 },
@@ -94,7 +94,7 @@ describe("xp-curves end-to-end pipeline", () => {
     }
   });
 
-  it("boot path: file → provider → registry produces canonical OSRS xp values", async () => {
+  it("boot path: file → provider → registry produces canonical classic MMORPG xp values", async () => {
     // Mirrors DataManager.ts @ lines 2085-2089 (browser fetch path)
     // and lines ~4730-4735 (Node fs path):
     //    const parsed = xpCurvesProvider.loadRaw(raw);
@@ -107,7 +107,7 @@ describe("xp-curves end-to-end pipeline", () => {
     expect(xpCurveRegistry.has("osrs-classic")).toBe(true);
     expect(xpCurveRegistry.maxLevel("osrs-classic")).toBe(99);
 
-    for (const { level, xp } of OSRS_SPOT_CHECKS) {
+    for (const { level, xp } of CLASSIC_MMO_SPOT_CHECKS) {
       expect(xpCurveRegistry.xpForLevel("osrs-classic", level)).toBe(xp);
     }
   });
@@ -116,7 +116,7 @@ describe("xp-curves end-to-end pipeline", () => {
     const raw = JSON.parse(await readFile(MANIFEST_PATH, "utf8")) as unknown;
     xpCurveRegistry.load(xpCurvesProvider.loadRaw(raw));
 
-    for (const { level, xp } of OSRS_SPOT_CHECKS) {
+    for (const { level, xp } of CLASSIC_MMO_SPOT_CHECKS) {
       // Exactly at threshold → that level.
       expect(xpCurveRegistry.levelForXp("osrs-classic", xp)).toBe(level);
       // One below threshold → previous level (except at L1).
@@ -215,7 +215,7 @@ describe("xp-curves PIE hot-reload path", () => {
     xpCurveRegistry.load([
       {
         id: "osrs-classic",
-        name: "OSRS Classic",
+        name: "classic MMORPG Classic",
         description: "",
         kind: "formula",
         formula: "rs-classic",

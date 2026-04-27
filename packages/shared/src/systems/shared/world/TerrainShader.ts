@@ -895,7 +895,7 @@ export function computeTerrainColorCPU(
 }
 
 // ============================================================================
-// TERRAIN MATERIAL - OSRS Style (No Textures)
+// TERRAIN MATERIAL - classic MMORPG Style (No Textures)
 // ============================================================================
 
 /**

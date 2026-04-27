@@ -2,7 +2,7 @@
  * WeaponStylesProvider
  *
  * Singleton persistence layer for the authored weapon-styles manifest —
- * OSRS-accurate combat style availability table keyed by weapon type.
+ * tile-based-MMORPG-accurate combat style availability table keyed by weapon type.
  *
  * No baseline fixture — schema uses `z.record(WeaponTypeIdSchema, ...)`
  * which in Zod v4 requires an entry for every enum value. Runtime falls

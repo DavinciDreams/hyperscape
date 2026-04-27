@@ -1,6 +1,6 @@
 /**
  * Distance-based entity fade using dithered dissolve shader.
- * Includes camera-to-player occlusion dissolve (RuneScape-style).
+ * Includes camera-to-player occlusion dissolve (tile-based-MMORPG-style).
  *
  * ## WebGPU/WebGL Support
  * - WebGPU: Uses TSL (Three Shading Language) nodes for native WebGPU support
@@ -290,7 +290,7 @@ function applyDissolveTSL(
       smoothstep(nearCameraFadeEnd, nearCameraFadeStart, camDist),
     );
 
-    // Camera-to-player occlusion dissolve (RuneScape-style cone)
+    // Camera-to-player occlusion dissolve (tile-based-MMORPG-style cone)
     const camToPlayer = sub(uPlayerPos, uCameraPos);
     const ctLengthSq = dot(camToPlayer, camToPlayer);
     const ctLength = sqrt(ctLengthSq);

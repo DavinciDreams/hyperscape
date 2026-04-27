@@ -3,17 +3,17 @@
  *
  * Handles interactions with ground items.
  *
- * OSRS Context Menu Format: "<Action> <ItemName>" with orange target (item color)
+ * classic MMORPG Context Menu Format: "<Action> <ItemName>" with orange target (item color)
  * - "Take Bones" (orange #ff9040 for "Bones")
  * - "Walk here"
  * - "Examine Bones" (orange #ff9040 for "Bones")
  *
- * OSRS-Style Behavior:
+ * classic MMORPG-Style Behavior:
  * - Must stand ON the item's tile to pick it up (range 0)
  * - Left-click picks up highest value item in pile
  * - Context menu shows all items in pile
  *
- * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
+ * @see  for classic MMORPG menu format
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
@@ -64,7 +64,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
 
     if (pileItems.length === 0) return;
 
-    // Find highest value item in pile (OSRS behavior)
+    // Find highest value item in pile (classic MMORPG behavior)
     const bestItem = pileItems.reduce(
       (best, item) => (item.value > best.value ? item : best),
       pileItems[0],
@@ -76,7 +76,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
   /**
    * Right-click: Show all items in pile
    *
-   * OSRS-accurate format with orange item names:
+   * tile-based-MMORPG-accurate format with orange item names:
    * - "Take Bones" (orange for "Bones")
    * - "Take Coins" (orange for "Coins")
    * - "Walk here"
@@ -111,7 +111,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
     }
 
     // Add "Take" for each item in pile (newest first = top of menu)
-    // OSRS: "Take Bones" with orange item name
+    // classic MMORPG: "Take Bones" with orange item name
     let priority = 1;
     for (const pileItem of pileItems) {
       actions.push({
@@ -130,7 +130,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine for each item - OSRS: "Examine Bones" with orange item name
+    // Examine for each item - classic MMORPG: "Examine Bones" with orange item name
     for (const pileItem of pileItems) {
       const itemData = getItem(pileItem.itemId);
       const examineText =
@@ -207,7 +207,7 @@ export class ItemInteractionHandler extends BaseInteractionHandler {
   }
 
   /**
-   * Get all item entities at a specific tile (OSRS-style pile query)
+   * Get all item entities at a specific tile (tile-based-MMORPG-style pile query)
    *
    * Optimization: Tries GroundItemSystem O(1) lookup first (server-side),
    * falls back to O(n) entity iteration (client-side).

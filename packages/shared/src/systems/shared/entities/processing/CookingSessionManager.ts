@@ -2,14 +2,14 @@
  * Cooking Session Manager
  *
  * Tick-based cooking session management.
- * Follows OSRS mechanics:
+ * Follows classic MMORPG mechanics:
  * - 4-tick per item
  * - Level-based burn chance (linear interpolation)
  * - "Cook All" support with quantity tracking
  * - Fire vs Range burn rates
  * - Movement cancellation
  *
- * @see https://oldschool.runescape.wiki/w/Cooking
+ * @see
  */
 
 import {
@@ -141,7 +141,7 @@ export class CookingSessionManager {
     const now = Date.now();
     const lastRequest = this.rateLimits.get(playerId);
     if (lastRequest && now - lastRequest < getProcessingRateLimitMs()) {
-      return null; // Silently drop (OSRS behavior)
+      return null; // Silently drop (classic MMORPG behavior)
     }
     this.rateLimits.set(playerId, now);
 

@@ -235,13 +235,13 @@ export const UI_CONSTANTS = Object.freeze({
   CHAT_MESSAGE_TIMEOUT: manifest.ui.chatMessageTimeout,
 });
 
-// === OSRS-STYLE CONTEXT MENU COLORS ===
+// === classic MMORPG-STYLE CONTEXT MENU COLORS ===
 export const CONTEXT_MENU_COLORS = Object.freeze({
-  /** Item name color in context menus (OSRS orange) */
+  /** Item name color in context menus (classic MMORPG orange) */
   ITEM: manifest.contextMenuColors.item,
-  /** NPC name color in context menus (OSRS yellow) */
+  /** NPC name color in context menus (classic MMORPG yellow) */
   NPC: manifest.contextMenuColors.npc,
-  /** Object name color in context menus (OSRS cyan) */
+  /** Object name color in context menus (classic MMORPG cyan) */
   OBJECT: manifest.contextMenuColors.object,
   /** Player name color in context menus */
   PLAYER: manifest.contextMenuColors.player,

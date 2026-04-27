@@ -1,15 +1,15 @@
 /**
  * Cooking Calculator Tests
  *
- * Verifies OSRS-accurate cooking calculations:
+ * Verifies tile-based-MMORPG-accurate cooking calculations:
  * - Burn chance formula (linear interpolation)
  * - Stop-burn levels per food type (fire vs range)
  * - XP values per food type
  * - Level requirements
  * - Cooked/burnt item mappings
  *
- * @see https://oldschool.runescape.wiki/w/Cooking
- * @see https://oldschool.runescape.wiki/w/Cooking/Burn_level
+ * @see
+ * @see
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -525,8 +525,8 @@ describe("CookingCalculator", () => {
     });
   });
 
-  describe("OSRS Wiki verification", () => {
-    // These tests verify specific values from the OSRS Wiki
+  describe("classic MMORPG Wiki verification", () => {
+    // These tests verify specific values from the classic MMORPG Wiki
 
     it("raw_shrimp: level 1, 30 XP, stop burn 34 fire / 33 range", () => {
       expect(getCookingLevelRequired("raw_shrimp")).toBe(1);

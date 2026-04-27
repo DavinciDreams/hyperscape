@@ -98,7 +98,7 @@ const FORMULA_EVALUATORS: Record<
     return Math.floor((base * (Math.pow(growth, n) - 1)) / (growth - 1));
   },
   "rs-classic"(level) {
-    // Canonical OSRS XP table — independent of params.
+    // Canonical classic MMORPG XP table — independent of params.
     // xp(L) = floor(Σ(n=1..L-1, floor(n + 300*2^(n/7))) / 4)
     if (level <= 1) return 0;
     let sum = 0;

@@ -55,7 +55,7 @@ export function vegSmoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Constants — tuned for RuneScape-style settlement → wilderness
+// Constants — tuned for tile-based-MMORPG-style settlement → wilderness
 // ---------------------------------------------------------------------------
 
 /** Noise frequency (features ~14m, subtle wobble) */

@@ -17,8 +17,8 @@
  *
  * @see packages/server/world/assets/manifests/items.json for item data
  * @see packages/shared/src/data/ProcessingDataProvider.ts for runtime access
- * @see https://oldschool.runescape.wiki/w/Firemaking
- * @see https://oldschool.runescape.wiki/w/Cooking
+ * @see
+ * @see
  */
 
 import { ProcessingManifestSchema } from "@hyperforge/manifest-schema";
@@ -28,7 +28,7 @@ import processingManifestJson from "./processing-constants.json" with { type: "j
 const manifest = ProcessingManifestSchema.parse(processingManifestJson);
 
 export const PROCESSING_CONSTANTS = Object.freeze({
-  // === Skill-Specific Mechanics (OSRS-accurate) ===
+  // === Skill-Specific Mechanics (tile-based-MMORPG-accurate) ===
   SKILL_MECHANICS: Object.freeze({
     firemaking: Object.freeze({
       type: manifest.skillMechanics.firemaking.type,
@@ -45,7 +45,7 @@ export const PROCESSING_CONSTANTS = Object.freeze({
     }),
   }),
 
-  // === Firemaking Success Rates (OSRS formula) ===
+  // === Firemaking Success Rates (classic MMORPG formula) ===
   FIREMAKING_SUCCESS_RATE: Object.freeze({
     low: manifest.firemakingSuccessRate.low,
     high: manifest.firemakingSuccessRate.high,
@@ -60,7 +60,7 @@ export const PROCESSING_CONSTANTS = Object.freeze({
     interactionRange: manifest.fire.interactionRange,
   }),
 
-  // === Walk-West Movement Priority (OSRS) ===
+  // === Walk-West Movement Priority (classic MMORPG) ===
   FIRE_WALK_PRIORITY: manifest.fireWalkPriority,
 
   // === Timing ===

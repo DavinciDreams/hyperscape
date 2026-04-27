@@ -76,7 +76,7 @@ export class InteractionConfigRegistry {
     return this.interactionDistance[kind];
   }
 
-  /** Whether the player is within interaction range (Chebyshev, OSRS-style). */
+  /** Whether the player is within interaction range (Chebyshev, tile-based-MMORPG-style). */
   isInRange(
     kind: SessionKind,
     player: { x: number; z: number },

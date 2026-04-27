@@ -17,7 +17,7 @@
  * cycle. They are intentionally NOT `Object.freeze`d so the hot-reload
  * path can clear and refill them.
  *
- * @see https://oldschool.runescape.wiki/w/Rune
+ * @see
  */
 
 import {

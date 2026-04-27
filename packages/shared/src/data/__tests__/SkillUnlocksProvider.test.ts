@@ -30,11 +30,11 @@ describe("SkillUnlocksProvider", () => {
   it("loadRaw() accepts $schema + _comment passthrough fields", () => {
     const parsed = skillUnlocksProvider.loadRaw({
       $schema: "hyperforge.skill-unlocks.v1",
-      _comment: "OSRS-style level unlocks",
+      _comment: "tile-based-MMORPG-style level unlocks",
       skills: {},
     });
     expect(parsed.$schema).toBe("hyperforge.skill-unlocks.v1");
-    expect(parsed._comment).toBe("OSRS-style level unlocks");
+    expect(parsed._comment).toBe("tile-based-MMORPG-style level unlocks");
   });
 
   it("loadRaw() accepts skill unlock entries", () => {

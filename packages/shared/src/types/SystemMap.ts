@@ -143,7 +143,7 @@ export interface SystemMap {
 
   // Processing / crafting
   processing: unknown;
-  // The five OSRS skill processing systems are all registered by
+  // The five classic MMORPG skill processing systems are all registered by
   // the @hyperforge/hyperscape plugin onEnable (2026-04-24):
   //   "smelting", "smithing", "crafting", "fletching",
   //   "tanning", "runecrafting"

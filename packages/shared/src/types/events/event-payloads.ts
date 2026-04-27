@@ -97,14 +97,14 @@ export interface CombatFollowTargetPayload {
 }
 
 /**
- * OSRS-accurate: Player clicked to move (not on target), cancel their attacking combat
+ * tile-based-MMORPG-accurate: Player clicked to move (not on target), cancel their attacking combat
  */
 export interface CombatPlayerDisengagePayload {
   playerId: string;
 }
 
 /**
- * OSRS-accurate: Player clicked elsewhere, cancel their pending attack
+ * tile-based-MMORPG-accurate: Player clicked elsewhere, cancel their pending attack
  * (e.g., player was walking to mob to attack, but clicked ground instead)
  */
 export interface PendingAttackCancelPayload {

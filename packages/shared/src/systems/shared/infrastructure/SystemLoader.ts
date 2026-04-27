@@ -410,7 +410,7 @@ export async function registerSystems(world: World): Promise<void> {
   // cross-cutting branch (migrated 2026-04-25).
 
   // 12a. Health regeneration system - Passive health regen (depends on combat system)
-  // Server-only: handles RuneScape-style out-of-combat health regeneration
+  // Server-only: handles tile-based-MMORPG-style out-of-combat health regeneration
   // Note: world.isServer isn't reliable here because ServerNetwork registers later
   // Use Node.js/Bun environment check instead
   const isServerEnvironment =
@@ -442,7 +442,7 @@ export async function registerSystems(world: World): Promise<void> {
   // "processing" registered by @hyperforge/hyperscape plugin onEnable
   // cross-cutting branch (migrated 2026-04-25).
 
-  // (Slots 18a–18f — the six OSRS skill processing systems —
+  // (Slots 18a–18f — the six classic MMORPG skill processing systems —
   //  Smelting / Smithing / Crafting / Fletching / Tanning /
   //  Runecrafting — are all registered by the
   //  @hyperforge/hyperscape plugin onEnable. Migrated 2026-04-24.)

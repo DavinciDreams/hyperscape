@@ -3,12 +3,12 @@
  *
  * Tests for prayer system functionality:
  * - Type guards and input validation
- * - OSRS-accurate drain formula
+ * - tile-based-MMORPG-accurate drain formula
  * - Prayer toggle with conflict resolution
  * - Rate limiting
  * - Bounds checking
  *
- * @see https://oldschool.runescape.wiki/w/Prayer
+ * @see
  */
 
 import { describe, it, expect } from "vitest";
@@ -325,7 +325,7 @@ describe("Prayer Constants", () => {
     expect(MIN_PRAYER_LEVEL).toBe(1);
   });
 
-  it("MAX_PRAYER_LEVEL is 99 (OSRS-accurate)", () => {
+  it("MAX_PRAYER_LEVEL is 99 (tile-based-MMORPG-accurate)", () => {
     expect(MAX_PRAYER_LEVEL).toBe(99);
   });
 
@@ -339,8 +339,8 @@ describe("Prayer Constants", () => {
   });
 });
 
-describe("OSRS Prayer Drain Formula", () => {
-  // OSRS formula: drain_resistance = 2 * prayer_bonus + 60
+describe("classic MMORPG Prayer Drain Formula", () => {
+  // classic MMORPG formula: drain_resistance = 2 * prayer_bonus + 60
   // Points drained per tick = drain_effect / drain_resistance
 
   const BASE_DRAIN_RESISTANCE = 60;

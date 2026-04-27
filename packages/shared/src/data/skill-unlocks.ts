@@ -1,5 +1,5 @@
 /**
- * Skill Unlocks Data - OSRS-style content unlocks per skill level
+ * Skill Unlocks Data - tile-based-MMORPG-style content unlocks per skill level
  *
  * Defines what content is unlocked at each level for display in
  * the level-up notification popup.
@@ -57,7 +57,7 @@ export function loadSkillUnlocks(manifest: SkillUnlocksManifest): void {
   }
 
   // Normalize British/American spelling: "defence" -> "defense"
-  // JSON uses OSRS-accurate British spelling, but UI uses American spelling
+  // JSON uses tile-based-MMORPG-accurate British spelling, but UI uses American spelling
   // Replace the British spelling entirely to keep skill count at 12
   if (loadedUnlocks["defence"] && !loadedUnlocks["defense"]) {
     loadedUnlocks["defense"] = loadedUnlocks["defence"];

@@ -120,7 +120,7 @@ const names = [
   'gatheringComplete',
   'gatheringStarted',  // Server -> Client: gathering session started
   'gatheringStopped',  // Server -> Client: gathering session stopped
-  'gatheringToolShow', // Server -> Client: show gathering tool in hand (OSRS fishing rod)
+  'gatheringToolShow', // Server -> Client: show gathering tool in hand (classic MMORPG fishing rod)
   'gatheringToolHide', // Server -> Client: hide gathering tool from hand
   // Processing packets (firemaking/cooking)
   'firemakingRequest', // Client -> Server: request to light fire (tinderbox + logs)
@@ -164,7 +164,7 @@ const names = [
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack
-  'followPlayer',  // Follow another player (OSRS-style)
+  'followPlayer',  // Follow another player (tile-based-MMORPG-style)
   'changeAttackStyle',
   'setAutoRetaliate',
   'autoRetaliateChanged',
@@ -272,7 +272,7 @@ const names = [
   'dialogueContinue',
   'dialogueEnd',
   'dialogueClose',
-  // Tile movement packets (RuneScape-style)
+  // Tile movement packets (tile-based-MMORPG-style)
   'entityTileUpdate',    // Server -> Client: entity moved to new tile position
   'tileMovementStart',   // Server -> Client: movement path started
   'tileMovementEnd',     // Server -> Client: arrived at destination
@@ -325,7 +325,7 @@ const names = [
   'tradeCompleted',      // Server -> Client: trade successful, items swapped
   'tradeCancelled',      // Server -> Client: trade cancelled (disconnect, decline, etc.)
   'tradeError',          // Server -> Client: trade operation failed with reason
-  'tradeConfirmScreen',  // Server -> Client: move to confirmation screen (OSRS two-screen)
+  'tradeConfirmScreen',  // Server -> Client: move to confirmation screen (classic MMORPG two-screen)
   // Duel Arena packets
   'duel:challenge',        // Client -> Server: challenge player to duel
   'duel:challenge:respond',// Client -> Server: accept/decline duel challenge

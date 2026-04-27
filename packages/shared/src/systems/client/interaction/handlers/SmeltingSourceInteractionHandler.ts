@@ -3,13 +3,13 @@
  *
  * Handles interactions with furnaces for smelting ores into bars.
  *
- * OSRS Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
+ * classic MMORPG Context Menu Format: "<Action> <TargetName>" with cyan target (scenery color)
  * - "Smelt Furnace" (cyan #00ffff for "Furnace")
  * - "Walk here"
  * - "Examine Furnace" (cyan #00ffff for "Furnace")
  *
- * @see https://oldschool.runescape.wiki/w/Choose_Option for OSRS menu format
- * @see https://oldschool.runescape.wiki/w/Furnace for furnace info
+ * @see  for classic MMORPG menu format
+ * @see  for furnace info
  */
 
 import { BaseInteractionHandler } from "./BaseInteractionHandler";
@@ -17,7 +17,7 @@ import type { RaycastTarget, ContextMenuAction } from "../types";
 import { INTERACTION_RANGE } from "../constants";
 import { EventType } from "../../../../types/events/event-types";
 
-/** OSRS scenery/object color (cyan) for context menu target names */
+/** classic MMORPG scenery/object color (cyan) for context menu target names */
 const SCENERY_COLOR = "#00ffff";
 
 /**
@@ -48,7 +48,7 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
   /**
    * Right-click: Show Smelt action and other options
    *
-   * OSRS-accurate format:
+   * tile-based-MMORPG-accurate format:
    * - "Smelt Furnace" (action white, target cyan)
    * - "Walk here"
    * - "Examine Furnace" (action white, target cyan)
@@ -57,7 +57,7 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
     const actions: ContextMenuAction[] = [];
     const targetName = target.name || "Furnace";
 
-    // Smelt action (primary) - OSRS: "Smelt Furnace"
+    // Smelt action (primary) - classic MMORPG: "Smelt Furnace"
     actions.push({
       id: "smelt",
       label: `Smelt ${targetName}`,
@@ -100,7 +100,7 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
-    // Examine - OSRS: "Examine Furnace"
+    // Examine - classic MMORPG: "Examine Furnace"
     actions.push({
       id: "examine",
       label: `Examine ${targetName}`,

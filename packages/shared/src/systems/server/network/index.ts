@@ -754,7 +754,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // `world.tileMovement` so plugin-side game managers can resolve
     // it via lookup at register-time.
 
-    // Action queue for OSRS-style input processing
+    // Action queue for tile-based-MMORPG-style input processing
     this.actionQueue = new ActionQueue();
 
     // Set up action queue handlers - these execute the actual game logic
@@ -878,11 +878,11 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // MobTileMovementManager — migrated to @hyperforge/hyperscape
     // (Phase E2, 2026-04-26). Plugin onEnable owns construction.
 
-    // OSRS-ACCURATE: Process mob AI BEFORE mob movement each tick
+    // tile-based-MMORPG-accurate: Process mob AI BEFORE mob movement each tick
     // AI state machine (IDLE → WANDER → CHASE → ATTACK → RETURN) decides movement targets,
     // then mob tile movement executes the path on the same tick.
     // Without this, mobs stand idle forever because MobEntity.serverUpdate() defers
-    // AI ticking to the tick system for deterministic OSRS ordering.
+    // AI ticking to the tick system for deterministic classic MMORPG ordering.
     const MOB_AI_DELTA_SECONDS = TICK_DURATION_MS / 1000;
 
     // Use type-indexed entity lookup instead of iterating all 221+ entities
@@ -1033,7 +1033,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // 2026-04-26). Plugin onEnable owns construction.
 
     // Register follow processing (same priority as movement)
-    // Pass tick number for OSRS-accurate 1-tick delay tracking
+    // Pass tick number for tile-based-MMORPG-accurate 1-tick delay tracking
     this.tickSystem.onTick(
       (tickNumber) => {
         (
@@ -1280,7 +1280,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register combat system to process on each tick (after movement, before AI)
-    // This is OSRS-accurate: combat runs on the game tick, not per-frame
+    // This is tile-based-MMORPG-accurate: combat runs on the game tick, not per-frame
     this.tickSystem.onTick(
       (tickNumber) => {
         const t0 = Date.now();
@@ -1297,7 +1297,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register death system to process on each tick (after combat)
-    // Handles gravestone expiration and ground item despawn (OSRS-accurate tick-based timing)
+    // Handles gravestone expiration and ground item despawn (tile-based-MMORPG-accurate tick-based timing)
     this.tickSystem.onTick(
       (tickNumber) => {
         const playerDeathSystem = this.world.getSystem(
@@ -1315,7 +1315,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register loot system to process on each tick (after combat)
-    // Handles mob corpse despawn (OSRS-accurate tick-based timing)
+    // Handles mob corpse despawn (tile-based-MMORPG-accurate tick-based timing)
     this.tickSystem.onTick(
       (tickNumber) => {
         const lootSystem = this.world.getSystem("loot") as unknown as
@@ -1330,7 +1330,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     );
 
     // Register resource gathering system to process on each tick (after combat)
-    // OSRS-accurate: Woodcutting attempts every 4 ticks (2.4 seconds)
+    // tile-based-MMORPG-accurate: Woodcutting attempts every 4 ticks (2.4 seconds)
     this.tickSystem.onTick(
       (tickNumber) => {
         // ResourceSystem migrated. Duck-typed inline — only
@@ -1665,12 +1665,12 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     });
 
     // Combat follow: When player is in combat but out of range, move toward target
-    // OSRS-style: "if the clicked entity is an NPC or player, a new pathfinding attempt
+    // tile-based-MMORPG-style: "if the clicked entity is an NPC or player, a new pathfinding attempt
     // will be started every tick, until a target tile can be found"
     this.onWorld(EventType.COMBAT_FOLLOW_TARGET, (event) => {
       const followEvent =
         event as EventMap[typeof EventType.COMBAT_FOLLOW_TARGET];
-      // Use OSRS-style pathfinding with appropriate range and type
+      // Use tile-based-MMORPG-style pathfinding with appropriate range and type
       // MELEE: Cardinal-only for range 1, RANGED/MAGIC: Chebyshev distance
       (
         this.world as { tileMovement?: TileMovementManager }
@@ -1683,7 +1683,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
     });
 
-    // OSRS-accurate: Cancel pending attack when player clicks elsewhere
+    // tile-based-MMORPG-accurate: Cancel pending attack when player clicks elsewhere
     this.onWorld(EventType.PENDING_ATTACK_CANCEL, (event) => {
       const { playerId } =
         event as EventMap[typeof EventType.PENDING_ATTACK_CANCEL];
@@ -1692,7 +1692,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       ).pendingAttackManager?.cancelPendingAttack(playerId);
     });
 
-    // OSRS-accurate: Move player to adjacent tile after lighting fire
+    // tile-based-MMORPG-accurate: Move player to adjacent tile after lighting fire
     // Priority: West → East → South → North (handled by ProcessingSystem)
     // Uses proper tile movement for smooth walking animation (not teleport)
     this.onWorld(EventType.FIREMAKING_MOVE_REQUEST, (event) => {
@@ -1710,7 +1710,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         return;
       }
 
-      // OSRS-accurate: Use tile movement system for smooth walking animation
+      // tile-based-MMORPG-accurate: Use tile movement system for smooth walking animation
       // Walking (not running) to adjacent tile, meleeRange=0 means go directly to tile
       // This sends tileMovementStart packet for smooth client interpolation
       (
@@ -1718,7 +1718,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       ).tileMovement?.movePlayerToward(
         playerId,
         position,
-        false, // OSRS firemaking step is a walk, not a run
+        false, // classic MMORPG firemaking step is a walk, not a run
         0, // meleeRange=0 = non-combat, go directly to the tile
       );
     });
@@ -1871,7 +1871,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // advances on the 600ms tick schedule via onTick(). This matches the documented
     // 30 Hz client input rate and removes the 0–600ms ActionQueue delay.
     this.handlers["onMoveRequest"] = (socket, data) => {
-      // Cancel any pending actions when player moves elsewhere (OSRS behavior)
+      // Cancel any pending actions when player moves elsewhere (classic MMORPG behavior)
       if (socket.player) {
         this.cancelAllPendingActions(socket.player.id, socket);
       }
@@ -1884,7 +1884,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       // Legacy input handler - convert clicks to immediate move request
       const payload = data as LegacyInputPayload;
       if (payload.type === "click" && Array.isArray(payload.target)) {
-        // Cancel any pending actions when player moves elsewhere (OSRS behavior)
+        // Cancel any pending actions when player moves elsewhere (classic MMORPG behavior)
         if (socket.player) {
           this.cancelAllPendingActions(socket.player.id, socket);
         }
@@ -1898,7 +1898,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     };
 
     // Combat - server-authoritative "walk to and attack" system
-    // OSRS-style: If in attack range, start combat immediately; otherwise queue pending attack
+    // tile-based-MMORPG-style: If in attack range, start combat immediately; otherwise queue pending attack
     // Melee range is CARDINAL ONLY for range 1, ranged/magic use Chebyshev distance
     this.handlers["onAttackMob"] = (socket, data) => {
       const playerEntity = socket.player;
@@ -2029,7 +2029,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         });
         this.actionQueue.queueCombat(socket, data);
       } else {
-        // Not in range - queue pending attack (server handles OSRS-style pathfinding)
+        // Not in range - queue pending attack (server handles tile-based-MMORPG-style pathfinding)
         traceAttackMob("action:queue_pending_attack", {
           playerId: playerEntity.id,
           targetId,
@@ -2155,7 +2155,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       }
     };
 
-    // Follow another player (OSRS-style) migrated to @hyperforge/hyperscape
+    // Follow another player (tile-based-MMORPG-style) migrated to @hyperforge/hyperscape
     // (Phase F3 batch-2, 2026-04-26). Plugin onEnable registers
     // `onFollowPlayer` via `world.connectionRegistry`; pre-handler logic
     // (cancelPendingAttack) is inlined plugin-side.
@@ -2576,7 +2576,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // Setup event bridge (world events → network messages)
     this.eventBridge.setupEventListeners();
 
-    // Start tick system (600ms RuneScape-style ticks)
+    // Start tick system (600ms tile-based-MMORPG-style ticks)
     this.tickSystem.start();
     console.log(
       "[ServerNetwork] Tick system started (600ms ticks) with action queue",
@@ -3214,7 +3214,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       if (equipment?.weapon?.item) {
         const weaponItem = equipment.weapon.item;
 
-        // OSRS-accurate: Magic weapons (staffs/wands) without autocast
+        // tile-based-MMORPG-accurate: Magic weapons (staffs/wands) without autocast
         // default to melee range (1 tile bonk). The selectedSpell check above
         // already returns 10 for magic range when a spell is selected.
         const isMagicWeapon =
@@ -3249,7 +3249,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
    * Get the attack type from the player's equipped weapon or selected spell
    * Returns AttackType.MELEE if no weapon or melee weapon equipped and no spell selected
    *
-   * OSRS-accurate: You can cast spells without a staff - the staff just provides
+   * tile-based-MMORPG-accurate: You can cast spells without a staff - the staff just provides
    * magic attack bonus and elemental staves give infinite runes
    */
   getPlayerAttackType(playerId: string): AttackType {
@@ -3283,7 +3283,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
         // Check explicit attackType first
         if (weaponItem.attackType) {
-          // OSRS-accurate: Magic weapons (staffs/wands) without autocast use
+          // tile-based-MMORPG-accurate: Magic weapons (staffs/wands) without autocast use
           // melee crush attack (bonk). The selectedSpell check above already
           // returns MAGIC when a spell is selected.
           const isMagicAttackType =
@@ -3299,7 +3299,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         if (weaponItem.weaponType === WeaponType.BOW) {
           return AttackType.RANGED;
         }
-        // OSRS-accurate: Staffs/wands without autocast use melee (crush bonk)
+        // tile-based-MMORPG-accurate: Staffs/wands without autocast use melee (crush bonk)
         // The selectedSpell check above already handles the autocast case
         if (
           weaponItem.weaponType === WeaponType.STAFF ||

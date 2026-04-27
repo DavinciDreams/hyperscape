@@ -172,7 +172,7 @@ export interface AggroTarget {
 // ============== DROP SYSTEM ==============
 
 /**
- * RuneScape-style Drop Rarity Tiers
+ * tile-based-MMORPG-style Drop Rarity Tiers
  */
 export type DropRarity =
   | "always"
@@ -182,7 +182,7 @@ export type DropRarity =
   | "very_rare";
 
 /**
- * Drop Table Entry - RuneScape-style loot system
+ * Drop Table Entry - tile-based-MMORPG-style loot system
  */
 export interface DropTableEntry {
   itemId: string;
@@ -257,12 +257,12 @@ export interface NPCDataInput {
 
 /**
  * NPC Stats - Unified across all NPCs
- * Note: In OSRS, monster "hitpoints" IS the max HP directly (no multiplication).
+ * Note: In classic MMORPG, monster "hitpoints" IS the max HP directly (no multiplication).
  * The `health` field is the hitpoints level AND max HP (1:1 ratio).
  */
 export interface NPCStats {
   level: number;
-  health: number; // This IS the hitpoints level AND max HP (OSRS style)
+  health: number; // This IS the hitpoints level AND max HP (classic MMORPG style)
   attack: number;
   strength: number;
   defense: number;
@@ -304,7 +304,7 @@ export interface NPCMovementConfig {
 }
 
 /**
- * NPC Drops - RuneScape-style tiered drop system
+ * NPC Drops - tile-based-MMORPG-style tiered drop system
  * ALL NPCs drop something (at minimum, bones/ashes)
  */
 export interface NPCDrops {
@@ -409,7 +409,7 @@ export interface NPCAppearanceConfig {
  * - All NPCs drop something (minimum: bones/ashes)
  * - All NPCs have stats (even if passive)
  * - All NPCs can move (flag to disable)
- * - Flexible drop system with RuneScape-style rarity tiers
+ * - Flexible drop system with tile-based-MMORPG-style rarity tiers
  */
 export interface NPCData {
   // ========== CORE IDENTITY ==========
@@ -613,7 +613,7 @@ export interface MobSpawnConfig {
   type: string; // Mob ID from mobs.json
   name: string;
   level: number;
-  health: number; // OSRS: hitpoints = max HP directly
+  health: number; // classic MMORPG: hitpoints = max HP directly
   description?: string;
   levelRange?: LevelRange;
   difficultyLevel?: 1 | 2 | 3;
