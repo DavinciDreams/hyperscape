@@ -197,6 +197,7 @@ import { minimapCompassRegistration } from "./widgets/MinimapCompassWidget.js";
 import { actionProgressBarRegistration } from "./widgets/ActionProgressBarWidget.js";
 import { homeTeleportButtonRegistration } from "./widgets/HomeTeleportButtonWidget.js";
 import { minimapHomeTeleportOrbRegistration } from "./widgets/MinimapHomeTeleportOrbWidget.js";
+import { skillSelectModalRegistration } from "./widgets/SkillSelectModalWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -308,6 +309,15 @@ export {
   type MinimapHomeTeleportOrbProps,
   type MinimapHomeTeleportOrbRuntimeProps,
 } from "./widgets/MinimapHomeTeleportOrbWidget.js";
+export {
+  skillSelectModalWidget,
+  skillSelectModalRegistration,
+  SkillSelectModal,
+  DEFAULT_SKILL_CATALOG,
+  type SkillCatalogEntry,
+  type SkillSelectModalProps,
+  type SkillSelectModalRuntimeProps,
+} from "./widgets/SkillSelectModalWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -703,6 +713,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(actionProgressBarRegistration);
         ctx.widgets.register(homeTeleportButtonRegistration);
         ctx.widgets.register(minimapHomeTeleportOrbRegistration);
+        ctx.widgets.register(skillSelectModalRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
