@@ -74,6 +74,7 @@ import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatEventRecorder } from "./CombatEventRecorder";
 import { CombatFollowController } from "./CombatFollowController";
 import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
+import { CombatMagicAttackHandler } from "./CombatMagicAttackHandler";
 import { CombatMeleeAttackHandler } from "./CombatMeleeAttackHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatProjectileHitProcessor } from "./CombatProjectileHitProcessor";
@@ -258,6 +259,10 @@ export class CombatSystem extends SystemBase {
   // Inbound entry for ranged attacks extracted as the fifteenth
   // slice. Wraps handleRangedAttack (mob + player branches).
   private readonly rangedAttackHandler: CombatRangedAttackHandler;
+
+  // Inbound entry for magic attacks extracted as the sixteenth
+  // slice. Wraps handleMagicAttack (mob + player branches).
+  private readonly magicAttackHandler: CombatMagicAttackHandler;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -530,6 +535,31 @@ export class CombatSystem extends SystemBase {
       this._targetTile,
       (type, payload) => this.emitTypedEvent(type, payload),
       () => this.playerSystem,
+    );
+
+    // Magic attack handler (slice 16). Inbound entry — mob + player
+    // branches. Closure for late-bound inventorySystem (used in a
+    // diagnostic warning only; rune consumption goes through
+    // playerQueries which has its own inventorySystem closure).
+    this.magicAttackHandler = new CombatMagicAttackHandler(
+      world,
+      this.entityIdValidator,
+      this.antiCheat,
+      this.rateLimiter,
+      this.attackValidator,
+      this.entityResolver,
+      this.rotationManager,
+      this.animationManager,
+      this.damageOrchestrator,
+      this.eventEmitter,
+      this.playerQueries,
+      this.projectileService,
+      this.enterLifecycleHandler,
+      this.nextAttackTicks,
+      this._attackerTile,
+      this._targetTile,
+      (type, payload) => this.emitTypedEvent(type, payload),
+      () => this.inventorySystem,
     );
   }
 
@@ -813,6 +843,10 @@ export class CombatSystem extends SystemBase {
     this.rangedAttackHandler.handleRangedAttack(data);
   }
 
+  // handleMagicAttack moved to ./CombatMagicAttackHandler (slice 16).
+  // Call sites delegate via this.magicAttackHandler.handleMagicAttack(data).
+
+  /** Thin proxy — delegates to CombatMagicAttackHandler. */
   private async handleMagicAttack(data: {
     attackerId: string;
     targetId: string;
@@ -820,416 +854,8 @@ export class CombatSystem extends SystemBase {
     targetType: "player" | "mob";
     spellId?: string;
   }): Promise<void> {
-    const { attackerId, targetId, attackerType, targetType } = data;
-    const currentTick = this.world.currentTick ?? 0;
-
-    // Mobs can launch magic projectiles when configured with spellId.
-    if (attackerType === "mob") {
-      const attacker = this.entityResolver.resolve(attackerId, attackerType);
-      const target = this.entityResolver.resolve(targetId, targetType);
-      if (!attacker || !target || !isMobEntity(attacker)) return;
-
-      if (
-        !this.entityResolver.isAlive(attacker, attackerType) ||
-        !this.entityResolver.isAlive(target, targetType)
-      ) {
-        return;
-      }
-
-      const mobData = attacker.getMobData();
-      const npcData = getNPCById(mobData.type);
-      if (!npcData) return;
-
-      const spellId = data.spellId ?? npcData.combat.spellId;
-      if (!spellId) {
-        console.warn(
-          `[MagicAttackHandler] Mob ${attackerId} (${mobData.type}) has no spellId configured, skipping attack`,
-        );
-        return;
-      }
-
-      const spell = spellService.getSpell(spellId);
-      if (!spell) return;
-
-      const attackRange = Math.max(
-        1,
-        Math.floor(npcData.combat.combatRange ?? getDefaultMagicRange()),
-      );
-      const attackerPos = getEntityPosition(attacker);
-      const targetPos = getEntityPosition(target);
-      if (!attackerPos || !targetPos) return;
-
-      tilePool.setFromPosition(this._attackerTile, attackerPos);
-      tilePool.setFromPosition(this._targetTile, targetPos);
-      const distance = tileChebyshevDistance(
-        this._attackerTile,
-        this._targetTile,
-      );
-      if (distance > attackRange || distance === 0) {
-        this.eventEmitter.emitAttackFailed(
-          attackerId,
-          targetId,
-          "out_of_range",
-        );
-        return;
-      }
-
-      const typedAttackerId = createEntityID(attackerId);
-      if (
-        !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
-      ) {
-        return;
-      }
-
-      const attackSpeedTicks = Math.max(
-        1,
-        npcData.combat.attackSpeedTicks ?? spell.attackSpeed,
-      );
-
-      this.rotationManager.rotateTowardsTarget(
-        attackerId,
-        targetId,
-        attackerType,
-        targetType,
-      );
-      this.animationManager.setCombatEmote(
-        attackerId,
-        attackerType,
-        currentTick,
-        attackSpeedTicks,
-        "magic",
-      );
-
-      const damage = this.damageOrchestrator.calculateMobMagicDamageForAttack(
-        target,
-        targetType,
-        npcData.stats.magic ?? 1,
-        spell,
-      );
-
-      const projectileParams: CreateProjectileParams = {
-        sourceId: attackerId,
-        targetId,
-        attackType: AttackType.MAGIC,
-        damage,
-        currentTick,
-        sourcePosition: { x: attackerPos.x, z: attackerPos.z },
-        targetPosition: { x: targetPos.x, z: targetPos.z },
-        spellId: spell.id,
-        xpReward: 0,
-      };
-
-      this.projectileService.createProjectile(projectileParams);
-
-      const HIT_DELAY = getHitDelayConfig();
-      const TICK_DURATION_MS = getTickDurationMs();
-      const magicHitDelayTicks = Math.min(
-        HIT_DELAY.MAX_HIT_DELAY,
-        HIT_DELAY.MAGIC_BASE +
-          Math.floor(
-            (HIT_DELAY.MAGIC_DISTANCE_OFFSET + distance) /
-              HIT_DELAY.MAGIC_DISTANCE_DIVISOR,
-          ),
-      );
-      const spellLaunchDelayMs = getSpellLaunchDelayMs();
-      const travelDurationMs = Math.max(
-        200,
-        magicHitDelayTicks * TICK_DURATION_MS - spellLaunchDelayMs,
-      );
-
-      this.eventEmitter.emitProjectileLaunched(
-        attackerId,
-        targetId,
-        spell.element,
-        attackerPos,
-        targetPos,
-        spell.id,
-        undefined,
-        spellLaunchDelayMs,
-        travelDurationMs,
-      );
-
-      const typedTargetId = createEntityID(targetId);
-      this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-      this.enterLifecycleHandler.enterCombat(
-        typedAttackerId,
-        typedTargetId,
-        attackSpeedTicks,
-        AttackType.MAGIC,
-      );
-      return;
-    }
-
-    // Detect streaming duel agents for diagnostic logging
-    const attackerEntity = this.world.entities.get(attackerId);
-    const isStreamingDuel =
-      (attackerEntity as { data?: { inStreamingDuel?: boolean } })?.data
-        ?.inStreamingDuel === true;
-
-    // Validate entity IDs
-    if (
-      !this.entityIdValidator.isValid(attackerId) ||
-      !this.entityIdValidator.isValid(targetId)
-    ) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Entity ID validation failed for ${attackerId} → ${targetId}`,
-        );
-      }
-      return;
-    }
-
-    // Rate limiting
-    const rateResult = this.rateLimiter.checkLimit(attackerId, currentTick);
-    if (!rateResult.allowed) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Rate limited: ${attackerId} (reason=${rateResult.reason ?? "unknown"})`,
-        );
-      }
-      return;
-    }
-    this.antiCheat.trackAttack(attackerId, currentTick);
-
-    // Get entities
-    const attacker = this.entityResolver.resolve(attackerId, attackerType);
-    const target = this.entityResolver.resolve(targetId, targetType);
-    if (!attacker || !target) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Entity resolve failed: attacker=${!!attacker} target=${!!target}`,
-        );
-      }
-      return;
-    }
-
-    // Check both are alive
-    if (
-      !this.entityResolver.isAlive(attacker, attackerType) ||
-      !this.entityResolver.isAlive(target, targetType)
-    ) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Alive check failed: attacker=${this.entityResolver.isAlive(attacker, attackerType)} target=${this.entityResolver.isAlive(target, targetType)}`,
-        );
-      }
-      return;
-    }
-
-    // Get selected spell from player data
-    const selectedSpellId =
-      this.playerQueries.getPlayerSelectedSpell(attackerId);
-    const magicLevel = this.playerQueries.getPlayerSkillLevel(
-      attackerId,
-      "magic",
-    );
-
-    if (isStreamingDuel && !selectedSpellId) {
-      // Extra diagnostics: check entity.data directly
-      const entityData = attackerEntity?.data as {
-        selectedSpell?: string;
-      } | null;
-      const worldPlayer = this.world.getPlayer?.(attackerId);
-      console.warn(
-        `[MagicAttack:Duel] selectedSpell NULL for ${attackerId}! ` +
-          `entity.data.selectedSpell=${entityData?.selectedSpell ?? "undefined"} ` +
-          `worldPlayer.data.selectedSpell=${(worldPlayer?.data as { selectedSpell?: string } | null)?.selectedSpell ?? "undefined"} ` +
-          `worldPlayer exists=${!!worldPlayer}`,
-      );
-    }
-
-    // Validate spell can be cast
-    const spellValidation = spellService.canCastSpell(
-      selectedSpellId,
-      magicLevel,
-    );
-    if (!spellValidation.valid) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Spell validation failed: spell=${selectedSpellId} level=${magicLevel} error=${spellValidation.error}`,
-        );
-      }
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: attackerId,
-        message: spellValidation.error ?? "You cannot cast this spell.",
-        type: "error",
-      });
-      return;
-    }
-
-    const spell = spellService.getSpell(selectedSpellId!);
-    if (!spell) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Spell lookup failed: ${selectedSpellId}`,
-        );
-      }
-      return;
-    }
-
-    // Validate runes in inventory
-    const weapon = this.damageOrchestrator.getEquippedWeapon(attackerId);
-    const inventory = this.playerQueries.getPlayerInventoryItems(attackerId);
-
-    if (isStreamingDuel && inventory.length === 0) {
-      console.warn(
-        `[MagicAttack:Duel] Empty inventory for ${attackerId}! inventorySystem=${!!this.inventorySystem}`,
-      );
-    }
-
-    const runeValidation = runeService.hasRequiredRunes(
-      inventory,
-      spell.runes,
-      weapon,
-    );
-    if (!runeValidation.valid) {
-      if (isStreamingDuel) {
-        // Streaming duel agents bypass rune validation — inventory-based rune
-        // addition is unreliable for bot agents (race conditions, manifest
-        // loading timing). The staff provides infinite elemental runes; only
-        // catalytic runes (mind/chaos) would fail. Since these are AI bots
-        // with no real economy, let the attack proceed.
-        console.warn(
-          `[MagicAttack:Duel] Rune validation bypassed for ${attackerId} ` +
-            `(${runeValidation.error}) weapon=${weapon?.id ?? "none"} spell=${spell.id}`,
-        );
-      } else {
-        this.emitTypedEvent(EventType.UI_MESSAGE, {
-          playerId: attackerId,
-          message: runeValidation.error ?? "You don't have enough runes.",
-          type: "error",
-        });
-        return;
-      }
-    }
-
-    // Check magic attack range (spells have fixed range, typically 10 tiles)
-    const attackRange = 10;
-    const attackerPos = getEntityPosition(attacker);
-    const targetPos = getEntityPosition(target);
-    if (!attackerPos || !targetPos) return;
-
-    tilePool.setFromPosition(this._attackerTile, attackerPos);
-    tilePool.setFromPosition(this._targetTile, targetPos);
-    const distance = tileChebyshevDistance(
-      this._attackerTile,
-      this._targetTile,
-    );
-
-    if (distance > attackRange || distance === 0) {
-      if (isStreamingDuel) {
-        console.warn(
-          `[MagicAttack:Duel] Range check failed: distance=${distance} range=${attackRange}`,
-        );
-      }
-      this.eventEmitter.emitAttackFailed(attackerId, targetId, "out_of_range");
-      return;
-    }
-
-    // Check cooldown
-    const typedAttackerId = createEntityID(attackerId);
-    if (
-      !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
-    ) {
-      return;
-    }
-
-    // Get attack speed from spell (clamp to minimum 1 tick)
-    const attackSpeedTicks = Math.max(1, spell.attackSpeed);
-
-    // Claim cooldown slot IMMEDIATELY to prevent async race condition.
-    // consumeRunesForSpell is async, so two concurrent invocations (event
-    // handler + tick auto-attack) can both pass checkAttackCooldown before
-    // either sets the cooldown, resulting in duplicate projectiles.
-    this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-
-    // Enter combat state synchronously so auto-attack tick gating works
-    const typedTargetId = createEntityID(targetId);
-    this.enterLifecycleHandler.enterCombat(
-      typedAttackerId,
-      typedTargetId,
-      attackSpeedTicks,
-      AttackType.MAGIC,
-    );
-
-    // Face target
-    this.rotationManager.rotateTowardsTarget(
-      attackerId,
-      targetId,
-      attackerType,
-      targetType,
-    );
-
-    // Play attack animation
-    this.animationManager.setCombatEmote(
-      attackerId,
-      attackerType,
-      currentTick,
-      attackSpeedTicks,
-    );
-
-    // Calculate damage
-    const damage = this.damageOrchestrator.calculateMagicDamageForAttack(
-      attacker,
-      target,
-      attackerId,
-      targetType,
-      spell,
-    );
-
-    // Consume runes for real players; skip for streaming duel agents (they
-    // bypass rune validation above, so consumption would fail or be a no-op)
-    if (!isStreamingDuel) {
-      try {
-        await this.playerQueries.consumeRunesForSpell(
-          attackerId,
-          spell,
-          weapon,
-        );
-      } catch (err) {
-        console.warn(
-          `[MagicAttack] consumeRunesForSpell failed for ${attackerId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
-    // Create projectile with delayed hit
-    const projectileParams: CreateProjectileParams = {
-      sourceId: attackerId,
-      targetId,
-      attackType: AttackType.MAGIC,
-      damage,
-      currentTick,
-      sourcePosition: { x: attackerPos.x, z: attackerPos.z },
-      targetPosition: { x: targetPos.x, z: targetPos.z },
-      spellId: spell.id,
-      xpReward: spell.baseXp,
-    };
-
-    this.projectileService.createProjectile(projectileParams);
-
-    // Emit projectile created event for client visuals
-    // Delay projectile spawn to sync with casting animation (roughly halfway through)
-    this.eventEmitter.emitProjectileLaunched(
-      attackerId,
-      targetId,
-      spell.element,
-      attackerPos,
-      targetPos,
-      spell.id,
-      undefined,
-      800, // Delay to match casting animation
-    );
+    await this.magicAttackHandler.handleMagicAttack(data);
   }
-
-  /**
-   * Get player skill level
-   */
-  // Player query helpers (skill level, selected spell, inventory
-  // items, rune consumption) live in CombatPlayerQueries — see field
-  // declaration above. All `this.getPlayerFoo(...)` and
-  // `this.playerQueries.consumeRunesForSpell(...)` callsites delegate via
-  // `this.playerQueries`.
 
   private handleMobAttack(data: {
     mobId: string;
