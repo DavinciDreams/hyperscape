@@ -50,10 +50,14 @@ export class UnknownStoreItemError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type StoresReloadListener = () => void;
+
 export class StoresRegistry {
   private _manifest: StoresManifest | null = null;
   private _byId = new Map<string, Store>();
   private _itemsByStore = new Map<string, Map<string, StoreItem>>();
+  private _reloadListeners = new Set<StoresReloadListener>();
 
   constructor(manifest?: StoresManifest) {
     if (manifest) this.load(manifest);
@@ -69,10 +73,37 @@ export class StoresRegistry {
       for (const it of s.items) m.set(it.id, it);
       this._itemsByStore.set(s.id, m);
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(StoresManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: StoresReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[storesRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

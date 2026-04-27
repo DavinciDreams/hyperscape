@@ -35,9 +35,13 @@ export class UnknownPluginIdError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ProjectSettingsReloadListener = () => void;
+
 export class ProjectSettingsRegistry {
   private _manifest: ProjectSettingsManifest | null = null;
   private _pluginById = new Map<string, EnabledPlugin>();
+  private _reloadListeners = new Set<ProjectSettingsReloadListener>();
 
   constructor(manifest?: ProjectSettingsManifest) {
     if (manifest) this.load(manifest);
@@ -47,10 +51,37 @@ export class ProjectSettingsRegistry {
     this._manifest = manifest;
     this._pluginById.clear();
     for (const p of manifest.plugins) this._pluginById.set(p.id, p);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ProjectSettingsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ProjectSettingsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[projectSettingsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

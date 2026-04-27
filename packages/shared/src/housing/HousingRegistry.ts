@@ -84,9 +84,13 @@ const TIER_ORDER: HousingPermissionTier[] = [
   "owner",
 ];
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type HousingReloadListener = () => void;
+
 export class HousingRegistry {
   private _manifest: HousingManifest | null = null;
   private _byId = new Map<string, HousingPlotType>();
+  private _reloadListeners = new Set<HousingReloadListener>();
 
   constructor(manifest?: HousingManifest) {
     if (manifest) this.load(manifest);
@@ -96,10 +100,37 @@ export class HousingRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const p of manifest.plotTypes) this._byId.set(p.id, p);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(HousingManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: HousingReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[housingRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
