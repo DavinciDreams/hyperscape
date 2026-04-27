@@ -335,7 +335,7 @@ export interface NPCServicesConfig {
 
 /**
  * NPC Dialogue Response - A single response option in a dialogue node
- * Note: Uses string-based conditions/effects for JSON serialization (vs function-based DialogueOption)
+ * Note: Uses string-based conditions/effects for JSON serialization.
  */
 export interface NPCDialogueResponse {
   text: string; // Display text for this response option
@@ -345,8 +345,11 @@ export interface NPCDialogueResponse {
 }
 
 /**
- * NPC Dialogue Node - A single node in a dialogue tree
- * Note: Data-only for JSON serialization (vs function-based DialogueNode in animation-dialogue-types)
+ * NPC Dialogue Node - A single node in a dialogue tree.
+ * Data-only (JSON-serializable). The runtime DialogueRunner /
+ * DialogueRegistry use schema-derived types from
+ * `@hyperforge/manifest-schema` for tree authoring; this interface
+ * is the on-disk shape attached to NPC entity data.
  */
 export interface NPCDialogueNode {
   id: string; // Unique identifier for this node

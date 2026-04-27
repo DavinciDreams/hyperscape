@@ -17,7 +17,6 @@
  * - inventory-types.ts - Inventory, equipment, banking, stores, and item management
  * - resource-processing-types.ts - Resources, fires, processing actions, death/respawn
  * - interaction-types.ts - Interaction system, interactable entities, tooltips, and damage numbers
- * - animation-dialogue-types.ts - Dialogue system (AnimationTask is in combat-types.ts)
  * - spawning-types.ts - Spawn points, respawn tasks, and spawner system
  * - system-types.ts - System configuration and system-specific interfaces
  *
@@ -37,7 +36,6 @@ export * from "../entities/npc-mob-types";
 export * from "../game/inventory-types";
 export * from "../game/resource-processing-types";
 export * from "../game/interaction-types";
-export * from "../game/animation-dialogue-types";
 export * from "../game/spawning-types";
 export * from "../systems/system-types";
 

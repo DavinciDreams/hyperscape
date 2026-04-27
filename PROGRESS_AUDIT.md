@@ -268,10 +268,10 @@ resolved. The new list reorders:
 
 | # | Item | Phase | Effort | Why now |
 |---|---|---|---|---|
-| 1 | **Wire plugin system into server/client startup** | post-I | S | No-op behavior change; turns this session's structural separation into runtime separation |
+| ~~1~~ | ~~**Wire plugin system into server/client startup**~~ | ~~post-I~~ | ~~S~~ | **DONE (audit re-verification 2026-04-27 evening)** — server `bootServerPlugins` + client `bootClientPlugins` both invoke `startPluginSessionFromModules` in production boot. Hyperscape meta-plugin's `onEnable` registers entity types + widgets + systems on the host world. 8/8 server plugin-boot tests green. |
 | ~~2~~ | ~~**Game-data JSON extraction**~~ | ~~A~~ | ~~M~~ | **RESOLVED 2026-04-26 evening** — re-audit found all data/*.ts and constants/*.ts files already façaded |
-| 3 | **Plugin Browser UI** (consumes 7 routes + 107 types already shipped) | I5 | M | Closes Phase I |
-| 4 | **D7 plugin widget contribution + D6.c.1 (XP orb)** as one PR | D | S | Establishes the per-widget migration pattern |
+| ~~3~~ | ~~**Plugin Browser UI**~~ | ~~I5~~ | ~~M~~ | **DONE** — `PluginBrowserPanel.tsx` (666 lines) ships Browse + Installed tabs with `useSyncExternalStore` over the installed-plugins store, install button, sha-verified content download. |
+| ~~4~~ | ~~**D7 plugin widget contribution + D6.c.1 (XP orb)**~~ | ~~D~~ | ~~S~~ | **DONE** — `XPOrbWidget.tsx` + `LevelUpToastWidget.tsx` ship from `@hyperforge/hyperscape-plugin/src/widgets/`, registered via `ctx.widgets?.register(...)` in plugin onEnable. Both widgets unit-tested. Pattern established. |
 | 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | 7 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | Closes UI framework story |

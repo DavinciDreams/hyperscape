@@ -69,8 +69,6 @@ export type {
   BankEntityData,
   CombatBonuses,
   CombatTarget,
-  DialogueNode,
-  DialogueSession,
   EquipmentComponent,
   EquipmentSlot,
   InteractionAction,
@@ -104,7 +102,6 @@ export * from "./entities/npc-mob-types";
 export * from "./game/inventory-types";
 export * from "./game/resource-processing-types";
 export * from "./game/interaction-types";
-export * from "./game/animation-dialogue-types";
 export * from "./game/spawning-types";
 export * from "./systems/system-types";
 
