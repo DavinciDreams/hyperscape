@@ -195,6 +195,7 @@ import { connectionIndicatorRegistration } from "./widgets/ConnectionIndicatorWi
 import { minimapStaminaOrbRegistration } from "./widgets/MinimapStaminaOrbWidget.js";
 import { minimapCompassRegistration } from "./widgets/MinimapCompassWidget.js";
 import { actionProgressBarRegistration } from "./widgets/ActionProgressBarWidget.js";
+import { homeTeleportButtonRegistration } from "./widgets/HomeTeleportButtonWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -290,6 +291,15 @@ export {
   ActionProgressBar,
   type ActionProgressBarProps,
 } from "./widgets/ActionProgressBarWidget.js";
+export {
+  homeTeleportButtonWidget,
+  homeTeleportButtonRegistration,
+  HomeTeleportButton,
+  HOME_TELEPORT_STATUSES,
+  type HomeTeleportButtonProps,
+  type HomeTeleportButtonRuntimeProps,
+  type HomeTeleportStatus,
+} from "./widgets/HomeTeleportButtonWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -683,6 +693,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(minimapStaminaOrbRegistration);
         ctx.widgets.register(minimapCompassRegistration);
         ctx.widgets.register(actionProgressBarRegistration);
+        ctx.widgets.register(homeTeleportButtonRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
