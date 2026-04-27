@@ -33,6 +33,11 @@ export {
 // Phase D9 proof-of-concept — Hyperscape's reference UIPackManifest.
 export { HYPERSCAPE_UI_PACK, HYPERSCAPE_UI_PACK_ID } from "./hyperscapePack";
 
+// Phase D9 client-side glue — bridges loadUIPack to the local
+// themeRegistry. Hosts call loadUIPackOnClient(pack) instead of the
+// engine-level loadUIPack to get automatic theme registration.
+export { loadHyperscapeUIPack, loadUIPackOnClient } from "./uiPackLoader";
+
 export {
   buildPlayerDataContext,
   playerDataSourceRegistry,
