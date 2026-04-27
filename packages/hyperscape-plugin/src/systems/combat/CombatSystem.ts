@@ -63,6 +63,7 @@ import {
   type AttackValidationResult,
   type MeleeAttackData,
 } from "./CombatAttackValidator";
+import { CombatDamageApplicator } from "./CombatDamageApplicator";
 import {
   CombatDamageOrchestrator,
   type PlayerEquipmentStats,
@@ -206,6 +207,11 @@ export class CombatSystem extends SystemBase {
   // #9 fifth decomposition slice).
   private readonly deathHandler: CombatDeathHandler;
 
+  // Central damage application path — extracted as the ninth slice.
+  // Polymorphic dispatch via damageHandlers Map; routes death cleanup
+  // through deathHandler.
+  private readonly damageApplicator: CombatDamageApplicator;
+
   // Combat lifecycle handler — currently wraps endCombat (timeout +
   // manual force-end cleanup). enterCombat is deferred to a future
   // slice (top-10 #9 sixth decomposition slice).
@@ -331,6 +337,17 @@ export class CombatSystem extends SystemBase {
       this.eventEmitter,
       this.eventRecorder,
       this.nextAttackTicks,
+    );
+
+    // Central damage application (slice 9). Routes through the
+    // damageHandlers Map (player vs mob); death cleanup via
+    // deathHandler. emit closure for the "you take damage" UI message.
+    this.damageApplicator = new CombatDamageApplicator(
+      this.damageHandlers,
+      this.entityResolver,
+      this.deathHandler,
+      this.logger,
+      (type, payload) => this.emitTypedEvent(type, payload),
     );
 
     // Combat lifecycle handler (endCombat). Closure over emitTypedEvent
@@ -762,7 +779,7 @@ export class CombatSystem extends SystemBase {
     const currentHealth = this.entityResolver.getHealth(target);
     const damage = Math.min(rawDamage, currentHealth);
 
-    this.applyDamage(targetId, targetType, damage, attackerId);
+    this.damageApplicator.applyDamage(targetId, targetType, damage, attackerId);
 
     // Emit damage event using pre-allocated payload (zero allocation)
     const targetPosition = getEntityPosition(target);
@@ -1672,80 +1689,8 @@ export class CombatSystem extends SystemBase {
     // which calls TileMovementManager.movePlayerToward()
   }
 
-  private applyDamage(
-    targetId: string,
-    targetType: string,
-    damage: number,
-    attackerId: string,
-  ): void {
-    // Validate target type
-    if (targetType !== "player" && targetType !== "mob") {
-      return;
-    }
-
-    // Get the appropriate handler for the target type
-    const handler = this.damageHandlers.get(targetType);
-    if (!handler) {
-      this.logger.error("No damage handler for target type", undefined, {
-        targetType,
-      });
-      return;
-    }
-
-    // Create typed EntityID for handler
-    const typedTargetId = createEntityID(targetId);
-    const typedAttackerId = createEntityID(attackerId);
-
-    // Determine attacker type for handler
-    const attackerType = this.entityResolver.resolveType(attackerId);
-
-    // Apply damage through polymorphic handler
-    const result = handler.applyDamage(
-      typedTargetId,
-      damage,
-      typedAttackerId,
-      attackerType,
-    );
-
-    // Handle failed damage application
-    if (!result.success) {
-      if (result.targetDied) {
-        // Target was already dead - end ALL combat with this entity
-        this.deathHandler.handleEntityDied(targetId, targetType);
-      } else {
-        this.logger.error("Failed to apply damage", undefined, {
-          targetId,
-          targetType,
-        });
-      }
-      return;
-    }
-
-    // Prevent additional attacks if target died this tick
-    if (result.targetDied) {
-      this.deathHandler.handleEntityDied(targetId, targetType);
-      return;
-    }
-
-    // Emit UI message based on target type
-    if (targetType === "player") {
-      // Get attacker name for message
-      const attackerHandler = this.damageHandlers.get(attackerType);
-      const attackerName = attackerHandler
-        ? attackerHandler.getDisplayName(typedAttackerId)
-        : "enemy";
-
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: targetId,
-        message: `The ${attackerName} hits you for ${damage} damage!`,
-        type: "damage",
-      });
-    }
-    // Note: Mob death messages are emitted by MobEntity.die() to avoid duplication
-
-    // Note: Damage splatter events are now emitted at the call sites
-    // (handleMeleeAttack, processAutoAttack) to ensure they're emitted even for 0 damage hits
-  }
+  // applyDamage moved to ./CombatDamageApplicator (slice 9). Call
+  // sites delegate via this.damageApplicator.applyDamage(...).
 
   // Note: syncCombatStateToEntity, clearCombatStateFromEntity moved to CombatStateService
   // Note: setCombatEmote, resetEmote moved to CombatAnimationManager
@@ -2553,7 +2498,12 @@ export class CombatSystem extends SystemBase {
     const damage = Math.min(rawDamage, currentHealth);
 
     // Apply capped damage
-    this.applyDamage(targetId, combatState.targetType, damage, attackerId);
+    this.damageApplicator.applyDamage(
+      targetId,
+      combatState.targetType,
+      damage,
+      attackerId,
+    );
 
     // Emit damage splatter event using pre-allocated payload (zero allocation)
     const targetPosition = getEntityPosition(target);
@@ -2729,7 +2679,7 @@ export class CombatSystem extends SystemBase {
       const damage = Math.min(projectile.damage, currentHealth);
 
       // Apply damage
-      this.applyDamage(
+      this.damageApplicator.applyDamage(
         projectile.targetId,
         targetType,
         damage,
