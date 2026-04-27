@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-27 (REFRESH 4)
+# Hyperscape Progress Audit — 2026-04-27 (REFRESH 5)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~76–77% of the way to "truly AAA, truly done"** — up from 70–75% mid-day yesterday and 50–60% pre-weekend. **REFRESH 4 (2026-04-27 evening): closed top-10 leverage item #10 (long-tail registry consumer-wiring) over 19 cuts of standardized hot-reload instrumentation + reusable `useRegistryReload` React hook.** REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6) end to end.
+**~78–80% of the way to "truly AAA, truly done"** — up from 76–77% earlier today and 70–75% mid-day yesterday. **REFRESH 5 (2026-04-27 late-morning): closed top-10 leverage item #9 (CombatSystem decomposition) over 17 slices — `CombatSystem.ts` 4,065 → 1,359 LOC (-66.6%) plus 3,142 LOC of orphan dead code purged from the combat directory. 16 cohesive helper files extracted; 198/198 plugin tests green throughout.** REFRESH 4 closed top-10 #10 (long-tail registry consumer-wiring) over 19 cuts. REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6) end to end.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -39,6 +39,65 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 5 — CombatSystem decomposition shipped (2026-04-27 late-morning)
+
+**Top-10 leverage item #9 (CombatSystem decomposition, original target
+4,019 → <2,000) hit and exceeded.** Final state: `CombatSystem.ts`
+**1,359 LOC**, ~30% below the original target.
+
+17 slices on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`,
+all pushed). 198/198 plugin tests green throughout; shared build
+clean at every slice boundary.
+
+**16 cohesive helpers extracted** (in
+`packages/hyperscape-plugin/src/systems/combat/`):
+
+| Slice | Helper | Purpose |
+|---|---|---|
+| 1 | CombatEventEmitter | zero-alloc event-payload helpers |
+| 2 | CombatPlayerQueries | skill-level, selected-spell, inventory queries |
+| 3 | CombatEventRecorder | event-store record + state-snapshot builders |
+| 4 | CombatDamageOrchestrator | melee/ranged/magic damage dispatch + equipment cache |
+| 5 | CombatDeathHandler | handleEntityDied + handlePlayerRespawned |
+| 6 | CombatLifecycleHandler | endCombat (timeout + manual force-end cleanup) |
+| 7 | CombatAttackValidator | 5 pre-attack predicates + range checks |
+| 8 | CombatFollowController | per-tick range + follow + getAttackTypeFromWeapon |
+| 9 | CombatDamageApplicator | trunk damage path (polymorphic via damageHandlers Map) |
+| 10 | CombatTickAttackWorker | per-tick auto-attack worker cluster (4 methods) |
+| 11 | CombatProjectileHitProcessor | deferred-damage projectile-hit loop |
+| 12 | CombatTickOrchestrator | processCombatTick + NPC/Player phase + autoAttackOnTick |
+| 13 | CombatEnterLifecycleHandler | enterCombat (287-LOC method) |
+| 14 | CombatMeleeAttackHandler | handleMeleeAttack + executeMeleeAttack |
+| 15 | CombatRangedAttackHandler | handleRangedAttack mob + player branches |
+| 16 | CombatMagicAttackHandler | handleMagicAttack mob + player branches |
+
+**Slice 17 — dead-code purge**: 6 orphan files totaling ~3,142 LOC
+deleted from the combat directory. Confirmed unused via mono-repo
+grep — they were parallel implementations from a prior extraction
+attempt that never got wired up:
+- `handlers/MeleeAttackHandler.ts` (367)
+- `handlers/RangedAttackHandler.ts` (532)
+- `handlers/MagicAttackHandler.ts` (614)
+- `handlers/AttackContext.ts` (342)
+- `CombatTickProcessor.ts` (763)
+- `CombatAnimationSync.ts` (511)
+
+**Final CombatSystem.ts at 1,359 LOC** is mostly thin-proxy +
+boilerplate (~340 LOC of constructor wiring for 16 helpers, ~211
+LOC of small public accessors, ~163 LOC of remaining handler
+methods, ~80 LOC of init() world-lookups, plus 6 thin-proxy methods
+3-15 LOC each). The pattern is exhausted at this scale; the helpers
+ARE the system now.
+
+**Recipe artifacts from the 17-slice arc** (memory:
+`session_2026_04_27_combat_complete.md`): closure-injection for
+late-bound deps; map-reference sharing for ownership boundaries;
+pooled-tile buffer sharing; public-method proxying preserves outside
+callers; perl bulk-rewrite for callsite delegation; substrate-promote
+for orphan code orphaned by parallel extractions.
 
 ---
 
@@ -239,10 +298,11 @@ Two old gaps moved heavily this session, several remain unchanged:
 7. **ManifestEditors UI breadth** — only 8 of 129 manifest schemas
    have dedicated editor UIs. (No change.)
 
-8. **Hygiene** — 4,019-line CombatSystem (now plugin-side, target
-   <2,000), 3,208-line Entity.ts (target <1,500), ~2,267 console.*
-   calls, 4,309 skipped tests. (Marginal improvement: 73 typecheck
-   errors cleared.)
+8. **Hygiene** — ~~4,019-line CombatSystem (now plugin-side, target
+   <2,000)~~ **RESOLVED REFRESH 5 — 1,359 LOC (-66.6%)**;
+   3,208-line Entity.ts (target <1,500), ~2,267 console.* calls,
+   4,309 skipped tests. (Marginal improvement: 73 typecheck errors
+   cleared.)
 
 9. **DataSourceRegistry (D8)** + **ui-pack.json (D9)** + **D10
    exit gate** in Phase D. (No change.)
@@ -276,7 +336,7 @@ resolved. The new list reorders:
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | 7 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | Closes UI framework story |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M | Path to "shared has zero Hyperscape identifiers" |
-| 9 | **CombatSystem decomposition (4,019 → <2,000)** | K4 | L | Maintenance + plugin extractability; lives in plugin now |
+| ~~9~~ | ~~**CombatSystem decomposition (4,019 → <2,000)**~~ | ~~K4~~ | ~~L~~ | **RESOLVED 2026-04-27 — REFRESH 5: 17-slice decomposition shipped on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`). `CombatSystem.ts` 4,065 → 1,359 LOC (-66.6%, ~30% below the <2,000 target). 16 cohesive helper files extracted: AttackValidator, FollowController, DamageApplicator, TickAttackWorker, ProjectileHitProcessor, TickOrchestrator, EnterLifecycleHandler, MeleeAttackHandler, RangedAttackHandler, MagicAttackHandler, EventEmitter, PlayerQueries, EventRecorder, DamageOrchestrator, DeathHandler, LifecycleHandler. Plus 3,142 LOC of orphan dead code (handlers/{Melee,Ranged,Magic}AttackHandler + handlers/AttackContext + CombatTickProcessor + CombatAnimationSync) purged in slice 17 — confirmed unused via mono-repo grep. 198/198 plugin tests green throughout; shared build clean.** |
 | ~~10~~ | ~~**Long-tail registry consumer-wiring (~90 still unwired)**~~ | ~~F/G~~ | ~~M each~~ | **RESOLVED 2026-04-27 — 100/104 instrumented across cuts #10–#28; `useRegistryReload` hook in ui-widgets makes adding any new consumer a 1-liner. Remaining gap is consumer breadth (PIE editor panels), not contract wiring.** |
 
 ---
@@ -285,20 +345,20 @@ resolved. The new list reorders:
 
 If "done" = master plan's 7 success criteria all green:
 
-**8–12 focused 2-hour sessions** — down from 12–20 in the prior
-audit because item #2 from that list (XL unknown) is mostly
-resolved.
+**4–6 focused 2-hour sessions** for the remaining open top-10 items
+— down from 8–12 before REFRESH 5 because items #1, #2, #3, #4, #6,
+#9, #10 are now closed.
 
-- 1 session: wire plugin system into prod (item 1)
-- 1–2 sessions: game-data JSON extraction (item 2)
-- 1–2 sessions: Plugin Browser UI (item 3)
-- 1 session: D7 + D6.c.1 (item 4)
+- ~~1 session: wire plugin system into prod (item 1)~~ **DONE**
+- ~~1–2 sessions: game-data JSON extraction (item 2)~~ **DONE**
+- ~~1–2 sessions: Plugin Browser UI (item 3)~~ **DONE**
+- ~~1 session: D7 + D6.c.1 (item 4)~~ **DONE**
 - 2–3 sessions: D6.c per-widget migrations (item 5)
-- 1 session: AI test coverage (item 6)
+- ~~1 session: AI test coverage (item 6)~~ **DONE**
 - 1–2 sessions: D8/D9/D10 close-out (item 7)
 - 1 session: final shared cleanup (item 8)
-- ongoing: hygiene + consumer wiring (items 9, 10) — happens
-  alongside
+- ~~ongoing: CombatSystem decomposition (item 9)~~ **DONE — REFRESH 5**
+- ~~ongoing: long-tail registry consumer-wiring (item 10)~~ **DONE — REFRESH 4**
 
 If "done" = also includes the non-plan work that's been started:
 - Cross-chain mainnet hardening: 1–2 sessions
@@ -306,10 +366,10 @@ If "done" = also includes the non-plan work that's been started:
 - Mobile app polish: 2–3 sessions
 - AI service hardening: 1–2 sessions
 
-So **realistically 10–18 sessions** total to ship a complete
-package — the headline effort estimate is roughly the same as the
-prior audit because the saved sessions on item #2 are partially
-offset by the items below it that didn't move.
+So **realistically 10–14 sessions** total to ship a complete
+package — saved sessions across REFRESH 4 (item #10) and REFRESH 5
+(item #9) bring the headline estimate down by 2–4 sessions vs the
+pre-REFRESH-4 cut.
 
 ---
 
@@ -337,15 +397,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~76–77% to AAA done. Plugin tests stable at 198/198 (+11 widget tests today). Asset-forge AI service tests: 136/136 across 9 services (was 0 at start of day).
-Server typecheck cleared 68% of pre-existing errors as a side
-effect. **REFRESH 4 (2026-04-27 evening): registry hot-reload long-tail
-shipped. 100/104 manifest registries instrumented with `onReloaded`
-across 19 cuts; `useRegistryReload` hook published in
-`@hyperforge/ui-widgets` over `useSyncExternalStore`; XPOrb +
-SpellsPanel migrated as proof-of-pattern. 90 registries × ~85 LOC =
-~7,650 LOC of standardized hot-reload pumping shipped today.**
-Branch pushed and ready for review.**
+**Status: ~78–80% to AAA done. Plugin tests stable at 198/198. Asset-forge AI service tests: 136/136 across 9 services. Server typecheck cleared 68% of pre-existing errors as a side effect. **REFRESH 5 (2026-04-27 late-morning): CombatSystem decomposition shipped on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`). 4,065 → 1,359 LOC (-66.6%, ~30% below the original <2,000 target) across 17 slices, plus 3,142 LOC of orphan dead code purged. 16 cohesive helper files extracted; 198/198 plugin tests green throughout.** REFRESH 4 (2026-04-27 evening): registry hot-reload long-tail shipped. 100/104 manifest registries instrumented with `onReloaded` across 19 cuts; `useRegistryReload` hook published in `@hyperforge/ui-widgets` over `useSyncExternalStore`; XPOrb + SpellsPanel migrated as proof-of-pattern. 90 registries × ~85 LOC = ~7,650 LOC of standardized hot-reload pumping shipped. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
@@ -360,9 +412,11 @@ The work pattern has shifted from "find structural blockers" to
 | Game-data JSON extraction | unchanged (M) |
 | ~~AI service test coverage~~ | **DONE — Session 6 closed (M)** |
 | DataSourceRegistry / ui-pack | unchanged (M) |
-| CombatSystem decomposition | unchanged but moved plugin-side (L) |
+| ~~CombatSystem decomposition~~ | **DONE — REFRESH 5 closed (4,065 → 1,359 LOC, -66.6%; 16 helpers + 3,142 LOC dead-code purge)** |
 | ~~Long-tail registry wiring~~ | **DONE — REFRESH 4 closed (M each → 100/104 instrumented)** |
 
-The next session's natural unit is **wire plugin into prod
-startup** (#1) — small effort, large payoff. After that the
-remaining work is enumerable: each item is its own targeted PR.
+With #1, #2, #3, #4, #6, #9, #10 closed, the remaining top-10 items
+are #5 (D6.c per-widget migration, L), #7 (DataSourceRegistry +
+ui-pack, M), and #8 (final shared cleanup, M). The next session's
+natural unit is **#7 or #8** — both M-effort with clear scope; #5
+is the long-tail UI migration that gates Phase D's exit.
