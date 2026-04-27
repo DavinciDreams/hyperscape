@@ -22,6 +22,24 @@ import {
 
 import { HYPERSCAPE_UI_PACK } from "./hyperscapePack";
 import { registerTheme } from "./themeRegistry";
+import { registerUIPack, setActiveUIPack } from "./uiPackRegistry";
+
+/** Options for `loadUIPackOnClient`. */
+export interface LoadUIPackOnClientOptions {
+  /**
+   * If `true` (default), the loaded pack is also registered in the
+   * client's `uiPackRegistry`. Pass `false` to skip registration —
+   * useful for tests that want a pure validation pass without
+   * mutating the singleton.
+   */
+  register?: boolean;
+  /**
+   * If `true` (default), the loaded pack is set as the active pack.
+   * Pass `false` to register without activating — useful when
+   * pre-loading multiple packs at boot before the user picks one.
+   */
+  setActive?: boolean;
+}
 
 /**
  * Load a `UIPackManifest` and apply its theme to the client's
@@ -29,14 +47,18 @@ import { registerTheme } from "./themeRegistry";
  * union — callers handle `{ ok: false, error }` to surface validation
  * failures.
  *
- * The pack object is NOT yet wired through to the active-layout or
- * customization stores; downstream consumers read
- * `result.loaded.defaultLayout` (and friends) directly.
+ * On success the pack is also registered in the client's
+ * `uiPackRegistry` and (by default) marked as the active pack.
+ * `useActiveUIPack` reads from there. Pass `{ register: false }` to
+ * skip registration entirely; pass `{ setActive: false }` to
+ * register without activating.
  */
 export function loadUIPackOnClient(
   input: unknown | UIPackManifest,
+  options: LoadUIPackOnClientOptions = {},
 ): LoadUIPackResult {
-  return loadUIPack(input, {
+  const { register = true, setActive = true } = options;
+  const result = loadUIPack(input, {
     // Adapt themeRegistry's `(theme) => boolean` signature to
     // RegisterThemeFn's `(theme) => void`. Failed registration is
     // logged by the registry itself; loadUIPack does not propagate
@@ -46,6 +68,13 @@ export function loadUIPackOnClient(
       registerTheme(theme);
     },
   });
+
+  if (result.ok && register) {
+    registerUIPack(result.loaded);
+    if (setActive) setActiveUIPack(result.loaded.id);
+  }
+
+  return result;
 }
 
 /**

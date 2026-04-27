@@ -37,6 +37,22 @@ export { HYPERSCAPE_UI_PACK, HYPERSCAPE_UI_PACK_ID } from "./hyperscapePack";
 // themeRegistry. Hosts call loadUIPackOnClient(pack) instead of the
 // engine-level loadUIPack to get automatic theme registration.
 export { loadHyperscapeUIPack, loadUIPackOnClient } from "./uiPackLoader";
+export type { LoadUIPackOnClientOptions } from "./uiPackLoader";
+
+// Phase D10 — pack registry singleton + React hook. Loaded packs
+// register here; ManifestHud (next slice) reads via useActiveUIPack.
+export {
+  getActiveUIPack,
+  getActiveUIPackId,
+  listRegisteredUIPacks,
+  registerUIPack,
+  resolveUIPackById,
+  setActiveUIPack,
+  subscribeUIPackRegistry,
+  uiPackRegistrySize,
+  unregisterUIPack,
+} from "./uiPackRegistry";
+export { useActiveUIPack } from "./useActiveUIPack";
 
 export {
   buildPlayerDataContext,
