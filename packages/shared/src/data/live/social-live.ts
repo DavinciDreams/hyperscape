@@ -9,7 +9,19 @@
  */
 
 import { friendsSocialProvider } from "../FriendsSocialProvider";
-import { SOCIAL_CONSTANTS } from "../../types/game/social-types";
+
+// SOCIAL_CONSTANTS inlined here 2026-04-27 (top-10 #8 cleanup) so
+// social-types could migrate to @hyperforge/hyperscape-plugin. These
+// values are only used as fallbacks when the provider's manifest is
+// not yet loaded; the real game-tunable values come from the
+// FriendsSocialManifest (authored content).
+const SOCIAL_CONSTANTS = {
+  MAX_FRIENDS: 99,
+  MAX_IGNORE: 99,
+  REQUEST_TIMEOUT_MS: 7 * 24 * 60 * 60 * 1000,
+  PRIVATE_MESSAGE_MAX_LENGTH: 200,
+  MAX_OPERATIONS_PER_MINUTE: 30,
+} as const;
 
 /** Maximum number of friends per player (RS-classic default = 99). */
 export function getMaxFriends(): number {

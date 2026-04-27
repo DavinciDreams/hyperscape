@@ -110,12 +110,17 @@ import type { Entity } from "../../entities/Entity";
 import { EventType } from "../../types/events";
 import type { FletchingInterfaceOpenPayload } from "../../types/events";
 import { DeathState } from "../../types/entities";
-// Social system types - use shared types for consistency
-import type {
-  FriendsListSyncData,
-  FriendRequest,
-  FriendStatusUpdateData,
-} from "../../types/game/social-types";
+// Social-system payload types migrated to @hyperforge/hyperscape-plugin
+// 2026-04-27 (top-10 #8 cleanup). ClientNetwork forwards these payloads
+// opaquely to the SocialSystem (already duck-typed below); only one
+// field (FriendRequest.fromName) is read directly for the toast, so
+// the local minimal types are sufficient.
+type FriendsListSyncData = unknown;
+type FriendStatusUpdateData = unknown;
+interface FriendRequest {
+  readonly fromName: string;
+  readonly [key: string]: unknown;
+}
 import { uuid } from "../../utils";
 import { SystemBase } from "../shared/infrastructure/SystemBase";
 import { PendingActionTracker } from "./network/PendingActionTracker";

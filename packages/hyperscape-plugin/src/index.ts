@@ -288,6 +288,21 @@ export {
   type QuestValidationResult,
 } from "./types/quest-types.js";
 
+// social-types — migrated from shared 2026-04-27 (top-10 #8 cleanup).
+// Re-exported here for cross-package consumers (client FriendsPanel, etc.)
+export type {
+  Friend,
+  FriendRequest,
+  FriendStatus,
+  FriendStatusUpdateData,
+  FriendsListSyncData,
+  IgnoredPlayer,
+  PrivateMessage,
+  PrivateChatFailReason,
+  SocialError,
+  SocialErrorCode,
+} from "./types/social-types.js";
+
 // Network packet handlers — Phase F3 (2026-04-26). Each handler is
 // also registered automatically by plugin onEnable via
 // `world.connectionRegistry`; these re-exports are for direct

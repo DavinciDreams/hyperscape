@@ -25,19 +25,18 @@
  * @see packages/shared/src/types/game/social-types.ts for type definitions
  */
 
-import {
-  type World,
-  type Friend,
-  type FriendRequest,
-  type IgnoredPlayer,
-  type FriendsListSyncData,
-  type FriendStatusUpdateData,
-  type PrivateMessage,
-  type PrivateChatFailReason,
-  type SocialErrorCode,
-  isValidPlayerID,
-  SystemLogger,
-} from "@hyperforge/shared";
+import { type World, isValidPlayerID, SystemLogger } from "@hyperforge/shared";
+// social-types migrated to plugin 2026-04-27 (top-10 #8 cleanup).
+import type {
+  Friend,
+  FriendRequest,
+  IgnoredPlayer,
+  FriendsListSyncData,
+  FriendStatusUpdateData,
+  PrivateMessage,
+  PrivateChatFailReason,
+  SocialErrorCode,
+} from "../../types/social-types.js";
 import {
   getMaxFriends,
   getMaxIgnore,

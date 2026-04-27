@@ -13,7 +13,7 @@
  * @see packages/client/src/game/panels/FriendsPanel for UI implementation
  */
 
-import type { PlayerID } from "../core/identifiers";
+import type { PlayerID } from "@hyperforge/shared";
 
 // ============================================================================
 // Friend Status Types

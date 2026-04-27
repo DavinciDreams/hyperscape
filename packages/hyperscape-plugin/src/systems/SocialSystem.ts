@@ -29,13 +29,16 @@ import {
   SystemClass as System,
   type World,
   type WorldOptions,
-  type Friend,
-  type FriendRequest,
-  type FriendStatus,
-  type IgnoredPlayer,
-  type FriendsListSyncData,
-  type FriendStatusUpdateData,
 } from "@hyperforge/shared";
+// social-types migrated to plugin 2026-04-27 (top-10 #8 cleanup).
+import type {
+  Friend,
+  FriendRequest,
+  FriendStatus,
+  IgnoredPlayer,
+  FriendsListSyncData,
+  FriendStatusUpdateData,
+} from "../types/social-types.js";
 // Note: We use UI_UPDATE with component: "friends" for friend updates
 
 /**

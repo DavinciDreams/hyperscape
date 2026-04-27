@@ -13,5 +13,6 @@ export * from "./prayer-types";
 // quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
 // 2026-04-27 (top-10 #8 cleanup).
 export * from "./trade-types";
-export * from "./social-types";
+// social-types migrated to @hyperforge/hyperscape-plugin/types/social-types
+// 2026-04-27 (top-10 #8 cleanup).
 export * from "./duel-types";

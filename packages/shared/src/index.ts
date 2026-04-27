@@ -364,20 +364,9 @@ export type {
   TradeRequestModalState,
 } from "./types/game/trade-types";
 
-// Export social/friend system types
-export { SOCIAL_CONSTANTS } from "./types/game/social-types";
-export type {
-  FriendStatus,
-  Friend,
-  FriendStatusUpdateData,
-  FriendRequest,
-  IgnoredPlayer,
-  PrivateMessage,
-  PrivateChatFailReason,
-  FriendsListSyncData,
-  SocialErrorCode,
-  SocialError,
-} from "./types/game/social-types";
+// social-types migrated to @hyperforge/hyperscape-plugin/types/social-types
+// 2026-04-27 (top-10 #8 cleanup). SOCIAL_CONSTANTS inlined into
+// data/live/social-live.ts as engine-side fallback values.
 
 // Export duel arena types and utilities
 export {

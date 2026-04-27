@@ -18,7 +18,12 @@ import {
 import { useThemeStore, type Theme } from "@/ui";
 import { breakpoints } from "../../constants";
 import type { ClientWorld } from "../../types";
-import type { Friend, FriendRequest, FriendStatus } from "@hyperforge/shared";
+// social-types migrated from shared to plugin 2026-04-27 (top-10 #8 cleanup).
+import type {
+  Friend,
+  FriendRequest,
+  FriendStatus,
+} from "@hyperforge/hyperscape";
 
 interface FriendsPanelProps {
   world: ClientWorld;
