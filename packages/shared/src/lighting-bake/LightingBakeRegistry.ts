@@ -28,10 +28,14 @@ export interface EffectiveBakeSettings {
   gi: LightingBakeManifest["gi"];
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type LightingBakeReloadListener = () => void;
+
 export class LightingBakeRegistry {
   private _manifest: LightingBakeManifest | null = null;
   private _volumesById = new Map<string, LightprobeVolume>();
   private _overridesBySublevel = new Map<string, LevelBakeOverride>();
+  private _reloadListeners = new Set<LightingBakeReloadListener>();
 
   constructor(manifest?: LightingBakeManifest) {
     if (manifest) this.load(manifest);
@@ -44,6 +48,33 @@ export class LightingBakeRegistry {
     for (const v of manifest.lightprobeVolumes) this._volumesById.set(v.id, v);
     for (const o of manifest.levelOverrides) {
       this._overridesBySublevel.set(o.sublevelId, o);
+    }
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: LightingBakeReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[lightingBakeRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 

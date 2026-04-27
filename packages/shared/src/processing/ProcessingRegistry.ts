@@ -23,8 +23,12 @@ export class ProcessingNotLoadedError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ProcessingReloadListener = () => void;
+
 export class ProcessingRegistry {
   private _manifest: ProcessingManifest | null = null;
+  private _reloadListeners = new Set<ProcessingReloadListener>();
 
   constructor(manifest?: ProcessingManifest) {
     if (manifest) this.load(manifest);
@@ -32,10 +36,37 @@ export class ProcessingRegistry {
 
   load(manifest: ProcessingManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ProcessingManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ProcessingReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[processingRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

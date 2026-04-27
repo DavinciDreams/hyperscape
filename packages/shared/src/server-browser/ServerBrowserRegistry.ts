@@ -43,10 +43,14 @@ export class UnknownFilterFacetError extends Error {
 /** Ping quality bucket. */
 export type PingBucket = "good" | "ok" | "poor";
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ServerBrowserReloadListener = () => void;
+
 export class ServerBrowserRegistry {
   private _manifest: ServerBrowserManifest | null = null;
   private _filtersById = new Map<string, FilterFacet>();
   private _columnsByKind = new Map<SortColumn, ColumnDefinition>();
+  private _reloadListeners = new Set<ServerBrowserReloadListener>();
 
   constructor(manifest?: ServerBrowserManifest) {
     if (manifest) this.load(manifest);
@@ -58,6 +62,33 @@ export class ServerBrowserRegistry {
     this._columnsByKind.clear();
     for (const f of manifest.filters) this._filtersById.set(f.id, f);
     for (const c of manifest.columns) this._columnsByKind.set(c.column, c);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ServerBrowserReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[serverBrowserRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   loadFromJson(raw: unknown): void {
