@@ -37,9 +37,13 @@ export class UnknownToolError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ToolsReloadListener = () => void;
+
 export class ToolsRegistry {
   private _manifest: ToolsManifest | null = null;
   private _byItemId = new Map<string, ToolEntry>();
+  private _reloadListeners = new Set<ToolsReloadListener>();
 
   constructor(manifest?: ToolsManifest) {
     if (manifest) this.load(manifest);
@@ -49,10 +53,37 @@ export class ToolsRegistry {
     this._manifest = manifest;
     this._byItemId.clear();
     for (const t of manifest) this._byItemId.set(t.itemId, t);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ToolsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ToolsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[toolsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

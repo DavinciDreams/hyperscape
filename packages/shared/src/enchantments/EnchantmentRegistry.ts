@@ -51,8 +51,12 @@ export interface ApplyCheckResult {
   reason: ApplyCheckReason;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type EnchantmentReloadListener = () => void;
+
 export class EnchantmentRegistry {
   private _byId = new Map<string, Enchantment>();
+  private _reloadListeners = new Set<EnchantmentReloadListener>();
 
   constructor(manifest?: EnchantmentsManifest) {
     if (manifest) this.load(manifest);
@@ -61,10 +65,37 @@ export class EnchantmentRegistry {
   load(manifest: EnchantmentsManifest): void {
     this._byId.clear();
     for (const e of manifest) this._byId.set(e.id, e);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(EnchantmentsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: EnchantmentReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[enchantmentRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get size(): number {
