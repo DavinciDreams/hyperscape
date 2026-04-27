@@ -39,9 +39,13 @@ export class UnknownShareTargetError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ScreenshotReloadListener = () => void;
+
 export class ScreenshotRegistry {
   private _manifest: ScreenshotManifest | null = null;
   private _targetById = new Map<string, ShareTarget>();
+  private _reloadListeners = new Set<ScreenshotReloadListener>();
 
   constructor(manifest?: ScreenshotManifest) {
     if (manifest) this.load(manifest);
@@ -51,10 +55,37 @@ export class ScreenshotRegistry {
     this._manifest = manifest;
     this._targetById.clear();
     for (const t of manifest.shareTargets) this._targetById.set(t.id, t);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ScreenshotManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ScreenshotReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[screenshotRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

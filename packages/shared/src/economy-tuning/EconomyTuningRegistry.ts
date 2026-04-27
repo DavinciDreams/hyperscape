@@ -76,10 +76,14 @@ export interface MarketQuote {
   sellerPayout: number;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type EconomyTuningReloadListener = () => void;
+
 export class EconomyTuningRegistry {
   private _manifest: EconomyTuningManifest | null = null;
   private _currencies = new Map<string, Currency>();
   private _curves = new Map<string, CostCurve>();
+  private _reloadListeners = new Set<EconomyTuningReloadListener>();
 
   constructor(manifest?: EconomyTuningManifest) {
     if (manifest) this.load(manifest);
@@ -91,6 +95,33 @@ export class EconomyTuningRegistry {
     this._curves.clear();
     for (const c of manifest.currencies) this._currencies.set(c.id, c);
     for (const c of manifest.costCurves) this._curves.set(c.id, c);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: EconomyTuningReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[economyTuningRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   loadFromJson(raw: unknown): void {

@@ -50,9 +50,13 @@ const SEVERITY_RANK: Record<CrashSeverity, number> = {
   fatal: 4,
 };
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type CrashReporterReloadListener = () => void;
+
 export class CrashReporterRegistry {
   private _manifest: CrashReporterManifest | null = null;
   private _sinkById = new Map<string, CrashSink>();
+  private _reloadListeners = new Set<CrashReporterReloadListener>();
 
   constructor(manifest?: CrashReporterManifest) {
     if (manifest) this.load(manifest);
@@ -62,10 +66,37 @@ export class CrashReporterRegistry {
     this._manifest = manifest;
     this._sinkById.clear();
     for (const s of manifest.sinks) this._sinkById.set(s.id, s);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(CrashReporterManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: CrashReporterReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[crashReporterRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
