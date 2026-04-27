@@ -47,6 +47,7 @@ import {
   EventType,
   type Spell,
 } from "@hyperforge/shared";
+import { useRegistryReload } from "@hyperforge/ui-widgets";
 
 // Spell panel layout constants — use shared sizing tokens from panelLayout.ts
 // to ensure consistency across Prayer, Spells, Skills, and Inventory panels.
@@ -301,21 +302,12 @@ export function SpellsPanel({ stats, world }: SpellsPanelProps) {
   // Bumped whenever `combatSpellsRegistry` reloads (PIE hot-reload of
   // combat-spells.json). Perturbs the `spells` useMemo dep so the
   // grid recomputes on authored edits without a Stop/Play.
-  const [spellsRevision, setSpellsRevision] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
-
-  // Re-render spell grid on PIE hot-reload of `combat-spells.json`.
   // SpellService reads through `combatSpellsRegistry`, so the data
   // is always fresh — but the `spells` useMemo below holds a stale
-  // closure until something invalidates it. Bumping `spellsRevision`
-  // is the cheapest way to force the recompute.
-  useEffect(() => {
-    const unsubscribe = combatSpellsRegistry.onReloaded(() => {
-      setSpellsRevision((r) => r + 1);
-    });
-    return unsubscribe;
-  }, []);
+  // closure until something invalidates it.
+  const spellsRevision = useRegistryReload(combatSpellsRegistry);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const playerMagicLevel = stats?.skills?.magic?.level ?? 1;
 

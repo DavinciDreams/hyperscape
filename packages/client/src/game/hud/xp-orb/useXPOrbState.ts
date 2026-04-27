@@ -18,6 +18,7 @@ import {
   skillIconsRegistry,
   xpCurveRegistry,
 } from "@hyperforge/shared";
+import { useRegistryReload } from "@hyperforge/ui-widgets";
 
 /**
  * Curve id resolved through the shared `xpCurveRegistry`. Populated at
@@ -175,10 +176,11 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
   const [levelUpSkill, setLevelUpSkill] = useState<string | null>(null);
   const [floatingDrops, setFloatingDrops] = useState<GroupedXPDrop[]>([]);
   const [hoveredSkill, setHoveredSkill] = useState<string | null>(null);
-  // Bumped whenever `xpCurveRegistry` reloads (PIE hot-reload of
-  // xp-curves.json). Perturbs the derived `useMemo` deps so progress
-  // bars/xpToNext recompute without waiting for the next XP gain.
-  const [curveRevision, setCurveRevision] = useState(0);
+  // Bumped whenever `xpCurveRegistry` OR `skillIconsRegistry` reloads
+  // (PIE hot-reload of xp-curves.json / skill-icons.json). Perturbs
+  // the derived `useMemo` deps so progress bars/xpToNext recompute
+  // without waiting for the next XP gain.
+  const curveRevision = useRegistryReload(xpCurveRegistry, skillIconsRegistry);
 
   const dropIdRef = useRef(0);
   const pendingDropRef = useRef<GroupedXPDrop | null>(null);
@@ -237,19 +239,6 @@ export function useXPOrbState(world: ClientWorld): UseXPOrbStateResult {
     },
     [curveRevision],
   );
-
-  // Re-render derived progress on PIE hot-reload of `xp-curves.json`
-  // OR `skill-icons.json`. Both live-mutate module-level registries
-  // and bump the same revision counter.
-  useEffect(() => {
-    const bump = () => setCurveRevision((r) => r + 1);
-    const unsubscribeCurves = xpCurveRegistry.onReloaded(bump);
-    const unsubscribeIcons = skillIconsRegistry.onReloaded(bump);
-    return () => {
-      unsubscribeCurves();
-      unsubscribeIcons();
-    };
-  }, []);
 
   // Memoize derived skill data to avoid recalculating on every render
   const skillsWithProgress = useMemo((): SkillWithProgress[] => {
