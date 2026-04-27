@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-27 (REFRESH 5)
+# Hyperscape Progress Audit — 2026-04-27 (REFRESH 6)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~78–80% of the way to "truly AAA, truly done"** — up from 76–77% earlier today and 70–75% mid-day yesterday. **REFRESH 5 (2026-04-27 late-morning): closed top-10 leverage item #9 (CombatSystem decomposition) over 17 slices — `CombatSystem.ts` 4,065 → 1,359 LOC (-66.6%) plus 3,142 LOC of orphan dead code purged from the combat directory. 16 cohesive helper files extracted; 198/198 plugin tests green throughout.** REFRESH 4 closed top-10 #10 (long-tail registry consumer-wiring) over 19 cuts. REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6) end to end.
+**~80–82% of the way to "truly AAA, truly done"** — up from 78–80% earlier today. **REFRESH 6 (2026-04-27 mid-morning): partial progress on top-10 #8 (final shared cleanup) over 4 slices — quest-types (383 LOC) + social-types (219 LOC) + trade-types (372 LOC) migrated to plugin; interaction-types (150 LOC) deleted as dead code. `packages/shared/src/types/game/` 11 files → 7. 4 substrate-promotes shipped. 198/198 plugin tests green throughout.** REFRESH 5 closed top-10 #9 (CombatSystem decomposition). REFRESH 4 closed top-10 #10 (long-tail registry consumer-wiring). REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6).
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -39,6 +39,52 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 6 — types/game/ migration partial (2026-04-27 mid-morning)
+
+Top-10 leverage item #8 (final shared cleanup) advanced from "open"
+to **partial** over 4 slices. `packages/shared/src/types/game/` shrank
+from 11 files to 7; 1,124 LOC migrated to
+`@hyperforge/hyperscape-plugin/src/types/` + 150 LOC of dead code
+purged.
+
+| Slice | File | LOC | Substrate-promote |
+|---|---|---:|---|
+| 18 | `quest-types.ts` → plugin | 383 | WorldDialogueConditionEvaluators QuestProgress → inline `QuestProgressLike` duck-type |
+| 19 | `interaction-types.ts` deleted | 150 (dead) | none — file was unused, only barrel re-exports |
+| 20 | `social-types.ts` → plugin | 219 | SOCIAL_CONSTANTS inlined into `social-live.ts`; ClientNetwork's typed payload imports → opaque pass-through types |
+| 21 | `trade-types.ts` → plugin | 372 | TRADE_CONSTANTS inlined into `trading-live.ts`; TradingSystem + TradeOperationResult interfaces moved out of `system-interfaces.ts` to live with the implementation; dead TradeCancelledPayload import dropped |
+
+Plugin barrel now re-exports all migrated public types so cross-package
+consumers (server integration tests, client FriendsPanel, server
+swap.ts) keep their imports stable on `@hyperforge/hyperscape`.
+
+**Recipe-exhaustion confirmed** for the 6 remaining files in
+`types/game/`. Each has real engine-tied internal consumers:
+
+- `combat-types` (105 LOC): CombatStyle, CombatStateData, CombatTarget
+  flow through `entities/`, `components/`, `utils/CombatUtils.ts`,
+  `constants/WeaponStyleConfig.ts` — engine substrate.
+- `duel-types` (583 LOC): 24 references in `event-payloads.ts` plus
+  5 in the `DuelSystem` interface in `system-interfaces.ts`. Migration
+  needs DuelSystem interface relocation + event-payload duck-typing.
+- `inventory-types` (285 LOC): `Bank` (56 hits), `BankEntityData` (7),
+  `StoreData` (10), `LootEntry` (8), `LootTable` (5) deeply integrated
+  with shared internals.
+- `item-types` (508 LOC, 8 shared consumers): heaviest. Item substrate
+  for the engine; probably stays in shared permanently.
+- `prayer-types` (343 LOC): blocked by `PrayerDataProvider` (537 LOC,
+  engine-side editor + DataManager + PIEEditorSession dep).
+- `resource-processing-types` (169 LOC): footprint primitives
+  (ResourceFootprint, FootprintSpec, FOOTPRINT_SIZES, resolveFootprint)
+  bidirectionally consumed by `entities.ts` AND plugin entities.
+  Splitting yields only ~80 LOC of net migration.
+
+**Each remaining file is a focused M-L cut** requiring substrate
+refactors, not S-sized cleanup. Today's 4 slices represent the bulk
+of low-hanging fruit; remaining work is heavier.
 
 ---
 
@@ -335,7 +381,7 @@ resolved. The new list reorders:
 | 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | 7 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | Closes UI framework story |
-| 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M | Path to "shared has zero Hyperscape identifiers" |
+| 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M-L | Path to "shared has zero Hyperscape identifiers". **PARTIAL 2026-04-27 — REFRESH 6**: 4 type files migrated (quest-types/social-types/trade-types to plugin; interaction-types deleted as dead code). `packages/shared/src/types/game/` 11 files → 7. -1,124 LOC migrated + -150 dead-code purge across slices `d879d8450` `877446dde` `e042cb6a8` `dae4ebcba`. Recipe-exhaustion confirmed for the 6 remaining files (combat-types, duel-types, inventory-types, item-types, prayer-types, resource-processing-types) — each has engine-tied internal consumers and needs its own M-L substrate refactor (PrayerDataProvider migration, DuelSystem interface relocation, footprint-types split into shared/types/world/, etc.). |
 | ~~9~~ | ~~**CombatSystem decomposition (4,019 → <2,000)**~~ | ~~K4~~ | ~~L~~ | **RESOLVED 2026-04-27 — REFRESH 5: 17-slice decomposition shipped on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`). `CombatSystem.ts` 4,065 → 1,359 LOC (-66.6%, ~30% below the <2,000 target). 16 cohesive helper files extracted: AttackValidator, FollowController, DamageApplicator, TickAttackWorker, ProjectileHitProcessor, TickOrchestrator, EnterLifecycleHandler, MeleeAttackHandler, RangedAttackHandler, MagicAttackHandler, EventEmitter, PlayerQueries, EventRecorder, DamageOrchestrator, DeathHandler, LifecycleHandler. Plus 3,142 LOC of orphan dead code (handlers/{Melee,Ranged,Magic}AttackHandler + handlers/AttackContext + CombatTickProcessor + CombatAnimationSync) purged in slice 17 — confirmed unused via mono-repo grep. 198/198 plugin tests green throughout; shared build clean.** |
 | ~~10~~ | ~~**Long-tail registry consumer-wiring (~90 still unwired)**~~ | ~~F/G~~ | ~~M each~~ | **RESOLVED 2026-04-27 — 100/104 instrumented across cuts #10–#28; `useRegistryReload` hook in ui-widgets makes adding any new consumer a 1-liner. Remaining gap is consumer breadth (PIE editor panels), not contract wiring.** |
 
@@ -397,7 +443,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~78–80% to AAA done. Plugin tests stable at 198/198. Asset-forge AI service tests: 136/136 across 9 services. Server typecheck cleared 68% of pre-existing errors as a side effect. **REFRESH 5 (2026-04-27 late-morning): CombatSystem decomposition shipped on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`). 4,065 → 1,359 LOC (-66.6%, ~30% below the original <2,000 target) across 17 slices, plus 3,142 LOC of orphan dead code purged. 16 cohesive helper files extracted; 198/198 plugin tests green throughout.** REFRESH 4 (2026-04-27 evening): registry hot-reload long-tail shipped. 100/104 manifest registries instrumented with `onReloaded` across 19 cuts; `useRegistryReload` hook published in `@hyperforge/ui-widgets` over `useSyncExternalStore`; XPOrb + SpellsPanel migrated as proof-of-pattern. 90 registries × ~85 LOC = ~7,650 LOC of standardized hot-reload pumping shipped. Branch pushed and ready for review.
+**Status: ~80–82% to AAA done. Plugin tests stable at 198/198. Asset-forge AI service tests: 136/136 across 9 services. **REFRESH 6 (2026-04-27 mid-morning): types/game/ migration partial. 4 slices on `feat/world-studio` (commits `d879d8450` → `dae4ebcba`); 4 type files migrated to plugin (quest-types, social-types, trade-types) or deleted as dead code (interaction-types). `packages/shared/src/types/game/` 11 → 7 files. -1,124 LOC migrated + -150 dead-code purge. 4 substrate-promotes (QuestProgress duck-type, SOCIAL_CONSTANTS + TRADE_CONSTANTS inline, ClientNetwork pass-through types, TradingSystem interface relocation). Recipe-exhaustion confirmed for the 6 remaining files in types/game/.** REFRESH 5 (2026-04-27 late-morning): CombatSystem decomposition shipped on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`). 4,065 → 1,359 LOC (-66.6%, ~30% below the original <2,000 target) across 17 slices, plus 3,142 LOC of orphan dead code purged. REFRESH 4 (2026-04-27 evening): registry hot-reload long-tail shipped. 100/104 manifest registries instrumented with `onReloaded` across 19 cuts; `useRegistryReload` hook published. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
@@ -415,8 +461,15 @@ The work pattern has shifted from "find structural blockers" to
 | ~~CombatSystem decomposition~~ | **DONE — REFRESH 5 closed (4,065 → 1,359 LOC, -66.6%; 16 helpers + 3,142 LOC dead-code purge)** |
 | ~~Long-tail registry wiring~~ | **DONE — REFRESH 4 closed (M each → 100/104 instrumented)** |
 
-With #1, #2, #3, #4, #6, #9, #10 closed, the remaining top-10 items
-are #5 (D6.c per-widget migration, L), #7 (DataSourceRegistry +
-ui-pack, M), and #8 (final shared cleanup, M). The next session's
-natural unit is **#7 or #8** — both M-effort with clear scope; #5
-is the long-tail UI migration that gates Phase D's exit.
+With #1, #2, #3, #4, #6, #9, #10 closed and #8 partially advanced
+(REFRESH 6 — 4 slices shipped), the remaining top-10 items are:
+- **#5** (D6.c per-widget migration, L) — long-tail UI migration that gates Phase D's exit
+- **#7** (DataSourceRegistry + ui-pack, M) — closes UI framework story
+- **#8 remainder** (M-L per remaining file) — 6 type files left in
+  `shared/src/types/game/`, each needing a substrate refactor (e.g.,
+  PrayerDataProvider migration, DuelSystem interface relocation,
+  footprint-types split). No more "easy cuts" here.
+
+The next session's natural unit is **#7** (DataSourceRegistry/D8 +
+ui-pack/D9) — clearest scope with M-effort. #8 remainder is harder
+than originally estimated and #5 is the long-tail.
