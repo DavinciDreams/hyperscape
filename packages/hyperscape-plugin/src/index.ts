@@ -186,6 +186,7 @@ import {
   handlePrivateMessage,
 } from "./systems/network-handlers/friends.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
+import { xpOrbRegistration } from "./widgets/XPOrbWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -212,6 +213,17 @@ export {
 } from "@hyperforge/skills";
 
 export { manifest } from "./manifest.js";
+
+// Plugin-contributed widgets — re-exported so hosts that pre-register
+// widgets at boot (e.g. the asset-forge editor's UI Layout Editor)
+// can access the same registrations the plugin's onEnable installs.
+// Phase D6.c.1 / Session 4 of PLAN_NEXT_SESSIONS.
+export {
+  xpOrbWidget,
+  xpOrbRegistration,
+  XPOrb,
+  type XPDropEntry,
+} from "./widgets/XPOrbWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -493,6 +505,17 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.world.register(name, Ctor as never);
         ctx.scope.register(() => w.unregister?.(name));
       };
+
+      // Plugin-contributed HUD widgets — Phase D6.c.1 / Session 4.
+      // `ctx.widgets` is host-supplied: the live browser client
+      // (via `bootClientPlugins`) provides a real registry; the
+      // dedicated server, tests, and asset-forge dedicated-server
+      // contexts pass `undefined` and the widget registration is a
+      // silent no-op. Disposers attached to `ctx.scope` so
+      // `session.stop()` removes the widget from the host registry.
+      if (ctx.widgets) {
+        ctx.widgets.register(xpOrbRegistration);
+      }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
       // the registry hardcoded these in shared `Entities.ts` —

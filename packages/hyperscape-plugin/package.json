@@ -34,9 +34,16 @@
     "@hyperforge/gameplay-framework": "*",
     "@hyperforge/manifest-schema": "*",
     "@hyperforge/shared": "workspace:*",
-    "@hyperforge/skills": "*"
+    "@hyperforge/skills": "*",
+    "@hyperforge/ui-framework": "*",
+    "zod": "^4.1.11"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.6"
   },

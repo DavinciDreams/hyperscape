@@ -224,10 +224,33 @@ export async function bootClientPlugins(
           return ctx as PluginContextBase;
         }
         case hyperscapeManifest.id: {
+          // Hyperscape meta-plugin contributes its own widget set
+          // (XP orb is the first; D6.c per-widget migration adds
+          // the rest). Same wiring pattern as shooter-demo: when
+          // the host supplies a UI registry, expose `ctx.widgets`
+          // so onEnable can `register(...)` widgets and the
+          // disposer drops them on `session.stop()`.
+          const widgets: WidgetContributionRegistry | undefined =
+            uiWidgetRegistry
+              ? {
+                  register(contribution: WidgetContribution) {
+                    const reg = contribution as unknown as WidgetRegistration<
+                      Record<string, unknown>,
+                      UIWidgetComponent
+                    >;
+                    uiWidgetRegistry.register(reg);
+                    const widgetId = reg.widget.manifest.id;
+                    scope.register(() => {
+                      uiWidgetRegistry.unregister?.(widgetId);
+                    });
+                  },
+                }
+              : undefined;
           const ctx: HyperscapeContext = {
             pluginId,
             scope,
             world,
+            widgets,
           };
           return ctx as PluginContextBase;
         }

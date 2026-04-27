@@ -363,10 +363,17 @@
         "@hyperforge/manifest-schema": "*",
         "@hyperforge/shared": "workspace:*",
         "@hyperforge/skills": "*",
+        "@hyperforge/ui-framework": "*",
+        "zod": "^4.1.11",
       },
       "devDependencies": {
+        "@types/react": "^19.0.0",
+        "react": "^19.0.0",
         "typescript": "^5.9.3",
         "vitest": "^4.0.6",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
       },
     },
     "packages/impostors": {
