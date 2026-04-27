@@ -70,10 +70,14 @@ export interface VoiceJoinResult {
   reason: VoiceJoinReason;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type VoiceChatReloadListener = () => void;
+
 export class VoiceChatRegistry {
   private _manifest: VoiceChatManifest | null = null;
   private _roomsById = new Map<string, VoiceRoom>();
   private _roomByScope = new Map<VoiceRoomScope, VoiceRoom>();
+  private _reloadListeners = new Set<VoiceChatReloadListener>();
 
   constructor(manifest?: VoiceChatManifest) {
     if (manifest) this.load(manifest);
@@ -86,6 +90,33 @@ export class VoiceChatRegistry {
     for (const r of manifest.rooms) {
       this._roomsById.set(r.id, r);
       if (r.scope !== "custom") this._roomByScope.set(r.scope, r);
+    }
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: VoiceChatReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[voiceChatRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 

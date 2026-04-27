@@ -1,5 +1,5 @@
 import { FeatureFlagsManifestSchema } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   FeatureFlagRegistry,
   UnknownFlagError,
@@ -300,5 +300,41 @@ describe("FeatureFlagRegistry — API surface", () => {
     expect(a).toBe(b);
     expect(a).toBeGreaterThanOrEqual(0);
     expect(a).toBeLessThan(100);
+  });
+});
+
+describe("FeatureFlagRegistry — onReloaded", () => {
+  it("fires after every successful load()", () => {
+    const r = new FeatureFlagRegistry();
+    const cb = vi.fn();
+    r.onReloaded(cb);
+    r.load(baseManifest());
+    r.load(baseManifest());
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const r = new FeatureFlagRegistry();
+    const cb = vi.fn();
+    const off = r.onReloaded(cb);
+    r.load(baseManifest());
+    off();
+    r.load(baseManifest());
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing listener does not break subsequent listeners", () => {
+    const r = new FeatureFlagRegistry();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const good = vi.fn();
+    r.onReloaded(bad);
+    r.onReloaded(good);
+    r.load(baseManifest());
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

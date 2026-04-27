@@ -49,8 +49,12 @@ export class UnknownSoundError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type SfxReloadListener = () => void;
+
 export class SfxRegistry {
   private _byId = new Map<string, SoundEffect>();
+  private _reloadListeners = new Set<SfxReloadListener>();
 
   constructor(manifest?: SoundEffectManifest) {
     if (manifest) this.load(manifest);
@@ -59,10 +63,37 @@ export class SfxRegistry {
   load(manifest: SoundEffectManifest): void {
     this._byId.clear();
     for (const s of manifest) this._byId.set(s.id, s);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(SoundEffectManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: SfxReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[sfxRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get size(): number {

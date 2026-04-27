@@ -57,11 +57,15 @@ function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type PhysicsConfigReloadListener = () => void;
+
 export class PhysicsConfigRegistry {
   private _manifest: PhysicsConfigManifest | null = null;
   private _materialsById = new Map<string, PhysicsMaterial>();
   private _layersById = new Map<string, CollisionLayer>();
   private _matrix = new Map<string, LayerInteractionKind>();
+  private _reloadListeners = new Set<PhysicsConfigReloadListener>();
 
   constructor(manifest?: PhysicsConfigManifest) {
     if (manifest) this.load(manifest);
@@ -76,6 +80,33 @@ export class PhysicsConfigRegistry {
     for (const l of manifest.layers) this._layersById.set(l.id, l);
     for (const e of manifest.matrix)
       this._matrix.set(pairKey(e.a, e.b), e.kind);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: PhysicsConfigReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[physicsConfigRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
