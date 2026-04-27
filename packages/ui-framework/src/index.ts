@@ -178,3 +178,19 @@ export type {
 // runtime bindings layer.
 export { DataSourceRegistry } from "./dataSourceRegistry";
 export type { DataSource } from "./dataSourceRegistry";
+
+// Phase D9 — UI Pack manifest. Wraps widget catalog + layouts + theme +
+// customization into a single shippable ui-pack.json per game module.
+export {
+  UIPackCustomizationDefaultsSchema,
+  UIPackLayoutsSchema,
+  UIPackManifestSchema,
+  UIPackWidgetCatalogEntrySchema,
+  validateUIPackManifest,
+} from "./uiPack";
+export type {
+  UIPackCustomizationDefaults,
+  UIPackLayouts,
+  UIPackManifest,
+  UIPackWidgetCatalogEntry,
+} from "./uiPack";
