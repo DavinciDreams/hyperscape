@@ -19,8 +19,12 @@ export class WorldStructureNotLoadedError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type WorldStructureReloadListener = () => void;
+
 export class WorldStructureRegistry {
   private _manifest: WorldStructureManifest | null = null;
+  private _reloadListeners = new Set<WorldStructureReloadListener>();
 
   constructor(manifest?: WorldStructureManifest) {
     if (manifest) this.load(manifest);
@@ -28,10 +32,37 @@ export class WorldStructureRegistry {
 
   load(manifest: WorldStructureManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(WorldStructureManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: WorldStructureReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[worldStructureRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): WorldStructureManifest {

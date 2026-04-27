@@ -68,8 +68,12 @@ export interface OwnerScalingInput {
   level: number;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type PetReloadListener = () => void;
+
 export class PetRegistry {
   private _byId = new Map<string, Pet>();
+  private _reloadListeners = new Set<PetReloadListener>();
 
   constructor(manifest?: PetCompanionManifest) {
     if (manifest) this.load(manifest);
@@ -78,10 +82,37 @@ export class PetRegistry {
   load(manifest: PetCompanionManifest): void {
     this._byId.clear();
     for (const p of manifest) this._byId.set(p.id, p);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(PetCompanionManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: PetReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[petRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get size(): number {

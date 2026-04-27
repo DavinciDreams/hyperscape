@@ -1,5 +1,5 @@
 import { WorldStructureManifestSchema } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   WorldStructureNotLoadedError,
   WorldStructureRegistry,
@@ -55,5 +55,41 @@ describe("WorldStructureRegistry", () => {
     const r = new WorldStructureRegistry();
     r.loadFromJson(manifest());
     expect(r.gridSize).toBe(1);
+  });
+});
+
+describe("WorldStructureRegistry — onReloaded", () => {
+  it("fires after every successful load()", () => {
+    const r = new WorldStructureRegistry();
+    const cb = vi.fn();
+    r.onReloaded(cb);
+    r.loadFromJson(manifest());
+    r.loadFromJson(manifest());
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const r = new WorldStructureRegistry();
+    const cb = vi.fn();
+    const off = r.onReloaded(cb);
+    r.loadFromJson(manifest());
+    off();
+    r.loadFromJson(manifest());
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing listener does not break subsequent listeners", () => {
+    const r = new WorldStructureRegistry();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const good = vi.fn();
+    r.onReloaded(bad);
+    r.onReloaded(good);
+    r.loadFromJson(manifest());
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

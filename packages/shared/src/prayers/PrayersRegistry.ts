@@ -36,9 +36,13 @@ export class UnknownPrayerError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type PrayersReloadListener = () => void;
+
 export class PrayersRegistry {
   private _manifest: PrayersManifest | null = null;
   private _byId = new Map<string, PrayerDefinition>();
+  private _reloadListeners = new Set<PrayersReloadListener>();
 
   constructor(manifest?: PrayersManifest) {
     if (manifest) this.load(manifest);
@@ -48,10 +52,37 @@ export class PrayersRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const p of manifest.prayers) this._byId.set(p.id, p);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(PrayersManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: PrayersReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[prayersRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): PrayersManifest {
