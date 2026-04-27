@@ -78,10 +78,7 @@ export type {
   MeshUserData,
   MobEntityData,
   PrayerComponent,
-  RespawnTask,
   SkillData,
-  Spawner,
-  SpawnPoint,
   StatsComponent,
 } from "./core/core";
 
@@ -102,7 +99,6 @@ export * from "./entities/npc-mob-types";
 export * from "./game/inventory-types";
 export * from "./game/resource-processing-types";
 export * from "./game/interaction-types";
-export * from "./game/spawning-types";
 export * from "./systems/system-types";
 
 // Re-export other types (using specific exports to avoid circular dependencies)
