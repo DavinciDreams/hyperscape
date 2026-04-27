@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-27 (REFRESH 9)
+# Hyperscape Progress Audit — 2026-04-27 (REFRESH 10)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~85–87% of the way to "truly AAA, truly done"** — up from 84–86% earlier today. **REFRESH 9 (2026-04-27 afternoon): top-10 #8 (final shared cleanup) substantively complete after 2 more slices (29 + 30) — DuelSystem interface relocated from shared/system-interfaces to plugin (mirroring slice 21's TradingSystem cut); resource-processing-types split into shared footprint primitives + plugin game-specific types. `packages/shared/src/types/game/` is now 7 files; the 5 remaining game-data files are all bidirectional engine substrate (consumed by event-payloads, system-interfaces, components, utils, or PrayerDataProvider). 198/198 plugin tests green; shared build clean.** REFRESH 8 closed top-10 #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 7 D8/D9 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem). REFRESH 4 closed #10 (registry hot-reload). REFRESH 3 closed AI test-coverage gap.
+**~85–87% of the way to "truly AAA, truly done"**. **REFRESH 10 (2026-04-27 afternoon): first per-widget migration cycle on top-10 #5 (D6.c per-widget migration). 3 slices closed the D6.c.2 overlay set end-to-end: KickedOverlayWidget (slice 31), DisconnectedOverlayWidget (slice 32), DeathScreenWidget (slice 33). 20 new tests; plugin 198/198 → 218/218. Established the per-widget recipe (substrate-promote theme/side-effect/state, inline styling, no client deps). 3 of ~19 HUDs done; 0 of ~50 panels — long-tail.** REFRESH 9 substantively closed #8. REFRESH 8 closed #7 end-to-end. REFRESH 7 #7 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem). REFRESH 4 closed #10 (registry hot-reload). REFRESH 3 closed AI test-coverage gap.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -39,6 +39,42 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 10 — Top-10 #5 D6.c.2 overlay set shipped (2026-04-27 afternoon)
+
+First per-widget migration cycle on top-10 #5 (D6.c per-widget
+migration). Closed the D6.c.2 overlay sub-phase end-to-end over 3
+slices.
+
+| Slice | What | LOC | Tests |
+|---|---|---:|---:|
+| 31 `bfd77e55b` | KickedOverlayWidget — single primitive prop, pure presentational | 140 | 7 |
+| 32 `c0ad5ad67` | DisconnectedOverlayWidget — internal countdown, onReconnect callback | 225 | 6 |
+| 33 `e0dcb34ff` | DeathScreenWidget — 2 internal state machines, onRespawn callback | 290 | 7 |
+
+Plugin tests: 198/198 → 218/218 (20 new). Plugin type-check clean.
+
+**Per-widget recipe established** for the long-tail:
+1. Substrate-promote theme tokens to explicit Zod-validated color
+   props with defaults matching legacy.
+2. Side effects (network.send, location.reload, etc.) become
+   optional callback props with parity fallbacks.
+3. Internal state stays inside the widget.
+4. Inline all styling — no `useThemeStore`, no client theme
+   utilities, no client UI constants.
+5. Drop external icon libraries in favor of plain text or inline SVG.
+
+**Doesn't swap consumers yet** — the live client still mounts the
+hand-coded overlays. Registration-path-first; consumer-swap is a
+separate consolidation cycle.
+
+**Top-10 #5 progression**: 3 of ~19 HUDs done; 0 of ~50 panels —
+long-tail. Each remaining widget is its own focused S-M cut following
+the now-established recipe. Recommended next-cycle targets (still
+HUD set, mostly self-contained): ConnectionIndicator, HomeTeleportButton,
+MinimapStaminaBar, ActionProgressBar.
 
 ---
 
@@ -524,7 +560,7 @@ resolved. The new list reorders:
 | ~~2~~ | ~~**Game-data JSON extraction**~~ | ~~A~~ | ~~M~~ | **RESOLVED 2026-04-26 evening** — re-audit found all data/*.ts and constants/*.ts files already façaded |
 | ~~3~~ | ~~**Plugin Browser UI**~~ | ~~I5~~ | ~~M~~ | **DONE** — `PluginBrowserPanel.tsx` (666 lines) ships Browse + Installed tabs with `useSyncExternalStore` over the installed-plugins store, install button, sha-verified content download. |
 | ~~4~~ | ~~**D7 plugin widget contribution + D6.c.1 (XP orb)**~~ | ~~D~~ | ~~S~~ | **DONE** — `XPOrbWidget.tsx` + `LevelUpToastWidget.tsx` ship from `@hyperforge/hyperscape-plugin/src/widgets/`, registered via `ctx.widgets?.register(...)` in plugin onEnable. Both widgets unit-tested. Pattern established. |
-| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |
+| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework. **IN PROGRESS 2026-04-27 — REFRESH 10**: D6.c.2 overlay sub-phase closed end-to-end over 3 slices on `feat/world-studio` (`bfd77e55b` `c0ad5ad67` `e0dcb34ff`). Shipped: KickedOverlayWidget (140 LOC + 7 tests), DisconnectedOverlayWidget (225 LOC + 6 tests), DeathScreenWidget (290 LOC + 7 tests). Plugin tests 198/198 → 218/218. Per-widget recipe established (substrate-promote theme/side-effect/state, inline styling, no client deps). 3 of ~19 HUDs done; 0 of ~50 panels — long-tail. Each remaining widget is its own focused S-M cut. Consumer-swap (deleting hand-coded files) is a separate consolidation cycle. |
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | ~~7~~ | ~~**DataSourceRegistry (D8) + ui-pack.json (D9)**~~ | ~~D~~ | ~~M~~ | **RESOLVED 2026-04-27 — REFRESH 8**: D8 + D9 + D10 wire-through complete across 7 slices on `feat/world-studio` (commits `71fe4f0ac` → `c2a560b5e`). Shipped: `DataSourceRegistry` (pluggable bindings namespaces, 10 tests) + `UIPackManifestSchema` (wraps widget catalog + layouts + theme + customization, 13 tests) + `HYPERSCAPE_UI_PACK` (reference pack composing DEFAULT_UI_LAYOUT + HYPERSCAPE_DARK_THEME, 6 tests) + `loadUIPack` (pure engine runtime, 7 tests) + `uiPackLoader` (client bridge to themeRegistry, 5 tests) + `uiPackRegistry` + `useActiveUIPack` (D10 host-side state + React hook, 14 tests) + `ManifestHud` reads from active pack (D10 wire-through). 55 new tests across 7 slices; ui-framework 274/274 + plugin 198/198 + client ui-framework 117/117 throughout. Loading a pack now actually swaps the rendered HUD end-to-end. **Remaining polish (deferrable)**: persist HYPERSCAPE_UI_PACK to disk as `hyperscape.ui-pack.json` + file-loader; verify every Hyperscape HUD panel reads via DataSourceRegistry (gated by top-10 #5). |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M-L | **SUBSTANTIVELY COMPLETE 2026-04-27 — REFRESH 6 + 9**: 6 slices total. REFRESH 6: 4 type files migrated (quest-types/social-types/trade-types to plugin; interaction-types deleted as dead code). REFRESH 9: DuelSystem interface relocated to plugin (slice 29) + resource-processing-types split (slice 30 — footprint primitives stay shared, game types move to plugin). `packages/shared/src/types/game/` 11 → 7 files. The 5 remaining files (combat-types, duel-types, inventory-types, item-types, prayer-types) are all bidirectional engine substrate consumed by event-payloads/system-interfaces/components/utils/PrayerDataProvider — each remaining migration would duplicate duck-types in shared faster than removing them. Cleanup is functionally complete; remaining items are blocked by legitimate engine substrate needs. |
@@ -590,7 +626,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~85–87% to AAA done. Plugin tests stable at 198/198; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 9 (2026-04-27 afternoon): top-10 #8 (final shared cleanup) substantively complete after slices 29 + 30. DuelSystem interface relocated to plugin; resource-processing-types split (footprints stay shared, game types to plugin). `packages/shared/src/types/game/` 11 → 7 files; the 5 remaining are all bidirectional engine substrate.** REFRESH 8 closed top-10 #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 7 D8/D9 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
+**Status: ~85–87% to AAA done. Plugin tests stable at 218/218; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 10 (2026-04-27 afternoon): D6.c.2 overlay set shipped end-to-end. 3 slices: KickedOverlayWidget + DisconnectedOverlayWidget + DeathScreenWidget. 20 new tests; per-widget recipe established. 3 of ~19 HUDs done; long-tail.** REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
