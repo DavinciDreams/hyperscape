@@ -42,22 +42,56 @@ export class UnknownResourceError extends Error {
   }
 }
 
+/** Listener invoked after every successful load*() / load*FromJson(). */
+export type GatheringResourcesReloadListener = () => void;
+
 export class GatheringResourcesRegistry {
   private _trees = new Map<string, TreeResource>();
   private _rocks = new Map<string, RockResource>();
   private _spots = new Map<string, FishingSpot>();
+  private _reloadListeners = new Set<GatheringResourcesReloadListener>();
 
   loadWoodcutting(manifest: WoodcuttingManifest): void {
     this._trees.clear();
     for (const t of manifest.trees) this._trees.set(t.id, t);
+    this._emitReloaded();
   }
   loadMining(manifest: MiningManifest): void {
     this._rocks.clear();
     for (const r of manifest.rocks) this._rocks.set(r.id, r);
+    this._emitReloaded();
   }
   loadFishing(manifest: FishingManifest): void {
     this._spots.clear();
     for (const s of manifest.spots) this._spots.set(s.id, s);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`. Fires on any of the three
+   * load* methods (woodcutting / mining / fishing).
+   */
+  onReloaded(cb: GatheringResourcesReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[gatheringResourcesRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   loadWoodcuttingFromJson(raw: unknown): void {

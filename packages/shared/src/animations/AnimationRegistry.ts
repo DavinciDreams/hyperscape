@@ -61,9 +61,13 @@ export interface AnimationIntegrityIssue {
   clipId?: string;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type AnimationReloadListener = () => void;
+
 export class AnimationRegistry {
   private _clipsById = new Map<string, AnimationClip>();
   private _bindings = new Map<string, AnimationBinding>();
+  private _reloadListeners = new Set<AnimationReloadListener>();
 
   constructor(manifest?: AnimationManifest) {
     if (manifest) this.load(manifest);
@@ -75,6 +79,33 @@ export class AnimationRegistry {
     for (const c of manifest.clips) this._clipsById.set(c.id, c);
     for (const b of manifest.bindings) {
       this._bindings.set(bindingKey(b.rigId, b.action), b);
+    }
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: AnimationReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[animationRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 

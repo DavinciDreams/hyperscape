@@ -3,7 +3,7 @@ import {
   MiningManifestSchema,
   WoodcuttingManifestSchema,
 } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   GatheringResourcesRegistry,
   UnknownResourceError,
@@ -167,5 +167,42 @@ describe("GatheringResourcesRegistry", () => {
     expect(r.findResource("copper")?.id).toBe("copper");
     expect(r.findResource("lure")?.id).toBe("lure");
     expect(r.findResource("ghost")).toBeNull();
+  });
+});
+
+describe("GatheringResourcesRegistry — onReloaded", () => {
+  it("fires after each successful loadWoodcutting / loadMining / loadFishing", () => {
+    const r = new GatheringResourcesRegistry();
+    const cb = vi.fn();
+    r.onReloaded(cb);
+    r.loadWoodcutting(tree());
+    r.loadMining(mine());
+    r.loadFishing(fish());
+    expect(cb).toHaveBeenCalledTimes(3);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const r = new GatheringResourcesRegistry();
+    const cb = vi.fn();
+    const off = r.onReloaded(cb);
+    r.loadWoodcutting(tree());
+    off();
+    r.loadMining(mine());
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing listener does not break subsequent listeners", () => {
+    const r = new GatheringResourcesRegistry();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const good = vi.fn();
+    r.onReloaded(bad);
+    r.onReloaded(good);
+    r.loadWoodcutting(tree());
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });
