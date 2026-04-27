@@ -51,8 +51,12 @@ export class UnknownDuelEquipmentSlotError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type DuelRulesReloadListener = () => void;
+
 export class DuelRulesRegistry {
   private _manifest: DuelManifest | null = null;
+  private _reloadListeners = new Set<DuelRulesReloadListener>();
 
   constructor(manifest?: DuelManifest) {
     if (manifest) this.load(manifest);
@@ -60,10 +64,37 @@ export class DuelRulesRegistry {
 
   load(manifest: DuelManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(DuelManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: DuelRulesReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[duelRulesRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

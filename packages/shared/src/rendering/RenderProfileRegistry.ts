@@ -33,9 +33,13 @@ export class UnknownRenderProfileError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type RenderProfileReloadListener = () => void;
+
 export class RenderProfileRegistry {
   private _byId = new Map<string, RenderProfile>();
   private _defaultId: string | null = null;
+  private _reloadListeners = new Set<RenderProfileReloadListener>();
 
   constructor(manifest?: RenderProfileManifest, defaultId?: string) {
     if (manifest) this.load(manifest, defaultId);
@@ -59,10 +63,37 @@ export class RenderProfileRegistry {
     } else {
       this._defaultId = manifest[0]?.id ?? null;
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown, defaultId?: string): void {
     this.load(RenderProfileManifestSchema.parse(raw), defaultId);
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: RenderProfileReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[renderProfileRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get size(): number {

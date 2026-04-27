@@ -37,10 +37,14 @@ export class UnknownProfilerMetricError extends Error {
 
 export type ProfilerBand = "green" | "yellow" | "red" | "neutral";
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ProfilerOverlayReloadListener = () => void;
+
 export class ProfilerOverlayRegistry {
   private _manifest: ProfilerOverlayManifest | null = null;
   private _metricById = new Map<string, ProfilerMetric>();
   private _groupForMetric = new Map<string, ProfilerGroup>();
+  private _reloadListeners = new Set<ProfilerOverlayReloadListener>();
 
   constructor(manifest?: ProfilerOverlayManifest) {
     if (manifest) this.load(manifest);
@@ -56,10 +60,37 @@ export class ProfilerOverlayRegistry {
         this._groupForMetric.set(m.id, g);
       }
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ProfilerOverlayManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ProfilerOverlayReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[profilerOverlayRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

@@ -48,10 +48,14 @@ export class UnknownReplicatedEventError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ReplicationReloadListener = () => void;
+
 export class ReplicationRegistry {
   private _manifest: ReplicationManifest | null = null;
   private _componentsByName = new Map<string, ReplicatedComponent>();
   private _eventsById = new Map<string, ReplicatedEvent>();
+  private _reloadListeners = new Set<ReplicationReloadListener>();
 
   constructor(manifest?: ReplicationManifest) {
     if (manifest) this.load(manifest);
@@ -65,10 +69,37 @@ export class ReplicationRegistry {
       this._componentsByName.set(c.component, c);
     }
     for (const e of manifest.events) this._eventsById.set(e.id, e);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ReplicationManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ReplicationReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[replicationRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
