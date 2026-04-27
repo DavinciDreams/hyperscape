@@ -1644,4 +1644,3 @@ export type {
 } from "./types/game/quest-types";
 export type { NPCDiedPayload } from "./types/events/event-payloads";
 export { validateKillToken } from "./utils/game/KillTokenUtils";
-export type { IQuestSystem } from "./types/game/quest-interfaces";

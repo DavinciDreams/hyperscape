@@ -34,7 +34,6 @@
 // via local `QuestSystemLike` interfaces.
 import {
   EventType,
-  type IQuestSystem,
   type NPCDiedPayload,
   type PlayerQuestState,
   type QuestDbStatus,
@@ -49,6 +48,8 @@ import {
   validateQuestDefinition,
   type World,
 } from "@hyperforge/shared";
+
+import type { IQuestSystem } from "../interfaces/quest-interfaces.js";
 
 /**
  * QuestSystem - Handles quest progression and rewards

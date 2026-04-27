@@ -14,13 +14,19 @@
  * Handlers that only need to check quest status use `IQuestQuery`.
  * Systems that need to start/complete quests use `IQuestActions`.
  * This reduces coupling and makes dependencies explicit.
+ *
+ * Lives in `@hyperforge/hyperscape-plugin` because the only
+ * implementation (`QuestSystem`) is plugin-side. Game-specific quest
+ * data shapes (QuestDefinition / QuestStatus / QuestProgress) still
+ * come from `@hyperforge/shared` until those types finish their own
+ * migration.
  */
 
 import type {
   QuestDefinition,
   QuestStatus,
   QuestProgress,
-} from "./quest-types";
+} from "@hyperforge/shared";
 
 /**
  * Read-only quest information queries
