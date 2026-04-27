@@ -30,6 +30,7 @@ import { ManifestRenderer } from "./ManifestRenderer";
 import { isManifestHudEnabled } from "./featureFlag";
 import { resolveThemeById } from "./themeRegistry";
 import { useActiveUILayout } from "./useActiveUILayout";
+import { useActiveUIPack } from "./useActiveUIPack";
 import { useUserLayout } from "./useUserLayout";
 import { useViewportVariant } from "./useViewportVariant";
 
@@ -65,18 +66,24 @@ export const ManifestHud = memo(function ManifestHud() {
     [inventory, equipment, playerStats, coins],
   );
 
-  // Fetch the team's active layout when the studio has provided a
-  // team/game context. Falls back to the per-game built-in default
-  // (Hyperscape's or shooter-demo's minimal crosshair layout) while
-  // loading, on error, or when no studio context is configured — so
-  // the HUD always has *something* to render. The game-id resolver
-  // reads `VITE_HYPERSCAPE_GAME_PLUGIN` + the editor's localStorage
-  // preference, matching what `bootClientPlugins` uses to decide
-  // which plugin set to load.
+  // Layout precedence (D10 — ui-pack wire-through, 2026-04-27):
+  //   1. Active UIPack's default layout (when a pack has been
+  //      `loadUIPackOnClient`-ed and marked active)
+  //   2. Studio team's server-fetched layout (legacy path)
+  //   3. Per-game built-in default
+  //
+  // The pack path supersedes the studio fetch when a pack is loaded
+  // because pack authors expect their pack to win — the studio
+  // fetch is a per-team override, packaged content is the publisher
+  // default. Loading the studio layout without an active pack
+  // continues to work unchanged.
+  const activePack = useActiveUIPack();
   const { layout: activeLayout } = useActiveUILayout();
   const activeGameId = resolveGamePluginSetIdFromEnv();
   const authoredLayout =
-    activeLayout ?? getDefaultUILayoutForGame(activeGameId);
+    activePack?.defaultLayout ??
+    activeLayout ??
+    getDefaultUILayoutForGame(activeGameId);
 
   // U9: pick the matching author-time variant for this viewport, if
   // any. `applyLayoutVariant` is a no-op when `viewport` is null or
