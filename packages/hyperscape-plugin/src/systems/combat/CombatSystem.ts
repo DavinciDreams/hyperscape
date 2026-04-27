@@ -65,6 +65,7 @@ import {
 import { CombatDeathHandler } from "./CombatDeathHandler";
 import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatEventRecorder } from "./CombatEventRecorder";
+import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
@@ -214,6 +215,11 @@ export class CombatSystem extends SystemBase {
   // #9 fifth decomposition slice).
   private readonly deathHandler: CombatDeathHandler;
 
+  // Combat lifecycle handler — currently wraps endCombat (timeout +
+  // manual force-end cleanup). enterCombat is deferred to a future
+  // slice (top-10 #9 sixth decomposition slice).
+  private readonly lifecycleHandler: CombatLifecycleHandler;
+
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
   private equipmentSystem?: EquipmentSystemDuck;
@@ -325,6 +331,18 @@ export class CombatSystem extends SystemBase {
       this.eventEmitter,
       this.eventRecorder,
       this.nextAttackTicks,
+    );
+
+    // Combat lifecycle handler (endCombat). Closure over emitTypedEvent
+    // for the UI_MESSAGE event. Shares lastCombatTargetTile Map with
+    // the host system — CombatSystem populates, helper deletes on end.
+    this.lifecycleHandler = new CombatLifecycleHandler(
+      this.stateService,
+      this.animationManager,
+      this.eventEmitter,
+      this.eventRecorder,
+      this.lastCombatTargetTile,
+      (type, payload) => this.emitTypedEvent(type, payload),
     );
   }
 
@@ -2193,81 +2211,6 @@ export class CombatSystem extends SystemBase {
     }
   }
 
-  private endCombat(data: {
-    entityId: string;
-    skipAttackerEmoteReset?: boolean;
-    skipTargetEmoteReset?: boolean;
-  }): void {
-    // Validate entity ID before processing
-    if (!data.entityId) {
-      return;
-    }
-
-    const typedEntityId = createEntityID(data.entityId);
-    const combatState = this.stateService.getCombatData(data.entityId);
-    if (!combatState) return;
-
-    // Reset emotes for both entities via AnimationManager
-    // Skip attacker emote reset if requested (e.g., when target died during attack animation)
-    if (!data.skipAttackerEmoteReset) {
-      this.animationManager.resetEmote(data.entityId, combatState.attackerType);
-    }
-    // Skip target emote reset if requested (e.g., when dead entity ends combat, don't reset their attacker)
-    if (!data.skipTargetEmoteReset) {
-      this.animationManager.resetEmote(
-        String(combatState.targetId),
-        combatState.targetType,
-      );
-    }
-
-    // Clear combat state from player entities via StateService
-    this.stateService.clearCombatStateFromEntity(
-      data.entityId,
-      combatState.attackerType,
-    );
-    this.stateService.clearCombatStateFromEntity(
-      String(combatState.targetId),
-      combatState.targetType,
-    );
-
-    // Remove combat states via StateService
-    this.stateService.removeCombatState(typedEntityId);
-    this.stateService.removeCombatState(combatState.targetId);
-
-    // Clean up combat follow tracking
-    this.lastCombatTargetTile.delete(data.entityId);
-    this.lastCombatTargetTile.delete(String(combatState.targetId));
-
-    // Emit combat ended event
-    this.eventEmitter.emitCombatEnded(
-      data.entityId,
-      String(combatState.targetId),
-    );
-
-    this.eventRecorder.record(GameEventType.COMBAT_END, data.entityId, {
-      targetId: String(combatState.targetId),
-      attackerType: combatState.attackerType,
-      targetType: combatState.targetType,
-      reason: "timeout_or_manual",
-    });
-
-    if (combatState.attackerType === "player") {
-      this.eventEmitter.emitClearFaceTarget(data.entityId);
-    }
-    if (combatState.targetType === "player") {
-      this.eventEmitter.emitClearFaceTarget(String(combatState.targetId));
-    }
-
-    // Show combat end message for player
-    if (combatState.attackerType === "player") {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: data.entityId,
-        message: `Combat ended.`,
-        type: "info",
-      });
-    }
-  }
-
   public startCombat(
     attackerId: string,
     targetId: string,
@@ -2399,7 +2342,7 @@ export class CombatSystem extends SystemBase {
       skipTargetEmoteReset?: boolean;
     },
   ): void {
-    this.endCombat({
+    this.lifecycleHandler.endCombat({
       entityId,
       skipAttackerEmoteReset: options?.skipAttackerEmoteReset,
       skipTargetEmoteReset: options?.skipTargetEmoteReset,
@@ -2596,7 +2539,7 @@ export class CombatSystem extends SystemBase {
       // Check for combat timeout (8 ticks after last hit)
       if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
         const entityIdStr = String(entityId);
-        this.endCombat({ entityId: entityIdStr });
+        this.lifecycleHandler.endCombat({ entityId: entityIdStr });
         processed++;
         continue;
       }
@@ -2643,7 +2586,7 @@ export class CombatSystem extends SystemBase {
 
     // Check for combat timeout (8 ticks after last hit)
     if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
-      this.endCombat({ entityId: mobId });
+      this.lifecycleHandler.endCombat({ entityId: mobId });
       return;
     }
 
@@ -2686,7 +2629,7 @@ export class CombatSystem extends SystemBase {
 
     // Check for combat timeout (8 ticks after last hit)
     if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
-      this.endCombat({ entityId: playerId });
+      this.lifecycleHandler.endCombat({ entityId: playerId });
       return;
     }
 
