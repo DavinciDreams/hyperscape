@@ -174,3 +174,91 @@ export function validateUIPackManifest(
  * compose them without reaching across the barrel.
  */
 export { WidgetManifestSchema };
+
+// ============================================================================
+// loadUIPack runtime — D9.x
+// ============================================================================
+
+/** Callback shape for handing a pack's theme to the host's registry. */
+export type RegisterThemeFn = (theme: import("./theme").ThemeManifest) => void;
+
+/** Options for `loadUIPack` — host-side hooks to apply the pack. */
+export interface LoadUIPackOptions {
+  /**
+   * Register the pack's theme with the host's theme registry. Called
+   * exactly once when the pack is loaded, only if the pack carries a
+   * `theme` block. Hosts using `client/ui-framework/themeRegistry`
+   * pass its `registerTheme` directly.
+   */
+  registerTheme?: RegisterThemeFn;
+}
+
+/**
+ * Structured view of a loaded `UIPackManifest`. Surfaces the most
+ * common fields downstream consumers need — the full manifest is
+ * still available under `pack` for callers that want fine control.
+ */
+export interface LoadedUIPack {
+  /** The validated pack manifest. */
+  readonly pack: UIPackManifest;
+  /** Pack id (`pack.id`). */
+  readonly id: string;
+  /** Pack theme, if any. */
+  readonly theme: import("./theme").ThemeManifest | undefined;
+  /** Default layout — guaranteed to exist by `UIPackLayoutsSchema`. */
+  readonly defaultLayout: import("./layout").UILayoutManifest;
+  /** All layouts in the pack, keyed by variant name. */
+  readonly layouts: UIPackLayouts;
+  /** Cross-widget customization defaults, if any. */
+  readonly customization: UIPackCustomizationDefaults | undefined;
+  /** Widget catalog entries (subset of registered widgets this pack uses). */
+  readonly widgets: ReadonlyArray<UIPackWidgetCatalogEntry>;
+}
+
+/** Result of `loadUIPack` — discriminated union mirrors `validateUIPackManifest`. */
+export type LoadUIPackResult =
+  | { readonly ok: true; readonly loaded: LoadedUIPack }
+  | { readonly ok: false; readonly error: import("zod").ZodError };
+
+/**
+ * Validate + project a `UIPackManifest` into a `LoadedUIPack`. When
+ * `options.registerTheme` is provided and the pack carries a theme,
+ * the callback is invoked with the theme exactly once on success.
+ *
+ * Returns a discriminated union — failure carries the underlying
+ * `ZodError` so callers can surface friendly messages without
+ * re-validating. Successful loads are pure projections of the
+ * manifest plus the side-effect of invoking the theme callback.
+ *
+ * The runtime intentionally does NOT touch any layout/customization
+ * stores — those live in the host (client/ui-framework). Hosts call
+ * `loadUIPack(manifest, { registerTheme })` and then drive their own
+ * layout-store updates from `result.loaded.defaultLayout` and
+ * `result.loaded.layouts`. This keeps the loader testable and
+ * dependency-free.
+ */
+export function loadUIPack(
+  input: unknown,
+  options: LoadUIPackOptions = {},
+): LoadUIPackResult {
+  const validation = validateUIPackManifest(input);
+  if (!validation.ok) {
+    return { ok: false, error: validation.error };
+  }
+  const pack = validation.data;
+
+  if (pack.theme && options.registerTheme) {
+    options.registerTheme(pack.theme);
+  }
+
+  const loaded: LoadedUIPack = {
+    pack,
+    id: pack.id,
+    theme: pack.theme,
+    defaultLayout: pack.layouts.default,
+    layouts: pack.layouts,
+    customization: pack.customization,
+    widgets: pack.widgets,
+  };
+  return { ok: true, loaded };
+}

@@ -1,12 +1,14 @@
 /**
- * Tests for UIPackManifestSchema — the D9 ui-pack.json shape.
+ * Tests for UIPackManifestSchema + loadUIPack runtime — the D9
+ * ui-pack.json shape and its loader.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { UILayoutManifestSchema } from "./layout";
 import {
   UIPackManifestSchema,
+  loadUIPack,
   validateUIPackManifest,
   type UIPackManifest,
 } from "./uiPack";
@@ -145,5 +147,80 @@ describe("UIPackManifestSchema", () => {
   it("validateUIPackManifest returns error for an invalid pack", () => {
     const result = validateUIPackManifest({ version: 1, id: "x" });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("loadUIPack", () => {
+  it("returns { ok: true, loaded } for a valid manifest", () => {
+    const result = loadUIPack(minimalPack);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.loaded.id).toBe("test-pack");
+      expect(result.loaded.defaultLayout.id).toBe("test-layout");
+      expect(result.loaded.theme).toBeUndefined();
+      expect(result.loaded.customization).toBeUndefined();
+      expect(result.loaded.widgets).toEqual([]);
+    }
+  });
+
+  it("returns { ok: false, error } for invalid input", () => {
+    const result = loadUIPack({ version: 1 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("invokes registerTheme exactly once when the pack carries a theme", () => {
+    const registerTheme = vi.fn();
+    const result = loadUIPack(
+      {
+        ...minimalPack,
+        theme: { id: "test-theme", name: "Test" },
+      },
+      { registerTheme },
+    );
+    expect(result.ok).toBe(true);
+    expect(registerTheme).toHaveBeenCalledTimes(1);
+    expect(registerTheme).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "test-theme" }),
+    );
+  });
+
+  it("does NOT invoke registerTheme when the pack has no theme", () => {
+    const registerTheme = vi.fn();
+    loadUIPack(minimalPack, { registerTheme });
+    expect(registerTheme).not.toHaveBeenCalled();
+  });
+
+  it("does NOT invoke registerTheme when the pack is invalid", () => {
+    const registerTheme = vi.fn();
+    loadUIPack({ version: 1, id: "x" }, { registerTheme });
+    expect(registerTheme).not.toHaveBeenCalled();
+  });
+
+  it("LoadedUIPack.layouts exposes every variant in the pack", () => {
+    const result = loadUIPack({
+      ...minimalPack,
+      layouts: {
+        default: minimalLayout,
+        minimal: minimalLayout,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(Object.keys(result.loaded.layouts).sort()).toEqual([
+        "default",
+        "minimal",
+      ]);
+    }
+  });
+
+  it("LoadedUIPack.customization is undefined when omitted", () => {
+    const result = loadUIPack(minimalPack);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.loaded.customization).toBeUndefined();
+    }
   });
 });

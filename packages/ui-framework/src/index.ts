@@ -186,9 +186,14 @@ export {
   UIPackLayoutsSchema,
   UIPackManifestSchema,
   UIPackWidgetCatalogEntrySchema,
+  loadUIPack,
   validateUIPackManifest,
 } from "./uiPack";
 export type {
+  LoadUIPackOptions,
+  LoadUIPackResult,
+  LoadedUIPack,
+  RegisterThemeFn,
   UIPackCustomizationDefaults,
   UIPackLayouts,
   UIPackManifest,
