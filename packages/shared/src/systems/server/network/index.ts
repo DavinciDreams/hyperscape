@@ -270,9 +270,16 @@ import type {
 // helper works unchanged.
 // DuelSystem migrated to @hyperforge/hyperscape (2026-04-26). Plugin
 // onEnable owns the lifecycle; ServerNetwork resolves the instance
-// via `world.duelSystem` (typed as the DuelSystem duck-type interface
-// from system-interfaces) for tick + lifecycle hooks.
-import type { DuelSystem } from "../../../types/systems/system-interfaces";
+// via `world.duelSystem`. Slice 29 (2026-04-27) moved the full
+// DuelSystem duck-type interface to plugin-side; here we duck-type
+// only the 3 methods this file actually calls (processTick,
+// onPlayerDisconnect, onPlayerReconnect) so shared has zero coupling
+// to the plugin's DuelSystem shape.
+interface DuelSystemLifecycleSurface {
+  processTick(): void;
+  onPlayerDisconnect(playerId: string): void;
+  onPlayerReconnect(playerId: string): void;
+}
 import { registerDuelEventListeners } from "./duel-events";
 
 const DEBUG_ATTACK_MOB =
@@ -840,8 +847,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     // FIGHTING later in the same tick
     this.tickSystem.onTick(
       () => {
-        const duelSystem = (this.world as { duelSystem?: DuelSystem })
-          .duelSystem;
+        const duelSystem = (
+          this.world as { duelSystem?: DuelSystemLifecycleSurface }
+        ).duelSystem;
         duelSystem?.processTick();
       },
       TickPriority.INPUT,
@@ -1800,7 +1808,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         }
       ).pendingDuelChallengeManager;
       pdcm?.onPlayerDisconnect(event.playerId);
-      const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
+      const duelSystem = (
+        this.world as { duelSystem?: DuelSystemLifecycleSurface }
+      ).duelSystem;
       duelSystem?.onPlayerDisconnect(event.playerId);
       const homeTeleportManager = (
         this.world as { homeTeleportManager?: IHomeTeleportManager }
@@ -1810,7 +1820,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
     // Handle player reconnection (clears disconnect timer if active duel)
     this.onWorld(EventType.PLAYER_JOINED, (event: { playerId: string }) => {
-      const duelSystem = (this.world as { duelSystem?: DuelSystem }).duelSystem;
+      const duelSystem = (
+        this.world as { duelSystem?: DuelSystemLifecycleSurface }
+      ).duelSystem;
       duelSystem?.onPlayerReconnect(event.playerId);
     });
 

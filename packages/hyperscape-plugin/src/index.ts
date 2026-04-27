@@ -246,6 +246,18 @@ export type {
   DuelSessionInfo,
 } from "./types/duel-system-interface.js";
 
+// Resource / processing / death game types — migrated from
+// `@hyperforge/shared/types/game/resource-processing-types`
+// 2026-04-27 (top-10 #8, slice 30). Footprint primitives stay in
+// shared (engine substrate); game types live here.
+export type {
+  Resource,
+  ResourceDrop,
+  Fire,
+  ProcessingAction,
+  DeathData,
+} from "./types/resource-game-types.js";
+
 // ScriptQueue — tile-based action priority queue, consumed by
 // `@hyperforge/server`'s GameTickProcessor. Migrated from
 // `@hyperforge/shared` (2026-04-26).

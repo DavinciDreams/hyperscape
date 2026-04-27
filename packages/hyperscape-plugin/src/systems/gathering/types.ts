@@ -5,8 +5,9 @@
  * Extracted from ResourceSystem.ts for better modularity.
  */
 
-import type { ResourceDrop } from "@hyperforge/shared";
 import type { PlayerID, ResourceID } from "@hyperforge/shared";
+// ResourceDrop migrated to plugin 2026-04-27 (top-10 #8, slice 30).
+import type { ResourceDrop } from "../../types/resource-game-types.js";
 
 /**
  * Cached tuning data for a gathering session.

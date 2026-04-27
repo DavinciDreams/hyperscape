@@ -6,7 +6,7 @@
  *
  */
 
-import type { ResourceDrop } from "@hyperforge/shared";
+import type { ResourceDrop } from "../../types/resource-game-types.js";
 
 /**
  * catch-rate interpolation formula

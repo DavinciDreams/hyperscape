@@ -899,9 +899,9 @@ export type {
   ResourceFootprint,
   FootprintDimensions,
   FootprintSpec,
-  Resource,
-  Fire,
 } from "./types/game/resource-processing-types";
+// Resource + Fire migrated to @hyperforge/hyperscape-plugin/types/
+// resource-game-types 2026-04-27 (top-10 #8, slice 30).
 
 // Export client network utilities
 export { PendingActionTracker } from "./systems/client/network/PendingActionTracker";
@@ -1116,7 +1116,8 @@ export { groundToTerrain } from "./utils/game/EntityUtils";
 // ProcessingSystem deps — needed by the migrated ProcessingSystem
 // in @hyperforge/hyperscape.
 export { ITEM_IDS } from "./constants/GameConstants";
-export type { ProcessingAction } from "./types/game/resource-processing-types";
+// ProcessingAction migrated to @hyperforge/hyperscape-plugin/types/
+// resource-game-types 2026-04-27 (top-10 #8, slice 30).
 // (calculateDistance2D already exported above)
 // getTargetValidator / TargetValidator migrated to
 // @hyperforge/hyperscape (2026-04-26).
@@ -1220,7 +1221,8 @@ export type { TerrainResourceSpawnPoint } from "./types/world/terrain";
 export { gatheringResources } from "./gathering/index";
 export type { GatheringToolData } from "./data/DataManager";
 export { findFishingSpotTiles, shuffleArray } from "./utils/ShoreUtils";
-export type { ResourceDrop } from "./types/core/core";
+// ResourceDrop migrated to @hyperforge/hyperscape-plugin/types/
+// resource-game-types 2026-04-27 (top-10 #8, slice 30).
 export {
   getExternalTool,
   getExternalToolsForSkill,

@@ -25,13 +25,11 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   calculateDistance2D,
   EventType,
-  type Fire,
   type GroundItemSystemDuck,
   ITEM_IDS,
   modelCache,
   ParticleSystem,
   processingDataProvider,
-  type ProcessingAction,
   SystemBase,
   THREE,
   tileToWorld,
@@ -39,6 +37,8 @@ import {
   type World,
   worldToTile,
 } from "@hyperforge/shared";
+// Fire + ProcessingAction migrated to plugin 2026-04-27 (top-10 #8, slice 30).
+import type { Fire, ProcessingAction } from "../types/resource-game-types.js";
 import { getTargetValidator } from "./interaction/TargetValidator.js";
 
 /**

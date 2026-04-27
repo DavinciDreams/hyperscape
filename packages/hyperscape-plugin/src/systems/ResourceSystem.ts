@@ -33,8 +33,6 @@ import {
   isCardinallyAdjacentToResource,
   isPositionInsideDuelArenaZone,
   type PlayerID,
-  type Resource,
-  type ResourceDrop,
   type ResourceFootprint,
   type ResourceID,
   shuffleArray,
@@ -49,6 +47,8 @@ import {
   type WorldArea,
   worldToTile,
 } from "@hyperforge/shared";
+// Resource + ResourceDrop migrated to plugin 2026-04-27 (top-10 #8, slice 30).
+import type { Resource, ResourceDrop } from "../types/resource-game-types.js";
 import { ResourceEntity } from "../entities/world/ResourceEntity.js";
 // Note: quaternionPool no longer used here - face rotation is deferred to FaceDirectionManager
 

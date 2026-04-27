@@ -1286,7 +1286,8 @@ export { groundToTerrain } from "./utils/game/EntityUtils";
 
 // ProcessingSystem deps — re-exported for the client bundle.
 export { ITEM_IDS } from "./constants/GameConstants";
-export type { ProcessingAction } from "./types/game/resource-processing-types";
+// ProcessingAction migrated to @hyperforge/hyperscape-plugin/types/
+// resource-game-types 2026-04-27 (top-10 #8, slice 30).
 // getTargetValidator / TargetValidator migrated to
 // @hyperforge/hyperscape (2026-04-26).
 export { modelCache } from "./utils/rendering/ModelCache";
@@ -1381,7 +1382,8 @@ export type { TerrainResourceSpawnPoint } from "./types/world/terrain";
 export { gatheringResources } from "./gathering/index";
 export type { GatheringToolData } from "./data/DataManager";
 export { findFishingSpotTiles, shuffleArray } from "./utils/ShoreUtils";
-export type { ResourceDrop } from "./types/core/core";
+// ResourceDrop migrated to @hyperforge/hyperscape-plugin/types/
+// resource-game-types 2026-04-27 (top-10 #8, slice 30).
 export {
   getExternalTool,
   getExternalToolsForSkill,
