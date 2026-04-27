@@ -1,5 +1,5 @@
 import { QuestsManifestSchema } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   QuestsNotLoadedError,
   QuestsRegistry,
@@ -147,5 +147,42 @@ describe("QuestsRegistry", () => {
     const r = new QuestsRegistry();
     r.loadFromJson(manifest());
     expect(r.ids.length).toBe(2);
+  });
+
+  it("onReloaded fires after every load() and supports unsubscribe", () => {
+    const r = new QuestsRegistry();
+    let count = 0;
+    const off = r.onReloaded(() => {
+      count++;
+    });
+    r.load(manifest());
+    r.load(manifest());
+    expect(count).toBe(2);
+    off();
+    r.load(manifest());
+    expect(count).toBe(2);
+  });
+
+  it("onReloaded fires after loadFromJson too", () => {
+    const r = new QuestsRegistry();
+    let count = 0;
+    r.onReloaded(() => {
+      count++;
+    });
+    r.loadFromJson(manifest());
+    expect(count).toBe(1);
+  });
+
+  it("onReloaded survives a throwing listener (logs but does not propagate)", () => {
+    const r = new QuestsRegistry();
+    const goodListener = vi.fn();
+    r.onReloaded(() => {
+      throw new Error("intentional");
+    });
+    r.onReloaded(goodListener);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(() => r.load(manifest())).not.toThrow();
+    expect(goodListener).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 });

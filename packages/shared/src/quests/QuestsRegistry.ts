@@ -41,8 +41,12 @@ export interface QuestRequirementCheck {
   skillLevels: Readonly<Record<string, number>>;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type QuestsReloadListener = () => void;
+
 export class QuestsRegistry {
   private _manifest: QuestsManifest | null = null;
+  private _reloadListeners = new Set<QuestsReloadListener>();
 
   constructor(manifest?: QuestsManifest) {
     if (manifest) this.load(manifest);
@@ -50,10 +54,42 @@ export class QuestsRegistry {
 
   load(manifest: QuestsManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(QuestsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `load()` / `loadFromJson()`. Returns an unsubscribe
+   * function. Listener throws are caught + logged so a buggy listener
+   * can't take the registry down.
+   *
+   * Used by PIE / Studio editor session UI consumers that want to
+   * re-render when the quest manifest hot-reloads. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: QuestsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[questsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): QuestsManifest {

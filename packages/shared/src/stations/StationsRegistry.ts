@@ -39,11 +39,15 @@ export class UnknownStationError extends Error {
   }
 }
 
+/** Listener invoked after every successful `loadStations()` / `loadBounds()`. */
+export type StationsReloadListener = () => void;
+
 export class StationsRegistry {
   private _stations: StationsManifest | null = null;
   private _bounds: ModelBoundsManifest | null = null;
   private _byType = new Map<string, StationManifestEntry>();
   private _boundsById = new Map<string, ModelBoundsEntry>();
+  private _reloadListeners = new Set<StationsReloadListener>();
 
   constructor(stations?: StationsManifest, bounds?: ModelBoundsManifest) {
     if (stations) this.loadStations(stations);
@@ -54,6 +58,7 @@ export class StationsRegistry {
     this._stations = manifest;
     this._byType.clear();
     for (const s of manifest.stations) this._byType.set(s.type, s);
+    this._emitReloaded();
   }
 
   loadStationsFromJson(raw: unknown): void {
@@ -64,10 +69,41 @@ export class StationsRegistry {
     this._bounds = manifest;
     this._boundsById.clear();
     for (const m of manifest.models) this._boundsById.set(m.id, m);
+    this._emitReloaded();
   }
 
   loadBoundsFromJson(raw: unknown): void {
     this.loadBounds(ModelBoundsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to "registry reloaded" notifications. Fires after every
+   * successful `loadStations()` / `loadBounds()`. Returns an
+   * unsubscribe function. Listener throws are caught + logged.
+   *
+   * Used by PIE / Studio editor session UI consumers that want to
+   * re-render when the stations or model-bounds manifests hot-reload.
+   * Pattern matches `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: StationsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[stationsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get stationsManifest(): StationsManifest {

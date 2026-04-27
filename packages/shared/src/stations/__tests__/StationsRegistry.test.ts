@@ -2,7 +2,7 @@ import {
   ModelBoundsManifestSchema,
   StationsManifestSchema,
 } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   StationsNotLoadedError,
   StationsRegistry,
@@ -117,5 +117,54 @@ describe("StationsRegistry", () => {
     const r = new StationsRegistry(stationsManifest(), boundsManifest());
     expect(r.boundsFor("anvil")?.assetPath).toBe("asset://anvil.glb");
     expect(r.boundsFor("ghost")).toBeUndefined();
+  });
+
+  it("onReloaded fires after loadStations() and supports unsubscribe", () => {
+    const r = new StationsRegistry();
+    let count = 0;
+    const off = r.onReloaded(() => {
+      count++;
+    });
+    r.loadStations(stationsManifest());
+    r.loadStations(stationsManifest());
+    expect(count).toBe(2);
+    off();
+    r.loadStations(stationsManifest());
+    expect(count).toBe(2);
+  });
+
+  it("onReloaded fires after loadBounds() too — both feeds notify", () => {
+    const r = new StationsRegistry();
+    let count = 0;
+    r.onReloaded(() => {
+      count++;
+    });
+    r.loadStations(stationsManifest());
+    r.loadBounds(boundsManifest());
+    expect(count).toBe(2);
+  });
+
+  it("onReloaded fires after loadFromJson variants", () => {
+    const r = new StationsRegistry();
+    let count = 0;
+    r.onReloaded(() => {
+      count++;
+    });
+    r.loadStationsFromJson(stationsManifest());
+    r.loadBoundsFromJson(boundsManifest());
+    expect(count).toBe(2);
+  });
+
+  it("onReloaded survives a throwing listener (logs but does not propagate)", () => {
+    const r = new StationsRegistry();
+    const goodListener = vi.fn();
+    r.onReloaded(() => {
+      throw new Error("intentional");
+    });
+    r.onReloaded(goodListener);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(() => r.loadStations(stationsManifest())).not.toThrow();
+    expect(goodListener).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 });
