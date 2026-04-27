@@ -23,13 +23,14 @@ import {
   type DialoguePresentation,
   EventType,
   getNPCById,
-  isValidQuestId,
   LocalizationCatalog,
   type NPCDialogueNode,
   type NPCDialogueTree,
   SystemBase,
   type World,
 } from "@hyperforge/shared";
+// isValidQuestId migrated to plugin types 2026-04-27 (top-10 #8 cleanup).
+import { isValidQuestId } from "../types/quest-types.js";
 import type { DialogueManifest } from "@hyperforge/manifest-schema";
 
 interface DialogueState {

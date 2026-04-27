@@ -405,8 +405,8 @@ export type {
   DuelEventName,
 } from "./types/game/duel-types";
 
-// Export quest type guards for server validation
-export { isValidQuestId } from "./types/game/quest-types";
+// quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
+// 2026-04-27 (top-10 #8 cleanup). isValidQuestId is plugin-side now.
 
 // Export item helpers used by server network snapshot
 export {
@@ -1517,19 +1517,11 @@ export { ticksToMs } from "./utils/game/CombatCalculations";
 // only; the system itself is exported by the plugin.
 export type { TargetType, SourceItem } from "./types/item-targeting";
 
-// QuestSystem deps — needed by the migrated QuestSystem in
-// @hyperforge/hyperscape.
-export { validateQuestDefinition } from "./types/game/quest-types";
-export type {
-  QuestDefinition,
-  QuestStatus,
-  QuestDbStatus,
-  QuestStage,
-  StageProgress,
-  QuestProgress,
-  PlayerQuestState,
-  QuestManifest,
-} from "./types/game/quest-types";
+// quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
+// 2026-04-27 (top-10 #8 cleanup). QuestDefinition, QuestStatus,
+// QuestDbStatus, QuestStage, StageProgress, QuestProgress,
+// PlayerQuestState, QuestManifest, validateQuestDefinition are now
+// plugin-side.
 export type { NPCDiedPayload } from "./types/events/event-payloads";
 export { validateKillToken } from "./utils/game/KillTokenUtils";
 export { Emotes } from "./data/playerEmotes";

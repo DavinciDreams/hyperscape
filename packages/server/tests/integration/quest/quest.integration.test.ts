@@ -23,12 +23,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { QuestSystem } from "@hyperforge/shared";
+// QuestSystem + quest-types migrated from shared to plugin 2026-04-27 (top-10 #8 cleanup).
+import {
+  QuestSystem,
+  type QuestDefinition,
+  type QuestStatus,
+} from "@hyperforge/hyperscape";
 import { EventType } from "@hyperforge/shared";
-import type {
-  QuestDefinition,
-  QuestStatus,
-} from "@hyperforge/shared/types/game/quest-types";
 
 // Mock world interface - minimal mock to test real QuestSystem logic
 interface MockWorld {

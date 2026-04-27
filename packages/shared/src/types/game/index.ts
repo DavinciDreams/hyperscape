@@ -9,7 +9,8 @@ export * from "./item-types";
 export * from "./interaction-types";
 export * from "./resource-processing-types";
 export * from "./prayer-types";
-export * from "./quest-types";
+// quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
+// 2026-04-27 (top-10 #8 cleanup).
 export * from "./trade-types";
 export * from "./social-types";
 export * from "./duel-types";

@@ -17,16 +17,15 @@
  *
  * Lives in `@hyperforge/hyperscape-plugin` because the only
  * implementation (`QuestSystem`) is plugin-side. Game-specific quest
- * data shapes (QuestDefinition / QuestStatus / QuestProgress) still
- * come from `@hyperforge/shared` until those types finish their own
- * migration.
+ * data shapes (QuestDefinition / QuestStatus / QuestProgress) live
+ * in `../types/quest-types` (migrated from shared 2026-04-27).
  */
 
 import type {
   QuestDefinition,
   QuestStatus,
   QuestProgress,
-} from "@hyperforge/shared";
+} from "../types/quest-types";
 
 /**
  * Read-only quest information queries

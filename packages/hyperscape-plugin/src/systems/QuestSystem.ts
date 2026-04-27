@@ -35,6 +35,13 @@
 import {
   EventType,
   type NPCDiedPayload,
+  SystemBase,
+  validateKillToken,
+  type World,
+} from "@hyperforge/shared";
+
+// Quest-shape types migrated from shared 2026-04-27 (top-10 #8 cleanup).
+import {
   type PlayerQuestState,
   type QuestDbStatus,
   type QuestDefinition,
@@ -43,11 +50,8 @@ import {
   type QuestStage,
   type QuestStatus,
   type StageProgress,
-  SystemBase,
-  validateKillToken,
   validateQuestDefinition,
-  type World,
-} from "@hyperforge/shared";
+} from "../types/quest-types.js";
 
 import type { IQuestSystem } from "../interfaces/quest-interfaces.js";
 

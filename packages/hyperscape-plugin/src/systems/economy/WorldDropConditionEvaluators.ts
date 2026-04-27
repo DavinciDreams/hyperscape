@@ -29,7 +29,8 @@ import type { World } from "@hyperforge/shared";
 import type { Skills } from "@hyperforge/shared";
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed locally — only 2 methods are called.
-import type { QuestProgress } from "@hyperforge/shared";
+// QuestProgress migrated to plugin types 2026-04-27 (top-10 #8 cleanup).
+import type { QuestProgress } from "../../types/quest-types.js";
 interface QuestSystem {
   getActiveQuests(playerId: string): QuestProgress[];
   hasCompletedQuest(playerId: string, questId: string): boolean;

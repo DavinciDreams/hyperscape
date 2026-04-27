@@ -1142,7 +1142,8 @@ export type {
   NPCDialogueTree,
   NPCDialogueNode,
 } from "./types/entities/npc-mob-types";
-export { isValidQuestId } from "./types/game/quest-types";
+// quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
+// 2026-04-27 (top-10 #8 cleanup). isValidQuestId is plugin-side now.
 
 // StationSpawnerSystem deps — re-exported for the client bundle.
 export { stationDataProvider } from "./data/StationDataProvider";
@@ -1629,18 +1630,10 @@ export { ticksToMs } from "./utils/game/CombatCalculations";
 // client world. (Mirrors index.ts.)
 export type { TargetType, SourceItem } from "./types/item-targeting";
 
-// QuestSystem (cross-cutting server-side) — re-exported here for the
-// client bundle.
-export { validateQuestDefinition } from "./types/game/quest-types";
-export type {
-  QuestDefinition,
-  QuestStatus,
-  QuestDbStatus,
-  QuestStage,
-  StageProgress,
-  QuestProgress,
-  PlayerQuestState,
-  QuestManifest,
-} from "./types/game/quest-types";
+// quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
+// 2026-04-27 (top-10 #8 cleanup). QuestDefinition, QuestStatus,
+// QuestDbStatus, QuestStage, StageProgress, QuestProgress,
+// PlayerQuestState, QuestManifest, validateQuestDefinition are now
+// plugin-side.
 export type { NPCDiedPayload } from "./types/events/event-payloads";
 export { validateKillToken } from "./utils/game/KillTokenUtils";

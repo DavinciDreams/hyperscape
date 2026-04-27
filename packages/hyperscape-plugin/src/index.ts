@@ -263,6 +263,31 @@ export { FaceDirectionManager } from "./systems/FaceDirectionManager.js";
 export { TileMovementManager } from "./systems/tile-movement.js";
 export { MobTileMovementManager } from "./systems/mob-tile-movement.js";
 
+// QuestSystem + quest-types — re-exported for server integration tests
+// + cross-package consumers. quest-types migrated from shared
+// 2026-04-27 (top-10 #8 cleanup).
+export { QuestSystem } from "./systems/QuestSystem.js";
+export {
+  isValidQuestId,
+  validateQuestDefinition,
+  type QuestDefinition,
+  type QuestStatus,
+  type QuestDbStatus,
+  type QuestStage,
+  type StageProgress,
+  type QuestProgress,
+  type PlayerQuestState,
+  type QuestManifest,
+  type QuestDifficulty,
+  type QuestStageType,
+  type QuestRequirements,
+  type QuestRewards,
+  type QuestOnStart,
+  type QuestDialogueOverrides,
+  type QuestAwareDialogue,
+  type QuestValidationResult,
+} from "./types/quest-types.js";
+
 // Network packet handlers — Phase F3 (2026-04-26). Each handler is
 // also registered automatically by plugin onEnable via
 // `world.connectionRegistry`; these re-exports are for direct

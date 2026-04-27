@@ -9,12 +9,13 @@
 import type { World } from "@hyperforge/shared";
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed local interface; this server handler calls 9 methods
-// on the system. Returns are typed against shared's quest-types.
+// on the system. Returns typed against plugin's local quest-types
+// (migrated from shared 2026-04-27, top-10 #8 cleanup).
 import type {
   QuestDefinition,
   QuestStatus,
   QuestProgress,
-} from "@hyperforge/shared";
+} from "../../types/quest-types.js";
 interface QuestSystem {
   getAllQuestDefinitions(): QuestDefinition[];
   getActiveQuests(playerId: string): QuestProgress[];
@@ -25,7 +26,9 @@ interface QuestSystem {
   abandonQuest(playerId: string, questId: string): Promise<boolean>;
   completeQuest(playerId: string, questId: string): Promise<boolean>;
 }
-import { SystemLogger, isValidQuestId } from "@hyperforge/shared";
+import { SystemLogger } from "@hyperforge/shared";
+// isValidQuestId migrated to plugin types 2026-04-27 (top-10 #8 cleanup).
+import { isValidQuestId } from "../../types/quest-types.js";
 import type { ServerSocket } from "@hyperforge/shared";
 import { sendToSocket, getPlayerId } from "@hyperforge/shared";
 import {

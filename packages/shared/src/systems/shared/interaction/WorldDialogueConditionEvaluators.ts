@@ -23,9 +23,14 @@ import type { World } from "../../../types/index";
 import type { Skills } from "../../../types/entities/entity-types";
 // QuestSystem migrated to @hyperforge/hyperscape (2026-04-25).
 // Duck-typed locally — `getActiveQuests` + `hasCompletedQuest`.
-import type { QuestProgress } from "../../../types/game/quest-types";
+// QuestProgress shape duck-typed (only questId + status read here).
+// quest-types itself migrated to plugin 2026-04-27 (top-10 #8 cleanup).
+interface QuestProgressLike {
+  readonly questId: string;
+  readonly status: string;
+}
 interface QuestSystem {
-  getActiveQuests(playerId: string): QuestProgress[];
+  getActiveQuests(playerId: string): QuestProgressLike[];
   hasCompletedQuest(playerId: string, questId: string): boolean;
 }
 // InventorySystem migrated to @hyperforge/hyperscape (2026-04-26, Wave 5c).
