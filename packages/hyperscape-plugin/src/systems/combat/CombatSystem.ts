@@ -59,6 +59,11 @@ import {
 import { tilePool, PooledTile } from "@hyperforge/shared";
 import { CombatAnimationManager } from "./CombatAnimationManager";
 import {
+  CombatAttackValidator,
+  type AttackValidationResult,
+  type MeleeAttackData,
+} from "./CombatAttackValidator";
+import {
   CombatDamageOrchestrator,
   type PlayerEquipmentStats,
 } from "./CombatDamageOrchestrator";
@@ -152,24 +157,9 @@ export type { CombatData } from "./CombatStateService";
 /**
  * Attack data structure for validation and execution
  */
-interface MeleeAttackData {
-  attackerId: string;
-  targetId: string;
-  attackerType: "player" | "mob";
-  targetType: "player" | "mob";
-}
-
-/**
- * Result of attack validation
- * Contains validated entities if successful, or null if validation failed
- */
-interface AttackValidationResult {
-  valid: boolean;
-  attacker: Entity | MobEntity | null;
-  target: Entity | MobEntity | null;
-  typedAttackerId: EntityID | null;
-  typedTargetId: EntityID | null;
-}
+// MeleeAttackData and AttackValidationResult moved to
+// ./CombatAttackValidator (slice 7); re-imported above for use
+// at the few CombatSystem call sites that still reference them.
 
 export class CombatSystem extends SystemBase {
   private nextAttackTicks = new Map<EntityID, number>(); // Tick when entity can next attack
@@ -219,6 +209,11 @@ export class CombatSystem extends SystemBase {
   // manual force-end cleanup). enterCombat is deferred to a future
   // slice (top-10 #9 sixth decomposition slice).
   private readonly lifecycleHandler: CombatLifecycleHandler;
+
+  // Pre-attack validation predicates extracted as the seventh slice.
+  // Wraps validateMeleeAttack, isWithinCombatRange, checkAttackCooldown,
+  // validateCombatActors, validateAttackRange.
+  private readonly attackValidator: CombatAttackValidator;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -343,6 +338,19 @@ export class CombatSystem extends SystemBase {
       this.eventRecorder,
       this.lastCombatTargetTile,
       (type, payload) => this.emitTypedEvent(type, payload),
+    );
+
+    // Pre-attack validation (slice 7). Shares the pooled tile buffers
+    // and nextAttackTicks Map with the host system — both are read
+    // by other CombatSystem methods on the same tick, which is safe
+    // because combat is single-threaded.
+    this.attackValidator = new CombatAttackValidator(
+      this.entityResolver,
+      this.antiCheat,
+      this.eventEmitter,
+      this.nextAttackTicks,
+      this._attackerTile,
+      this._targetTile,
     );
   }
 
@@ -686,13 +694,21 @@ export class CombatSystem extends SystemBase {
     }
 
     // Validate the attack (entities exist, alive, in range, etc.)
-    const validation = this.validateMeleeAttack(data, currentTick);
+    const validation = this.attackValidator.validateMeleeAttack(
+      data,
+      currentTick,
+    );
     if (!validation.valid) {
       return;
     }
 
     // Check cooldown before executing
-    if (!this.checkAttackCooldown(validation.typedAttackerId!, currentTick)) {
+    if (
+      !this.attackValidator.checkAttackCooldown(
+        validation.typedAttackerId!,
+        currentTick,
+      )
+    ) {
       return;
     }
 
@@ -700,188 +716,9 @@ export class CombatSystem extends SystemBase {
     this.executeMeleeAttack(data, validation, currentTick);
   }
 
-  /**
-   * Validate all preconditions for a melee attack
-   * Returns validation result with entities if valid
-   */
-  private validateMeleeAttack(
-    data: MeleeAttackData,
-    currentTick: number,
-  ): AttackValidationResult {
-    const { attackerId, targetId, attackerType, targetType } = data;
-    const invalidResult: AttackValidationResult = {
-      valid: false,
-      attacker: null,
-      target: null,
-      typedAttackerId: null,
-      typedTargetId: null,
-    };
-
-    // Convert IDs to typed IDs
-    const typedAttackerId = createEntityID(attackerId);
-    const typedTargetId = createEntityID(targetId);
-
-    // Get attacker and target entities
-    const attacker = this.entityResolver.resolve(attackerId, attackerType);
-    const target = this.entityResolver.resolve(targetId, targetType);
-
-    // Check entities exist
-    if (!attacker || !target) {
-      if (attackerType === "player" && !target) {
-        this.antiCheat.recordNonexistentTargetAttack(
-          attackerId,
-          targetId,
-          currentTick,
-        );
-      }
-      return invalidResult;
-    }
-
-    // Check attacker is alive
-    if (!this.entityResolver.isAlive(attacker, attackerType)) {
-      return invalidResult;
-    }
-
-    // Check target is alive
-    if (!this.entityResolver.isAlive(target, targetType)) {
-      if (attackerType === "player") {
-        this.antiCheat.recordDeadTargetAttack(
-          attackerId,
-          targetId,
-          currentTick,
-        );
-      }
-      return invalidResult;
-    }
-
-    // Check target not in loading protection
-    if (targetType === "player" && target.data?.isLoading) {
-      if (attackerType === "player") {
-        this.antiCheat.recordViolation(
-          attackerId,
-          CombatViolationType.ATTACK_DURING_PROTECTION,
-          CombatViolationSeverity.MODERATE,
-          `Attacked player ${targetId} during loading protection`,
-          targetId,
-          currentTick,
-        );
-      }
-      return invalidResult;
-    }
-
-    // Check target is attackable (for mobs)
-    if (targetType === "mob" && isMobEntity(target)) {
-      if (typeof target.isAttackable === "function" && !target.isAttackable()) {
-        this.eventEmitter.emitAttackFailed(
-          attackerId,
-          targetId,
-          "target_not_attackable",
-        );
-        return invalidResult;
-      }
-    }
-
-    // Check not self-attack
-    if (attackerId === targetId) {
-      if (attackerType === "player") {
-        this.antiCheat.recordSelfAttack(attackerId, currentTick);
-      }
-      return invalidResult;
-    }
-
-    // Check range
-    if (
-      !this.isWithinCombatRange(
-        attacker,
-        target,
-        attackerType,
-        data,
-        currentTick,
-      )
-    ) {
-      return invalidResult;
-    }
-
-    return {
-      valid: true,
-      attacker,
-      target,
-      typedAttackerId,
-      typedTargetId,
-    };
-  }
-
-  /**
-   * Check if attacker is within combat range of target
-   *
-   * OSRS melee rules (from wiki):
-   * - Range 1 (standard melee): Cardinal only (N/S/E/W) - NO diagonal attacks
-   * - Range 2+ (halberd): Allows diagonal attacks
-   *
-   * @see https://oldschool.runescape.wiki/w/Attack_range
-   */
-  private isWithinCombatRange(
-    attacker: Entity | MobEntity,
-    target: Entity | MobEntity,
-    attackerType: "player" | "mob",
-    data: MeleeAttackData,
-    currentTick: number,
-  ): boolean {
-    const attackerPos = getEntityPosition(attacker);
-    const targetPos = getEntityPosition(target);
-    if (!attackerPos || !targetPos) return false;
-
-    // Use pre-allocated pooled tiles (zero GC)
-    tilePool.setFromPosition(this._attackerTile, attackerPos);
-    tilePool.setFromPosition(this._targetTile, targetPos);
-    const combatRangeTiles = this.entityResolver.getCombatRange(
-      attacker,
-      attackerType,
-    );
-
-    // OSRS-accurate melee range check:
-    // - Range 1: Cardinal only (N/S/E/W)
-    // - Range 2+: Allows diagonal (Chebyshev distance)
-    if (
-      !tilesWithinMeleeRange(
-        this._attackerTile,
-        this._targetTile,
-        combatRangeTiles,
-      )
-    ) {
-      if (attackerType === "player") {
-        const dx = Math.abs(this._attackerTile.x - this._targetTile.x);
-        const dz = Math.abs(this._attackerTile.z - this._targetTile.z);
-        const actualDistance = Math.max(dx, dz);
-        this.antiCheat.recordOutOfRangeAttack(
-          data.attackerId,
-          data.targetId,
-          actualDistance,
-          combatRangeTiles,
-          currentTick,
-        );
-      }
-
-      this.eventEmitter.emitAttackFailed(
-        data.attackerId,
-        data.targetId,
-        "out_of_range",
-      );
-      return false;
-    }
-    return true;
-  }
-
-  /**
-   * Check if attack is on cooldown
-   */
-  private checkAttackCooldown(
-    typedAttackerId: EntityID,
-    currentTick: number,
-  ): boolean {
-    const nextAllowedTick = this.nextAttackTicks.get(typedAttackerId) ?? 0;
-    return !isAttackOnCooldownTicks(currentTick, nextAllowedTick);
-  }
+  // validateMeleeAttack, isWithinCombatRange, checkAttackCooldown
+  // moved to ./CombatAttackValidator (slice 7). Call sites delegate
+  // via this.attackValidator.{method}(...).
 
   /**
    * Execute a validated melee attack
@@ -1025,7 +862,9 @@ export class CombatSystem extends SystemBase {
       }
 
       const typedAttackerId = createEntityID(attackerId);
-      if (!this.checkAttackCooldown(typedAttackerId, currentTick)) {
+      if (
+        !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
+      ) {
         return;
       }
 
@@ -1178,7 +1017,9 @@ export class CombatSystem extends SystemBase {
 
     // Check cooldown
     const typedAttackerId = createEntityID(attackerId);
-    if (!this.checkAttackCooldown(typedAttackerId, currentTick)) {
+    if (
+      !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
+    ) {
       return;
     }
 
@@ -1328,7 +1169,9 @@ export class CombatSystem extends SystemBase {
       }
 
       const typedAttackerId = createEntityID(attackerId);
-      if (!this.checkAttackCooldown(typedAttackerId, currentTick)) {
+      if (
+        !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
+      ) {
         return;
       }
 
@@ -1579,7 +1422,9 @@ export class CombatSystem extends SystemBase {
 
     // Check cooldown
     const typedAttackerId = createEntityID(attackerId);
-    if (!this.checkAttackCooldown(typedAttackerId, currentTick)) {
+    if (
+      !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
+    ) {
       return;
     }
 
@@ -2824,71 +2669,9 @@ export class CombatSystem extends SystemBase {
     }
   }
 
-  /**
-   * Validate combat actors exist and are alive
-   */
-  private validateCombatActors(
-    combatState: CombatData,
-  ): { attacker: Entity | MobEntity; target: Entity | MobEntity } | null {
-    const attackerId = String(combatState.attackerId);
-    const targetId = String(combatState.targetId);
-
-    const attacker = this.entityResolver.resolve(
-      attackerId,
-      combatState.attackerType,
-    );
-    const target = this.entityResolver.resolve(
-      targetId,
-      combatState.targetType,
-    );
-
-    // Let combat time out naturally if entities gone (health bars stay visible)
-    if (!attacker || !target) {
-      return null;
-    }
-
-    if (!this.entityResolver.isAlive(attacker, combatState.attackerType)) {
-      return null;
-    }
-
-    if (!this.entityResolver.isAlive(target, combatState.targetType)) {
-      return null;
-    }
-
-    return { attacker, target };
-  }
-
-  /**
-   * Validate attacker is within melee range of target
-   * Uses pooled tiles for zero GC overhead
-   * @returns true if within range, false otherwise
-   */
-  private validateAttackRange(
-    attacker: Entity | MobEntity,
-    target: Entity | MobEntity,
-    attackerType: "player" | "mob",
-  ): boolean {
-    const attackerPos = getEntityPosition(attacker);
-    const targetPos = getEntityPosition(target);
-    if (!attackerPos || !targetPos) return false;
-
-    // MELEE: Must be within attacker's combat range (configurable per mob, minimum 1 tile)
-    // OSRS-style: range 1 = cardinal only (N/S/E/W), range 2+ = diagonal allowed
-    // Use pre-allocated pooled tiles (zero GC)
-    tilePool.setFromPosition(this._attackerTile, attackerPos);
-    tilePool.setFromPosition(this._targetTile, targetPos);
-    const combatRangeTiles = this.entityResolver.getCombatRange(
-      attacker,
-      attackerType,
-    );
-
-    // OSRS-accurate melee range check (cardinal-only for range 1)
-    return tilesWithinMeleeRange(
-      this._attackerTile,
-      this._targetTile,
-      combatRangeTiles,
-    );
-  }
+  // validateCombatActors and validateAttackRange moved to
+  // ./CombatAttackValidator (slice 7). Call sites delegate via
+  // this.attackValidator.{method}(...).
 
   /**
    * Execute the attack: rotation, animation, damage calculation, and application
@@ -3178,7 +2961,7 @@ export class CombatSystem extends SystemBase {
     const typedAttackerId = combatState.attackerId;
 
     // Step 1: Validate combat actors exist and are alive
-    const actors = this.validateCombatActors(combatState);
+    const actors = this.attackValidator.validateCombatActors(combatState);
     if (!actors) return;
     const { attacker, target } = actors;
 
@@ -3214,7 +2997,13 @@ export class CombatSystem extends SystemBase {
     }
 
     // Step 2: Validate attack range (melee only from here)
-    if (!this.validateAttackRange(attacker, target, combatState.attackerType)) {
+    if (
+      !this.attackValidator.validateAttackRange(
+        attacker,
+        target,
+        combatState.attackerType,
+      )
+    ) {
       return;
     }
 
