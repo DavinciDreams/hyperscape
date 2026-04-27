@@ -12,7 +12,6 @@ export * from "./resource-processing-types";
 export * from "./prayer-types";
 // quest-types migrated to @hyperforge/hyperscape-plugin/types/quest-types
 // 2026-04-27 (top-10 #8 cleanup).
-export * from "./trade-types";
-// social-types migrated to @hyperforge/hyperscape-plugin/types/social-types
-// 2026-04-27 (top-10 #8 cleanup).
+// trade-types + social-types migrated to
+// @hyperforge/hyperscape-plugin/types/* 2026-04-27 (top-10 #8 cleanup).
 export * from "./duel-types";

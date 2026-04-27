@@ -44,7 +44,11 @@ import type {
   PendingDuelChallenge,
   StakedItem,
 } from "../game/duel-types";
-import type { TradeParticipant, TradeSession } from "../game/trade-types";
+// trade-types migrated to @hyperforge/hyperscape-plugin/types/trade-types
+// 2026-04-27 (top-10 #8 cleanup). TradingSystem + TradeOperationResult
+// interfaces moved out of this file to live with their implementation
+// (plugin's TradingSystem class). Shared no longer carries the trading
+// duck-type contract.
 
 // ============================================================================
 // CORE SYSTEM INTERFACES
@@ -383,101 +387,6 @@ export interface StoreSystem extends System {
 
 export interface BankingSystem extends System {
   playerBanks: Map<string, unknown>;
-}
-
-/**
- * Trading system result type
- */
-export interface TradeOperationResult {
-  success: boolean;
-  error?: string;
-  errorCode?: string;
-}
-
-/**
- * TradingSystem - Server-authoritative player-to-player trading
- *
- * Manages trade sessions between players with full validation,
- * atomic item swaps, and proper cleanup on disconnection.
- *
- * Trade Flow:
- * 1. Player A requests trade with Player B
- * 2. Player B receives request notification
- * 3. Player B accepts/declines
- * 4. If accepted, trade window opens for both
- * 5. Players add/remove items from their offers
- * 6. Both players must accept the final offer
- * 7. Server atomically swaps items between inventories
- */
-// Migrated to @hyperforge/hyperscape (2026-04-26). The plugin's
-// concrete `TradingSystem` class is a plain class (not a `System`
-// subclass), so this interface is a structural duck-type contract —
-// no `extends System`. Shared code that resolves it via
-// `world.tradingSystem` only ever calls these methods.
-export interface TradingSystem {
-  // Trade Lifecycle
-  createTradeRequest(
-    initiatorId: string,
-    initiatorName: string,
-    initiatorSocketId: string,
-    recipientId: string,
-  ): TradeOperationResult & { tradeId?: string };
-
-  respondToTradeRequest(
-    tradeId: string,
-    recipientId: string,
-    recipientName: string,
-    recipientSocketId: string,
-    accept: boolean,
-  ): TradeOperationResult;
-
-  // Trade Operations
-  addItemToTrade(
-    tradeId: string,
-    playerId: string,
-    inventorySlot: number,
-    itemId: string,
-    quantity: number,
-  ): TradeOperationResult;
-
-  removeItemFromTrade(
-    tradeId: string,
-    playerId: string,
-    tradeSlot: number,
-  ): TradeOperationResult;
-
-  setAcceptance(
-    tradeId: string,
-    playerId: string,
-    accepted: boolean,
-  ): TradeOperationResult & {
-    bothAccepted?: boolean;
-    moveToConfirming?: boolean;
-  };
-
-  moveToConfirmation(tradeId: string): TradeOperationResult;
-  returnToOfferScreen(tradeId: string): TradeOperationResult;
-
-  completeTrade(tradeId: string): TradeOperationResult & {
-    initiatorReceives?: unknown[];
-    recipientReceives?: unknown[];
-    initiatorId?: string;
-    recipientId?: string;
-  };
-
-  cancelTrade(
-    tradeId: string,
-    reason: string,
-    cancelledBy?: string,
-  ): TradeOperationResult;
-
-  // Queries
-  getTradeSession(tradeId: string): TradeSession | undefined;
-  getPlayerTrade(playerId: string): TradeSession | undefined;
-  getPlayerTradeId(playerId: string): string | undefined;
-  isPlayerInTrade(playerId: string): boolean;
-  getTradePartner(playerId: string): TradeParticipant | undefined;
-  isPlayerOnline(playerId: string): boolean;
 }
 
 /**

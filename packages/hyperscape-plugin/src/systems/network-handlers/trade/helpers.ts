@@ -5,12 +5,7 @@
  * IMPORTANT: This module must NOT import from any handler module to prevent circular imports.
  */
 
-import {
-  type World,
-  getItem,
-  type TradeOfferView,
-  type TradeOfferItem,
-} from "@hyperforge/shared";
+import { type World, getItem } from "@hyperforge/shared";
 import type { ServerSocket } from "@hyperforge/shared";
 import { RateLimitService } from "@hyperforge/shared";
 import {
@@ -18,10 +13,13 @@ import {
   getPlayerId,
   getEntityPosition,
 } from "@hyperforge/shared";
-// TradingSystem migrated to @hyperforge/hyperscape (2026-04-26). The
-// `TradingSystem` interface in system-interfaces is the duck-type
-// contract — plugin's concrete class structurally satisfies it.
-import type { TradingSystem } from "@hyperforge/shared";
+// trade-types + TradingSystem interface migrated to plugin 2026-04-27
+// (top-10 #8 cleanup).
+import type {
+  TradeOfferView,
+  TradeOfferItem,
+  TradingSystem,
+} from "../../../types/trade-types.js";
 // PendingTradeManager migrated to @hyperforge/hyperscape (Phase D1,
 // 2026-04-26). Duck-typed locally — only `queuePendingTrade` is
 // called from the trade handlers; plugin's concrete class

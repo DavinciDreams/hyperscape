@@ -337,32 +337,9 @@ export type {
   PlayerWithPrayerStats,
 } from "./types/game/prayer-types";
 
-// Export trade types
-export { TRADE_CONSTANTS } from "./types/game/trade-types";
-export type {
-  TradeStatus,
-  TradeCancelReason,
-  TradeOfferItem,
-  TradeParticipant,
-  TradeSession,
-  TradeRequestPayload,
-  TradeRequestRespondPayload,
-  TradeAddItemPayload,
-  TradeRemoveItemPayload,
-  TradeSetQuantityPayload,
-  TradeAcceptPayload,
-  TradeCancelAcceptPayload,
-  TradeCancelPayload,
-  TradeIncomingPayload,
-  TradeStartedPayload,
-  TradeOfferView,
-  TradeUpdatedPayload,
-  TradeCompletedPayload,
-  TradeCancelledPayload,
-  TradeErrorPayload,
-  TradeWindowState,
-  TradeRequestModalState,
-} from "./types/game/trade-types";
+// trade-types migrated to @hyperforge/hyperscape-plugin/types/trade-types
+// 2026-04-27 (top-10 #8 cleanup). TRADE_CONSTANTS inlined into
+// data/live/trading-live.ts as engine-side fallback values.
 
 // social-types migrated to @hyperforge/hyperscape-plugin/types/social-types
 // 2026-04-27 (top-10 #8 cleanup). SOCIAL_CONSTANTS inlined into
@@ -2152,10 +2129,9 @@ export {
 // DuelSystem duck-type interface — concrete class lives in
 // @hyperforge/hyperscape; this shape is how shared code refers to
 // the system without a back-reference.
-export type {
-  DuelSystem,
-  TradingSystem,
-} from "./types/systems/system-interfaces";
+// TradingSystem interface migrated to @hyperforge/hyperscape-plugin
+// 2026-04-27 (top-10 #8 cleanup).
+export type { DuelSystem } from "./types/systems/system-interfaces";
 // ServerSocket type — needed by migrated ScriptQueue (the queued
 // player/NPC action types reference ServerSocket).
 export type { ServerSocket } from "./systems/server/network/server-types";

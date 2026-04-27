@@ -35,12 +35,15 @@ import {
   isValidPlayerID,
   isValidSlotNumber,
   type PlayerID,
-  type TradeCancelReason,
-  type TradeOfferItem,
-  type TradeParticipant,
-  type TradeSession,
   type World,
 } from "@hyperforge/shared";
+// trade-types migrated to plugin 2026-04-27 (top-10 #8 cleanup).
+import type {
+  TradeCancelReason,
+  TradeOfferItem,
+  TradeParticipant,
+  TradeSession,
+} from "../../types/trade-types.js";
 
 // ============================================================================
 // Types

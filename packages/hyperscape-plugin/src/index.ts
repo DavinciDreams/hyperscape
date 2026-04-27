@@ -303,6 +303,40 @@ export type {
   SocialErrorCode,
 } from "./types/social-types.js";
 
+// trade-types — migrated from shared 2026-04-27 (top-10 #8 cleanup).
+// TradingSystem + TradeOperationResult also live here now (was in
+// shared/types/systems/system-interfaces). Re-exported here for
+// cross-package consumers (server's swap.ts, etc.)
+export type {
+  TradeStatus,
+  TradeCancelReason,
+  TradeOfferItem,
+  TradeParticipant,
+  TradeSession,
+  TradeRequestPayload,
+  TradeRequestRespondPayload,
+  TradeAddItemPayload,
+  TradeRemoveItemPayload,
+  TradeSetQuantityPayload,
+  TradeAcceptPayload,
+  TradeCancelAcceptPayload,
+  TradeCancelPayload,
+  TradeIncomingPayload,
+  TradeStartedPayload,
+  TradeOfferView,
+  TradeUpdatedPayload,
+  TradeCompletedPayload,
+  TradeCancelledPayload,
+  TradeErrorPayload,
+  TradeWindowState,
+  TradeRequestModalState,
+  TradeOperationResult,
+  // TradingSystem name is already exported above as a class (from
+  // ./systems/TradingSystem/index.js). The class structurally
+  // satisfies the duck-type interface, so consumers needing the
+  // interface should import the class as a type.
+} from "./types/trade-types.js";
+
 // Network packet handlers — Phase F3 (2026-04-26). Each handler is
 // also registered automatically by plugin onEnable via
 // `world.connectionRegistry`; these re-exports are for direct

@@ -18,7 +18,9 @@ import type {
   PrayerStateSyncPayload,
   PrayerPointsChangedPayload,
 } from "../game/prayer-types";
-import type { TradeCancelledPayload } from "../game/trade-types";
+// TradeCancelledPayload import removed 2026-04-27 (top-10 #8 cleanup) —
+// it was dead code, only referenced by a comment. The actual server
+// event-bridge defines its own inline payload type with extra fields.
 
 // ============================================================================
 // EVENT PAYLOAD INTERFACES
