@@ -71,7 +71,7 @@ export type {
   CombatTarget,
   EquipmentComponent,
   EquipmentSlot,
-  InteractionAction,
+  // InteractionAction removed 2026-04-27 (top-10 #8 cleanup) — type was dead.
   InventoryItem,
   InventorySlotItem,
   LootTable,
@@ -98,7 +98,7 @@ export * from "./world/building-collision-types";
 export * from "./entities/npc-mob-types";
 export * from "./game/inventory-types";
 export * from "./game/resource-processing-types";
-export * from "./game/interaction-types";
+// interaction-types deleted 2026-04-27 (top-10 #8 cleanup) — dead code.
 export * from "./systems/system-types";
 
 // Re-export other types (using specific exports to avoid circular dependencies)

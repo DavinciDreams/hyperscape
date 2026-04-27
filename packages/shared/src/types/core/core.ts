@@ -34,7 +34,7 @@ export * from "../world/world-types";
 export * from "../entities/npc-mob-types";
 export * from "../game/inventory-types";
 export * from "../game/resource-processing-types";
-export * from "../game/interaction-types";
+// interaction-types deleted 2026-04-27 (top-10 #8 cleanup) — dead code.
 export * from "../systems/system-types";
 
 // Re-export specific types for components
