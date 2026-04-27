@@ -199,6 +199,7 @@ import { homeTeleportButtonRegistration } from "./widgets/HomeTeleportButtonWidg
 import { minimapHomeTeleportOrbRegistration } from "./widgets/MinimapHomeTeleportOrbWidget.js";
 import { skillSelectModalRegistration } from "./widgets/SkillSelectModalWidget.js";
 import { floatingXPDropsRegistration } from "./widgets/FloatingXPDropsWidget.js";
+import { unlocksSectionRegistration } from "./widgets/UnlocksSectionWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -326,6 +327,16 @@ export {
   type FloatingXPDrop,
   type FloatingXPDropsProps,
 } from "./widgets/FloatingXPDropsWidget.js";
+export {
+  unlocksSectionWidget,
+  unlocksSectionRegistration,
+  UnlocksSection,
+  UNLOCK_TYPES,
+  DEFAULT_UNLOCK_TYPE_ICONS,
+  type UnlockType,
+  type UnlockEntry,
+  type UnlocksSectionProps,
+} from "./widgets/UnlocksSectionWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -723,6 +734,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(minimapHomeTeleportOrbRegistration);
         ctx.widgets.register(skillSelectModalRegistration);
         ctx.widgets.register(floatingXPDropsRegistration);
+        ctx.widgets.register(unlocksSectionRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
