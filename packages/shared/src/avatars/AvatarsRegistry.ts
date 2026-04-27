@@ -37,9 +37,13 @@ export class UnknownAvatarError extends Error {
 
 export type AvatarLodTier = 0 | 1 | 2;
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type AvatarsReloadListener = () => void;
+
 export class AvatarsRegistry {
   private _manifest: AvatarsManifest | null = null;
   private _byId = new Map<string, AvatarEntry>();
+  private _reloadListeners = new Set<AvatarsReloadListener>();
 
   constructor(manifest?: AvatarsManifest) {
     if (manifest) this.load(manifest);
@@ -49,10 +53,37 @@ export class AvatarsRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const a of manifest.avatars) this._byId.set(a.id, a);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(AvatarsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: AvatarsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[avatarsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

@@ -62,8 +62,12 @@ export interface ShotGateResult {
   reason: ShotGateReason;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type AmmunitionReloadListener = () => void;
+
 export class AmmunitionRegistry {
   private _manifest: AmmunitionManifest | null = null;
+  private _reloadListeners = new Set<AmmunitionReloadListener>();
 
   constructor(manifest?: AmmunitionManifest) {
     if (manifest) this.load(manifest);
@@ -71,10 +75,37 @@ export class AmmunitionRegistry {
 
   load(manifest: AmmunitionManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(AmmunitionManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: AmmunitionReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[ammunitionRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
