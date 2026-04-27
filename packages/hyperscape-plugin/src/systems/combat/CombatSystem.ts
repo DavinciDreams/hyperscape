@@ -77,6 +77,7 @@ import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
 import { CombatMeleeAttackHandler } from "./CombatMeleeAttackHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatProjectileHitProcessor } from "./CombatProjectileHitProcessor";
+import { CombatRangedAttackHandler } from "./CombatRangedAttackHandler";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
 import { CombatTickAttackWorker } from "./CombatTickAttackWorker";
@@ -253,6 +254,10 @@ export class CombatSystem extends SystemBase {
   // Inbound + execute pair for melee attacks extracted as the
   // fourteenth slice. Wraps handleMeleeAttack + executeMeleeAttack.
   private readonly meleeAttackHandler: CombatMeleeAttackHandler;
+
+  // Inbound entry for ranged attacks extracted as the fifteenth
+  // slice. Wraps handleRangedAttack (mob + player branches).
+  private readonly rangedAttackHandler: CombatRangedAttackHandler;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -501,6 +506,29 @@ export class CombatSystem extends SystemBase {
       this.eventEmitter,
       this.enterLifecycleHandler,
       this.nextAttackTicks,
+      () => this.playerSystem,
+    );
+
+    // Ranged attack handler (slice 15). Inbound entry — mob + player
+    // branches. Closure for late-bound playerSystem (style modifier).
+    this.rangedAttackHandler = new CombatRangedAttackHandler(
+      world,
+      this.entityIdValidator,
+      this.antiCheat,
+      this.rateLimiter,
+      this.attackValidator,
+      this.entityResolver,
+      this.rotationManager,
+      this.animationManager,
+      this.damageOrchestrator,
+      this.eventEmitter,
+      this.playerQueries,
+      this.projectileService,
+      this.enterLifecycleHandler,
+      this.nextAttackTicks,
+      this._attackerTile,
+      this._targetTile,
+      (type, payload) => this.emitTypedEvent(type, payload),
       () => this.playerSystem,
     );
   }
@@ -771,9 +799,10 @@ export class CombatSystem extends SystemBase {
     this.meleeAttackHandler.handleMeleeAttack(data);
   }
 
-  /**
-   * Handle ranged attack - validate arrows, create projectile, queue damage
-   */
+  // handleRangedAttack moved to ./CombatRangedAttackHandler (slice 15).
+  // Call sites delegate via this.rangedAttackHandler.handleRangedAttack(data).
+
+  /** Thin proxy — delegates to CombatRangedAttackHandler. */
   private handleRangedAttack(data: {
     attackerId: string;
     targetId: string;
@@ -781,301 +810,7 @@ export class CombatSystem extends SystemBase {
     targetType: "player" | "mob";
     arrowId?: string;
   }): void {
-    const { attackerId, targetId, attackerType, targetType } = data;
-    const currentTick = this.world.currentTick ?? 0;
-
-    // Mobs can launch ranged projectiles when configured with arrowId.
-    if (attackerType === "mob") {
-      const attacker = this.entityResolver.resolve(attackerId, attackerType);
-      const target = this.entityResolver.resolve(targetId, targetType);
-      if (!attacker || !target || !isMobEntity(attacker)) return;
-
-      if (
-        !this.entityResolver.isAlive(attacker, attackerType) ||
-        !this.entityResolver.isAlive(target, targetType)
-      ) {
-        return;
-      }
-
-      const mobData = attacker.getMobData();
-      const npcData = getNPCById(mobData.type);
-      if (!npcData) return;
-
-      const arrowId = data.arrowId ?? npcData.combat.arrowId;
-      if (!arrowId) {
-        console.warn(
-          `[RangedAttackHandler] Mob ${attackerId} (${mobData.type}) has no arrowId configured, skipping attack`,
-        );
-        return;
-      }
-
-      const attackRange = Math.max(
-        1,
-        Math.floor(npcData.combat.combatRange ?? getDefaultRangedRange()),
-      );
-      const attackerPos = getEntityPosition(attacker);
-      const targetPos = getEntityPosition(target);
-      if (!attackerPos || !targetPos) return;
-
-      tilePool.setFromPosition(this._attackerTile, attackerPos);
-      tilePool.setFromPosition(this._targetTile, targetPos);
-      const distance = tileChebyshevDistance(
-        this._attackerTile,
-        this._targetTile,
-      );
-      if (distance > attackRange || distance === 0) {
-        this.eventEmitter.emitAttackFailed(
-          attackerId,
-          targetId,
-          "out_of_range",
-        );
-        return;
-      }
-
-      const typedAttackerId = createEntityID(attackerId);
-      if (
-        !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
-      ) {
-        return;
-      }
-
-      const attackSpeedTicks = Math.max(
-        1,
-        npcData.combat.attackSpeedTicks ?? getDefaultNpcAttackSpeedTicks(),
-      );
-
-      this.rotationManager.rotateTowardsTarget(
-        attackerId,
-        targetId,
-        attackerType,
-        targetType,
-      );
-      this.animationManager.setCombatEmote(
-        attackerId,
-        attackerType,
-        currentTick,
-        attackSpeedTicks,
-        "ranged",
-      );
-
-      const damage = this.damageOrchestrator.calculateMobRangedDamageForAttack(
-        target,
-        targetType,
-        npcData.stats.ranged ?? 1,
-        arrowId,
-      );
-
-      const projectileParams: CreateProjectileParams = {
-        sourceId: attackerId,
-        targetId,
-        attackType: AttackType.RANGED,
-        damage,
-        currentTick,
-        sourcePosition: { x: attackerPos.x, z: attackerPos.z },
-        targetPosition: { x: targetPos.x, z: targetPos.z },
-        arrowId,
-        xpReward: 0,
-      };
-
-      this.projectileService.createProjectile(projectileParams);
-
-      const HIT_DELAY = getHitDelayConfig();
-      const TICK_DURATION_MS = getTickDurationMs();
-      const rangedHitDelayTicks = Math.min(
-        HIT_DELAY.MAX_HIT_DELAY,
-        HIT_DELAY.RANGED_BASE +
-          Math.floor(
-            (HIT_DELAY.RANGED_DISTANCE_OFFSET + distance) /
-              HIT_DELAY.RANGED_DISTANCE_DIVISOR,
-          ),
-      );
-      const arrowLaunchDelayMs = getArrowLaunchDelayMs();
-      const travelDurationMs = Math.max(
-        200,
-        rangedHitDelayTicks * TICK_DURATION_MS - arrowLaunchDelayMs,
-      );
-
-      this.eventEmitter.emitProjectileLaunched(
-        attackerId,
-        targetId,
-        "arrow",
-        attackerPos,
-        targetPos,
-        undefined,
-        arrowId,
-        arrowLaunchDelayMs,
-        travelDurationMs,
-      );
-
-      const typedTargetId = createEntityID(targetId);
-      this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-      this.enterLifecycleHandler.enterCombat(
-        typedAttackerId,
-        typedTargetId,
-        attackSpeedTicks,
-        AttackType.RANGED,
-      );
-      return;
-    }
-
-    // Validate entity IDs
-    if (
-      !this.entityIdValidator.isValid(attackerId) ||
-      !this.entityIdValidator.isValid(targetId)
-    ) {
-      return;
-    }
-
-    // Rate limiting
-    const rateResult = this.rateLimiter.checkLimit(attackerId, currentTick);
-    if (!rateResult.allowed) {
-      return;
-    }
-    this.antiCheat.trackAttack(attackerId, currentTick);
-
-    // Get entities
-    const attacker = this.entityResolver.resolve(attackerId, attackerType);
-    const target = this.entityResolver.resolve(targetId, targetType);
-    if (!attacker || !target) return;
-
-    // Check both are alive
-    if (
-      !this.entityResolver.isAlive(attacker, attackerType) ||
-      !this.entityResolver.isAlive(target, targetType)
-    ) {
-      return;
-    }
-
-    // Validate arrows equipped
-    const weapon = this.damageOrchestrator.getEquippedWeapon(attackerId);
-    const arrowSlot = this.damageOrchestrator.getEquippedArrows(attackerId);
-    const rangedLevel = this.playerQueries.getPlayerSkillLevel(
-      attackerId,
-      "ranged",
-    );
-
-    const arrowValidation = ammunitionService.validateArrows(
-      weapon,
-      arrowSlot,
-      rangedLevel,
-    );
-    if (!arrowValidation.valid) {
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: attackerId,
-        message: arrowValidation.error ?? "You need arrows to attack.",
-        type: "error",
-      });
-      return;
-    }
-
-    // Check ranged attack range (bows have attackRange property)
-    const attackRange = weapon?.attackRange ?? 7;
-    const attackerPos = getEntityPosition(attacker);
-    const targetPos = getEntityPosition(target);
-    if (!attackerPos || !targetPos) return;
-
-    tilePool.setFromPosition(this._attackerTile, attackerPos);
-    tilePool.setFromPosition(this._targetTile, targetPos);
-    const distance = tileChebyshevDistance(
-      this._attackerTile,
-      this._targetTile,
-    );
-
-    if (distance > attackRange || distance === 0) {
-      this.eventEmitter.emitAttackFailed(attackerId, targetId, "out_of_range");
-      return;
-    }
-
-    // Check cooldown
-    const typedAttackerId = createEntityID(attackerId);
-    if (
-      !this.attackValidator.checkAttackCooldown(typedAttackerId, currentTick)
-    ) {
-      return;
-    }
-
-    // Get player's ranged style for speed modifier
-    let rangedStyle: RangedCombatStyle = "accurate";
-    const playerSystem = this.world.getSystem(
-      "player",
-    ) as unknown as PlayerSystem | null;
-    const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
-    if (styleData?.id) {
-      const id = styleData.id;
-      if (id === "accurate" || id === "rapid" || id === "longrange") {
-        rangedStyle = id;
-      }
-    }
-
-    // Get attack speed from weapon with style modifier (rapid = -1 tick)
-    const baseAttackSpeed = weapon?.attackSpeed ?? 4;
-    const styleBonus = RANGED_STYLE_BONUSES[rangedStyle];
-    const attackSpeedTicks = Math.max(
-      1,
-      baseAttackSpeed + styleBonus.speedModifier,
-    );
-
-    // Face target
-    this.rotationManager.rotateTowardsTarget(
-      attackerId,
-      targetId,
-      attackerType,
-      targetType,
-    );
-
-    // Play attack animation
-    this.animationManager.setCombatEmote(
-      attackerId,
-      attackerType,
-      currentTick,
-      attackSpeedTicks,
-    );
-
-    // Calculate damage
-    const damage = this.damageOrchestrator.calculateRangedDamageForAttack(
-      attacker,
-      target,
-      attackerId,
-      targetType,
-    );
-
-    // Create projectile with delayed hit
-    const projectileParams: CreateProjectileParams = {
-      sourceId: attackerId,
-      targetId,
-      attackType: AttackType.RANGED,
-      damage,
-      currentTick,
-      sourcePosition: { x: attackerPos.x, z: attackerPos.z },
-      targetPosition: { x: targetPos.x, z: targetPos.z },
-      arrowId: arrowSlot?.itemId ? String(arrowSlot.itemId) : undefined,
-    };
-
-    this.projectileService.createProjectile(projectileParams);
-
-    // Emit projectile created event for client visuals
-    this.eventEmitter.emitProjectileLaunched(
-      attackerId,
-      targetId,
-      "arrow",
-      attackerPos,
-      targetPos,
-      undefined,
-      arrowSlot?.itemId ? String(arrowSlot.itemId) : undefined,
-      400, // Delay to match bow draw animation
-    );
-
-    // Set cooldown and enter combat
-    const typedTargetId = createEntityID(targetId);
-    this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-    this.enterLifecycleHandler.enterCombat(
-      typedAttackerId,
-      typedTargetId,
-      attackSpeedTicks,
-      AttackType.RANGED,
-    );
-
-    // Arrow consumption will be handled when projectile hits
+    this.rangedAttackHandler.handleRangedAttack(data);
   }
 
   private async handleMagicAttack(data: {
