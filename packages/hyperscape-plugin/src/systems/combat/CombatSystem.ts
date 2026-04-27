@@ -74,6 +74,7 @@ import { CombatEventRecorder } from "./CombatEventRecorder";
 import { CombatFollowController } from "./CombatFollowController";
 import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
+import { CombatProjectileHitProcessor } from "./CombatProjectileHitProcessor";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
 import { CombatTickAttackWorker } from "./CombatTickAttackWorker";
@@ -231,6 +232,10 @@ export class CombatSystem extends SystemBase {
   // Wraps executeAttackDamage + updateCombatTickState +
   // handlePlayerRetaliation + emitCombatEvents.
   private readonly tickAttackWorker: CombatTickAttackWorker;
+
+  // Deferred-damage projectile-hit resolution loop extracted as the
+  // eleventh slice. Wraps processProjectileHits.
+  private readonly projectileHitProcessor: CombatProjectileHitProcessor;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -412,6 +417,17 @@ export class CombatSystem extends SystemBase {
       this.lastInputTick,
       (type, payload) => this.emitTypedEvent(type, payload),
       () => this.playerSystem,
+    );
+
+    // Projectile-hit deferred-damage loop (slice 11). Closure over
+    // emitTypedEvent for the magic XP event.
+    this.projectileHitProcessor = new CombatProjectileHitProcessor(
+      this.projectileService,
+      this.entityResolver,
+      this.damageApplicator,
+      this.eventEmitter,
+      this.eventRecorder,
+      (type, payload) => this.emitTypedEvent(type, payload),
     );
   }
 
@@ -2286,7 +2302,7 @@ export class CombatSystem extends SystemBase {
     }
 
     // Process projectile hits (ranged/magic delayed damage)
-    this.processProjectileHits(tickNumber);
+    this.projectileHitProcessor.processProjectileHits(tickNumber);
 
     // Process scheduled emote resets (tick-aligned animation timing)
     // Delegated to AnimationManager for better separation of concerns
@@ -2474,83 +2490,9 @@ export class CombatSystem extends SystemBase {
   // emitCombatEvents moved to ./CombatTickAttackWorker (slice 10). Call
   // sites delegate via this.tickAttackWorker.{method}(...).
 
-  /**
-   * Process projectile hits for ranged/magic attacks
-   * Applies delayed damage when projectiles reach their targets
-   */
-  private processProjectileHits(tickNumber: number): void {
-    const result = this.projectileService.processTick(tickNumber);
-
-    for (const projectile of result.hits) {
-      // Get target entity
-      const target =
-        this.entityResolver.resolve(
-          projectile.targetId,
-          "mob", // Could be player or mob, resolver handles this
-        ) ?? this.entityResolver.resolve(projectile.targetId, "player");
-
-      if (!target) continue;
-
-      // Determine target type
-      const targetType = isMobEntity(target) ? "mob" : "player";
-
-      // Check if target is still alive
-      if (!this.entityResolver.isAlive(target, targetType)) {
-        continue;
-      }
-
-      // Cap damage at target's current health
-      const currentHealth = this.entityResolver.getHealth(target);
-      const damage = Math.min(projectile.damage, currentHealth);
-
-      // Apply damage
-      this.damageApplicator.applyDamage(
-        projectile.targetId,
-        targetType,
-        damage,
-        projectile.attackerId,
-      );
-
-      // Emit damage and projectile hit events using pre-allocated payloads (zero allocation)
-      const targetPosition = getEntityPosition(target);
-      this.eventEmitter.emitDamageDealt(
-        projectile.attackerId,
-        projectile.targetId,
-        damage,
-        undefined,
-        targetType,
-        targetPosition,
-      );
-      this.eventEmitter.emitProjectileHit(
-        projectile.attackerId,
-        projectile.targetId,
-        damage,
-        projectile.spellId ? "spell" : "arrow",
-      );
-
-      // Record combat event
-      this.eventRecorder.record(
-        GameEventType.COMBAT_DAMAGE,
-        projectile.attackerId,
-        {
-          targetId: projectile.targetId,
-          damage,
-          rawDamage: projectile.damage,
-          projectileHit: true,
-          attackType: projectile.spellId ? "magic" : "ranged",
-        },
-      );
-
-      // Handle XP rewards for magic (ranged XP handled elsewhere)
-      if (projectile.xpReward && projectile.xpReward > 0) {
-        this.emitTypedEvent(EventType.PLAYER_XP_GAINED, {
-          playerId: projectile.attackerId,
-          skill: "magic",
-          xp: projectile.xpReward,
-        });
-      }
-    }
-  }
+  // processProjectileHits moved to ./CombatProjectileHitProcessor
+  // (slice 11). Call site delegates via
+  // this.projectileHitProcessor.processProjectileHits(tickNumber).
 
   /**
    * Process auto-attack for a combatant on a specific tick
