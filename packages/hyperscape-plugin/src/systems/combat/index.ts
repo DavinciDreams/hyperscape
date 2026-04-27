@@ -20,7 +20,7 @@ export * from "./SpellService";
 export * from "./ProjectileService";
 export * from "./CombatAnimationManager";
 export * from "./CombatRotationManager";
-export * from "./CombatAnimationSync";
+// CombatAnimationSync removed 2026-04-27 — was never consumed.
 export * from "./CombatAntiCheat";
 // RangeSystem migrated to @hyperforge/hyperscape (2026-04-25)
 export * from "./PidManager";
