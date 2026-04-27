@@ -42,6 +42,47 @@ function createRecordingWorld(opts: { isServer?: boolean } = {}) {
     unregister(name: string) {
       unregistered.push(name);
     },
+    /**
+     * Plugin onEnable does post-registration `world.getSystem(name)`
+     * lookups (loot setup, processing-context wiring, etc.) on the
+     * just-registered systems. Return null so any null-checked code
+     * path is exercised; specific lookups can be stubbed in
+     * individual tests if needed.
+     */
+    getSystem(_name: string) {
+      return null;
+    },
+    /**
+     * Several manual-lifecycle systems (TradingSystem, DuelSystem)
+     * subscribe to world events during init via `world.on(...)`.
+     * Stubbed as no-ops since this test only verifies registration
+     * happened, not event flow.
+     */
+    on(_event: string, _handler: unknown) {},
+    off(_event: string, _handler: unknown) {},
+    emit(_event: string, _payload?: unknown) {},
+    /**
+     * MobNPCSystem and a few others reach into `world.entities`.
+     * Provide a minimal Map-shaped stub.
+     */
+    entities: {
+      items: new Map<string, unknown>(),
+      players: new Map<string, unknown>(),
+      get: (_id: string) => undefined,
+      values: () => new Map().values(),
+    },
+    /**
+     * CollisionMaskRegistry-using systems may set/clear flags here.
+     */
+    collision: {
+      addFlags: (_kind: string, _flags: number) => {},
+      removeFlags: (_kind: string, _flags: number) => {},
+    },
+    /**
+     * `systemsByName` is consumed by a few migrated systems' init
+     * methods to look up sibling systems by name.
+     */
+    systemsByName: new Map<string, unknown>(),
   };
 }
 
@@ -127,13 +168,18 @@ describe("server plugin boot — in-binary set", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const session = await bootServerPlugins(world as any);
 
-    // Migrated systems (2026-04-24 wave):
-    // - MobDeathSystem (combat/ → meta-plugin)
-    // - HealthRegenSystem (character/ → meta-plugin, server-only)
-    // - TanningSystem (interaction/ → meta-plugin)
-    // 9 server-side systems registered (10 total migrated; the 10th
-    // is DamageSplatSystem which is client-only).
+    // Migrated systems verified plugin-registered.
+    // Initial wave (2026-04-24): MobDeathSystem, HealthRegenSystem,
+    // TanningSystem, and the processing systems (smithing/smelting/
+    // crafting/fletching/runecrafting).
+    // Additional waves (2026-04-25 → 2026-04-26): the full Hyperia
+    // gameplay surface migrated through Phase F3 + G-1 — combat,
+    // skills, equipment, inventory, prayer, banking, store, dialogue,
+    // quest, aggro, processing, mob-npc, npc, station/mob/item
+    // spawners, ground-items, zone-detection, player, player-death,
+    // loot, resource, towns, bridges, docks, pois, scripting.
     const expected = [
+      // 2026-04-24 wave
       "mob-death",
       "gravestone-loot",
       "health-regen",
@@ -143,6 +189,26 @@ describe("server plugin boot — in-binary set", () => {
       "crafting",
       "fletching",
       "runecrafting",
+      // Heavy-cluster + Phase D/E/F3/G-1 waves
+      "combat",
+      "skills",
+      "equipment",
+      "inventory",
+      "prayer",
+      "banking",
+      "store",
+      "dialogue",
+      "quest",
+      "aggro",
+      "processing",
+      "mob-npc",
+      "npc",
+      "player",
+      "player-death",
+      "loot",
+      "resource",
+      "ground-items",
+      "zone-detection",
     ];
     for (const name of expected) {
       expect(world.registered).toContain(name);
