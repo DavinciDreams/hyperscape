@@ -44,9 +44,13 @@ export interface AcceptedConsent {
   readonly version: string;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type LicenseAgreementsReloadListener = () => void;
+
 export class LicenseAgreementsRegistry {
   private _manifest: LicenseAgreementsManifest | null = null;
   private _byId = new Map<string, LegalDocument>();
+  private _reloadListeners = new Set<LicenseAgreementsReloadListener>();
 
   constructor(manifest?: LicenseAgreementsManifest) {
     if (manifest) this.load(manifest);
@@ -56,6 +60,33 @@ export class LicenseAgreementsRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const d of manifest.documents) this._byId.set(d.id, d);
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: LicenseAgreementsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[licenseAgreementsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   loadFromJson(raw: unknown): void {
