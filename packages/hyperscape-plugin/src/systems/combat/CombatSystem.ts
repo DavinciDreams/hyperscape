@@ -59,6 +59,7 @@ import {
 import { tilePool, PooledTile } from "@hyperforge/shared";
 import { CombatAnimationManager } from "./CombatAnimationManager";
 import { CombatEventEmitter } from "./CombatEventEmitter";
+import { CombatEventRecorder } from "./CombatEventRecorder";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
@@ -186,7 +187,10 @@ export class CombatSystem extends SystemBase {
   public readonly eventStore: EventStore;
   private entityResolver: CombatEntityResolver;
   private damageCalculator: DamageCalculator;
-  private eventRecordingEnabled: boolean = true;
+  // Combat event recording — replay snapshot + EventStore append.
+  // Extracted to CombatEventRecorder (top-10 #9 third decomposition
+  // slice). Toggle via `this.eventRecorder.recordingEnabled`.
+  private readonly eventRecorder: CombatEventRecorder;
 
   // Equipment stats cache per player for damage calculations
   private playerEquipmentStats = new Map<
@@ -292,6 +296,15 @@ export class CombatSystem extends SystemBase {
     this.playerQueries = new CombatPlayerQueries(
       world,
       () => this.inventorySystem,
+    );
+
+    // Combat event recorder — appends events to EventStore for replay,
+    // builds GameStateInfo + periodic combat snapshots.
+    this.eventRecorder = new CombatEventRecorder(
+      world,
+      this.eventStore,
+      this.stateService,
+      this.entityResolver,
     );
   }
 
@@ -2424,7 +2437,7 @@ export class CombatSystem extends SystemBase {
     // Emit combat started event
     this.eventEmitter.emitCombatStarted(String(attackerId), String(targetId));
 
-    this.recordCombatEvent(GameEventType.COMBAT_START, String(attackerId), {
+    this.eventRecorder.record(GameEventType.COMBAT_START, String(attackerId), {
       targetId: String(targetId),
       attackerType,
       targetType,
@@ -2503,7 +2516,7 @@ export class CombatSystem extends SystemBase {
       String(combatState.targetId),
     );
 
-    this.recordCombatEvent(GameEventType.COMBAT_END, data.entityId, {
+    this.eventRecorder.record(GameEventType.COMBAT_END, data.entityId, {
       targetId: String(combatState.targetId),
       attackerType: combatState.attackerType,
       targetType: combatState.targetType,
@@ -2551,7 +2564,7 @@ export class CombatSystem extends SystemBase {
         ? GameEventType.DEATH_PLAYER
         : GameEventType.DEATH_MOB;
     const combatState = this.stateService.getCombatData(entityId);
-    this.recordCombatEvent(deathEventType, entityId, {
+    this.eventRecorder.record(deathEventType, entityId, {
       entityType,
       killedBy: combatState ? String(combatState.targetId) : "unknown",
     });
@@ -3399,7 +3412,7 @@ export class CombatSystem extends SystemBase {
       targetPosition,
     );
 
-    this.recordCombatEvent(GameEventType.COMBAT_ATTACK, attackerId, {
+    this.eventRecorder.record(GameEventType.COMBAT_ATTACK, attackerId, {
       targetId,
       attackerType: combatState.attackerType,
       targetType: combatState.targetType,
@@ -3407,7 +3420,7 @@ export class CombatSystem extends SystemBase {
     });
 
     if (damage > 0) {
-      this.recordCombatEvent(GameEventType.COMBAT_DAMAGE, attackerId, {
+      this.eventRecorder.record(GameEventType.COMBAT_DAMAGE, attackerId, {
         targetId,
         damage,
         rawDamage,
@@ -3417,7 +3430,7 @@ export class CombatSystem extends SystemBase {
           : undefined,
       });
     } else {
-      this.recordCombatEvent(GameEventType.COMBAT_MISS, attackerId, {
+      this.eventRecorder.record(GameEventType.COMBAT_MISS, attackerId, {
         targetId,
         rawDamage,
       });
@@ -3587,7 +3600,7 @@ export class CombatSystem extends SystemBase {
       );
 
       // Record combat event
-      this.recordCombatEvent(
+      this.eventRecorder.record(
         GameEventType.COMBAT_DAMAGE,
         projectile.attackerId,
         {
@@ -3695,111 +3708,10 @@ export class CombatSystem extends SystemBase {
     this.emitCombatEvents(attackerId, targetId, target, damage, combatState);
   }
 
-  /**
-   * Build GameStateInfo for event recording
-   */
-  private buildGameStateInfo(): GameStateInfo {
-    const combatStatesMap = this.stateService.getCombatStatesMap();
-    return {
-      currentTick: this.world.currentTick ?? 0,
-      playerCount: this.world.entities.players.size,
-      activeCombats: combatStatesMap.size,
-    };
-  }
-
-  /**
-   * Build a full snapshot of combat state for replay
-   * Called periodically (every 100 ticks) for efficient replay start points
-   */
-  private buildCombatSnapshot(): {
-    entities: Map<string, EntitySnapshot>;
-    combatStates: Map<string, CombatSnapshot>;
-    rngState: SeededRandomState;
-  } {
-    const entities = new Map<string, EntitySnapshot>();
-    const combatStates = new Map<string, CombatSnapshot>();
-
-    // Snapshot all active combat participants
-    for (const [entityId, state] of this.stateService.getCombatStatesMap()) {
-      const attackerEntity = this.entityResolver.resolve(
-        String(entityId),
-        state.attackerType,
-      );
-      const targetEntity = this.entityResolver.resolve(
-        String(state.targetId),
-        state.targetType,
-      );
-
-      // Snapshot attacker
-      if (attackerEntity) {
-        const pos = getEntityPosition(attackerEntity);
-        entities.set(String(entityId), {
-          id: String(entityId),
-          type: state.attackerType,
-          position: pos ? { x: pos.x, y: pos.y, z: pos.z } : undefined,
-          health: this.entityResolver.getHealth(attackerEntity),
-          maxHealth: attackerEntity.getMaxHealth?.() ?? 100,
-        });
-      }
-
-      // Snapshot target
-      if (targetEntity) {
-        const pos = getEntityPosition(targetEntity);
-        entities.set(String(state.targetId), {
-          id: String(state.targetId),
-          type: state.targetType,
-          position: pos ? { x: pos.x, y: pos.y, z: pos.z } : undefined,
-          health: this.entityResolver.getHealth(targetEntity),
-          maxHealth: targetEntity.getMaxHealth?.() ?? 100,
-        });
-      }
-
-      // Snapshot combat state
-      combatStates.set(String(entityId), {
-        attackerId: String(entityId),
-        targetId: String(state.targetId),
-        startTick: state.lastAttackTick, // Use lastAttackTick as approximate start
-        lastAttackTick: state.lastAttackTick,
-      });
-    }
-
-    // Get RNG state for deterministic replay
-    const rngState = getGameRngState() ?? { state0: "0", state1: "0" };
-
-    return { entities, combatStates, rngState };
-  }
-
-  /**
-   * Record a combat event to the EventStore
-   * Includes RNG state for deterministic replay
-   */
-  private recordCombatEvent(
-    type: GameEventType,
-    entityId: string,
-    payload: unknown,
-  ): void {
-    if (!this.eventRecordingEnabled) return;
-
-    const tick = this.world.currentTick ?? 0;
-    const stateInfo = this.buildGameStateInfo();
-
-    // Include snapshot data periodically (every 100 ticks)
-    const snapshot = tick % 100 === 0 ? this.buildCombatSnapshot() : undefined;
-
-    this.eventStore.record(
-      {
-        tick,
-        type,
-        entityId,
-        payload: {
-          ...((payload as object) ?? {}),
-          rngState: getGameRngState(), // Include RNG state for replay
-        },
-      },
-      stateInfo,
-      snapshot,
-    );
-  }
+  // Combat event recording (record / buildGameStateInfo /
+  // buildCombatSnapshot) lives in CombatEventRecorder — see field
+  // declaration above. All `this.eventRecorder.record(...)` callsites
+  // delegate to `this.eventRecorder.record(...)`.
 
   destroy(): void {
     this.stateService.destroy();
