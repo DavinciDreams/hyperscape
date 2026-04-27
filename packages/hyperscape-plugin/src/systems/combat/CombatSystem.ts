@@ -64,6 +64,7 @@ import {
   type MeleeAttackData,
 } from "./CombatAttackValidator";
 import { CombatDamageApplicator } from "./CombatDamageApplicator";
+import { CombatEnterLifecycleHandler } from "./CombatEnterLifecycleHandler";
 import {
   CombatDamageOrchestrator,
   type PlayerEquipmentStats,
@@ -242,6 +243,11 @@ export class CombatSystem extends SystemBase {
   // processPlayerCombatTick, processAutoAttackOnTick. Public proxies
   // on this class forward to it. Extracted as the twelfth slice.
   private readonly tickOrchestrator: CombatTickOrchestrator;
+
+  // Combat-start lifecycle (enterCombat) extracted as the thirteenth
+  // slice. Pairs with CombatLifecycleHandler (endCombat) for the full
+  // lifecycle.
+  private readonly enterLifecycleHandler: CombatEnterLifecycleHandler;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -452,6 +458,25 @@ export class CombatSystem extends SystemBase {
       this.logger,
       (data) => this.handleAttack(data),
       () => this.world.frameBudget,
+    );
+
+    // Combat-start lifecycle (slice 13). Pairs with the slice-6
+    // CombatLifecycleHandler (endCombat). Closures for late-bound
+    // zoneDetectionSystem + playerSystem; lastInputTick Map for AFK
+    // detection; emit closure for the "Combat started with X!" UI
+    // message.
+    this.enterLifecycleHandler = new CombatEnterLifecycleHandler(
+      world,
+      this.entityResolver,
+      this.stateService,
+      this.rotationManager,
+      this.followController,
+      this.eventEmitter,
+      this.eventRecorder,
+      this.lastInputTick,
+      (type, payload) => this.emitTypedEvent(type, payload),
+      () => this.zoneDetectionSystem,
+      () => this.playerSystem,
     );
   }
 
@@ -862,7 +887,11 @@ export class CombatSystem extends SystemBase {
 
     // Set cooldown and enter combat state
     this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-    this.enterCombat(typedAttackerId, typedTargetId, attackSpeedTicks);
+    this.enterLifecycleHandler.enterCombat(
+      typedAttackerId,
+      typedTargetId,
+      attackSpeedTicks,
+    );
   }
 
   /**
@@ -1003,7 +1032,7 @@ export class CombatSystem extends SystemBase {
 
       const typedTargetId = createEntityID(targetId);
       this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-      this.enterCombat(
+      this.enterLifecycleHandler.enterCombat(
         typedAttackerId,
         typedTargetId,
         attackSpeedTicks,
@@ -1162,7 +1191,7 @@ export class CombatSystem extends SystemBase {
     // Set cooldown and enter combat
     const typedTargetId = createEntityID(targetId);
     this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-    this.enterCombat(
+    this.enterLifecycleHandler.enterCombat(
       typedAttackerId,
       typedTargetId,
       attackSpeedTicks,
@@ -1310,7 +1339,7 @@ export class CombatSystem extends SystemBase {
 
       const typedTargetId = createEntityID(targetId);
       this.nextAttackTicks.set(typedAttackerId, currentTick + attackSpeedTicks);
-      this.enterCombat(
+      this.enterLifecycleHandler.enterCombat(
         typedAttackerId,
         typedTargetId,
         attackSpeedTicks,
@@ -1504,7 +1533,7 @@ export class CombatSystem extends SystemBase {
 
     // Enter combat state synchronously so auto-attack tick gating works
     const typedTargetId = createEntityID(targetId);
-    this.enterCombat(
+    this.enterLifecycleHandler.enterCombat(
       typedAttackerId,
       typedTargetId,
       attackSpeedTicks,
@@ -1666,7 +1695,7 @@ export class CombatSystem extends SystemBase {
     );
 
     // enterCombat() detects entity types internally
-    this.enterCombat(
+    this.enterLifecycleHandler.enterCombat(
       createEntityID(playerId),
       createEntityID(pendingAttacker),
       attackSpeedTicks,
@@ -1760,293 +1789,8 @@ export class CombatSystem extends SystemBase {
   // Note: setCombatEmote, resetEmote moved to CombatAnimationManager
   // Note: rotateTowardsTarget moved to CombatRotationManager
 
-  private enterCombat(
-    attackerId: EntityID,
-    targetId: EntityID,
-    attackerSpeedTicks?: number,
-    attackerWeaponType: AttackType = AttackType.MELEE,
-  ): void {
-    const currentTick = this.world.currentTick ?? 0;
-
-    // Detect entity types (don't assume attacker is always player!)
-    const attackerEntity = this.world.entities.get(String(attackerId));
-    const targetEntity = this.world.entities.get(String(targetId));
-
-    // Don't enter combat if target is dead (using type guard)
-    if (isEntityDead(targetEntity)) {
-      return;
-    }
-
-    // Also check if target is a player marked as dead
-    const playerSystem = this.world.getSystem("player") as unknown as
-      | PlayerSystem
-      | undefined;
-    if (playerSystem?.getPlayer) {
-      const targetPlayer = playerSystem.getPlayer(String(targetId));
-      if (targetPlayer && !targetPlayer.alive) {
-        return;
-      }
-    }
-
-    const attackerType =
-      attackerEntity?.type === "mob" ? ("mob" as const) : ("player" as const);
-    const targetType =
-      targetEntity?.type === "mob" ? ("mob" as const) : ("player" as const);
-
-    const attackerInStreamingDuel =
-      (attackerEntity as { data?: { inStreamingDuel?: boolean } } | undefined)
-        ?.data?.inStreamingDuel === true;
-    const targetInStreamingDuel =
-      (targetEntity as { data?: { inStreamingDuel?: boolean } } | undefined)
-        ?.data?.inStreamingDuel === true;
-    const bypassPvPZoneCheck = attackerInStreamingDuel || targetInStreamingDuel;
-
-    // PvP ZONE VALIDATION: Prevent player vs player combat in safe zones
-    // This is critical to prevent:
-    // - Combat resuming after respawn in safe zone
-    // - Players attacking each other in towns/banks
-    // - Auto-retaliate triggering in non-PvP areas
-    // OPTIMIZATION: Use cached zoneDetectionSystem
-    if (
-      attackerType === "player" &&
-      targetType === "player" &&
-      !bypassPvPZoneCheck
-    ) {
-      if (this.zoneDetectionSystem) {
-        const attackerPos = getEntityPosition(attackerEntity);
-        if (attackerPos) {
-          const isPvPAllowed = this.zoneDetectionSystem.isPvPEnabled({
-            x: attackerPos.x,
-            z: attackerPos.z,
-          });
-          if (!isPvPAllowed) {
-            return; // Cannot start PvP in safe zone
-          }
-        }
-      }
-    }
-
-    // Get attack speeds in ticks (use provided or calculate)
-    const attackerAttackSpeedTicks =
-      attackerSpeedTicks ??
-      this.entityResolver.getAttackSpeed(attackerId, attackerType);
-    const targetAttackSpeedTicks = this.entityResolver.getAttackSpeed(
-      targetId,
-      targetType,
-    );
-
-    // Set combat state for attacker (just attacked, so next attack is after cooldown)
-    this.stateService.createAttackerState(
-      attackerId,
-      targetId,
-      attackerType,
-      targetType,
-      currentTick,
-      attackerAttackSpeedTicks,
-      attackerWeaponType,
-    );
-
-    // OSRS Retaliation: Target retaliates after ceil(speed/2) + 1 ticks
-    // @see https://oldschool.runescape.wiki/w/Auto_Retaliate
-    // Check if target can retaliate (mobs have retaliates flag, players check auto-retaliate setting)
-    let canRetaliate = true;
-    if (targetType === "mob" && targetEntity) {
-      // Check mob's retaliates config using type guard - if false, mob won't fight back
-      canRetaliate = getMobRetaliates(targetEntity);
-    } else if (targetType === "player") {
-      // Check player's auto-retaliate setting
-      // Uses cached reference (no getSystem() call in hot path)
-      // Defaults to true if PlayerSystem unavailable (fail-safe, OSRS default)
-      if (this.playerSystem) {
-        canRetaliate = this.playerSystem.getPlayerAutoRetaliate(
-          String(targetId),
-        );
-      }
-      // Note: If playerSystem is null, canRetaliate stays true (default OSRS behavior)
-
-      // 20 min AFK disables auto-retaliate
-      if (canRetaliate && this.isAFKTooLong(String(targetId), currentTick)) {
-        canRetaliate = false;
-      }
-    }
-
-    // Attacker always faces target
-    this.rotationManager.rotateTowardsTarget(
-      String(attackerId),
-      String(targetId),
-      attackerType,
-      targetType,
-    );
-
-    // Emit COMBAT_FACE_TARGET for the attacker so the local player client
-    // rotates toward the target. This is essential for magic/ranged attacks
-    // where the player is stationary (no movement to naturally rotate them).
-    if (attackerType === "player") {
-      this.eventEmitter.emitFaceTarget(String(attackerId), String(targetId));
-    }
-
-    // Auto-retaliate only triggers when player has no current target
-    let targetHasValidTarget = false;
-    if (canRetaliate) {
-      const targetCombatState = this.stateService.getCombatData(targetId);
-      targetHasValidTarget = !!(
-        targetCombatState &&
-        targetCombatState.inCombat &&
-        this.entityResolver.isAlive(
-          this.entityResolver.resolve(
-            String(targetCombatState.targetId),
-            targetCombatState.targetType,
-          ),
-          targetCombatState.targetType,
-        )
-      );
-
-      if (!targetHasValidTarget) {
-        // Target has no valid target - schedule retaliation (normal OSRS auto-retaliate)
-        const retaliationDelay = calculateRetaliationDelay(
-          targetAttackSpeedTicks,
-        );
-
-        this.stateService.createRetaliatorState(
-          targetId,
-          attackerId,
-          targetType,
-          attackerType,
-          currentTick,
-          retaliationDelay,
-          targetAttackSpeedTicks,
-        );
-
-        // OSRS-ACCURATE: Auto-retaliate ALWAYS redirects player toward attacker
-        // When hit with auto-retaliate ON, player stops any current movement and turns to fight
-        // The COMBAT_FOLLOW_TARGET event replaces any existing movement destination
-        // Wiki: "the player's character walks/runs towards the monster attacking and fights back"
-
-        // ALWAYS rotate defender to face attacker immediately when retaliation starts
-        // This fixes PvP rotation bug where defender wouldn't face attacker
-        if (targetType === "player") {
-          this.rotationManager.rotateTowardsTarget(
-            String(targetId),
-            String(attackerId),
-            targetType,
-            attackerType,
-          );
-        }
-
-        // If not in attack range, also emit follow event to trigger movement
-        // Movement will update rotation to face movement direction
-        if (targetType === "player" && attackerEntity && targetEntity) {
-          const attackerPos = getEntityPosition(attackerEntity);
-          const targetPos = getEntityPosition(targetEntity);
-
-          if (attackerPos && targetPos) {
-            const attackerTile = worldToTile(attackerPos.x, attackerPos.z);
-            const targetTile = worldToTile(targetPos.x, targetPos.z);
-
-            // Get target player's attack type and range (they are retaliating)
-            const targetAttackType =
-              this.followController.getAttackTypeFromWeapon(String(targetId));
-            const targetCombatRange = this.entityResolver.getCombatRange(
-              targetEntity,
-              "player",
-            );
-
-            // Use appropriate range check based on attack type
-            const inRange =
-              targetAttackType === AttackType.MELEE
-                ? tilesWithinMeleeRange(
-                    targetTile,
-                    attackerTile,
-                    targetCombatRange,
-                  )
-                : tilesWithinRange(targetTile, attackerTile, targetCombatRange);
-
-            if (!inRange) {
-              // Not in range - emit follow event to trigger movement
-              this.eventEmitter.emitFollowTarget(
-                String(targetId),
-                String(attackerId),
-                attackerPos,
-                targetCombatRange,
-                targetAttackType,
-              );
-            }
-          }
-        }
-      } else {
-        // Target already has valid target - just extend their combat timer
-        // They stay locked on their current target (OSRS-accurate)
-        this.stateService.extendCombatTimer(targetId, currentTick);
-      }
-    }
-
-    // Sync combat state to player entities for client-side combat awareness
-    // Attacker always gets combat state with target
-    this.stateService.syncCombatStateToEntity(
-      String(attackerId),
-      String(targetId),
-      attackerType,
-    );
-
-    // Target only gets NEW combat target if:
-    // 1. They will retaliate (auto-retaliate ON), AND
-    // 2. They don't already have a valid target (OSRS-accurate)
-    //
-    // If target already has a valid target, we don't overwrite their target state.
-    // They stay locked on their current enemy.
-    // NOTE: We use the same targetHasValidTarget value calculated BEFORE state modifications
-    if (canRetaliate && !targetHasValidTarget) {
-      // Target has no valid target - sync them to attack this attacker
-      this.stateService.syncCombatStateToEntity(
-        String(targetId),
-        String(attackerId),
-        targetType,
-      );
-    } else if (!canRetaliate && targetType === "player") {
-      // Mark player as in combat (for logout timer) but without a target
-      // Store attackerId so combat can start if auto-retaliate is toggled ON
-      this.stateService.markInCombatWithoutTarget(
-        String(targetId),
-        String(attackerId),
-      );
-
-      // Player visually faces attacker even with auto-retaliate off
-      this.eventEmitter.emitFaceTarget(String(targetId), String(attackerId));
-    }
-
-    // DON'T set combat emotes here - we set them when attacks happen instead
-    // This prevents the animation from looping continuously
-
-    // Emit combat started event
-    this.eventEmitter.emitCombatStarted(String(attackerId), String(targetId));
-
-    this.eventRecorder.record(GameEventType.COMBAT_START, String(attackerId), {
-      targetId: String(targetId),
-      attackerType,
-      targetType,
-      attackerAttackSpeedTicks,
-      targetAttackSpeedTicks,
-    });
-
-    // Show combat UI indicator for the local player (whoever that is)
-    const localPlayer = this.world.getPlayer();
-    if (
-      localPlayer &&
-      (String(attackerId) === localPlayer.id ||
-        String(targetId) === localPlayer.id)
-    ) {
-      const opponent =
-        String(attackerId) === localPlayer.id ? targetEntity : attackerEntity;
-      const opponentName = opponent!.name;
-
-      this.emitTypedEvent(EventType.UI_MESSAGE, {
-        playerId: localPlayer.id,
-        message: `Combat started with ${opponentName}!`,
-        type: "combat",
-        duration: 3000,
-      });
-    }
-  }
+  // enterCombat moved to ./CombatEnterLifecycleHandler (slice 13).
+  // Call sites delegate via this.enterLifecycleHandler.enterCombat(...).
 
   public startCombat(
     attackerId: string,
@@ -2108,7 +1852,7 @@ export class CombatSystem extends SystemBase {
     }
 
     // Start combat — pass weaponType so enterCombat uses correct attack speed
-    this.enterCombat(
+    this.enterLifecycleHandler.enterCombat(
       createEntityID(attackerId),
       createEntityID(targetId),
       undefined,
