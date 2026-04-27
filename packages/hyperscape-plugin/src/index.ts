@@ -200,6 +200,7 @@ import { minimapHomeTeleportOrbRegistration } from "./widgets/MinimapHomeTelepor
 import { skillSelectModalRegistration } from "./widgets/SkillSelectModalWidget.js";
 import { floatingXPDropsRegistration } from "./widgets/FloatingXPDropsWidget.js";
 import { unlocksSectionRegistration } from "./widgets/UnlocksSectionWidget.js";
+import { coinPouchRegistration } from "./widgets/CoinPouchWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -337,6 +338,13 @@ export {
   type UnlockEntry,
   type UnlocksSectionProps,
 } from "./widgets/UnlocksSectionWidget.js";
+export {
+  coinPouchWidget,
+  coinPouchRegistration,
+  CoinPouch,
+  type CoinPouchProps,
+  type CoinPouchRuntimeProps,
+} from "./widgets/CoinPouchWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -735,6 +743,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(skillSelectModalRegistration);
         ctx.widgets.register(floatingXPDropsRegistration);
         ctx.widgets.register(unlocksSectionRegistration);
+        ctx.widgets.register(coinPouchRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
