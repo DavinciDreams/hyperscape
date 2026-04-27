@@ -58,6 +58,7 @@ import {
 } from "@hyperforge/shared";
 import { tilePool, PooledTile } from "@hyperforge/shared";
 import { CombatAnimationManager } from "./CombatAnimationManager";
+import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
 import {
@@ -233,78 +234,11 @@ export class CombatSystem extends SystemBase {
   // Lower PID = higher priority when attacks occur on same tick
   public readonly pidManager: PidManager;
 
-  // ============================================================================
-  // PRE-ALLOCATED EVENT PAYLOADS (zero-allocation hot path)
-  // ============================================================================
-  // These objects are reused for every event emission to avoid GC pressure.
-  // Safe because EventEmitter3 is synchronous - listeners process before emit returns.
-
-  private readonly _damageDealtPayload = {
-    attackerId: "",
-    targetId: "",
-    damage: 0,
-    attackType: "melee" as string | undefined,
-    targetType: "mob" as "player" | "mob" | undefined,
-    position: { x: 0, y: 0, z: 0 } as
-      | { x: number; y: number; z: number }
-      | undefined,
-    isCritical: false as boolean | undefined,
-  };
-
-  // Separate position object for when there's no position (to avoid repeated undefined assignment)
-  private readonly _damageDealtPositionBuffer = { x: 0, y: 0, z: 0 };
-
-  private readonly _projectileLaunchedPayload = {
-    attackerId: "",
-    targetId: "",
-    projectileType: "",
-    sourcePosition: { x: 0, y: 0, z: 0 },
-    targetPosition: { x: 0, y: 0, z: 0 },
-    spellId: undefined as string | undefined,
-    arrowId: undefined as string | undefined,
-    delayMs: undefined as number | undefined,
-    travelDurationMs: undefined as number | undefined,
-  };
-
-  private readonly _faceTargetPayload = {
-    playerId: "",
-    targetId: "",
-  };
-
-  private readonly _clearFaceTargetPayload = {
-    playerId: "",
-  };
-
-  private readonly _attackFailedPayload = {
-    attackerId: "",
-    targetId: "",
-    reason: "",
-  };
-
-  private readonly _followTargetPayload = {
-    playerId: "",
-    targetId: "",
-    targetPosition: { x: 0, y: 0, z: 0 },
-    attackRange: 1 as number | undefined,
-    attackType: "melee" as string | undefined,
-  };
-
-  private readonly _combatStartedPayload = {
-    attackerId: "",
-    targetId: "",
-  };
-
-  private readonly _combatEndedPayload = {
-    attackerId: "",
-    targetId: "",
-  };
-
-  private readonly _projectileHitPayload = {
-    attackerId: "",
-    targetId: "",
-    damage: 0,
-    projectileType: "",
-  };
+  // Combat event emission helpers — pre-allocated payloads + zero-
+  // allocation emit methods. Extracted to CombatEventEmitter (top-10
+  // #9 first decomposition slice). All `emit*` callsites in this
+  // file delegate to `this.eventEmitter.emit*(...)`.
+  private readonly eventEmitter: CombatEventEmitter;
 
   constructor(world: World) {
     super(world, {
@@ -339,149 +273,17 @@ export class CombatSystem extends SystemBase {
 
     // Ranged/Magic projectile service (F2P)
     this.projectileService = new ProjectileService();
-  }
 
-  // ============================================================================
-  // ZERO-ALLOCATION EVENT EMISSION HELPERS
-  // ============================================================================
-  // These methods populate pre-allocated payloads and emit events.
-  // Eliminates object allocation on every combat event (saves GC pressure).
-
-  private emitDamageDealt(
-    attackerId: string,
-    targetId: string,
-    damage: number,
-    attackType?: string,
-    targetType?: "player" | "mob",
-    position?: { x: number; y: number; z: number } | null,
-    isCritical?: boolean,
-  ): void {
-    this._damageDealtPayload.attackerId = attackerId;
-    this._damageDealtPayload.targetId = targetId;
-    this._damageDealtPayload.damage = damage;
-    this._damageDealtPayload.attackType = attackType;
-    this._damageDealtPayload.targetType = targetType;
-    this._damageDealtPayload.isCritical = isCritical;
-    // Copy position values into pre-allocated buffer to avoid object creation
-    if (position) {
-      this._damageDealtPositionBuffer.x = position.x;
-      this._damageDealtPositionBuffer.y = position.y;
-      this._damageDealtPositionBuffer.z = position.z;
-      this._damageDealtPayload.position = this._damageDealtPositionBuffer;
-    } else {
-      this._damageDealtPayload.position = undefined;
-    }
-    this.emitTypedEvent(
-      EventType.COMBAT_DAMAGE_DEALT,
-      this._damageDealtPayload,
+    // Combat event emission helpers — pre-allocated payloads + zero-
+    // alloc emit. Closure injects this system's protected emitTypedEvent.
+    this.eventEmitter = new CombatEventEmitter((type, payload) =>
+      this.emitTypedEvent(type, payload),
     );
   }
 
-  private emitProjectileLaunched(
-    attackerId: string,
-    targetId: string,
-    projectileType: string,
-    sourcePosition: { x: number; y: number; z: number },
-    targetPosition: { x: number; y: number; z: number },
-    spellId?: string,
-    arrowId?: string,
-    delayMs?: number,
-    flightTimeMs?: number,
-  ): void {
-    this._projectileLaunchedPayload.attackerId = attackerId;
-    this._projectileLaunchedPayload.targetId = targetId;
-    this._projectileLaunchedPayload.projectileType = projectileType;
-    this._projectileLaunchedPayload.sourcePosition.x = sourcePosition.x;
-    this._projectileLaunchedPayload.sourcePosition.y = sourcePosition.y;
-    this._projectileLaunchedPayload.sourcePosition.z = sourcePosition.z;
-    this._projectileLaunchedPayload.targetPosition.x = targetPosition.x;
-    this._projectileLaunchedPayload.targetPosition.y = targetPosition.y;
-    this._projectileLaunchedPayload.targetPosition.z = targetPosition.z;
-    this._projectileLaunchedPayload.spellId = spellId;
-    this._projectileLaunchedPayload.arrowId = arrowId;
-    this._projectileLaunchedPayload.delayMs = delayMs;
-    this._projectileLaunchedPayload.travelDurationMs = flightTimeMs;
-    this.emitTypedEvent(
-      EventType.COMBAT_PROJECTILE_LAUNCHED,
-      this._projectileLaunchedPayload,
-    );
-  }
-
-  private emitFaceTarget(playerId: string, targetId: string): void {
-    this._faceTargetPayload.playerId = playerId;
-    this._faceTargetPayload.targetId = targetId;
-    this.emitTypedEvent(EventType.COMBAT_FACE_TARGET, this._faceTargetPayload);
-  }
-
-  private emitClearFaceTarget(playerId: string): void {
-    this._clearFaceTargetPayload.playerId = playerId;
-    this.emitTypedEvent(
-      EventType.COMBAT_CLEAR_FACE_TARGET,
-      this._clearFaceTargetPayload,
-    );
-  }
-
-  private emitAttackFailed(
-    attackerId: string,
-    targetId: string,
-    reason: string,
-  ): void {
-    this._attackFailedPayload.attackerId = attackerId;
-    this._attackFailedPayload.targetId = targetId;
-    this._attackFailedPayload.reason = reason;
-    this.emitTypedEvent(
-      EventType.COMBAT_ATTACK_FAILED,
-      this._attackFailedPayload,
-    );
-  }
-
-  private emitFollowTarget(
-    playerId: string,
-    targetId: string,
-    targetPosition: { x: number; y: number; z: number },
-    attackRange?: number,
-    attackType?: string,
-  ): void {
-    this._followTargetPayload.playerId = playerId;
-    this._followTargetPayload.targetId = targetId;
-    this._followTargetPayload.targetPosition.x = targetPosition.x;
-    this._followTargetPayload.targetPosition.y = targetPosition.y;
-    this._followTargetPayload.targetPosition.z = targetPosition.z;
-    this._followTargetPayload.attackRange = attackRange;
-    this._followTargetPayload.attackType = attackType;
-    this.emitTypedEvent(
-      EventType.COMBAT_FOLLOW_TARGET,
-      this._followTargetPayload,
-    );
-  }
-
-  private emitCombatStarted(attackerId: string, targetId: string): void {
-    this._combatStartedPayload.attackerId = attackerId;
-    this._combatStartedPayload.targetId = targetId;
-    this.emitTypedEvent(EventType.COMBAT_STARTED, this._combatStartedPayload);
-  }
-
-  private emitCombatEnded(attackerId: string, targetId: string): void {
-    this._combatEndedPayload.attackerId = attackerId;
-    this._combatEndedPayload.targetId = targetId;
-    this.emitTypedEvent(EventType.COMBAT_ENDED, this._combatEndedPayload);
-  }
-
-  private emitProjectileHit(
-    attackerId: string,
-    targetId: string,
-    damage: number,
-    projectileType: string,
-  ): void {
-    this._projectileHitPayload.attackerId = attackerId;
-    this._projectileHitPayload.targetId = targetId;
-    this._projectileHitPayload.damage = damage;
-    this._projectileHitPayload.projectileType = projectileType;
-    this.emitTypedEvent(
-      EventType.COMBAT_PROJECTILE_HIT,
-      this._projectileHitPayload,
-    );
-  }
+  // Event emission helpers live in CombatEventEmitter — see field
+  // declaration above. All `this.emitXxx(...)` callsites in this file
+  // are now `this.eventEmitter.emitXxx(...)`.
 
   async init(): Promise<void> {
     // Get entity manager - required dependency
@@ -918,7 +720,11 @@ export class CombatSystem extends SystemBase {
     // Check target is attackable (for mobs)
     if (targetType === "mob" && isMobEntity(target)) {
       if (typeof target.isAttackable === "function" && !target.isAttackable()) {
-        this.emitAttackFailed(attackerId, targetId, "target_not_attackable");
+        this.eventEmitter.emitAttackFailed(
+          attackerId,
+          targetId,
+          "target_not_attackable",
+        );
         return invalidResult;
       }
     }
@@ -1004,7 +810,11 @@ export class CombatSystem extends SystemBase {
         );
       }
 
-      this.emitAttackFailed(data.attackerId, data.targetId, "out_of_range");
+      this.eventEmitter.emitAttackFailed(
+        data.attackerId,
+        data.targetId,
+        "out_of_range",
+      );
       return false;
     }
     return true;
@@ -1079,7 +889,7 @@ export class CombatSystem extends SystemBase {
 
     // Emit damage event using pre-allocated payload (zero allocation)
     const targetPosition = getEntityPosition(target);
-    this.emitDamageDealt(
+    this.eventEmitter.emitDamageDealt(
       attackerId,
       targetId,
       damage,
@@ -1150,7 +960,11 @@ export class CombatSystem extends SystemBase {
         this._targetTile,
       );
       if (distance > attackRange || distance === 0) {
-        this.emitAttackFailed(attackerId, targetId, "out_of_range");
+        this.eventEmitter.emitAttackFailed(
+          attackerId,
+          targetId,
+          "out_of_range",
+        );
         return;
       }
 
@@ -1215,7 +1029,7 @@ export class CombatSystem extends SystemBase {
         rangedHitDelayTicks * TICK_DURATION_MS - arrowLaunchDelayMs,
       );
 
-      this.emitProjectileLaunched(
+      this.eventEmitter.emitProjectileLaunched(
         attackerId,
         targetId,
         "arrow",
@@ -1299,7 +1113,7 @@ export class CombatSystem extends SystemBase {
     );
 
     if (distance > attackRange || distance === 0) {
-      this.emitAttackFailed(attackerId, targetId, "out_of_range");
+      this.eventEmitter.emitAttackFailed(attackerId, targetId, "out_of_range");
       return;
     }
 
@@ -1369,7 +1183,7 @@ export class CombatSystem extends SystemBase {
     this.projectileService.createProjectile(projectileParams);
 
     // Emit projectile created event for client visuals
-    this.emitProjectileLaunched(
+    this.eventEmitter.emitProjectileLaunched(
       attackerId,
       targetId,
       "arrow",
@@ -1446,7 +1260,11 @@ export class CombatSystem extends SystemBase {
         this._targetTile,
       );
       if (distance > attackRange || distance === 0) {
-        this.emitAttackFailed(attackerId, targetId, "out_of_range");
+        this.eventEmitter.emitAttackFailed(
+          attackerId,
+          targetId,
+          "out_of_range",
+        );
         return;
       }
 
@@ -1511,7 +1329,7 @@ export class CombatSystem extends SystemBase {
         magicHitDelayTicks * TICK_DURATION_MS - spellLaunchDelayMs,
       );
 
-      this.emitProjectileLaunched(
+      this.eventEmitter.emitProjectileLaunched(
         attackerId,
         targetId,
         spell.element,
@@ -1692,7 +1510,7 @@ export class CombatSystem extends SystemBase {
           `[MagicAttack:Duel] Range check failed: distance=${distance} range=${attackRange}`,
         );
       }
-      this.emitAttackFailed(attackerId, targetId, "out_of_range");
+      this.eventEmitter.emitAttackFailed(attackerId, targetId, "out_of_range");
       return;
     }
 
@@ -1774,7 +1592,7 @@ export class CombatSystem extends SystemBase {
 
     // Emit projectile created event for client visuals
     // Delay projectile spawn to sync with casting animation (roughly halfway through)
-    this.emitProjectileLaunched(
+    this.eventEmitter.emitProjectileLaunched(
       attackerId,
       targetId,
       spell.element,
@@ -2184,7 +2002,7 @@ export class CombatSystem extends SystemBase {
 
     // Clear server face target since player now has a combat target
     // Note: enterCombat() already handles rotation via rotateTowardsTarget()
-    this.emitClearFaceTarget(playerId);
+    this.eventEmitter.emitClearFaceTarget(playerId);
   }
 
   /**
@@ -2509,7 +2327,7 @@ export class CombatSystem extends SystemBase {
     // rotates toward the target. This is essential for magic/ranged attacks
     // where the player is stationary (no movement to naturally rotate them).
     if (attackerType === "player") {
-      this.emitFaceTarget(String(attackerId), String(targetId));
+      this.eventEmitter.emitFaceTarget(String(attackerId), String(targetId));
     }
 
     // Auto-retaliate only triggers when player has no current target
@@ -2591,7 +2409,7 @@ export class CombatSystem extends SystemBase {
 
             if (!inRange) {
               // Not in range - emit follow event to trigger movement
-              this.emitFollowTarget(
+              this.eventEmitter.emitFollowTarget(
                 String(targetId),
                 String(attackerId),
                 attackerPos,
@@ -2639,14 +2457,14 @@ export class CombatSystem extends SystemBase {
       );
 
       // Player visually faces attacker even with auto-retaliate off
-      this.emitFaceTarget(String(targetId), String(attackerId));
+      this.eventEmitter.emitFaceTarget(String(targetId), String(attackerId));
     }
 
     // DON'T set combat emotes here - we set them when attacks happen instead
     // This prevents the animation from looping continuously
 
     // Emit combat started event
-    this.emitCombatStarted(String(attackerId), String(targetId));
+    this.eventEmitter.emitCombatStarted(String(attackerId), String(targetId));
 
     this.recordCombatEvent(GameEventType.COMBAT_START, String(attackerId), {
       targetId: String(targetId),
@@ -2722,7 +2540,10 @@ export class CombatSystem extends SystemBase {
     this.lastCombatTargetTile.delete(String(combatState.targetId));
 
     // Emit combat ended event
-    this.emitCombatEnded(data.entityId, String(combatState.targetId));
+    this.eventEmitter.emitCombatEnded(
+      data.entityId,
+      String(combatState.targetId),
+    );
 
     this.recordCombatEvent(GameEventType.COMBAT_END, data.entityId, {
       targetId: String(combatState.targetId),
@@ -2732,10 +2553,10 @@ export class CombatSystem extends SystemBase {
     });
 
     if (combatState.attackerType === "player") {
-      this.emitClearFaceTarget(data.entityId);
+      this.eventEmitter.emitClearFaceTarget(data.entityId);
     }
     if (combatState.targetType === "player") {
-      this.emitClearFaceTarget(String(combatState.targetId));
+      this.eventEmitter.emitClearFaceTarget(String(combatState.targetId));
     }
 
     // Show combat end message for player
@@ -2823,7 +2644,7 @@ export class CombatSystem extends SystemBase {
         const pendingAttacker = getPendingAttacker(player);
         if (pendingAttacker === entityId) {
           clearPendingAttacker(player);
-          this.emitClearFaceTarget(player.id);
+          this.eventEmitter.emitClearFaceTarget(player.id);
         }
       }
     }
@@ -2876,7 +2697,7 @@ export class CombatSystem extends SystemBase {
     }
 
     // 5. Clear face target so player doesn't auto-look at old attacker
-    this.emitClearFaceTarget(playerId);
+    this.eventEmitter.emitClearFaceTarget(playerId);
   }
 
   // Public API methods
@@ -3471,7 +3292,7 @@ export class CombatSystem extends SystemBase {
       // Out of range - follow the target and extend combat timeout while pursuing
       combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
 
-      this.emitFollowTarget(
+      this.eventEmitter.emitFollowTarget(
         attackerId,
         targetId,
         targetPos,
@@ -3483,7 +3304,7 @@ export class CombatSystem extends SystemBase {
       // movePlayerToward() updates the player's path destination even when
       // currently in range, so if the target steps out of range next tick
       // the player is already pathing toward them with zero delay.
-      this.emitFollowTarget(
+      this.eventEmitter.emitFollowTarget(
         attackerId,
         targetId,
         targetPos,
@@ -3611,7 +3432,7 @@ export class CombatSystem extends SystemBase {
 
     // Emit damage splatter event using pre-allocated payload (zero allocation)
     const targetPosition = getEntityPosition(target);
-    this.emitDamageDealt(
+    this.eventEmitter.emitDamageDealt(
       attackerId,
       targetId,
       damage,
@@ -3727,7 +3548,7 @@ export class CombatSystem extends SystemBase {
     );
 
     // Clear any server face target since player now has combat target
-    this.emitClearFaceTarget(targetId);
+    this.eventEmitter.emitClearFaceTarget(targetId);
   }
 
   /**
@@ -3792,7 +3613,7 @@ export class CombatSystem extends SystemBase {
 
       // Emit damage and projectile hit events using pre-allocated payloads (zero allocation)
       const targetPosition = getEntityPosition(target);
-      this.emitDamageDealt(
+      this.eventEmitter.emitDamageDealt(
         projectile.attackerId,
         projectile.targetId,
         damage,
@@ -3800,7 +3621,7 @@ export class CombatSystem extends SystemBase {
         targetType,
         targetPosition,
       );
-      this.emitProjectileHit(
+      this.eventEmitter.emitProjectileHit(
         projectile.attackerId,
         projectile.targetId,
         damage,
