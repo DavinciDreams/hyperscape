@@ -37,9 +37,13 @@ export class UnknownInputActionError extends Error {
 
 export type InputScheme = "keyboard-mouse" | "gamepad" | "touch";
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type InputActionsReloadListener = () => void;
+
 export class InputActionsRegistry {
   private _manifest: InputActionsManifest | null = null;
   private _byId = new Map<string, InputAction>();
+  private _reloadListeners = new Set<InputActionsReloadListener>();
 
   constructor(manifest?: InputActionsManifest) {
     if (manifest) this.load(manifest);
@@ -53,10 +57,37 @@ export class InputActionsRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const a of manifest) this._byId.set(a.id, a);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(InputActionsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: InputActionsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[inputActionsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): InputActionsManifest {

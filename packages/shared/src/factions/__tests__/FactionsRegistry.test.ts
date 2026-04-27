@@ -1,5 +1,5 @@
 import { FactionsManifestSchema } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   FactionsNotLoadedError,
   FactionsRegistry,
@@ -155,5 +155,41 @@ describe("FactionsRegistry — propagateStandingDelta", () => {
     const out = r.propagateStandingDelta("kandarin", 100);
     expect(out.size).toBe(1);
     expect(out.get("kandarin")).toBe(100);
+  });
+});
+
+describe("FactionsRegistry — onReloaded", () => {
+  it("fires after every successful load()", () => {
+    const r = new FactionsRegistry();
+    const cb = vi.fn();
+    r.onReloaded(cb);
+    r.load(manifest());
+    r.load(manifest());
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const r = new FactionsRegistry();
+    const cb = vi.fn();
+    const off = r.onReloaded(cb);
+    r.load(manifest());
+    off();
+    r.load(manifest());
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing listener does not break subsequent listeners", () => {
+    const r = new FactionsRegistry();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const good = vi.fn();
+    r.onReloaded(bad);
+    r.onReloaded(good);
+    r.load(manifest());
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

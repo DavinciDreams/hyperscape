@@ -107,11 +107,15 @@ export interface AppealEligibilityResult {
   reason: AppealEligibilityReason;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type ModerationReloadListener = () => void;
+
 export class ModerationRegistry {
   private _manifest: ModerationManifest | null = null;
   private _categoriesById = new Map<string, ReportCategory>();
   private _rulesById = new Map<string, FilterRule>();
   private _laddersByCategory = new Map<string, CategorySanctionLadder>();
+  private _reloadListeners = new Set<ModerationReloadListener>();
 
   constructor(manifest?: ModerationManifest) {
     if (manifest) this.load(manifest);
@@ -129,10 +133,37 @@ export class ModerationRegistry {
     for (const l of manifest.sanctionLadders) {
       this._laddersByCategory.set(l.categoryId, l);
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(ModerationManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: ModerationReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[moderationRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
