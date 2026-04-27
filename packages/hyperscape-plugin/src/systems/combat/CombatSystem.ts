@@ -59,6 +59,7 @@ import {
 import { tilePool, PooledTile } from "@hyperforge/shared";
 import { CombatAnimationManager } from "./CombatAnimationManager";
 import { CombatEventEmitter } from "./CombatEventEmitter";
+import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
 import {
@@ -240,6 +241,11 @@ export class CombatSystem extends SystemBase {
   // file delegate to `this.eventEmitter.emit*(...)`.
   private readonly eventEmitter: CombatEventEmitter;
 
+  // Player query helpers — read-only skill / spell / inventory
+  // accessors + rune consumption. Extracted to CombatPlayerQueries
+  // (top-10 #9 second decomposition slice).
+  private readonly playerQueries: CombatPlayerQueries;
+
   constructor(world: World) {
     super(world, {
       name: "combat",
@@ -278,6 +284,14 @@ export class CombatSystem extends SystemBase {
     // alloc emit. Closure injects this system's protected emitTypedEvent.
     this.eventEmitter = new CombatEventEmitter((type, payload) =>
       this.emitTypedEvent(type, payload),
+    );
+
+    // Player query helpers. Inventory accessor is a closure so the
+    // helper picks up `this.inventorySystem` once it's assigned in
+    // start() (it's undefined at construct-time).
+    this.playerQueries = new CombatPlayerQueries(
+      world,
+      () => this.inventorySystem,
     );
   }
 
@@ -511,7 +525,7 @@ export class CombatSystem extends SystemBase {
    */
   private getAttackTypeFromWeapon(attackerId: string): AttackType {
     // Check if player has a spell selected - if so, use magic regardless of weapon
-    const selectedSpell = this.getPlayerSelectedSpell(attackerId);
+    const selectedSpell = this.playerQueries.getPlayerSelectedSpell(attackerId);
     if (selectedSpell) {
       return AttackType.MAGIC;
     }
@@ -1083,7 +1097,10 @@ export class CombatSystem extends SystemBase {
     // Validate arrows equipped
     const weapon = this.getEquippedWeapon(attackerId);
     const arrowSlot = this.getEquippedArrows(attackerId);
-    const rangedLevel = this.getPlayerSkillLevel(attackerId, "ranged");
+    const rangedLevel = this.playerQueries.getPlayerSkillLevel(
+      attackerId,
+      "ranged",
+    );
 
     const arrowValidation = ammunitionService.validateArrows(
       weapon,
@@ -1409,8 +1426,12 @@ export class CombatSystem extends SystemBase {
     }
 
     // Get selected spell from player data
-    const selectedSpellId = this.getPlayerSelectedSpell(attackerId);
-    const magicLevel = this.getPlayerSkillLevel(attackerId, "magic");
+    const selectedSpellId =
+      this.playerQueries.getPlayerSelectedSpell(attackerId);
+    const magicLevel = this.playerQueries.getPlayerSkillLevel(
+      attackerId,
+      "magic",
+    );
 
     if (isStreamingDuel && !selectedSpellId) {
       // Extra diagnostics: check entity.data directly
@@ -1457,7 +1478,7 @@ export class CombatSystem extends SystemBase {
 
     // Validate runes in inventory
     const weapon = this.getEquippedWeapon(attackerId);
-    const inventory = this.getPlayerInventoryItems(attackerId);
+    const inventory = this.playerQueries.getPlayerInventoryItems(attackerId);
 
     if (isStreamingDuel && inventory.length === 0) {
       console.warn(
@@ -1567,7 +1588,11 @@ export class CombatSystem extends SystemBase {
     // bypass rune validation above, so consumption would fail or be a no-op)
     if (!isStreamingDuel) {
       try {
-        await this.consumeRunesForSpell(attackerId, spell, weapon);
+        await this.playerQueries.consumeRunesForSpell(
+          attackerId,
+          spell,
+          weapon,
+        );
       } catch (err) {
         console.warn(
           `[MagicAttack] consumeRunesForSpell failed for ${attackerId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -1607,84 +1632,11 @@ export class CombatSystem extends SystemBase {
   /**
    * Get player skill level
    */
-  private getPlayerSkillLevel(
-    playerId: string,
-    skill: "ranged" | "magic" | "defense",
-  ): number {
-    // Use world.getPlayer() to ensure consistency with PlayerSystem
-    const playerEntity = this.world.getPlayer?.(playerId);
-    if (!playerEntity) return 1;
-
-    const statsComponent = playerEntity.getComponent("stats");
-    if (!statsComponent?.data) return 1;
-
-    const stats = statsComponent.data as Record<
-      string,
-      { level: number } | number
-    >;
-    const skillData = stats[skill];
-
-    if (typeof skillData === "object" && skillData !== null) {
-      return skillData.level ?? 1;
-    }
-    if (typeof skillData === "number") {
-      return skillData;
-    }
-    return 1;
-  }
-
-  /**
-   * Get player's selected autocast spell
-   */
-  private getPlayerSelectedSpell(playerId: string): string | null {
-    // Use world.getPlayer() to ensure we get the same player entity as PlayerSystem
-    const playerEntity = this.world.getPlayer?.(playerId);
-    if (!playerEntity?.data) return null;
-
-    return (
-      (playerEntity.data as { selectedSpell?: string }).selectedSpell ?? null
-    );
-  }
-
-  /**
-   * Get player inventory items for rune checking
-   */
-  private getPlayerInventoryItems(
-    playerId: string,
-  ): Array<{ itemId: string; quantity: number; slot: number }> {
-    if (!this.inventorySystem) return [];
-
-    const inventory = this.inventorySystem.getInventory(playerId);
-    if (!inventory?.items) return [];
-
-    return inventory.items
-      .filter((item) => item.itemId)
-      .map((item) => ({
-        itemId: item.itemId,
-        quantity: item.quantity ?? 1,
-        slot: item.slot,
-      }));
-  }
-
-  /**
-   * Consume runes for spell cast
-   */
-  private async consumeRunesForSpell(
-    playerId: string,
-    spell: Spell,
-    weapon: Item | null,
-  ): Promise<void> {
-    if (!this.inventorySystem) return;
-
-    const runesToConsume = runeService.getRunesToConsume(spell.runes, weapon);
-
-    for (const requirement of runesToConsume) {
-      await this.inventorySystem.removeItemDirect(playerId, {
-        itemId: requirement.runeId,
-        quantity: requirement.quantity,
-      });
-    }
-  }
+  // Player query helpers (skill level, selected spell, inventory
+  // items, rune consumption) live in CombatPlayerQueries — see field
+  // declaration above. All `this.getPlayerFoo(...)` and
+  // `this.playerQueries.consumeRunesForSpell(...)` callsites delegate via
+  // `this.playerQueries`.
 
   /**
    * Calculate ranged damage for an attack
@@ -1695,7 +1647,10 @@ export class CombatSystem extends SystemBase {
     attackerId: string,
     targetType: "player" | "mob",
   ): number {
-    const rangedLevel = this.getPlayerSkillLevel(attackerId, "ranged");
+    const rangedLevel = this.playerQueries.getPlayerSkillLevel(
+      attackerId,
+      "ranged",
+    );
     const equipmentStats = this.playerEquipmentStats.get(attackerId);
     const arrowSlot = this.getEquippedArrows(attackerId);
 
@@ -1706,7 +1661,7 @@ export class CombatSystem extends SystemBase {
     const targetDefenseLevel =
       targetType === "mob" && isMobEntity(target)
         ? target.getMobData().defense
-        : this.getPlayerSkillLevel(String(target.id), "defense");
+        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
 
     // Use per-style defenseRanged from equipment (OSRS combat triangle).
     // Falls back to generic ranged bonus for backward compatibility.
@@ -1770,7 +1725,7 @@ export class CombatSystem extends SystemBase {
     const targetDefenseLevel =
       targetType === "mob" && isMobEntity(target)
         ? target.getMobData().defense
-        : this.getPlayerSkillLevel(String(target.id), "defense");
+        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
 
     const targetRangedDefense =
       targetType === "mob" && isMobEntity(target)
@@ -1809,19 +1764,22 @@ export class CombatSystem extends SystemBase {
     targetType: "player" | "mob",
     spell: Spell,
   ): number {
-    const magicLevel = this.getPlayerSkillLevel(attackerId, "magic");
+    const magicLevel = this.playerQueries.getPlayerSkillLevel(
+      attackerId,
+      "magic",
+    );
     const equipmentStats = this.playerEquipmentStats.get(attackerId);
 
     // Get target stats
     const targetMagicLevel =
       targetType === "mob" && isMobEntity(target)
         ? 1 // Most F2P mobs have 1 magic
-        : this.getPlayerSkillLevel(String(target.id), "magic");
+        : this.playerQueries.getPlayerSkillLevel(String(target.id), "magic");
 
     const targetDefenseLevel =
       targetType === "mob" && isMobEntity(target)
         ? target.getMobData().defense
-        : this.getPlayerSkillLevel(String(target.id), "defense");
+        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
 
     const targetMagicDefense =
       targetType === "mob" && isMobEntity(target)
@@ -1881,12 +1839,12 @@ export class CombatSystem extends SystemBase {
     const targetMagicLevel =
       targetType === "mob" && isMobEntity(target)
         ? 1
-        : this.getPlayerSkillLevel(String(target.id), "magic");
+        : this.playerQueries.getPlayerSkillLevel(String(target.id), "magic");
 
     const targetDefenseLevel =
       targetType === "mob" && isMobEntity(target)
         ? target.getMobData().defense
-        : this.getPlayerSkillLevel(String(target.id), "defense");
+        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
 
     const targetMagicDefense =
       targetType === "mob" && isMobEntity(target)
