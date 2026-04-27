@@ -78,6 +78,7 @@ import { CombatProjectileHitProcessor } from "./CombatProjectileHitProcessor";
 import { CombatRotationManager } from "./CombatRotationManager";
 import { CombatStateService, CombatData } from "./CombatStateService";
 import { CombatTickAttackWorker } from "./CombatTickAttackWorker";
+import { CombatTickOrchestrator } from "./CombatTickOrchestrator";
 import {
   CombatAntiCheat,
   CombatViolationType,
@@ -236,6 +237,11 @@ export class CombatSystem extends SystemBase {
   // Deferred-damage projectile-hit resolution loop extracted as the
   // eleventh slice. Wraps processProjectileHits.
   private readonly projectileHitProcessor: CombatProjectileHitProcessor;
+
+  // Per-tick driver — owns processCombatTick, processNPCCombatTick,
+  // processPlayerCombatTick, processAutoAttackOnTick. Public proxies
+  // on this class forward to it. Extracted as the twelfth slice.
+  private readonly tickOrchestrator: CombatTickOrchestrator;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -428,6 +434,24 @@ export class CombatSystem extends SystemBase {
       this.eventEmitter,
       this.eventRecorder,
       (type, payload) => this.emitTypedEvent(type, payload),
+    );
+
+    // Per-tick orchestrator (slice 12). handleAttack callback dispatches
+    // ranged/magic into the still-inline handleRangedAttack/handleMagicAttack
+    // (will move with a future slice). getFrameBudget reads world.frameBudget
+    // at call-time.
+    this.tickOrchestrator = new CombatTickOrchestrator(
+      this.pidManager,
+      this.projectileHitProcessor,
+      this.animationManager,
+      this.stateService,
+      this.lifecycleHandler,
+      this.followController,
+      this.attackValidator,
+      this.tickAttackWorker,
+      this.logger,
+      (data) => this.handleAttack(data),
+      () => this.world.frameBudget,
     );
   }
 
@@ -2286,313 +2310,24 @@ export class CombatSystem extends SystemBase {
     // This is called by TickSystem at TickPriority.COMBAT
   }
 
-  // Track when PID order needs re-sorting (optimization)
-  private _pidSortDirty = true;
-  private _lastSortedCombatCount = 0;
-
-  /**
-   * Process combat on each server tick (OSRS-accurate)
-   * Called by TickSystem at COMBAT priority (after movement, before AI)
-   */
+  /** Process combat on each server tick. Called by TickSystem. */
   public processCombatTick(tickNumber: number): void {
-    // Update PIDs - returns true if shuffle happened
-    const pidShuffled = this.pidManager.update(tickNumber);
-    if (pidShuffled) {
-      this._pidSortDirty = true;
-    }
-
-    // Process projectile hits (ranged/magic delayed damage)
-    this.projectileHitProcessor.processProjectileHits(tickNumber);
-
-    // Process scheduled emote resets (tick-aligned animation timing)
-    // Delegated to AnimationManager for better separation of concerns
-    this.animationManager.processEmoteResets(tickNumber);
-
-    // Get all combat states via StateService (returns reusable buffer to avoid allocations)
-    const combatStates = this.stateService.getAllCombatStates();
-    const combatStatesMap = this.stateService.getCombatStatesMap();
-
-    // OPTIMIZED: Only sort when needed
-    // - Skip if <= 1 combatants (nothing to sort)
-    // - Mark dirty when PIDs shuffle or combatant count changes
-    const combatCount = combatStates.length;
-    if (combatCount !== this._lastSortedCombatCount) {
-      this._pidSortDirty = true;
-      this._lastSortedCombatCount = combatCount;
-    }
-
-    if (combatCount > 1 && this._pidSortDirty) {
-      // Lower PID attacks first when multiple attacks on same tick
-      combatStates.sort((a, b) => this.pidManager.comparePriority(a[0], b[0]));
-      this._pidSortDirty = false;
-    }
-
-    // PERFORMANCE: Process combat with frame budget awareness
-    // Combat ticks are critical gameplay - always process, but track budget
-    const frameBudget = this.world.frameBudget;
-    let processed = 0;
-
-    for (const [entityId, combatState] of combatStates) {
-      // Check frame budget every 20 combatants (combat is time-critical, be lenient)
-      if (processed > 0 && processed % 20 === 0) {
-        if (frameBudget && !frameBudget.hasTimeRemaining(1)) {
-          // Over budget - log warning but don't skip combat (would break gameplay)
-          // This is a signal to optimize elsewhere
-          console.warn(
-            `[CombatSystem] Frame budget exhausted with ${combatStates.length - processed} combats remaining`,
-          );
-          // Continue processing - combat must complete for fairness
-        }
-      }
-
-      if (!combatStatesMap.has(entityId)) {
-        continue;
-      }
-
-      // Check for combat timeout (8 ticks after last hit)
-      if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
-        const entityIdStr = String(entityId);
-        this.lifecycleHandler.endCombat({ entityId: entityIdStr });
-        processed++;
-        continue;
-      }
-
-      if (!combatState.inCombat || !combatState.targetId) continue;
-
-      // OSRS-style: Check range EVERY tick and follow if needed (not just on attack ticks)
-      // In OSRS, you continuously pursue your target while in combat
-      if (combatState.attackerType === "player") {
-        this.followController.checkRangeAndFollow(combatState, tickNumber);
-      }
-
-      if (tickNumber >= combatState.nextAttackTick) {
-        void this.processAutoAttackOnTick(combatState, tickNumber).catch(
-          (error) => {
-            this.logger.error(
-              "processAutoAttackOnTick failed",
-              error instanceof Error ? error : undefined,
-              { entityId: String(entityId), tickNumber },
-            );
-          },
-        );
-      }
-
-      processed++;
-    }
+    this.tickOrchestrator.processCombatTick(tickNumber);
   }
 
-  /**
-   * Process combat for a specific NPC on this tick
-   *
-   * OSRS-ACCURATE: Called by GameTickProcessor during NPC phase
-   * NPCs process BEFORE players, creating the damage asymmetry:
-   * - NPC → Player damage: Applied same tick
-   * - Player → NPC damage: Applied next tick
-   *
-   * @param mobId - The NPC entity ID to process
-   * @param tickNumber - Current tick number
-   */
+  /** Per-mob entry. Called during the NPC phase of GameTickProcessor. */
   public processNPCCombatTick(mobId: string, tickNumber: number): void {
-    const combatState = this.stateService.getCombatData(mobId);
-
-    if (!combatState) return;
-
-    // Check for combat timeout (8 ticks after last hit)
-    if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
-      this.lifecycleHandler.endCombat({ entityId: mobId });
-      return;
-    }
-
-    if (!combatState.inCombat || !combatState.targetId) return;
-
-    // Only process mob attackers (not mobs being attacked)
-    if (combatState.attackerType !== "mob") return;
-
-    // Process emote resets for this mob
-    this.animationManager.processEntityEmoteReset(mobId, tickNumber);
-
-    if (tickNumber >= combatState.nextAttackTick) {
-      void this.processAutoAttackOnTick(combatState, tickNumber).catch(
-        (error) => {
-          this.logger.error(
-            "NPC processAutoAttackOnTick failed",
-            error instanceof Error ? error : undefined,
-            { mobId, tickNumber },
-          );
-        },
-      );
-    }
+    this.tickOrchestrator.processNPCCombatTick(mobId, tickNumber);
   }
 
-  /**
-   * Process combat for a specific player on this tick
-   *
-   * OSRS-ACCURATE: Called by GameTickProcessor during Player phase
-   * Players process AFTER NPCs, creating the damage asymmetry:
-   * - Player → NPC damage: Applied next tick (queued by GameTickProcessor)
-   * - NPC → Player damage: Applied same tick
-   *
-   * @param playerId - The player entity ID to process
-   * @param tickNumber - Current tick number
-   */
+  /** Per-player entry. Called during the Player phase of GameTickProcessor. */
   public processPlayerCombatTick(playerId: string, tickNumber: number): void {
-    const combatState = this.stateService.getCombatData(playerId);
-
-    if (!combatState) return;
-
-    // Check for combat timeout (8 ticks after last hit)
-    if (combatState.inCombat && tickNumber >= combatState.combatEndTick) {
-      this.lifecycleHandler.endCombat({ entityId: playerId });
-      return;
-    }
-
-    if (!combatState.inCombat || !combatState.targetId) return;
-
-    // Only process player attackers (not players being attacked)
-    if (combatState.attackerType !== "player") return;
-
-    // OSRS-ACCURATE: No movement suppression needed
-    // If player has combat state, they're either:
-    // 1. Standing still fighting
-    // 2. Combat following (chasing their target)
-    // In both cases, attacks should happen when in range and cooldown ready
-    // Wiki: "follow and attack while chasing it"
-    // The disengage event handles the "escape" case by clearing combat state
-
-    // Process emote resets for this player
-    this.animationManager.processEntityEmoteReset(playerId, tickNumber);
-
-    // OSRS-style: Check range EVERY tick and follow if needed
-    this.followController.checkRangeAndFollow(combatState, tickNumber);
-
-    if (tickNumber >= combatState.nextAttackTick) {
-      void this.processAutoAttackOnTick(combatState, tickNumber).catch(
-        (error) => {
-          this.logger.error(
-            "Player processAutoAttackOnTick failed",
-            error instanceof Error ? error : undefined,
-            { playerId, tickNumber },
-          );
-        },
-      );
-    }
+    this.tickOrchestrator.processPlayerCombatTick(playerId, tickNumber);
   }
 
-  // checkRangeAndFollow moved to ./CombatFollowController (slice 8).
-  // Call sites delegate via
-  // this.followController.checkRangeAndFollow(combatState, tickNumber).
-
-  // validateCombatActors and validateAttackRange moved to
-  // ./CombatAttackValidator (slice 7). Call sites delegate via
-  // this.attackValidator.{method}(...).
-
-  // executeAttackDamage, updateCombatTickState, handlePlayerRetaliation,
-  // emitCombatEvents moved to ./CombatTickAttackWorker (slice 10). Call
-  // sites delegate via this.tickAttackWorker.{method}(...).
-
-  // processProjectileHits moved to ./CombatProjectileHitProcessor
-  // (slice 11). Call site delegates via
-  // this.projectileHitProcessor.processProjectileHits(tickNumber).
-
-  /**
-   * Process auto-attack for a combatant on a specific tick
-   */
-  private async processAutoAttackOnTick(
-    combatState: CombatData,
-    tickNumber: number,
-  ): Promise<void> {
-    const attackerId = String(combatState.attackerId);
-    const targetId = String(combatState.targetId);
-    const typedAttackerId = combatState.attackerId;
-
-    // Step 1: Validate combat actors exist and are alive
-    const actors = this.attackValidator.validateCombatActors(combatState);
-    if (!actors) return;
-    const { attacker, target } = actors;
-
-    // Step 1.5: Route ranged/magic auto-attacks through projectile handlers.
-    // Players derive attack type from equipment; mobs use persisted combat weapon type.
-    const attackType =
-      combatState.attackerType === "player"
-        ? this.followController.getAttackTypeFromWeapon(attackerId)
-        : combatState.weaponType;
-    if (attackType === AttackType.RANGED || attackType === AttackType.MAGIC) {
-      // Handlers handle claiming the cooldown slot synchronously before any async work,
-      // so we don't need to pre-claim it here (which would break their internal checks).
-      await this.handleAttack({
-        attackerId,
-        targetId,
-        attackerType: combatState.attackerType,
-        targetType: combatState.targetType,
-        attackType,
-      });
-
-      // Refresh combat timeout after ranged/magic attack to prevent combat
-      // from timing out after COMBAT_TIMEOUT_TICKS. The handler may have
-      // replaced the state via enterCombat → createAttackerState, so fetch
-      // the fresh state from the Map (old reference may be stale).
-      const freshState = this.stateService
-        .getCombatStatesMap()
-        .get(typedAttackerId);
-      if (freshState) {
-        freshState.combatEndTick = tickNumber + getCombatTimeoutTicks();
-        freshState.lastAttackTick = tickNumber;
-      }
-      return;
-    }
-
-    // Step 2: Validate attack range (melee only from here)
-    if (
-      !this.attackValidator.validateAttackRange(
-        attacker,
-        target,
-        combatState.attackerType,
-      )
-    ) {
-      return;
-    }
-
-    // Step 3: Execute melee attack (rotation, animation, damage)
-    const damage = this.tickAttackWorker.executeAttackDamage(
-      attackerId,
-      targetId,
-      attacker,
-      target,
-      combatState,
-      tickNumber,
-    );
-
-    // Step 4: Check if combat state still exists (target may have died)
-    if (!this.stateService.getCombatStatesMap().has(typedAttackerId)) {
-      return;
-    }
-
-    // Step 5: Update combat tick state
-    this.tickAttackWorker.updateCombatTickState(
-      combatState,
-      typedAttackerId,
-      tickNumber,
-    );
-
-    // Step 6: Handle player retaliation if target is a player
-    if (combatState.targetType === "player") {
-      this.tickAttackWorker.handlePlayerRetaliation(
-        targetId,
-        attackerId,
-        typedAttackerId,
-        combatState.attackerType,
-        tickNumber,
-      );
-    }
-
-    // Step 7: Emit combat events
-    this.tickAttackWorker.emitCombatEvents(
-      attackerId,
-      target,
-      damage,
-      combatState,
-    );
-  }
+  // processCombatTick / processNPCCombatTick / processPlayerCombatTick /
+  // processAutoAttackOnTick bodies moved to ./CombatTickOrchestrator
+  // (slice 12). Public methods above are thin proxies.
 
   // Combat event recording (record / buildGameStateInfo /
   // buildCombatSnapshot) lives in CombatEventRecorder — see field
