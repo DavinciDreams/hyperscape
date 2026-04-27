@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-26 (REFRESH)
+# Hyperscape Progress Audit — 2026-04-26 (REFRESH 2)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~65–70% of the way to "truly AAA, truly done"** — up from 50–60%
+**~70–75% of the way to "truly AAA, truly done"** — up from 65–70% earlier today and 50–60% pre-weekend.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -123,15 +123,15 @@ plugin build, shared build all pass. Branch pushed to
 | A | Constants → manifests | 40 | **85** | re-audit revealed all 12 `data/*.ts` + all 11 `constants/*.ts` files are already manifest façades; only editor-side coverage (Phase B) and minor type-relocation work remains |
 | B | Manifest editors | 20 | **20** | not touched |
 | C | Property panel schema refactor | 65 | **65** | not touched |
-| D | UI/HUD framework | 78 | **78** | not touched |
+| D | UI/HUD framework | 78 | **80** | Sessions 4 + 5A (XP orb + LevelUp toast) shipped; per-widget plugin contribution recipe proven with 2 worked examples + multi-widget contribution test |
 | E | Audio/VFX/Anim/Input | 45 | **45** | not touched |
 | F | Progression/Economy/Loc/Render | 45 | **45** | not touched |
 | G | Missing systems | 35 | **35** | not touched |
 | H | AI behavior as data | 35 | **35** | not touched |
-| I | Plugin architecture | 88 | **92** | I4 meta-plugin now genuinely composes the migrated systems; only Plugin Browser UI (I5) remains |
+| I | Plugin architecture | 88 | **98** | Session 3 — Plugin Browser UI install + uninstall shipped; only runtime hot-mount remains |
 | J | Editor UX (UE5 parity) | 30 | **30** | not touched |
-| K | Hygiene | 15 | **22** | 38 stale-import / type-alignment errors cleared, duplicate-method removed, schema typos fixed |
-| **Engine/game separation** (master criterion #2) | — | **5** | **70** | **biggest unknown is mostly resolved this session** |
+| K | Hygiene | 15 | **30** | 38 type errors cleared this weekend + 691 OSRS/RuneScape/Jagex naming-rule violations scrubbed (185 files, 0 remaining) |
+| **Engine/game separation** (master criterion #2) | — | **5** | **75** | F3 + G1 closed handler/character-selection migration; lexical IP scrubbing complements structural separation |
 
 **Plus: substantial work outside the master plan** (unchanged
 this session)
@@ -313,7 +313,7 @@ offset by the items below it that didn't move.
 | Phase A still ~40% | high | `packages/shared/src/data/*.ts` and `types/game/*.ts` unchanged this session |
 | Phase D still ~78% | high | UI framework files unchanged this session |
 | Phases B, C, E, F, G, H, J unchanged | high | These weren't touched |
-| Overall ~65-70% | medium | Phase weighting is somewhat subjective; criterion #2 weight is significant |
+| Overall ~70-75% | medium | Phase weighting is somewhat subjective; criterion #2 weight is significant. Updated post-Session 7. |
 
 ---
 
@@ -326,7 +326,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~65-70% to AAA done. Plugin tests stable at 187/187.
+**Status: ~70-75% to AAA done. Plugin tests stable at 198/198 (up from 187 — 11 widget tests added this session).
 Server typecheck cleared 68% of pre-existing errors as a side
 effect. Branch pushed and ready for review.**
 
