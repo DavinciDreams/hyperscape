@@ -65,8 +65,12 @@ export interface EffectiveVisibility {
   reason: EffectiveVisibilityReason;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type FriendsSocialReloadListener = () => void;
+
 export class FriendsSocialRegistry {
   private _manifest: FriendsSocialManifest | null = null;
+  private _reloadListeners = new Set<FriendsSocialReloadListener>();
 
   constructor(manifest?: FriendsSocialManifest) {
     if (manifest) this.load(manifest);
@@ -74,10 +78,37 @@ export class FriendsSocialRegistry {
 
   load(manifest: FriendsSocialManifest): void {
     this._manifest = manifest;
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(FriendsSocialManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: FriendsSocialReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[friendsSocialRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

@@ -49,10 +49,14 @@ export class UnknownPrefabInstanceError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type PrefabReloadListener = () => void;
+
 export class PrefabRegistry {
   private _manifest: PrefabManifest | null = null;
   private _prefabsById = new Map<string, Prefab>();
   private _instancesById = new Map<string, PrefabInstance>();
+  private _reloadListeners = new Set<PrefabReloadListener>();
 
   constructor(manifest?: PrefabManifest) {
     if (manifest) this.load(manifest);
@@ -64,10 +68,37 @@ export class PrefabRegistry {
     this._instancesById.clear();
     for (const p of manifest.prefabs) this._prefabsById.set(p.id, p);
     for (const i of manifest.instances) this._instancesById.set(i.id, i);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(PrefabManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: PrefabReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[prefabRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): PrefabManifest {

@@ -68,9 +68,13 @@ export interface PartyCheckInput {
   includesSolo: boolean;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type MatchmakingReloadListener = () => void;
+
 export class MatchmakingRegistry {
   private _manifest: MatchmakingTuningManifest | null = null;
   private _byId = new Map<string, MatchmakingQueue>();
+  private _reloadListeners = new Set<MatchmakingReloadListener>();
 
   constructor(manifest?: MatchmakingTuningManifest) {
     if (manifest) this.load(manifest);
@@ -80,10 +84,37 @@ export class MatchmakingRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const q of manifest.queues) this._byId.set(q.id, q);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(MatchmakingTuningManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: MatchmakingReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[matchmakingRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
