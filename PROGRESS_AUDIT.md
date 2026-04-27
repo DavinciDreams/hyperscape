@@ -120,7 +120,7 @@ plugin build, shared build all pass. Branch pushed to
 | Phase | Plan name | 2026-04-24 | **2026-04-26** | Why the change |
 |---|---|---:|---:|---|
 | 0 | Foundation | 100 | **100** | unchanged |
-| A | Constants → manifests | 40 | **40** | not touched this session |
+| A | Constants → manifests | 40 | **85** | re-audit revealed all 12 `data/*.ts` + all 11 `constants/*.ts` files are already manifest façades; only editor-side coverage (Phase B) and minor type-relocation work remains |
 | B | Manifest editors | 20 | **20** | not touched |
 | C | Property panel schema refactor | 65 | **65** | not touched |
 | D | UI/HUD framework | 78 | **78** | not touched |
@@ -215,9 +215,15 @@ Two old gaps moved heavily this session, several remain unchanged:
    `onReloaded`; ~3 React UI consumers actually subscribe. (No
    change.)
 
-6. **Game data extraction (Phase A)** — NPCs, items, world
+6. ~~**Game data extraction (Phase A)** — NPCs, items, world
    structure, duel rules, banks, spells, runes still hardcoded in
-   `packages/shared/src/data/*.ts`. (No change.)
+   `packages/shared/src/data/*.ts`.~~ **RESOLVED** (re-audit
+   2026-04-26 evening): every `shared/data/*.ts` file is already a
+   manifest façade — they load JSON, validate against a Zod schema,
+   and expose the legacy export shape for backward compat. Same
+   for all `shared/constants/*.ts`. Phase A is at ~85%. The
+   remaining 15% is editor-side coverage (Phase B territory) and
+   minor type relocation (Session 7).
 
 7. **ManifestEditors UI breadth** — only 8 of 129 manifest schemas
    have dedicated editor UIs. (No change.)
@@ -252,7 +258,7 @@ resolved. The new list reorders:
 | # | Item | Phase | Effort | Why now |
 |---|---|---|---|---|
 | 1 | **Wire plugin system into server/client startup** | post-I | S | No-op behavior change; turns this session's structural separation into runtime separation |
-| 2 | **Game-data JSON extraction** (NPCs/items/world/duel/banks ~2k LOC) | A | M | Last big chunk of game-specific code in shared; closes Phase A meaningfully |
+| ~~2~~ | ~~**Game-data JSON extraction**~~ | ~~A~~ | ~~M~~ | **RESOLVED 2026-04-26 evening** — re-audit found all data/*.ts and constants/*.ts files already façaded |
 | 3 | **Plugin Browser UI** (consumes 7 routes + 107 types already shipped) | I5 | M | Closes Phase I |
 | 4 | **D7 plugin widget contribution + D6.c.1 (XP orb)** as one PR | D | S | Establishes the per-widget migration pattern |
 | 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |

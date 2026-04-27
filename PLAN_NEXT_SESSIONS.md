@@ -66,38 +66,86 @@ change rather than a runtime architecture change.
 
 ---
 
-## Session 2 — Game-data JSON extraction (M, ~3h)
+## Session 2 — Game-data JSON extraction ~~(M, ~3h)~~ — **VOID, ALREADY DONE**
 
-**Item #2 from top-10.** Closes Phase A meaningfully and removes
-~2,000 LOC of Hyperscape-specific TypeScript from `shared/data/*.ts`.
+**Update 2026-04-26 evening:** Session 2's headline targets were
+based on a stale read of the audit. After investigating all 12
+candidate files in `shared/src/data/` and all 11 files in
+`shared/src/constants/`, **every single one is already a manifest
+façade** that loads its data from a JSON manifest at module-load
+time and validates against a Zod schema from
+`@hyperforge/manifest-schema`. This work was done in Phase A11 of
+the World Studio plan before this session sequence even started.
 
-### Targets (in priority order)
+### What was checked
 
-Each is independent — can ship as separate commits within one
-session or split across sessions.
+Non-provider data files in `shared/src/data/`:
 
-| Target file | LOC est. | Existing manifest? | Action |
-|---|---:|---|---|
-| `shared/src/data/duel-manifest.ts` | 427 | Partial in `combat-tuning.json` | Extract `DUEL_RULE_DEFINITIONS`, `EQUIPMENT_SLOT_DEFINITIONS`, `CHALLENGE_TIMEOUT_MS` to `duel-rules.json`; load via provider |
-| `shared/src/data/items.ts` | ~600 | `server/world/assets/items/` already manifest | Consolidate — drop the TS module, route consumers through `itemsProvider` |
-| `shared/src/data/npcs.ts`, `npc-sizes.ts` | ~400 | `server/world/assets/npcs.json` already exists | Consolidate via `npcsProvider` |
-| `shared/src/data/banks-stores.ts` | ~300 | `stores.json` exists | Consolidate via `storesProvider` |
-| `shared/src/data/runes.ts`, `combat-spells.ts` | ~250 | Both already have JSON twins | Drop TS modules; route through providers |
+| File | Status |
+|---|---|
+| `runes.ts` | ✅ façade — loads from `runes.json` |
+| `combat-spells.ts` | ✅ façade — loads from `combat-spells.json` |
+| `banks-stores.ts` | ✅ façade — loads from JSON via DataManager |
+| `items.ts` | ✅ façade — loads from `items.json` |
+| `npcs.ts` | ✅ façade — loads from JSON via DataManager |
+| `npc-sizes.ts` | ✅ small derivation file, no hardcoded data |
+| `duel-manifest.ts` | ✅ façade — `DUEL_RULE_DEFINITIONS`, `EQUIPMENT_SLOT_DEFINITIONS`, `CHALLENGE_TIMEOUT_MS` all derived from `duel.json` |
+| `spell-visuals.ts` | ✅ façade — loads from `spell-visuals.json` |
+| `world-areas.ts` | ✅ loads from JSON via DataManager |
+| `skill-unlocks.ts` | ✅ loads from `skill-unlocks.json` via DataManager |
+| `smithing-recipes.ts` | ✅ pure type defs (data lives in `items.json`) |
+| `NoteGenerator.ts` | ✅ runtime generator, no static data |
 
-### Acceptance per target
-- Old `.ts` file deleted
-- Manifest schema added to `@hyperforge/manifest-schema` if not
-  present
-- Provider exposes typed accessors (`getItem(id)`, `getDuelRules()`)
-- All consumers route through provider (grep verification)
-- Hot-reload via PIE `updateManifests()` works
-- No runtime regression (smoke test the affected feature)
+All 12 constants files in `shared/src/constants/`:
 
-### Why it matters
-Master criterion #4 ("a different game can be built from the same
-blocks") requires that game data is data, not code. Each of these
-files is a hardcoded Hyperscape constant set; a non-Hyperscape game
-can't use the engine without first deleting these.
+| File | Status |
+|---|---|
+| `BankEquipmentConstants.ts` | ✅ façade |
+| `BankingConstants.ts` | ✅ façade |
+| `CombatConstants.ts` | ✅ façade |
+| `EquipmentConstants.ts` | ✅ façade |
+| `GameConstants.ts` | ✅ façade |
+| `GatheringConstants.ts` | ✅ façade |
+| `interaction.ts` | ✅ façade |
+| `ProcessingConstants.ts` | ✅ façade |
+| `SmithingConstants.ts` | ✅ façade |
+| `TreeTypes.ts` | ✅ façade |
+| `WeaponStyleConfig.ts` | ✅ façade |
+
+### What's actually still in scope for Phase A (deferred)
+
+Two small remaining strands, both better tackled inside other
+sessions where they're naturally relevant:
+
+1. **CLAUDE.md naming-rule violations** — 181 files in shared
+   contain `OSRS` / `RuneScape` / `Old School` / `Jagex` references
+   (mostly in comments / docstrings). Project rule:
+   "We don't want any of their IP or names in our codebase."
+   Mechanical sed cleanup; can ride along with whichever session
+   touches those files. Folded into Session 9+ (long-tail
+   hygiene).
+
+2. **Game-types relocation** — 3,367 LOC in
+   `shared/src/types/game/*.ts` (combat-types, duel-types,
+   inventory-types, prayer-types, quest-types, social-types,
+   trade-types, etc.). These are imported by both engine substrate
+   and plugin-side game logic. Each needs either a substrate-
+   promote (slim shape stays in shared, full shape moves to plugin)
+   or full move depending on whether engine actually consumes the
+   shape. Folded into Session 7 (Final shared cleanup).
+
+**Phase A is effectively closed at the data-extraction layer.**
+The remaining Phase A work is editor-side (manifest editor UI
+breadth) which lives in Phase B.
+
+### Net effect on top-10 leverage list
+
+Item #2 from PROGRESS_AUDIT ("Game-data JSON extraction") was
+tagged M effort. Closing it in 0 sessions of new work moves the
+"realistic remaining effort" estimate from 8–12 sessions down by
+about a session.
+
+**Skip to Session 3 below.**
 
 ---
 
