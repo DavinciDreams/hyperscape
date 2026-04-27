@@ -1,36 +1,63 @@
 /**
  * PluginBrowserPanel — Phase I5 plugin catalog tab for the bottom dock.
  *
- * Read-only slice:
- *   1. On mount, fetches `GET /api/plugins/registry` (listed
- *      newest-first by the server).
- *   2. Renders a searchable list — filter matches against plugin id,
- *      name, description, and tags.
- *   3. Clicking a row expands it inline and fetches the full bundle
- *      descriptor (lazy — each detail is a second round-trip).
+ * Two-tab UI:
+ *   - **Browse** — fetches `GET /api/plugins/registry` (newest-first),
+ *     supports filter, expand-for-detail, and Install button per row.
+ *   - **Installed** — shows locally-installed plugins from the
+ *     in-memory `installedPluginsStore`. Supports uninstall.
  *
- * Out-of-scope for this cut: install/uninstall controls, enable
- * toggles, dependency tree view. Those surface in later I5 slices
- * once the runtime side of plugin install lands.
+ * Install flow (Session 3 of PLAN_NEXT_SESSIONS):
+ *   1. User clicks Install on a row.
+ *   2. UI calls `installPlugin(id, version)` from `pluginApi`.
+ *   3. That helper fetches the bundle descriptor + every referenced
+ *      file from the content store, sha256-verifies each file, and
+ *      returns the verified bytes.
+ *   4. Result is recorded in the in-memory installed-plugins store
+ *      so the Installed tab updates immediately.
+ *
+ * Persistence: today the installed set lives in-memory only. When
+ * the editor's runtime grows real plugin hot-mount support, the
+ * bytes can be written to IndexedDB inside `installedPluginsStore`
+ * without changing the public API.
  */
 
 import {
   AlertCircle,
+  Check,
   ChevronDown,
   ChevronRight,
+  Download,
   Loader2,
   Package,
   RefreshCw,
   Search,
+  Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import {
   getPublishedPlugin,
+  installPlugin,
+  type InstalledPlugin,
   listPublishedPlugins,
   type PluginRegistryDetailResponse,
   type PluginRegistryListEntry,
 } from "../../../utils/pluginApi";
+import {
+  isInstalled,
+  listInstalledPlugins,
+  recordInstalledPlugin,
+  subscribeInstalledPlugins,
+  uninstallPlugin,
+} from "../../../utils/installedPluginsStore";
 
 type ListStatus =
   | { kind: "idle" }
@@ -57,14 +84,77 @@ function formatPublishedAt(iso: string): string {
   }
 }
 
+type InstallStatus =
+  | { kind: "idle" }
+  | { kind: "installing"; current: number; total: number }
+  | { kind: "error"; message: string }
+  | { kind: "done" };
+
+type ActiveTab = "browse" | "installed";
+
 export function PluginBrowserPanel() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("browse");
   const [status, setStatus] = useState<ListStatus>({ kind: "idle" });
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [detailCache, setDetailCache] = useState<DetailCache>({});
+  const [installStatus, setInstallStatus] = useState<
+    Record<string, InstallStatus>
+  >({});
   // Guard against stale state updates when the component re-fetches
   // quickly (e.g. user spams the refresh button).
   const fetchIdRef = useRef(0);
+
+  /**
+   * Subscribe to the installed-plugins store so the Installed tab
+   * + per-row "Installed" badges update immediately when an install
+   * or uninstall happens.
+   */
+  const installedPlugins = useSyncExternalStore(
+    subscribeInstalledPlugins,
+    listInstalledPlugins,
+    listInstalledPlugins,
+  );
+
+  const handleInstall = useCallback(async (entry: PluginRegistryListEntry) => {
+    const key = entryKey(entry);
+    setInstallStatus((prev) => ({
+      ...prev,
+      [key]: { kind: "installing", current: 0, total: 0 },
+    }));
+    try {
+      const installed = await installPlugin(
+        entry.id,
+        entry.version,
+        (_file, current, total) => {
+          setInstallStatus((prev) => ({
+            ...prev,
+            [key]: { kind: "installing", current, total },
+          }));
+        },
+      );
+      recordInstalledPlugin(installed);
+      setInstallStatus((prev) => ({ ...prev, [key]: { kind: "done" } }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setInstallStatus((prev) => ({
+        ...prev,
+        [key]: { kind: "error", message },
+      }));
+    }
+  }, []);
+
+  const handleUninstall = useCallback((id: string, version: string) => {
+    uninstallPlugin(id, version);
+    const key = `${id}@${version}`;
+    // Reset install status so the Browse tab's button re-shows
+    // "Install" instead of "Installed".
+    setInstallStatus((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const reload = useCallback(async () => {
     const fetchId = ++fetchIdRef.current;
@@ -128,125 +218,177 @@ export function PluginBrowserPanel() {
 
   return (
     <div className="flex flex-col h-full bg-bg-primary">
-      {/* Toolbar: search + refresh + count */}
+      {/* Tab strip: Browse / Installed */}
       <div
-        className="flex items-center gap-2 px-2 py-1.5 border-b border-border-primary"
+        className="flex items-center gap-0 px-2 pt-1.5 border-b border-border-primary"
         style={{ background: "var(--bg-secondary)" }}
       >
-        <div className="relative flex-1 max-w-sm">
-          <Search
-            size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none"
-          />
-          <input
-            type="text"
-            placeholder="Filter plugins…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="w-full pl-7 pr-2 py-1 text-[11px] bg-bg-primary border border-border-primary rounded text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
-          />
-        </div>
         <button
-          onClick={() => void reload()}
-          disabled={status.kind === "loading"}
-          className="flex items-center gap-1 px-2 py-1 text-[11px] rounded text-text-secondary hover:text-text-primary hover:bg-bg-tertiary disabled:opacity-50 transition-colors"
-          title="Reload registry"
+          onClick={() => setActiveTab("browse")}
+          className={`px-3 py-1 text-[11px] rounded-t border-b-2 transition-colors ${
+            activeTab === "browse"
+              ? "text-text-primary border-primary"
+              : "text-text-tertiary border-transparent hover:text-text-secondary"
+          }`}
         >
-          {status.kind === "loading" ? (
-            <Loader2 size={11} className="animate-spin" />
-          ) : (
-            <RefreshCw size={11} />
-          )}
-          <span>Reload</span>
+          Browse
         </button>
-        <span className="text-[11px] text-text-tertiary ml-auto">
-          {status.kind === "ready"
-            ? `${filteredEntries.length} / ${status.entries.length}`
-            : null}
-        </span>
+        <button
+          onClick={() => setActiveTab("installed")}
+          className={`px-3 py-1 text-[11px] rounded-t border-b-2 transition-colors ${
+            activeTab === "installed"
+              ? "text-text-primary border-primary"
+              : "text-text-tertiary border-transparent hover:text-text-secondary"
+          }`}
+        >
+          Installed{" "}
+          <span className="text-text-tertiary">
+            ({installedPlugins.length})
+          </span>
+        </button>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto">
-        {status.kind === "idle" || status.kind === "loading" ? (
-          <div className="flex items-center justify-center py-8 text-text-tertiary text-[11px]">
-            <Loader2 size={14} className="animate-spin mr-2" />
-            Loading plugin registry…
-          </div>
-        ) : null}
+      {activeTab === "installed" ? (
+        <InstalledTab
+          plugins={installedPlugins}
+          onUninstall={handleUninstall}
+        />
+      ) : null}
 
-        {status.kind === "error" ? (
-          <div className="flex items-start gap-2 px-3 py-3 text-[11px] text-red-400">
-            <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-            <div>
-              <div className="font-medium">Failed to load registry</div>
-              <div className="text-text-tertiary mt-0.5">{status.message}</div>
+      {activeTab === "browse" ? (
+        <>
+          {/* Toolbar: search + refresh + count */}
+          <div
+            className="flex items-center gap-2 px-2 py-1.5 border-b border-border-primary"
+            style={{ background: "var(--bg-secondary)" }}
+          >
+            <div className="relative flex-1 max-w-sm">
+              <Search
+                size={12}
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none"
+              />
+              <input
+                type="text"
+                placeholder="Filter plugins…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="w-full pl-7 pr-2 py-1 text-[11px] bg-bg-primary border border-border-primary rounded text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary"
+              />
             </div>
+            <button
+              onClick={() => void reload()}
+              disabled={status.kind === "loading"}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded text-text-secondary hover:text-text-primary hover:bg-bg-tertiary disabled:opacity-50 transition-colors"
+              title="Reload registry"
+            >
+              {status.kind === "loading" ? (
+                <Loader2 size={11} className="animate-spin" />
+              ) : (
+                <RefreshCw size={11} />
+              )}
+              <span>Reload</span>
+            </button>
+            <span className="text-[11px] text-text-tertiary ml-auto">
+              {status.kind === "ready"
+                ? `${filteredEntries.length} / ${status.entries.length}`
+                : null}
+            </span>
           </div>
-        ) : null}
 
-        {status.kind === "ready" && status.entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-text-tertiary text-[11px]">
-            <Package size={24} className="mb-2 opacity-50" />
-            <div>No plugins published yet.</div>
-            <div className="mt-1 text-[10px]">
-              Use <code>hyperforge-plugin publish</code> to add one.
-            </div>
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto">
+            {status.kind === "idle" || status.kind === "loading" ? (
+              <div className="flex items-center justify-center py-8 text-text-tertiary text-[11px]">
+                <Loader2 size={14} className="animate-spin mr-2" />
+                Loading plugin registry…
+              </div>
+            ) : null}
+
+            {status.kind === "error" ? (
+              <div className="flex items-start gap-2 px-3 py-3 text-[11px] text-red-400">
+                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-medium">Failed to load registry</div>
+                  <div className="text-text-tertiary mt-0.5">
+                    {status.message}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {status.kind === "ready" && status.entries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-text-tertiary text-[11px]">
+                <Package size={24} className="mb-2 opacity-50" />
+                <div>No plugins published yet.</div>
+                <div className="mt-1 text-[10px]">
+                  Use <code>hyperforge-plugin publish</code> to add one.
+                </div>
+              </div>
+            ) : null}
+
+            {status.kind === "ready" && status.entries.length > 0 ? (
+              filteredEntries.length === 0 ? (
+                <div className="py-6 text-center text-[11px] text-text-tertiary">
+                  No plugins match &ldquo;{filter}&rdquo;.
+                </div>
+              ) : (
+                <ul className="divide-y divide-border-primary">
+                  {filteredEntries.map((entry) => {
+                    const key = entryKey(entry);
+                    const isOpen = expanded[key] === true;
+                    const detail = detailCache[key];
+                    return (
+                      <li key={entry.registryId} className="text-[11px]">
+                        <button
+                          onClick={() => void toggleExpanded(entry)}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-tertiary transition-colors"
+                        >
+                          {isOpen ? (
+                            <ChevronDown
+                              size={11}
+                              className="text-text-tertiary flex-shrink-0"
+                            />
+                          ) : (
+                            <ChevronRight
+                              size={11}
+                              className="text-text-tertiary flex-shrink-0"
+                            />
+                          )}
+                          <Package
+                            size={11}
+                            className="text-text-secondary flex-shrink-0"
+                          />
+                          <span className="text-text-primary font-medium">
+                            {entry.id}
+                          </span>
+                          <span className="text-text-tertiary">
+                            @{entry.version}
+                          </span>
+                          <span className="text-text-tertiary ml-auto text-[10px]">
+                            {formatPublishedAt(entry.publishedAt)}
+                          </span>
+                        </button>
+                        {isOpen ? (
+                          <PluginDetailView
+                            detail={detail}
+                            entry={entry}
+                            installStatus={installStatus[key]}
+                            installed={isInstalled(entry.id, entry.version)}
+                            onInstall={() => void handleInstall(entry)}
+                            onUninstall={() =>
+                              handleUninstall(entry.id, entry.version)
+                            }
+                          />
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
+            ) : null}
           </div>
-        ) : null}
-
-        {status.kind === "ready" && status.entries.length > 0 ? (
-          filteredEntries.length === 0 ? (
-            <div className="py-6 text-center text-[11px] text-text-tertiary">
-              No plugins match &ldquo;{filter}&rdquo;.
-            </div>
-          ) : (
-            <ul className="divide-y divide-border-primary">
-              {filteredEntries.map((entry) => {
-                const key = entryKey(entry);
-                const isOpen = expanded[key] === true;
-                const detail = detailCache[key];
-                return (
-                  <li key={entry.registryId} className="text-[11px]">
-                    <button
-                      onClick={() => void toggleExpanded(entry)}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-tertiary transition-colors"
-                    >
-                      {isOpen ? (
-                        <ChevronDown
-                          size={11}
-                          className="text-text-tertiary flex-shrink-0"
-                        />
-                      ) : (
-                        <ChevronRight
-                          size={11}
-                          className="text-text-tertiary flex-shrink-0"
-                        />
-                      )}
-                      <Package
-                        size={11}
-                        className="text-text-secondary flex-shrink-0"
-                      />
-                      <span className="text-text-primary font-medium">
-                        {entry.id}
-                      </span>
-                      <span className="text-text-tertiary">
-                        @{entry.version}
-                      </span>
-                      <span className="text-text-tertiary ml-auto text-[10px]">
-                        {formatPublishedAt(entry.publishedAt)}
-                      </span>
-                    </button>
-                    {isOpen ? (
-                      <PluginDetailView detail={detail} entry={entry} />
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )
-        ) : null}
-      </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -254,9 +396,20 @@ export function PluginBrowserPanel() {
 interface PluginDetailViewProps {
   detail: PluginRegistryDetailResponse | Error | "loading" | undefined;
   entry: PluginRegistryListEntry;
+  installStatus?: InstallStatus;
+  installed: boolean;
+  onInstall?: () => void;
+  onUninstall?: () => void;
 }
 
-function PluginDetailView({ detail, entry }: PluginDetailViewProps) {
+function PluginDetailView({
+  detail,
+  entry,
+  installStatus,
+  installed,
+  onInstall,
+  onUninstall,
+}: PluginDetailViewProps) {
   if (detail === undefined || detail === "loading") {
     return (
       <div className="px-8 py-2 text-text-tertiary text-[11px] flex items-center gap-1.5">
@@ -406,6 +559,108 @@ function PluginDetailView({ detail, entry }: PluginDetailViewProps) {
           ) : null}
         </ul>
       </div>
+
+      {/* Install / Uninstall controls + status */}
+      <div className="flex items-center gap-2 pt-2 border-t border-border-primary">
+        {installed ? (
+          <>
+            <span className="flex items-center gap-1 text-[11px] text-green-400">
+              <Check size={11} />
+              Installed
+            </span>
+            <button
+              onClick={onUninstall}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded text-text-secondary hover:text-red-400 hover:bg-bg-tertiary transition-colors"
+            >
+              <Trash2 size={11} />
+              Uninstall
+            </button>
+          </>
+        ) : installStatus?.kind === "installing" ? (
+          <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
+            <Loader2 size={11} className="animate-spin" />
+            Installing
+            {installStatus.total > 0
+              ? ` (${installStatus.current}/${installStatus.total})`
+              : "…"}
+          </span>
+        ) : installStatus?.kind === "error" ? (
+          <span className="flex items-start gap-1 text-[11px] text-red-400">
+            <AlertCircle size={11} className="flex-shrink-0 mt-0.5" />
+            {installStatus.message}
+          </span>
+        ) : (
+          <button
+            onClick={onInstall}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-primary text-white hover:opacity-90 transition-opacity"
+          >
+            <Download size={11} />
+            Install
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Installed-plugins tab body. Reads from the in-memory store and
+ * supports per-row uninstall.
+ */
+interface InstalledTabProps {
+  plugins: InstalledPlugin[];
+  onUninstall: (id: string, version: string) => void;
+}
+
+function InstalledTab({ plugins, onUninstall }: InstalledTabProps) {
+  if (plugins.length === 0) {
+    return (
+      <div className="flex-1 overflow-y-auto">
+        <div className="flex flex-col items-center justify-center py-10 text-text-tertiary text-[11px]">
+          <Package size={24} className="mb-2 opacity-50" />
+          <div>No plugins installed yet.</div>
+          <div className="mt-1 text-[10px]">
+            Switch to the Browse tab and click Install on a plugin.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <ul className="divide-y divide-border-primary">
+        {plugins.map((p) => {
+          const totalKb = (p.totalSize / 1024).toFixed(1);
+          return (
+            <li key={`${p.id}@${p.version}`} className="px-3 py-2 text-[11px]">
+              <div className="flex items-center gap-2">
+                <Package
+                  size={11}
+                  className="text-text-secondary flex-shrink-0"
+                />
+                <span className="text-text-primary font-medium">{p.id}</span>
+                <span className="text-text-tertiary">@{p.version}</span>
+                <span className="text-text-tertiary ml-auto text-[10px]">
+                  {p.files.length} file{p.files.length === 1 ? "" : "s"}{" "}
+                  &middot; {totalKb} KB
+                </span>
+                <button
+                  onClick={() => onUninstall(p.id, p.version)}
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded text-text-secondary hover:text-red-400 hover:bg-bg-tertiary transition-colors"
+                  title="Uninstall"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+              <div className="ml-5 mt-1 text-text-tertiary">
+                installed from registry &middot; published{" "}
+                {formatPublishedAt(p.publishedAt)}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
