@@ -126,8 +126,12 @@ export class UnknownCombatTuningProfileError extends Error {
  * holding a reference to a previously-resolved profile keep their
  * snapshot, so in-flight duels don't observe mid-fight tuning changes.
  */
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type CombatTuningReloadListener = () => void;
+
 export class CombatTuningRegistry {
   private profilesById = new Map<string, CombatTuningProfile>();
+  private _reloadListeners = new Set<CombatTuningReloadListener>();
 
   /** Empty registry. Call `load()` before `resolve()`. */
   constructor(manifest?: CombatTuningManifest) {
@@ -142,6 +146,33 @@ export class CombatTuningRegistry {
     this.profilesById.clear();
     for (const profile of manifest) {
       this.profilesById.set(profile.id, profile);
+    }
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: CombatTuningReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[combatTuningRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 

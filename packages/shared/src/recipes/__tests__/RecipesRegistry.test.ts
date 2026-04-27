@@ -3,7 +3,7 @@ import {
   SmeltingManifestSchema,
   SmithingRecipesManifestSchema,
 } from "@hyperforge/manifest-schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RecipesNotLoadedError, RecipesRegistry } from "../RecipesRegistry.js";
 
 function cooking() {
@@ -113,5 +113,42 @@ describe("RecipesRegistry", () => {
     expect(r.smithingAtLevel(5).map((s) => s.output)).toEqual([
       "bronze_dagger",
     ]);
+  });
+});
+
+describe("RecipesRegistry — onReloaded", () => {
+  it("fires after each successful loadCooking / loadSmelting / loadSmithing", () => {
+    const r = new RecipesRegistry();
+    const cb = vi.fn();
+    r.onReloaded(cb);
+    r.loadCooking(cooking());
+    r.loadSmelting(smelting());
+    r.loadSmithing(smithing());
+    expect(cb).toHaveBeenCalledTimes(3);
+  });
+
+  it("returned unsubscribe stops further notifications", () => {
+    const r = new RecipesRegistry();
+    const cb = vi.fn();
+    const off = r.onReloaded(cb);
+    r.loadCooking(cooking());
+    off();
+    r.loadSmelting(smelting());
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing listener does not break subsequent listeners", () => {
+    const r = new RecipesRegistry();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const good = vi.fn();
+    r.onReloaded(bad);
+    r.onReloaded(good);
+    r.loadCooking(cooking());
+    expect(bad).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

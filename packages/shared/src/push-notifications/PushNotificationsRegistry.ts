@@ -57,10 +57,14 @@ function hhmmToMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type PushNotificationsReloadListener = () => void;
+
 export class PushNotificationsRegistry {
   private _manifest: PushNotificationsManifest | null = null;
   private _channelById = new Map<string, DeliveryChannel>();
   private _categoryById = new Map<string, NotificationCategory>();
+  private _reloadListeners = new Set<PushNotificationsReloadListener>();
 
   constructor(manifest?: PushNotificationsManifest) {
     if (manifest) this.load(manifest);
@@ -72,10 +76,37 @@ export class PushNotificationsRegistry {
     this._categoryById.clear();
     for (const c of manifest.channels) this._channelById.set(c.id, c);
     for (const c of manifest.categories) this._categoryById.set(c.id, c);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(PushNotificationsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: PushNotificationsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[pushNotificationsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {

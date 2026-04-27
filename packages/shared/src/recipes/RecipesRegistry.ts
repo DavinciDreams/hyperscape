@@ -33,6 +33,9 @@ export class RecipesNotLoadedError extends Error {
   }
 }
 
+/** Listener invoked after every successful load*() call. */
+export type RecipesReloadListener = () => void;
+
 export class RecipesRegistry {
   private _cooking: CookingManifest | null = null;
   private _firemaking: FiremakingManifest | null = null;
@@ -42,30 +45,65 @@ export class RecipesRegistry {
   private _tanning: TanningManifest | null = null;
   private _fletching: FletchingManifest | null = null;
   private _runecrafting: RunecraftingManifest | null = null;
+  private _reloadListeners = new Set<RecipesReloadListener>();
 
   loadCooking(m: CookingManifest): void {
     this._cooking = m;
+    this._emitReloaded();
   }
   loadFiremaking(m: FiremakingManifest): void {
     this._firemaking = m;
+    this._emitReloaded();
   }
   loadSmelting(m: SmeltingManifest): void {
     this._smelting = m;
+    this._emitReloaded();
   }
   loadSmithing(m: SmithingRecipesManifest): void {
     this._smithing = m;
+    this._emitReloaded();
   }
   loadCrafting(m: CraftingManifest): void {
     this._crafting = m;
+    this._emitReloaded();
   }
   loadTanning(m: TanningManifest): void {
     this._tanning = m;
+    this._emitReloaded();
   }
   loadFletching(m: FletchingManifest): void {
     this._fletching = m;
+    this._emitReloaded();
   }
   loadRunecrafting(m: RunecraftingManifest): void {
     this._runecrafting = m;
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Fires on any of the eight
+   * load*() methods. Returns unsubscribe. Listener throws are caught
+   * + logged. Pattern matches `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: RecipesReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[recipesRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get cooking(): readonly CookingRecipe[] {

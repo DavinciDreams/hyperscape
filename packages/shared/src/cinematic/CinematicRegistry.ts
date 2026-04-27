@@ -62,10 +62,14 @@ export class UnknownCinematicTrackError extends Error {
 
 export type CinematicTrackKind = CinematicTrack["kind"];
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type CinematicReloadListener = () => void;
+
 export class CinematicRegistry {
   private _manifest: CinematicManifest | null = null;
   private _byId = new Map<string, Cinematic>();
   private _tracksByCinematic = new Map<string, Map<string, CinematicTrack>>();
+  private _reloadListeners = new Set<CinematicReloadListener>();
 
   constructor(manifest?: CinematicManifest) {
     if (manifest) this.load(manifest);
@@ -81,10 +85,37 @@ export class CinematicRegistry {
       for (const t of c.tracks) tracks.set(t.id, t);
       this._tracksByCinematic.set(c.id, tracks);
     }
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(CinematicManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: CinematicReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[cinematicRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   isLoaded(): boolean {
