@@ -33,9 +33,13 @@ export class UnknownCameraProfileError extends Error {
   }
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type CameraProfileReloadListener = () => void;
+
 export class CameraProfileRegistry {
   private _byId = new Map<string, CameraProfile>();
   private _byKind = new Map<CameraRig["kind"], CameraProfile[]>();
+  private _reloadListeners = new Set<CameraProfileReloadListener>();
 
   constructor(manifest?: CameraProfilesManifest) {
     if (manifest) this.load(manifest);
@@ -49,6 +53,33 @@ export class CameraProfileRegistry {
       const arr = this._byKind.get(p.rig.kind) ?? [];
       arr.push(p);
       this._byKind.set(p.rig.kind, arr);
+    }
+    this._emitReloaded();
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: CameraProfileReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[cameraProfileRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 
