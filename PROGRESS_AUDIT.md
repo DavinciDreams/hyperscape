@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-26 (REFRESH 2)
+# Hyperscape Progress Audit — 2026-04-26 (REFRESH 3)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~70–75% of the way to "truly AAA, truly done"** — up from 65–70% earlier today and 50–60% pre-weekend.
+**~75% of the way to "truly AAA, truly done"** — up from 70–75% mid-day, 65–70% earlier today, and 50–60% pre-weekend. Session 6 closed the AI test-coverage gap (top-10 leverage item #6) end to end.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -127,7 +127,7 @@ plugin build, shared build all pass. Branch pushed to
 | E | Audio/VFX/Anim/Input | 45 | **45** | not touched |
 | F | Progression/Economy/Loc/Render | 45 | **45** | not touched |
 | G | Missing systems | 35 | **35** | not touched |
-| H | AI behavior as data | 35 | **35** | not touched |
+| H | AI behavior as data | 35 | **50** | Session 6 shipped 136 unit tests across 9 AI services (was 0 before today). Each service has happy path + error path + parameter-shape assertions under mocked SDKs. Production-shipped AI integrations no longer have zero-coverage risk. |
 | I | Plugin architecture | 88 | **98** | Session 3 — Plugin Browser UI install + uninstall shipped; only runtime hot-mount remains |
 | J | Editor UX (UE5 parity) | 30 | **30** | not touched |
 | K | Hygiene | 15 | **30** | 38 type errors cleared this weekend + 691 OSRS/RuneScape/Jagex naming-rule violations scrubbed (185 files, 0 remaining) |
@@ -262,7 +262,7 @@ resolved. The new list reorders:
 | 3 | **Plugin Browser UI** (consumes 7 routes + 107 types already shipped) | I5 | M | Closes Phase I |
 | 4 | **D7 plugin widget contribution + D6.c.1 (XP orb)** as one PR | D | S | Establishes the per-widget migration pattern |
 | 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |
-| 6 | **AI service test coverage** (10 services, 0 tests today) | H | M | Production-shipped without tests is a real risk |
+| ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | 7 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | Closes UI framework story |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M | Path to "shared has zero Hyperscape identifiers" |
 | 9 | **CombatSystem decomposition (4,019 → <2,000)** | K4 | L | Maintenance + plugin extractability; lives in plugin now |
@@ -313,7 +313,7 @@ offset by the items below it that didn't move.
 | Phase A still ~40% | high | `packages/shared/src/data/*.ts` and `types/game/*.ts` unchanged this session |
 | Phase D still ~78% | high | UI framework files unchanged this session |
 | Phases B, C, E, F, G, H, J unchanged | high | These weren't touched |
-| Overall ~70-75% | medium | Phase weighting is somewhat subjective; criterion #2 weight is significant. Updated post-Session 7. |
+| Overall ~75% | medium | Phase weighting is somewhat subjective; criterion #2 weight is significant. Updated post-Session 6.9 (final AI service test). |
 
 ---
 
@@ -326,7 +326,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~70-75% to AAA done. Plugin tests stable at 198/198 (up from 187 — 11 widget tests added this session).
+**Status: ~75% to AAA done. Plugin tests stable at 198/198 (+11 widget tests today). Asset-forge AI service tests: 136/136 across 9 services (was 0 at start of day).
 Server typecheck cleared 68% of pre-existing errors as a side
 effect. Branch pushed and ready for review.**
 
@@ -341,7 +341,7 @@ The work pattern has shifted from "find structural blockers" to
 | Plugin Browser UI | unchanged (M) |
 | D6.c per-widget migration | unchanged (L) |
 | Game-data JSON extraction | unchanged (M) |
-| AI service test coverage | unchanged (M) |
+| ~~AI service test coverage~~ | **DONE — Session 6 closed (M)** |
 | DataSourceRegistry / ui-pack | unchanged (M) |
 | CombatSystem decomposition | unchanged but moved plugin-side (L) |
 | Long-tail registry wiring | unchanged (M each) |
