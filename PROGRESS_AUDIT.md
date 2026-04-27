@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-27 (REFRESH 7)
+# Hyperscape Progress Audit — 2026-04-27 (REFRESH 8)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~82–84% of the way to "truly AAA, truly done"** — up from 80–82% earlier today. **REFRESH 7 (2026-04-27 mid-day): top-10 #7 (DataSourceRegistry + ui-pack.json) D8/D9 substrate complete over 5 slices — DataSourceRegistry (pluggable bindings namespaces), UIPackManifestSchema (wraps widget catalog + layouts + theme + customization), HYPERSCAPE_UI_PACK reference pack, loadUIPack pure runtime, client uiPackLoader bridge. 41 new tests; ui-framework 274/274 + plugin 198/198 throughout. D10 wire-through (active-layout pipeline reads from pack) is the next cycle.** REFRESH 6 partial progress on top-10 #8 (final shared cleanup) over 4 slices. REFRESH 5 closed top-10 #9 (CombatSystem decomposition). REFRESH 4 closed top-10 #10 (long-tail registry consumer-wiring). REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6).
+**~84–86% of the way to "truly AAA, truly done"** — up from 82–84% earlier today. **REFRESH 8 (2026-04-27 mid-day): closed top-10 leverage item #7 (DataSourceRegistry + ui-pack.json) end-to-end over 7 slices on `feat/world-studio` (commits `71fe4f0ac` → `c2a560b5e`). D8 + D9 + D10 wire-through all shipped: DataSourceRegistry (pluggable bindings namespaces), UIPackManifestSchema (wraps widget catalog + layouts + theme + customization), HYPERSCAPE_UI_PACK reference pack, loadUIPack pure runtime, client uiPackLoader bridge, uiPackRegistry + useActiveUIPack hook, ManifestHud reads from active pack. 55 new tests; ui-framework 274/274 + plugin 198/198 + client ui-framework 117/117 throughout. Loading a different pack now actually swaps the rendered HUD end-to-end.** REFRESH 7 closed D8/D9 substrate (5 slices). REFRESH 6 partial progress on top-10 #8 (final shared cleanup). REFRESH 5 closed top-10 #9 (CombatSystem decomposition). REFRESH 4 closed top-10 #10 (long-tail registry consumer-wiring). REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6).
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -39,6 +39,57 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 8 — Top-10 #7 closed end-to-end (2026-04-27 mid-day)
+
+Top-10 leverage item #7 (DataSourceRegistry + ui-pack.json) advanced
+from "substrate-complete" to **closed** over 2 more slices on top of
+the REFRESH 7 substrate work. Loading a different pack now actually
+swaps the rendered HUD.
+
+| Slice | What | Tests |
+|---|---|---:|
+| 27 `fa474a4f7` | client `uiPackRegistry` (in-memory pack store + active-pack pointer with useSyncExternalStore-friendly listeners) + `useActiveUIPack` React hook | 14 |
+| 28 `c2a560b5e` | `ManifestHud` reads from active pack (precedence: pack > studio fetch > built-in default) | (covered by existing 117) |
+
+Combined with the 5 substrate slices from REFRESH 7 (`71fe4f0ac` →
+`b5fd1e6b0`), top-10 #7 totals **7 slices, 55 new tests**, all
+shipped on `feat/world-studio`.
+
+**Final public-API surface for D8/D9/D10:**
+- `@hyperforge/ui-framework`: `DataSourceRegistry`, `DataSource`,
+  `UIPackManifestSchema`, `UIPackManifest`, `UIPackLayoutsSchema`,
+  `UIPackWidgetCatalogEntrySchema`, `UIPackCustomizationDefaultsSchema`,
+  `validateUIPackManifest`, `loadUIPack`, `LoadedUIPack`,
+  `LoadUIPackOptions`, `LoadUIPackResult`, `RegisterThemeFn`
+- `@hyperforge/client`: `playerDataSourceRegistry`,
+  `HYPERSCAPE_UI_PACK`, `HYPERSCAPE_UI_PACK_ID`, `loadUIPackOnClient`,
+  `loadHyperscapeUIPack`, `LoadUIPackOnClientOptions`, plus
+  `getActiveUIPack` / `getActiveUIPackId` / `setActiveUIPack` /
+  `registerUIPack` / `unregisterUIPack` / `resolveUIPackById` /
+  `listRegisteredUIPacks` / `uiPackRegistrySize` /
+  `subscribeUIPackRegistry` and the `useActiveUIPack` React hook.
+
+**ManifestHud layout precedence (D10 wire-through):**
+  1. `activePack.defaultLayout` — when a pack has been
+     `loadUIPackOnClient`-ed and marked active
+  2. `activeLayout` from `useActiveUILayout` — studio team's
+     server-fetched layout
+  3. `getDefaultUILayoutForGame(gameId)` — built-in fallback
+
+Pack supersedes studio fetch because pack authors expect their pack
+to win (the studio fetch is a per-team override; packaged content is
+the publisher default).
+
+**Remaining D10 polish (deferrable, won't block AAA close)**:
+  - Persist `HYPERSCAPE_UI_PACK` to disk as `hyperscape.ui-pack.json`
+    + file-loader that consumes the JSON instead of the in-memory const
+  - Plugin Browser integration (Phase I5 dep)
+  - Verifying every Hyperscape HUD panel reads via
+    `DataSourceRegistry` (gated by top-10 #5 — D6.c per-widget
+    migration)
 
 ---
 
@@ -431,7 +482,7 @@ resolved. The new list reorders:
 | ~~4~~ | ~~**D7 plugin widget contribution + D6.c.1 (XP orb)**~~ | ~~D~~ | ~~S~~ | **DONE** — `XPOrbWidget.tsx` + `LevelUpToastWidget.tsx` ship from `@hyperforge/hyperscape-plugin/src/widgets/`, registered via `ctx.widgets?.register(...)` in plugin onEnable. Both widgets unit-tested. Pattern established. |
 | 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework |
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
-| 7 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | **PARTIAL 2026-04-27 — REFRESH 7**: D8 + D9 contract substrate complete across 5 slices on `feat/world-studio` (commits `71fe4f0ac` → `b5fd1e6b0`). Shipped: `DataSourceRegistry` (110 LOC + 10 tests) — pluggable bindings namespaces; `UIPackManifestSchema` (~165 LOC + 13 tests) — wraps widget catalog + layouts + theme + customization; `HYPERSCAPE_UI_PACK` (50 LOC + 6 tests) — concrete reference pack composing DEFAULT_UI_LAYOUT + HYPERSCAPE_DARK_THEME; `loadUIPack` (engine pure runtime, +120 LOC + 7 tests); `uiPackLoader` (client bridge to themeRegistry, 60 LOC + 5 tests). 41 new tests; ui-framework 274/274 + plugin 198/198. **Still open**: D10 wire-through — surface `LoadedUIPack.layouts` + customization to `useActiveUILayout`/`useUserLayout` so a different ui-pack actually swaps the rendered HUD (substantial integration; existing useActiveUILayout reads from server fetch). |
+| ~~7~~ | ~~**DataSourceRegistry (D8) + ui-pack.json (D9)**~~ | ~~D~~ | ~~M~~ | **RESOLVED 2026-04-27 — REFRESH 8**: D8 + D9 + D10 wire-through complete across 7 slices on `feat/world-studio` (commits `71fe4f0ac` → `c2a560b5e`). Shipped: `DataSourceRegistry` (pluggable bindings namespaces, 10 tests) + `UIPackManifestSchema` (wraps widget catalog + layouts + theme + customization, 13 tests) + `HYPERSCAPE_UI_PACK` (reference pack composing DEFAULT_UI_LAYOUT + HYPERSCAPE_DARK_THEME, 6 tests) + `loadUIPack` (pure engine runtime, 7 tests) + `uiPackLoader` (client bridge to themeRegistry, 5 tests) + `uiPackRegistry` + `useActiveUIPack` (D10 host-side state + React hook, 14 tests) + `ManifestHud` reads from active pack (D10 wire-through). 55 new tests across 7 slices; ui-framework 274/274 + plugin 198/198 + client ui-framework 117/117 throughout. Loading a pack now actually swaps the rendered HUD end-to-end. **Remaining polish (deferrable)**: persist HYPERSCAPE_UI_PACK to disk as `hyperscape.ui-pack.json` + file-loader; verify every Hyperscape HUD panel reads via DataSourceRegistry (gated by top-10 #5). |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M-L | Path to "shared has zero Hyperscape identifiers". **PARTIAL 2026-04-27 — REFRESH 6**: 4 type files migrated (quest-types/social-types/trade-types to plugin; interaction-types deleted as dead code). `packages/shared/src/types/game/` 11 files → 7. -1,124 LOC migrated + -150 dead-code purge across slices `d879d8450` `877446dde` `e042cb6a8` `dae4ebcba`. Recipe-exhaustion confirmed for the 6 remaining files (combat-types, duel-types, inventory-types, item-types, prayer-types, resource-processing-types) — each has engine-tied internal consumers and needs its own M-L substrate refactor (PrayerDataProvider migration, DuelSystem interface relocation, footprint-types split into shared/types/world/, etc.). |
 | ~~9~~ | ~~**CombatSystem decomposition (4,019 → <2,000)**~~ | ~~K4~~ | ~~L~~ | **RESOLVED 2026-04-27 — REFRESH 5: 17-slice decomposition shipped on `feat/world-studio` (commits `780ad016e` → `5f7fda8a9`). `CombatSystem.ts` 4,065 → 1,359 LOC (-66.6%, ~30% below the <2,000 target). 16 cohesive helper files extracted: AttackValidator, FollowController, DamageApplicator, TickAttackWorker, ProjectileHitProcessor, TickOrchestrator, EnterLifecycleHandler, MeleeAttackHandler, RangedAttackHandler, MagicAttackHandler, EventEmitter, PlayerQueries, EventRecorder, DamageOrchestrator, DeathHandler, LifecycleHandler. Plus 3,142 LOC of orphan dead code (handlers/{Melee,Ranged,Magic}AttackHandler + handlers/AttackContext + CombatTickProcessor + CombatAnimationSync) purged in slice 17 — confirmed unused via mono-repo grep. 198/198 plugin tests green throughout; shared build clean.** |
 | ~~10~~ | ~~**Long-tail registry consumer-wiring (~90 still unwired)**~~ | ~~F/G~~ | ~~M each~~ | **RESOLVED 2026-04-27 — 100/104 instrumented across cuts #10–#28; `useRegistryReload` hook in ui-widgets makes adding any new consumer a 1-liner. Remaining gap is consumer breadth (PIE editor panels), not contract wiring.** |
@@ -442,9 +493,9 @@ resolved. The new list reorders:
 
 If "done" = master plan's 7 success criteria all green:
 
-**3–5 focused 2-hour sessions** for the remaining open top-10 items
-— down from 4–6 before REFRESH 7 because item #7 substrate is now
-complete.
+**2–4 focused 2-hour sessions** for the remaining open top-10 items
+— down from 3–5 before REFRESH 8 because item #7 closed end-to-end
+in a single cycle.
 
 - ~~1 session: wire plugin system into prod (item 1)~~ **DONE**
 - ~~1–2 sessions: game-data JSON extraction (item 2)~~ **DONE**
@@ -452,9 +503,7 @@ complete.
 - ~~1 session: D7 + D6.c.1 (item 4)~~ **DONE**
 - 2–3 sessions: D6.c per-widget migrations (item 5)
 - ~~1 session: AI test coverage (item 6)~~ **DONE**
-- ~~1 session: D8/D9 substrate (item 7)~~ **DONE — REFRESH 7**
-- 1 session: D10 wire-through (item 7 remainder — surface `LoadedUIPack`
-  to `useActiveUILayout` / `useUserLayout`)
+- ~~D8/D9/D10 close-out (item 7)~~ **DONE — REFRESH 8 (7 slices)**
 - 1 session: final shared cleanup (item 8)
 - ~~ongoing: CombatSystem decomposition (item 9)~~ **DONE — REFRESH 5**
 - ~~ongoing: long-tail registry consumer-wiring (item 10)~~ **DONE — REFRESH 4**
@@ -496,7 +545,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~82–84% to AAA done. Plugin tests stable at 198/198; ui-framework 274/274; asset-forge AI service tests: 136/136. **REFRESH 7 (2026-04-27 mid-day): D8 + D9 contract substrate complete. 5 slices on `feat/world-studio` (commits `71fe4f0ac` → `b5fd1e6b0`). DataSourceRegistry, UIPackManifestSchema, HYPERSCAPE_UI_PACK reference pack, loadUIPack pure runtime, client uiPackLoader bridge. 41 new tests; ui-framework 244 → 274 tests. Pack pipeline works end-to-end as a contract — D10 wire-through to active-layout pipeline is the next cycle.** REFRESH 6 (2026-04-27 mid-morning): types/game/ migration partial. 4 slices on `feat/world-studio` (commits `d879d8450` → `dae4ebcba`); 4 type files migrated to plugin (quest-types, social-types, trade-types) or deleted as dead code (interaction-types). REFRESH 5 (2026-04-27 late-morning): CombatSystem decomposition shipped (4,065 → 1,359 LOC, -66.6%) across 17 slices, plus 3,142 LOC of orphan dead code purged. REFRESH 4 (2026-04-27 evening): registry hot-reload long-tail shipped. Branch pushed and ready for review.
+**Status: ~84–86% to AAA done. Plugin tests stable at 198/198; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 8 (2026-04-27 mid-day): closed top-10 #7 (DataSourceRegistry + ui-pack.json) end-to-end. 7 slices on `feat/world-studio` (commits `71fe4f0ac` → `c2a560b5e`). D8 + D9 + D10 wire-through all shipped. Loading a different pack now actually swaps the rendered HUD end-to-end. 55 new tests across 7 slices.** REFRESH 7 closed D8/D9 substrate (5 slices). REFRESH 6 partial progress on top-10 #8 (4 type files done; 6 remaining). REFRESH 5 closed top-10 #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed top-10 #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
@@ -510,25 +559,20 @@ The work pattern has shifted from "find structural blockers" to
 | D6.c per-widget migration | unchanged (L) |
 | Game-data JSON extraction | unchanged (M) |
 | ~~AI service test coverage~~ | **DONE — Session 6 closed (M)** |
-| DataSourceRegistry / ui-pack | **PARTIAL — REFRESH 7 closed substrate (M); D10 wire-through pending** |
+| ~~DataSourceRegistry / ui-pack~~ | **DONE — REFRESH 8 closed end-to-end (D8 + D9 + D10 wire-through; 7 slices, 55 tests)** |
 | ~~CombatSystem decomposition~~ | **DONE — REFRESH 5 closed (4,065 → 1,359 LOC, -66.6%; 16 helpers + 3,142 LOC dead-code purge)** |
 | ~~Long-tail registry wiring~~ | **DONE — REFRESH 4 closed (M each → 100/104 instrumented)** |
 
-With #1, #2, #3, #4, #6, #9, #10 closed; #7 substrate complete
-(REFRESH 7); and #8 partially advanced (REFRESH 6), the remaining
-top-10 items are:
+With #1, #2, #3, #4, #6, #7, #9, #10 closed and #8 partially
+advanced (REFRESH 6), the remaining top-10 items are:
 - **#5** (D6.c per-widget migration, L) — long-tail UI migration that gates Phase D's exit
-- **#7 D10 wire-through** (S-M) — surface `LoadedUIPack.layouts` +
-  customization to `useActiveUILayout`/`useUserLayout` so a different
-  ui-pack actually swaps the rendered HUD. Existing pipeline reads
-  layouts from a server fetch; swap requires refactoring the
-  active-layout source-of-truth.
 - **#8 remainder** (M-L per remaining file) — 6 type files left in
   `shared/src/types/game/`, each needing a substrate refactor (e.g.,
   PrayerDataProvider migration, DuelSystem interface relocation,
   footprint-types split).
 
-The next session's natural unit is **#7 D10 wire-through** — small to
-medium effort, the contract is already there. After that, #5 (D6.c)
-is the long-tail UI work; #8 remainder is the heaviest remaining
-substrate work.
+8 of 10 top-10 items closed; 1 partially advanced; 1 long-tail. The
+remaining work is enumerable rather than architectural — #5 is the
+HUD widget-migration long-tail, #8 is the remaining type-file
+extractions. Either can be picked up incrementally without blocking
+the other.
