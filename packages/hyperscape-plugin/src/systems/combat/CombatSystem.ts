@@ -70,6 +70,7 @@ import {
 import { CombatDeathHandler } from "./CombatDeathHandler";
 import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatEventRecorder } from "./CombatEventRecorder";
+import { CombatFollowController } from "./CombatFollowController";
 import { CombatLifecycleHandler } from "./CombatLifecycleHandler";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
 import { CombatRotationManager } from "./CombatRotationManager";
@@ -215,6 +216,10 @@ export class CombatSystem extends SystemBase {
   // validateCombatActors, validateAttackRange.
   private readonly attackValidator: CombatAttackValidator;
 
+  // Tile-follow + weapon attack-type lookup extracted as the eighth
+  // slice. Wraps checkRangeAndFollow + getAttackTypeFromWeapon.
+  private readonly followController: CombatFollowController;
+
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
   private equipmentSystem?: EquipmentSystemDuck;
@@ -351,6 +356,21 @@ export class CombatSystem extends SystemBase {
       this.nextAttackTicks,
       this._attackerTile,
       this._targetTile,
+    );
+
+    // Tile-follow + weapon attack-type (slice 8). Closures capture
+    // late-bound systems assigned during start() (equipmentSystem,
+    // zoneDetectionSystem). Shared mutable refs: pooled tile buffers
+    // + lastCombatTargetTile cache.
+    this.followController = new CombatFollowController(
+      this.entityResolver,
+      this.eventEmitter,
+      this.playerQueries,
+      this._attackerTile,
+      this._targetTile,
+      this.lastCombatTargetTile,
+      () => this.equipmentSystem,
+      () => this.zoneDetectionSystem,
     );
   }
 
@@ -575,45 +595,9 @@ export class CombatSystem extends SystemBase {
     );
   }
 
-  /**
-   * Get attack type from equipped weapon or selected spell
-   * Returns AttackType based on weapon's attackType property, or MAGIC if spell selected
-   *
-   * OSRS-accurate: You can cast spells without a staff - the staff just provides
-   * magic attack bonus and elemental staves give infinite runes
-   */
-  private getAttackTypeFromWeapon(attackerId: string): AttackType {
-    // Check if player has a spell selected - if so, use magic regardless of weapon
-    const selectedSpell = this.playerQueries.getPlayerSelectedSpell(attackerId);
-    if (selectedSpell) {
-      return AttackType.MAGIC;
-    }
-
-    if (!this.equipmentSystem) return AttackType.MELEE;
-
-    const equipment = this.equipmentSystem.getPlayerEquipment(attackerId);
-    const weapon = equipment?.weapon?.item;
-
-    if (!weapon) return AttackType.MELEE;
-
-    // Normalize to lowercase for comparison (JSON may have uppercase values)
-    const attackType = weapon.attackType?.toLowerCase();
-    const weaponType = weapon.weaponType?.toLowerCase();
-
-    // Check weapon's attackType property for ranged
-    // Note: Magic only activates via autocast (checked above) - staffs melee by default
-    if (attackType === "ranged") {
-      return AttackType.RANGED;
-    }
-
-    // Fall back to weaponType for legacy compatibility (ranged only)
-    if (weaponType === "bow" || weaponType === "crossbow") {
-      return AttackType.RANGED;
-    }
-
-    // Default to melee (includes staffs/wands without autocast - OSRS accurate)
-    return AttackType.MELEE;
-  }
+  // getAttackTypeFromWeapon moved to ./CombatFollowController
+  // (slice 8). Call sites delegate via
+  // this.followController.getAttackTypeFromWeapon(attackerId).
 
   // Equipment lookups (getEquippedArrows / getEquippedWeapon) +
   // damage calculation methods live in CombatDamageOrchestrator —
@@ -630,7 +614,7 @@ export class CombatSystem extends SystemBase {
     // Route by attack type from equipped weapon (F2P ranged/magic support)
     const attackType =
       data.attackerType === "player"
-        ? this.getAttackTypeFromWeapon(data.attackerId)
+        ? this.followController.getAttackTypeFromWeapon(data.attackerId)
         : (data.attackType ?? AttackType.MELEE);
 
     switch (attackType) {
@@ -1951,9 +1935,8 @@ export class CombatSystem extends SystemBase {
             const targetTile = worldToTile(targetPos.x, targetPos.z);
 
             // Get target player's attack type and range (they are retaliating)
-            const targetAttackType = this.getAttackTypeFromWeapon(
-              String(targetId),
-            );
+            const targetAttackType =
+              this.followController.getAttackTypeFromWeapon(String(targetId));
             const targetCombatRange = this.entityResolver.getCombatRange(
               targetEntity,
               "player",
@@ -2394,7 +2377,7 @@ export class CombatSystem extends SystemBase {
       // OSRS-style: Check range EVERY tick and follow if needed (not just on attack ticks)
       // In OSRS, you continuously pursue your target while in combat
       if (combatState.attackerType === "player") {
-        this.checkRangeAndFollow(combatState, tickNumber);
+        this.followController.checkRangeAndFollow(combatState, tickNumber);
       }
 
       if (tickNumber >= combatState.nextAttackTick) {
@@ -2495,7 +2478,7 @@ export class CombatSystem extends SystemBase {
     this.animationManager.processEntityEmoteReset(playerId, tickNumber);
 
     // OSRS-style: Check range EVERY tick and follow if needed
-    this.checkRangeAndFollow(combatState, tickNumber);
+    this.followController.checkRangeAndFollow(combatState, tickNumber);
 
     if (tickNumber >= combatState.nextAttackTick) {
       void this.processAutoAttackOnTick(combatState, tickNumber).catch(
@@ -2510,164 +2493,9 @@ export class CombatSystem extends SystemBase {
     }
   }
 
-  /**
-   * OSRS-style: Check if player is in range of target, emit follow event if not
-   * Called EVERY tick to ensure continuous pursuit of moving targets
-   *
-   * CRITICAL: This method must NOT extend combat timeout for invalid targets.
-   * Invalid targets include: dead entities, entities that no longer exist,
-   * or (for PvP) targets that are now in a safe zone.
-   */
-  private checkRangeAndFollow(
-    combatState: CombatData,
-    tickNumber: number,
-  ): void {
-    const attackerId = String(combatState.attackerId);
-    const targetId = String(combatState.targetId);
-
-    // OSRS-ACCURATE: No movement suppression for following
-    // If player has combat state, they should continuously pursue their target
-    // Wiki: "follow and attack while chasing it"
-    // Movement during combat follow is normal - player is chasing their target
-
-    const attacker = this.entityResolver.resolve(
-      attackerId,
-      combatState.attackerType,
-    );
-    const target = this.entityResolver.resolve(
-      targetId,
-      combatState.targetType,
-    );
-
-    // Don't process if either entity is missing - let combat timeout naturally
-    if (!attacker || !target) return;
-
-    // Don't extend combat for dead attackers - their state should be cleaned up
-    if (!this.entityResolver.isAlive(attacker, combatState.attackerType)) {
-      return;
-    }
-
-    // Don't follow dead targets - let combat timeout naturally
-    // This prevents player getting stuck after killing a mob
-    if (!this.entityResolver.isAlive(target, combatState.targetType)) {
-      return;
-    }
-
-    // PvP zone check: Don't extend combat if we're no longer in a PvP zone
-    // This prevents combat from persisting after respawning in safe zone
-    // Bypass for streaming duel agents (consistent with enterCombat)
-    if (
-      combatState.attackerType === "player" &&
-      combatState.targetType === "player"
-    ) {
-      const attackerInStreamingDuel =
-        (attacker as { data?: { inStreamingDuel?: boolean } })?.data
-          ?.inStreamingDuel === true;
-      const targetInStreamingDuel =
-        (target as { data?: { inStreamingDuel?: boolean } })?.data
-          ?.inStreamingDuel === true;
-
-      if (!attackerInStreamingDuel && !targetInStreamingDuel) {
-        // OPTIMIZATION: Use cached zoneDetectionSystem
-        if (this.zoneDetectionSystem) {
-          const attackerPos = getEntityPosition(attacker);
-          if (
-            attackerPos &&
-            !this.zoneDetectionSystem.isPvPEnabled({
-              x: attackerPos.x,
-              z: attackerPos.z,
-            })
-          ) {
-            // Attacker is in safe zone - end combat instead of extending
-            return; // Don't extend timeout - let combat expire
-          }
-        }
-      }
-    }
-
-    const attackerPos = getEntityPosition(attacker);
-    const targetPos = getEntityPosition(target);
-    if (!attackerPos || !targetPos) return;
-
-    // Use pre-allocated pooled tiles (zero GC)
-    tilePool.setFromPosition(this._attackerTile, attackerPos);
-    tilePool.setFromPosition(this._targetTile, targetPos);
-    const combatRangeTiles = this.entityResolver.getCombatRange(
-      attacker,
-      combatState.attackerType,
-    );
-
-    // Get attack type for proper range checking (players may use ranged/magic)
-    const attackType =
-      combatState.attackerType === "player"
-        ? this.getAttackTypeFromWeapon(attackerId)
-        : AttackType.MELEE;
-
-    // OSRS-accurate range check:
-    // - MELEE: Cardinal-only for range 1 (using tilesWithinMeleeRange)
-    // - RANGED/MAGIC: Chebyshev distance (can attack diagonally)
-    const inRange =
-      attackType === AttackType.MELEE
-        ? tilesWithinMeleeRange(
-            this._attackerTile,
-            this._targetTile,
-            combatRangeTiles,
-          )
-        : tilesWithinRange(
-            this._attackerTile,
-            this._targetTile,
-            combatRangeTiles,
-          );
-
-    // OSRS-accurate: Continuously follow the target while in combat.
-    // In OSRS, the player follows the target every tick — not just when out of range.
-    // movePlayerToward() already returns early if already in range, so this is safe.
-    // This prevents the stutter pattern where the player stands still until the target
-    // leaves range, then chases, then stops again.
-    const lastKnown = this.lastCombatTargetTile.get(attackerId);
-    const targetMoved =
-      !lastKnown ||
-      lastKnown.x !== this._targetTile.x ||
-      lastKnown.z !== this._targetTile.z;
-
-    if (targetMoved) {
-      // Update last known target tile (reuse object to avoid allocation)
-      if (lastKnown) {
-        lastKnown.x = this._targetTile.x;
-        lastKnown.z = this._targetTile.z;
-      } else {
-        this.lastCombatTargetTile.set(attackerId, {
-          x: this._targetTile.x,
-          z: this._targetTile.z,
-        });
-      }
-    }
-
-    if (!inRange) {
-      // Out of range - follow the target and extend combat timeout while pursuing
-      combatState.combatEndTick = tickNumber + getCombatTimeoutTicks();
-
-      this.eventEmitter.emitFollowTarget(
-        attackerId,
-        targetId,
-        targetPos,
-        combatRangeTiles,
-        attackType,
-      );
-    } else if (targetMoved) {
-      // In range but target moved — pre-compute the follow path now.
-      // movePlayerToward() updates the player's path destination even when
-      // currently in range, so if the target steps out of range next tick
-      // the player is already pathing toward them with zero delay.
-      this.eventEmitter.emitFollowTarget(
-        attackerId,
-        targetId,
-        targetPos,
-        combatRangeTiles,
-        attackType,
-      );
-    }
-  }
+  // checkRangeAndFollow moved to ./CombatFollowController (slice 8).
+  // Call sites delegate via
+  // this.followController.checkRangeAndFollow(combatState, tickNumber).
 
   // validateCombatActors and validateAttackRange moved to
   // ./CombatAttackValidator (slice 7). Call sites delegate via
@@ -2969,7 +2797,7 @@ export class CombatSystem extends SystemBase {
     // Players derive attack type from equipment; mobs use persisted combat weapon type.
     const attackType =
       combatState.attackerType === "player"
-        ? this.getAttackTypeFromWeapon(attackerId)
+        ? this.followController.getAttackTypeFromWeapon(attackerId)
         : combatState.weaponType;
     if (attackType === AttackType.RANGED || attackType === AttackType.MAGIC) {
       // Handlers handle claiming the cooldown slot synchronously before any async work,
