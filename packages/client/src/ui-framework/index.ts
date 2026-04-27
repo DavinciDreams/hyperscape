@@ -30,6 +30,9 @@ export {
   getDefaultUILayoutForGame,
 } from "./defaultLayout";
 
+// Phase D9 proof-of-concept — Hyperscape's reference UIPackManifest.
+export { HYPERSCAPE_UI_PACK, HYPERSCAPE_UI_PACK_ID } from "./hyperscapePack";
+
 export {
   buildPlayerDataContext,
   playerDataSourceRegistry,
