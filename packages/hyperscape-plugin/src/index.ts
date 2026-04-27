@@ -187,6 +187,7 @@ import {
 } from "./systems/network-handlers/friends.js";
 import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { xpOrbRegistration } from "./widgets/XPOrbWidget.js";
+import { levelUpToastRegistration } from "./widgets/LevelUpToastWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -217,13 +218,19 @@ export { manifest } from "./manifest.js";
 // Plugin-contributed widgets — re-exported so hosts that pre-register
 // widgets at boot (e.g. the asset-forge editor's UI Layout Editor)
 // can access the same registrations the plugin's onEnable installs.
-// Phase D6.c.1 / Session 4 of PLAN_NEXT_SESSIONS.
+// Phase D6.c.1 / Session 4 (XP orb) + D6.c.A / Session 5 (LevelUp).
 export {
   xpOrbWidget,
   xpOrbRegistration,
   XPOrb,
   type XPDropEntry,
 } from "./widgets/XPOrbWidget.js";
+export {
+  levelUpToastWidget,
+  levelUpToastRegistration,
+  LevelUpToast,
+  type LevelUpEntry,
+} from "./widgets/LevelUpToastWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -515,6 +522,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
       // `session.stop()` removes the widget from the host registry.
       if (ctx.widgets) {
         ctx.widgets.register(xpOrbRegistration);
+        ctx.widgets.register(levelUpToastRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
