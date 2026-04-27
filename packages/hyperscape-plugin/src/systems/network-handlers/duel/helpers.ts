@@ -12,10 +12,11 @@ import {
   isPositionInsideCombatArena,
 } from "@hyperforge/shared";
 import type { ServerSocket } from "@hyperforge/shared";
-// DuelSystem migrated to @hyperforge/hyperscape (2026-04-26). The
-// `DuelSystem` interface in system-interfaces is the duck-type
-// contract — plugin's concrete class structurally satisfies it.
-import type { DuelSystem } from "@hyperforge/shared";
+// DuelSystem duck-type interface migrated from
+// shared/types/systems/system-interfaces to plugin/types/
+// duel-system-interface 2026-04-27 (top-10 #8, slice 29) — now
+// lives with the implementation.
+import type { DuelSystem } from "../../../types/duel-system-interface.js";
 // PendingDuelChallengeManager migrated to @hyperforge/hyperscape
 // (Phase D2, 2026-04-26). Duck-typed locally — only
 // `queuePendingChallenge` is called from the duel handlers.

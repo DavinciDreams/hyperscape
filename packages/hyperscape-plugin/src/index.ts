@@ -237,6 +237,14 @@ export {
 // Migrated from `@hyperforge/shared` (2026-04-26).
 export { TradingSystem } from "./systems/TradingSystem/index.js";
 export { DuelSystem } from "./systems/DuelSystem/index.js";
+// DuelSystem duck-type interface relocated to plugin/types/
+// duel-system-interface 2026-04-27 (top-10 #8, slice 29). The
+// DuelSystem name resolves to the class export above; companion
+// types are re-exported here for cross-package consumers.
+export type {
+  DuelOperationResult,
+  DuelSessionInfo,
+} from "./types/duel-system-interface.js";
 
 // ScriptQueue — tile-based action priority queue, consumed by
 // `@hyperforge/server`'s GameTickProcessor. Migrated from

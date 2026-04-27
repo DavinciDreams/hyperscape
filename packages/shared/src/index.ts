@@ -2126,12 +2126,10 @@ export {
   RateLimitService,
   IntervalRateLimiter,
 } from "./systems/server/network/services/IntervalRateLimiter";
-// DuelSystem duck-type interface — concrete class lives in
-// @hyperforge/hyperscape; this shape is how shared code refers to
-// the system without a back-reference.
-// TradingSystem interface migrated to @hyperforge/hyperscape-plugin
-// 2026-04-27 (top-10 #8 cleanup).
-export type { DuelSystem } from "./types/systems/system-interfaces";
+// DuelSystem + TradingSystem duck-type interfaces both migrated to
+// @hyperforge/hyperscape-plugin 2026-04-27 (top-10 #8 cleanup).
+// Concrete classes + their duck-type contracts now live with the
+// implementation. Shared no longer carries either.
 // ServerSocket type — needed by migrated ScriptQueue (the queued
 // player/NPC action types reference ServerSocket).
 export type { ServerSocket } from "./systems/server/network/server-types";
