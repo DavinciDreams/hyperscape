@@ -127,12 +127,16 @@ export interface DiscountedPrice {
   bonusEntitlementId: string;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type StoreFrontReloadListener = () => void;
+
 export class StoreFrontRegistry {
   private _manifest: StoreFrontManifest | null = null;
   private _tiersById = new Map<string, PriceTier>();
   private _bundlesById = new Map<string, Bundle>();
   private _shelvesById = new Map<string, Shelf>();
   private _rulesById = new Map<string, DiscountRule>();
+  private _reloadListeners = new Set<StoreFrontReloadListener>();
 
   constructor(manifest?: StoreFrontManifest) {
     if (manifest) this.load(manifest);
@@ -152,10 +156,37 @@ export class StoreFrontRegistry {
     for (const b of manifest.bundles) this._bundlesById.set(b.id, b);
     for (const s of manifest.shelves) this._shelvesById.set(s.id, s);
     for (const r of manifest.discountRules) this._rulesById.set(r.id, r);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(StoreFrontManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: StoreFrontReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[storeFrontRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): StoreFrontManifest {

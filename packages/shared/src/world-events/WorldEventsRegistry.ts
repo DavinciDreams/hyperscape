@@ -69,9 +69,13 @@ export interface EligibilityResult {
   reason: EligibilityReason;
 }
 
+/** Listener invoked after every successful `load()` / `loadFromJson()`. */
+export type WorldEventsReloadListener = () => void;
+
 export class WorldEventsRegistry {
   private _manifest: WorldEventsManifest | null = null;
   private _byId = new Map<string, WorldEvent>();
+  private _reloadListeners = new Set<WorldEventsReloadListener>();
 
   constructor(manifest?: WorldEventsManifest) {
     if (manifest) this.load(manifest);
@@ -81,10 +85,37 @@ export class WorldEventsRegistry {
     this._manifest = manifest;
     this._byId.clear();
     for (const e of manifest) this._byId.set(e.id, e);
+    this._emitReloaded();
   }
 
   loadFromJson(raw: unknown): void {
     this.load(WorldEventsManifestSchema.parse(raw));
+  }
+
+  /**
+   * Subscribe to reload notifications. Returns unsubscribe.
+   * Listener throws are caught + logged. Pattern matches
+   * `SkillIconsRegistry.onReloaded`.
+   */
+  onReloaded(cb: WorldEventsReloadListener): () => void {
+    this._reloadListeners.add(cb);
+    return () => {
+      this._reloadListeners.delete(cb);
+    };
+  }
+
+  private _emitReloaded(): void {
+    if (this._reloadListeners.size === 0) return;
+    for (const cb of this._reloadListeners) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn(
+          "[worldEventsRegistry] reload listener threw:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   get manifest(): WorldEventsManifest {
