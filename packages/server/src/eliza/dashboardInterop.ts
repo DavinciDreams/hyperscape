@@ -142,6 +142,12 @@ type CommandData = {
   message?: string;
   npcId?: string;
   interaction?: string;
+  /** Recipe id used by cook/smelt/smith commands. */
+  recipe?: string;
+  /** Inventory slot used by use/equip/drop commands. */
+  slot?: number;
+  /** Quest id used by questAccept commands. */
+  questId?: string;
 };
 
 type DistancePreference = "nearest" | "furthest";
@@ -1171,11 +1177,13 @@ function findGlobalResourceTarget(
       position?: { x: number; y: number; z: number };
     };
   };
-  type ServiceWithWorld = EmbeddedHyperiaService & {
-    getWorld?: () => { entities?: { items?: Map<string, WorldEntity> } };
-  };
-  const world = (service as ServiceWithWorld).getWorld?.();
-  const items = world?.entities?.items;
+  // EmbeddedHyperiaService.getWorld() returns the engine `World` whose
+  // `entities.items` is `Map<string, Entity>`. The duck-typed
+  // `WorldEntity` covers the Hyperia-specific fields stored on
+  // `entity.data` (and sometimes propagated to entity props), so cast
+  // through `unknown` to apply the duck shape at use-site.
+  const world = service.getWorld?.();
+  const items = world?.entities?.items as Map<string, WorldEntity> | undefined;
   if (!items) return null;
   const kws = typeKeywords.map((k) => k.toLowerCase());
   let bestId: string | null = null;
@@ -1245,11 +1253,13 @@ function findGlobalMobTarget(
     mobType?: string;
     position?: { x: number; y: number; z: number };
   };
-  type ServiceWithWorld = EmbeddedHyperiaService & {
-    getWorld?: () => { entities?: { items?: Map<string, WorldEntity> } };
-  };
-  const world = (service as ServiceWithWorld).getWorld?.();
-  const items = world?.entities?.items;
+  // EmbeddedHyperiaService.getWorld() returns the engine `World` whose
+  // `entities.items` is `Map<string, Entity>`. The duck-typed
+  // `WorldEntity` covers the Hyperia-specific fields stored on
+  // `entity.data` (and sometimes propagated to entity props), so cast
+  // through `unknown` to apply the duck shape at use-site.
+  const world = service.getWorld?.();
+  const items = world?.entities?.items as Map<string, WorldEntity> | undefined;
   if (!items) return null;
   const tokens = tokenizeTarget(targetPhrase);
   let bestId: string | null = null;
