@@ -58,6 +58,10 @@ import {
 } from "@hyperforge/shared";
 import { tilePool, PooledTile } from "@hyperforge/shared";
 import { CombatAnimationManager } from "./CombatAnimationManager";
+import {
+  CombatDamageOrchestrator,
+  type PlayerEquipmentStats,
+} from "./CombatDamageOrchestrator";
 import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatEventRecorder } from "./CombatEventRecorder";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
@@ -192,30 +196,17 @@ export class CombatSystem extends SystemBase {
   // slice). Toggle via `this.eventRecorder.recordingEnabled`.
   private readonly eventRecorder: CombatEventRecorder;
 
-  // Equipment stats cache per player for damage calculations
-  private playerEquipmentStats = new Map<
-    string,
-    {
-      attack: number;
-      strength: number;
-      defense: number;
-      ranged: number;
-      // Ranged/Magic bonuses (F2P)
-      rangedAttack: number;
-      rangedStrength: number;
-      magicAttack: number;
-      magicDefense: number;
-      // Per-style melee defence bonuses (OSRS combat triangle)
-      defenseStab: number;
-      defenseSlash: number;
-      defenseCrush: number;
-      defenseRanged: number;
-      // Per-style melee attack bonuses
-      attackStab: number;
-      attackSlash: number;
-      attackCrush: number;
-    }
-  >();
+  // Equipment stats cache per player for damage calculations.
+  // Type lives in CombatDamageOrchestrator (which is the primary
+  // reader); CombatSystem owns the Map and populates it on the
+  // PLAYER_EQUIPMENT_CHANGED event.
+  private playerEquipmentStats = new Map<string, PlayerEquipmentStats>();
+
+  // Damage calculation pipeline (5 calculate*Damage methods +
+  // equipment lookups). Extracted to CombatDamageOrchestrator (top-10
+  // #9 fourth decomposition slice). All callsites delegate via
+  // `this.damageOrchestrator.fooBar(...)`.
+  private readonly damageOrchestrator: CombatDamageOrchestrator;
 
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
@@ -305,6 +296,17 @@ export class CombatSystem extends SystemBase {
       this.eventStore,
       this.stateService,
       this.entityResolver,
+    );
+
+    // Damage calculation pipeline. Closures over equipmentSystem +
+    // prayerSystem because both are late-bound (assigned in start()).
+    this.damageOrchestrator = new CombatDamageOrchestrator(
+      world,
+      this.playerQueries,
+      this.damageCalculator,
+      this.playerEquipmentStats,
+      () => this.equipmentSystem,
+      () => this.prayerSystem,
     );
   }
 
@@ -569,23 +571,10 @@ export class CombatSystem extends SystemBase {
     return AttackType.MELEE;
   }
 
-  /**
-   * Get equipped arrows slot for ranged combat
-   */
-  private getEquippedArrows(playerId: string): EquipmentSlot | null {
-    if (!this.equipmentSystem) return null;
-    const equipment = this.equipmentSystem.getPlayerEquipment(playerId);
-    return equipment?.arrows ?? null;
-  }
-
-  /**
-   * Get equipped weapon for combat
-   */
-  private getEquippedWeapon(playerId: string): Item | null {
-    if (!this.equipmentSystem) return null;
-    const equipment = this.equipmentSystem.getPlayerEquipment(playerId);
-    return equipment?.weapon?.item ?? null;
-  }
+  // Equipment lookups (getEquippedArrows / getEquippedWeapon) +
+  // damage calculation methods live in CombatDamageOrchestrator —
+  // see field declaration above. All callsites delegate via
+  // `this.damageOrchestrator.fooBar(...)`.
 
   private async handleAttack(data: {
     attackerId: string;
@@ -908,7 +897,11 @@ export class CombatSystem extends SystemBase {
     }
 
     // Calculate and apply damage
-    const rawDamage = this.calculateMeleeDamage(attacker, target, combatStyle);
+    const rawDamage = this.damageOrchestrator.calculateMeleeDamage(
+      attacker,
+      target,
+      combatStyle,
+    );
     const currentHealth = this.entityResolver.getHealth(target);
     const damage = Math.min(rawDamage, currentHealth);
 
@@ -1019,7 +1012,7 @@ export class CombatSystem extends SystemBase {
         "ranged",
       );
 
-      const damage = this.calculateMobRangedDamageForAttack(
+      const damage = this.damageOrchestrator.calculateMobRangedDamageForAttack(
         target,
         targetType,
         npcData.stats.ranged ?? 1,
@@ -1108,8 +1101,8 @@ export class CombatSystem extends SystemBase {
     }
 
     // Validate arrows equipped
-    const weapon = this.getEquippedWeapon(attackerId);
-    const arrowSlot = this.getEquippedArrows(attackerId);
+    const weapon = this.damageOrchestrator.getEquippedWeapon(attackerId);
+    const arrowSlot = this.damageOrchestrator.getEquippedArrows(attackerId);
     const rangedLevel = this.playerQueries.getPlayerSkillLevel(
       attackerId,
       "ranged",
@@ -1191,7 +1184,7 @@ export class CombatSystem extends SystemBase {
     );
 
     // Calculate damage
-    const damage = this.calculateRangedDamageForAttack(
+    const damage = this.damageOrchestrator.calculateRangedDamageForAttack(
       attacker,
       target,
       attackerId,
@@ -1322,7 +1315,7 @@ export class CombatSystem extends SystemBase {
         "magic",
       );
 
-      const damage = this.calculateMobMagicDamageForAttack(
+      const damage = this.damageOrchestrator.calculateMobMagicDamageForAttack(
         target,
         targetType,
         npcData.stats.magic ?? 1,
@@ -1490,7 +1483,7 @@ export class CombatSystem extends SystemBase {
     }
 
     // Validate runes in inventory
-    const weapon = this.getEquippedWeapon(attackerId);
+    const weapon = this.damageOrchestrator.getEquippedWeapon(attackerId);
     const inventory = this.playerQueries.getPlayerInventoryItems(attackerId);
 
     if (isStreamingDuel && inventory.length === 0) {
@@ -1589,7 +1582,7 @@ export class CombatSystem extends SystemBase {
     );
 
     // Calculate damage
-    const damage = this.calculateMagicDamageForAttack(
+    const damage = this.damageOrchestrator.calculateMagicDamageForAttack(
       attacker,
       target,
       attackerId,
@@ -1650,241 +1643,6 @@ export class CombatSystem extends SystemBase {
   // declaration above. All `this.getPlayerFoo(...)` and
   // `this.playerQueries.consumeRunesForSpell(...)` callsites delegate via
   // `this.playerQueries`.
-
-  /**
-   * Calculate ranged damage for an attack
-   */
-  private calculateRangedDamageForAttack(
-    attacker: Entity | MobEntity,
-    target: Entity | MobEntity,
-    attackerId: string,
-    targetType: "player" | "mob",
-  ): number {
-    const rangedLevel = this.playerQueries.getPlayerSkillLevel(
-      attackerId,
-      "ranged",
-    );
-    const equipmentStats = this.playerEquipmentStats.get(attackerId);
-    const arrowSlot = this.getEquippedArrows(attackerId);
-
-    // Get arrow strength bonus
-    const arrowStrength = ammunitionService.getArrowStrengthBonus(arrowSlot);
-
-    // Get target stats
-    const targetDefenseLevel =
-      targetType === "mob" && isMobEntity(target)
-        ? target.getMobData().defense
-        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
-
-    // Use per-style defenseRanged from equipment (OSRS combat triangle).
-    // Falls back to generic ranged bonus for backward compatibility.
-    const targetEquipStats = this.playerEquipmentStats.get(String(target.id));
-    const targetRangedDefense =
-      targetType === "mob" && isMobEntity(target)
-        ? target.getMobData().defense
-        : (targetEquipStats?.defenseRanged ?? targetEquipStats?.ranged ?? 0);
-
-    // Get prayer bonuses
-    const prayerSystem = this.world.getSystem(
-      "prayer",
-    ) as unknown as PrayerSystemLike | null;
-    const attackerPrayer = prayerSystem?.getCombinedBonuses(attackerId);
-    const defenderPrayer =
-      targetType === "player"
-        ? prayerSystem?.getCombinedBonuses(String(target.id))
-        : undefined;
-
-    // NOTE: equipmentStats.rangedStrength already includes arrow strength from EquipmentSystem
-    // Do NOT add arrowStrength separately as that would double-count it
-    const rangedStrengthBonus = equipmentStats?.rangedStrength ?? arrowStrength;
-
-    // Get player's combat style for OSRS-accurate damage bonuses
-    let rangedStyle: RangedCombatStyle = "accurate";
-    const playerSystem = this.world.getSystem(
-      "player",
-    ) as unknown as PlayerSystem | null;
-    const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
-    if (styleData?.id) {
-      const id = styleData.id;
-      if (id === "accurate" || id === "rapid" || id === "longrange") {
-        rangedStyle = id;
-      }
-    }
-
-    const params: RangedDamageParams = {
-      rangedLevel,
-      rangedAttackBonus: equipmentStats?.rangedAttack ?? 0,
-      rangedStrengthBonus,
-      style: rangedStyle,
-      targetDefenseLevel,
-      targetRangedDefenseBonus: targetRangedDefense,
-      prayerBonuses: attackerPrayer,
-      targetPrayerBonuses: defenderPrayer,
-    };
-
-    const result = calculateRangedDamage(params, getGameRng());
-    return result.damage;
-  }
-
-  /**
-   * Calculate ranged damage for a mob attack.
-   */
-  private calculateMobRangedDamageForAttack(
-    target: Entity | MobEntity,
-    targetType: "player" | "mob",
-    rangedLevel: number,
-    arrowId: string,
-  ): number {
-    const targetDefenseLevel =
-      targetType === "mob" && isMobEntity(target)
-        ? target.getMobData().defense
-        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
-
-    const targetRangedDefense =
-      targetType === "mob" && isMobEntity(target)
-        ? target.getMobData().defense
-        : (this.playerEquipmentStats.get(String(target.id))?.defenseRanged ??
-          0);
-
-    const defenderPrayer =
-      targetType === "player"
-        ? this.prayerSystem?.getCombinedBonuses(String(target.id))
-        : undefined;
-
-    const params: RangedDamageParams = {
-      rangedLevel,
-      rangedAttackBonus: 0,
-      rangedStrengthBonus:
-        ammunitionService.getArrowData(arrowId)?.rangedStrength ?? 7,
-      style: "accurate",
-      targetDefenseLevel,
-      targetRangedDefenseBonus: targetRangedDefense,
-      prayerBonuses: undefined,
-      targetPrayerBonuses: defenderPrayer,
-    };
-
-    const result = calculateRangedDamage(params, getGameRng());
-    return result.damage;
-  }
-
-  /**
-   * Calculate magic damage for an attack
-   */
-  private calculateMagicDamageForAttack(
-    attacker: Entity | MobEntity,
-    target: Entity | MobEntity,
-    attackerId: string,
-    targetType: "player" | "mob",
-    spell: Spell,
-  ): number {
-    const magicLevel = this.playerQueries.getPlayerSkillLevel(
-      attackerId,
-      "magic",
-    );
-    const equipmentStats = this.playerEquipmentStats.get(attackerId);
-
-    // Get target stats
-    const targetMagicLevel =
-      targetType === "mob" && isMobEntity(target)
-        ? 1 // Most F2P mobs have 1 magic
-        : this.playerQueries.getPlayerSkillLevel(String(target.id), "magic");
-
-    const targetDefenseLevel =
-      targetType === "mob" && isMobEntity(target)
-        ? target.getMobData().defense
-        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
-
-    const targetMagicDefense =
-      targetType === "mob" && isMobEntity(target)
-        ? 0
-        : (this.playerEquipmentStats.get(String(target.id))?.magicDefense ?? 0);
-
-    // Get prayer bonuses
-    const prayerSystem = this.world.getSystem(
-      "prayer",
-    ) as unknown as PrayerSystemLike | null;
-    const attackerPrayer = prayerSystem?.getCombinedBonuses(attackerId);
-    const defenderPrayer =
-      targetType === "player"
-        ? prayerSystem?.getCombinedBonuses(String(target.id))
-        : undefined;
-
-    // Get player's combat style for OSRS-accurate damage bonuses
-    let magicStyle: MagicCombatStyle = "accurate";
-    const playerSystem = this.world.getSystem(
-      "player",
-    ) as unknown as PlayerSystem | null;
-    const styleData = playerSystem?.getPlayerAttackStyle?.(attackerId);
-    if (styleData?.id) {
-      const id = styleData.id;
-      if (id === "accurate" || id === "longrange" || id === "autocast") {
-        magicStyle = id;
-      }
-    }
-
-    const params: MagicDamageParams = {
-      magicLevel,
-      magicAttackBonus: equipmentStats?.magicAttack ?? 0,
-      style: magicStyle,
-      spellBaseMaxHit: spell.baseMaxHit,
-      // MagicDamageParams uses "npc" instead of "mob"
-      targetType: targetType === "mob" ? "npc" : "player",
-      targetMagicLevel,
-      targetDefenseLevel,
-      targetMagicDefenseBonus: targetMagicDefense,
-      prayerBonuses: attackerPrayer,
-      targetPrayerBonuses: defenderPrayer,
-    };
-
-    const result = calculateMagicDamage(params, getGameRng());
-    return result.damage;
-  }
-
-  /**
-   * Calculate magic damage for a mob attack.
-   */
-  private calculateMobMagicDamageForAttack(
-    target: Entity | MobEntity,
-    targetType: "player" | "mob",
-    magicLevel: number,
-    spell: Spell,
-  ): number {
-    const targetMagicLevel =
-      targetType === "mob" && isMobEntity(target)
-        ? 1
-        : this.playerQueries.getPlayerSkillLevel(String(target.id), "magic");
-
-    const targetDefenseLevel =
-      targetType === "mob" && isMobEntity(target)
-        ? target.getMobData().defense
-        : this.playerQueries.getPlayerSkillLevel(String(target.id), "defense");
-
-    const targetMagicDefense =
-      targetType === "mob" && isMobEntity(target)
-        ? 0
-        : (this.playerEquipmentStats.get(String(target.id))?.magicDefense ?? 0);
-
-    const defenderPrayer =
-      targetType === "player"
-        ? this.prayerSystem?.getCombinedBonuses(String(target.id))
-        : undefined;
-
-    const params: MagicDamageParams = {
-      magicLevel,
-      magicAttackBonus: 0,
-      style: "accurate",
-      spellBaseMaxHit: spell.baseMaxHit,
-      targetType: targetType === "mob" ? "npc" : "player",
-      targetMagicLevel,
-      targetDefenseLevel,
-      targetMagicDefenseBonus: targetMagicDefense,
-      prayerBonuses: undefined,
-      targetPrayerBonuses: defenderPrayer,
-    };
-
-    const result = calculateMagicDamage(params, getGameRng());
-    return result.damage;
-  }
 
   private handleMobAttack(data: {
     mobId: string;
@@ -2048,54 +1806,6 @@ export class CombatSystem extends SystemBase {
     // Movement is handled by ServerNetwork's COMBAT_FOLLOW_TARGET listener
     // which calls TileMovementManager.movePlayerToward()
   }
-
-  private calculateMeleeDamage(
-    attacker: Entity | MobEntity,
-    target: Entity | MobEntity,
-    style: CombatStyle = "accurate",
-  ): number {
-    // Get prayer bonuses for attacker and defender (players only)
-    let attackerPrayerBonuses: PrayerCombatBonuses | undefined;
-    let defenderPrayerBonuses: PrayerCombatBonuses | undefined;
-
-    // OPTIMIZATION: Use cached prayerSystem instead of getSystem() per damage calc
-    if (this.prayerSystem) {
-      // Attacker prayer bonuses (if player)
-      if (!(attacker instanceof MobEntity)) {
-        const bonuses = this.prayerSystem.getCombinedBonuses(attacker.id);
-        if (bonuses.attackMultiplier || bonuses.strengthMultiplier) {
-          attackerPrayerBonuses = bonuses;
-        }
-      }
-
-      // Defender prayer bonuses (if player)
-      if (!(target instanceof MobEntity)) {
-        const bonuses = this.prayerSystem.getCombinedBonuses(target.id);
-        if (bonuses.defenseMultiplier) {
-          defenderPrayerBonuses = bonuses;
-        }
-      }
-    }
-
-    // Determine melee attack style from weapon type (OSRS combat triangle)
-    let meleeAttackStyle: MeleeAttackStyle | undefined;
-    if (!(attacker instanceof MobEntity)) {
-      const weapon = this.getEquippedWeapon(attacker.id);
-      const weaponType = weapon?.weaponType?.toLowerCase() ?? "none";
-      meleeAttackStyle = WEAPON_DEFAULT_ATTACK_STYLE[weaponType] ?? "crush";
-    }
-
-    return this.damageCalculator.calculateMeleeDamage(
-      attacker,
-      target,
-      style,
-      attackerPrayerBonuses,
-      defenderPrayerBonuses,
-      meleeAttackStyle,
-    );
-  }
-
-  // MVP: calculateRangedDamage removed - melee only
 
   private applyDamage(
     targetId: string,
@@ -3392,7 +3102,11 @@ export class CombatSystem extends SystemBase {
     }
 
     // MVP: Melee-only damage calculation
-    const rawDamage = this.calculateMeleeDamage(attacker, target, combatStyle);
+    const rawDamage = this.damageOrchestrator.calculateMeleeDamage(
+      attacker,
+      target,
+      combatStyle,
+    );
 
     // OSRS-STYLE: Cap damage at target's current health (no overkill)
     const currentHealth = this.entityResolver.getHealth(target);
