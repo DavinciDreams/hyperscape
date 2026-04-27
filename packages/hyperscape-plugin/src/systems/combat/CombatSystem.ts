@@ -62,6 +62,7 @@ import {
   CombatDamageOrchestrator,
   type PlayerEquipmentStats,
 } from "./CombatDamageOrchestrator";
+import { CombatDeathHandler } from "./CombatDeathHandler";
 import { CombatEventEmitter } from "./CombatEventEmitter";
 import { CombatEventRecorder } from "./CombatEventRecorder";
 import { CombatPlayerQueries } from "./CombatPlayerQueries";
@@ -208,6 +209,11 @@ export class CombatSystem extends SystemBase {
   // `this.damageOrchestrator.fooBar(...)`.
   private readonly damageOrchestrator: CombatDamageOrchestrator;
 
+  // Death + respawn handlers — clean up combat state when entities
+  // die or players respawn. Extracted to CombatDeathHandler (top-10
+  // #9 fifth decomposition slice).
+  private readonly deathHandler: CombatDeathHandler;
+
   // Ranged/Magic combat services (F2P)
   private readonly projectileService: ProjectileService;
   private equipmentSystem?: EquipmentSystemDuck;
@@ -307,6 +313,18 @@ export class CombatSystem extends SystemBase {
       this.playerEquipmentStats,
       () => this.equipmentSystem,
       () => this.prayerSystem,
+    );
+
+    // Death + respawn handlers — clean up combat state on entity
+    // death / player respawn. All deps are already-extracted helpers
+    // plus the shared nextAttackTicks Map.
+    this.deathHandler = new CombatDeathHandler(
+      world,
+      this.stateService,
+      this.animationManager,
+      this.eventEmitter,
+      this.eventRecorder,
+      this.nextAttackTicks,
     );
   }
 
@@ -429,12 +447,12 @@ export class CombatSystem extends SystemBase {
 
     // Listen for death events to end combat
     this.subscribe(EventType.NPC_DIED, (data: { mobId: string }) => {
-      this.handleEntityDied(data.mobId, "mob");
+      this.deathHandler.handleEntityDied(data.mobId, "mob");
     });
     this.subscribe(
       EventType.ENTITY_DEATH,
       (data: { entityId: string; entityType: string }) => {
-        this.handleEntityDied(data.entityId, data.entityType);
+        this.deathHandler.handleEntityDied(data.entityId, data.entityType);
       },
     );
 
@@ -446,7 +464,7 @@ export class CombatSystem extends SystemBase {
         playerId: string;
         spawnPosition: { x: number; y: number; z: number };
       }) => {
-        this.handlePlayerRespawned(data.playerId);
+        this.deathHandler.handlePlayerRespawned(data.playerId);
       },
     );
 
@@ -1846,7 +1864,7 @@ export class CombatSystem extends SystemBase {
     if (!result.success) {
       if (result.targetDied) {
         // Target was already dead - end ALL combat with this entity
-        this.handleEntityDied(targetId, targetType);
+        this.deathHandler.handleEntityDied(targetId, targetType);
       } else {
         this.logger.error("Failed to apply damage", undefined, {
           targetId,
@@ -1858,7 +1876,7 @@ export class CombatSystem extends SystemBase {
 
     // Prevent additional attacks if target died this tick
     if (result.targetDied) {
-      this.handleEntityDied(targetId, targetType);
+      this.deathHandler.handleEntityDied(targetId, targetType);
       return;
     }
 
@@ -2250,138 +2268,6 @@ export class CombatSystem extends SystemBase {
     }
   }
 
-  /**
-   * Handle entity death - immediately clear ALL combat states involving the dead entity
-   *
-   * CRITICAL FIX: Previously only cleared the dead entity's state, leaving attackers
-   * with stale targetIds pointing to the dead (soon respawned) entity. This caused:
-   * - Players chasing dead players to spawn point
-   * - Mobs following dead players
-   * - Combat resuming immediately after respawn
-   *
-   * Now we:
-   * 1. Clear the dead entity's combat state
-   * 2. Notify mob attackers via onTargetDied() so they can return to patrol
-   * 3. Clear ALL attacker combat states targeting this entity
-   * 4. Clean up attack cooldowns for all involved parties
-   */
-  private handleEntityDied(entityId: string, entityType: string): void {
-    const typedEntityId = createEntityID(entityId);
-
-    // Record death event for analytics
-    const deathEventType =
-      entityType === "player"
-        ? GameEventType.DEATH_PLAYER
-        : GameEventType.DEATH_MOB;
-    const combatState = this.stateService.getCombatData(entityId);
-    this.eventRecorder.record(deathEventType, entityId, {
-      entityType,
-      killedBy: combatState ? String(combatState.targetId) : "unknown",
-    });
-
-    // 1. Remove the dead entity's own combat state from the internal map
-    this.stateService.removeCombatState(typedEntityId);
-
-    // 1b. CRITICAL: Sync the cleared state to the entity/client
-    //     Without this, the client's combat.combatTarget persists and they keep facing the target!
-    if (entityType === "player") {
-      this.stateService.clearCombatStateFromEntity(entityId, "player");
-    }
-
-    // 2. Clear the dead entity's attack cooldown so they can attack immediately after respawn
-    this.nextAttackTicks.delete(typedEntityId);
-
-    // 3. Clear any scheduled emote resets for the dead entity
-    this.animationManager.cancelEmoteReset(entityId);
-
-    // 4. BEFORE clearing attacker states, notify mob attackers so they can return to patrol
-    //    and clear attack cooldowns so attackers can target someone else immediately
-    const combatStatesMap = this.stateService.getCombatStatesMap();
-    for (const [attackerId, state] of combatStatesMap) {
-      if (String(state.targetId) === entityId) {
-        // Clear attacker's cooldown so they can engage new targets immediately
-        this.nextAttackTicks.delete(attackerId);
-
-        // Notify mob attackers so they can return to patrol/spawn
-        if (state.attackerType === "mob") {
-          const mobEntity = this.world.entities.get(String(attackerId));
-          if (
-            isMobEntity(mobEntity) &&
-            typeof mobEntity.onTargetDied === "function"
-          ) {
-            mobEntity.onTargetDied(entityId);
-          }
-        }
-      }
-    }
-
-    // 5. CRITICAL: Clear ALL attacker combat states targeting this dead entity
-    //    This prevents attackers from continuing to chase/fight the respawned entity
-    this.stateService.clearStatesTargeting(entityId);
-
-    // 6. Clear face target for players who had this as pending attacker
-    if (entityType === "mob") {
-      for (const player of this.world.entities.players.values()) {
-        const pendingAttacker = getPendingAttacker(player);
-        if (pendingAttacker === entityId) {
-          clearPendingAttacker(player);
-          this.eventEmitter.emitClearFaceTarget(player.id);
-        }
-      }
-    }
-
-    // 7. Reset dead entity's emote if they were mid-animation
-    // SKIP for players - let the death animation play instead of resetting to idle
-    // Mobs can reset since they have different animation handling
-    if (entityType === "mob") {
-      this.animationManager.resetEmote(entityId, entityType);
-    }
-    // Player death animation is handled by PlayerDeathSystem
-  }
-
-  /**
-   * Handle player respawn - clear any lingering combat states
-   *
-   * This is a safety net that catches edge cases where combat states
-   * might survive the death cleanup. When a player respawns:
-   * 1. They should have NO combat state (fresh start)
-   * 2. NO entities should be targeting them (they just spawned)
-   * 3. Their attack cooldown should be clear (can attack immediately)
-   *
-   * This ensures players respawn in a completely clean combat state,
-   * preventing bugs like:
-   * - Being immediately attacked at spawn point
-   * - Having stale combat UI indicators
-   * - Auto-retaliate triggering against old attackers
-   */
-  private handlePlayerRespawned(playerId: string): void {
-    const typedPlayerId = createEntityID(playerId);
-
-    // 1. Clear any lingering combat state the respawned player might have
-    const playerCombatState = this.stateService.getCombatData(typedPlayerId);
-    if (playerCombatState) {
-      this.stateService.removeCombatState(typedPlayerId);
-      this.stateService.clearCombatStateFromEntity(playerId, "player");
-    }
-
-    // 2. Clear the respawned player's attack cooldown
-    this.nextAttackTicks.delete(typedPlayerId);
-
-    // 3. Clear any attacker states that might still be targeting this player
-    //    (Safety net - handleEntityDied should have already done this)
-    this.stateService.clearStatesTargeting(playerId);
-
-    // 4. Clear any pending attacker reference on the player
-    const playerEntity = this.world.getPlayer?.(playerId);
-    if (playerEntity) {
-      clearPendingAttacker(playerEntity);
-    }
-
-    // 5. Clear face target so player doesn't auto-look at old attacker
-    this.eventEmitter.emitClearFaceTarget(playerId);
-  }
-
-  // Public API methods
   public startCombat(
     attackerId: string,
     targetId: string,
