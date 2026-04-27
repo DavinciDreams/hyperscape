@@ -189,6 +189,7 @@ import { WalkableTileDebugSystem } from "./systems/WalkableTileDebugSystem.js";
 import { xpOrbRegistration } from "./widgets/XPOrbWidget.js";
 import { levelUpToastRegistration } from "./widgets/LevelUpToastWidget.js";
 import { kickedOverlayRegistration } from "./widgets/KickedOverlayWidget.js";
+import { disconnectedOverlayRegistration } from "./widgets/DisconnectedOverlayWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -232,7 +233,7 @@ export {
   LevelUpToast,
   type LevelUpEntry,
 } from "./widgets/LevelUpToastWidget.js";
-// Phase D6.c.2 (overlay HUDs) — slice 31, 2026-04-27.
+// Phase D6.c.2 (overlay HUDs) — slices 31 + 32, 2026-04-27.
 export {
   kickedOverlayWidget,
   kickedOverlayRegistration,
@@ -240,6 +241,13 @@ export {
   DEFAULT_KICK_MESSAGES,
   type KickedOverlayProps,
 } from "./widgets/KickedOverlayWidget.js";
+export {
+  disconnectedOverlayWidget,
+  disconnectedOverlayRegistration,
+  DisconnectedOverlay,
+  type DisconnectedOverlayProps,
+  type DisconnectedOverlayRuntimeProps,
+} from "./widgets/DisconnectedOverlayWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -627,6 +635,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(xpOrbRegistration);
         ctx.widgets.register(levelUpToastRegistration);
         ctx.widgets.register(kickedOverlayRegistration);
+        ctx.widgets.register(disconnectedOverlayRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
