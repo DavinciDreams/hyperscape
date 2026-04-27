@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-26 (REFRESH 3)
+# Hyperscape Progress Audit — 2026-04-27 (REFRESH 4)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~75% of the way to "truly AAA, truly done"** — up from 70–75% mid-day, 65–70% earlier today, and 50–60% pre-weekend. Session 6 closed the AI test-coverage gap (top-10 leverage item #6) end to end.
+**~76–77% of the way to "truly AAA, truly done"** — up from 70–75% mid-day yesterday and 50–60% pre-weekend. **REFRESH 4 (2026-04-27 evening): closed top-10 leverage item #10 (long-tail registry consumer-wiring) over 19 cuts of standardized hot-reload instrumentation + reusable `useRegistryReload` React hook.** REFRESH 3 closed the AI test-coverage gap (top-10 leverage item #6) end to end.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -156,7 +156,7 @@ this session)
 
 - 129 manifest schemas with full Zod validation
 - 128 providers boot-loaded through DataManager
-- 104 module-level registries (10 with `onReloaded` listener)
+- 104 module-level registries (**100 with `onReloaded` listener — long-tail exhausted, REFRESH 4**); 4 non-manifest registries (factory/runtime/ECS) permanently skipped with documented rationale
 - **NEW: 9 engine substrate types** in `network/substrate/` covering
   every cross-package boundary in the runtime
 - **NEW: 14/14 network handler families migrated to
@@ -211,9 +211,20 @@ Two old gaps moved heavily this session, several remain unchanged:
 4. **Plugin Browser UI** — 107 TypeScript types shipped, zero React
    components rendering them. (No change.)
 
-5. **Consumer wiring of registries** — 10 of 104 registries have
-   `onReloaded`; ~3 React UI consumers actually subscribe. (No
-   change.)
+5. ~~**Consumer wiring of registries** — 10 of 104 registries have
+   `onReloaded`; ~3 React UI consumers actually subscribe.~~
+   **MOSTLY RESOLVED** (REFRESH 4, 2026-04-27 evening):
+   **100/104 manifest registries now have `onReloaded`** (cuts #10–#28
+   shipped 90 instrumentations across one session). Reusable
+   `useRegistryReload` hook published in `@hyperforge/ui-widgets`
+   wraps the subscription pattern over `useSyncExternalStore` —
+   `const rev = useRegistryReload(registry)` replaces the hand-rolled
+   `useState + useEffect` boilerplate. Two existing client consumers
+   (XPOrb HUD + SpellsPanel) migrated. The remaining gap is
+   **breadth of consumers**, not the wiring contract: PIE editor
+   panels still consume manifests through their own context-based
+   pipeline rather than shared registries — that's a larger refactor
+   for a future session.
 
 6. ~~**Game data extraction (Phase A)** — NPCs, items, world
    structure, duel rules, banks, spells, runes still hardcoded in
@@ -266,7 +277,7 @@ resolved. The new list reorders:
 | 7 | **DataSourceRegistry (D8) + ui-pack.json (D9)** | D | M | Closes UI framework story |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M | Path to "shared has zero Hyperscape identifiers" |
 | 9 | **CombatSystem decomposition (4,019 → <2,000)** | K4 | L | Maintenance + plugin extractability; lives in plugin now |
-| 10 | **Long-tail registry consumer-wiring (~90 still unwired)** | F/G | M each | Each closes one substrate→consumer loop |
+| ~~10~~ | ~~**Long-tail registry consumer-wiring (~90 still unwired)**~~ | ~~F/G~~ | ~~M each~~ | **RESOLVED 2026-04-27 — 100/104 instrumented across cuts #10–#28; `useRegistryReload` hook in ui-widgets makes adding any new consumer a 1-liner. Remaining gap is consumer breadth (PIE editor panels), not contract wiring.** |
 
 ---
 
@@ -326,9 +337,15 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~75% to AAA done. Plugin tests stable at 198/198 (+11 widget tests today). Asset-forge AI service tests: 136/136 across 9 services (was 0 at start of day).
+**Status: ~76–77% to AAA done. Plugin tests stable at 198/198 (+11 widget tests today). Asset-forge AI service tests: 136/136 across 9 services (was 0 at start of day).
 Server typecheck cleared 68% of pre-existing errors as a side
-effect. Branch pushed and ready for review.**
+effect. **REFRESH 4 (2026-04-27 evening): registry hot-reload long-tail
+shipped. 100/104 manifest registries instrumented with `onReloaded`
+across 19 cuts; `useRegistryReload` hook published in
+`@hyperforge/ui-widgets` over `useSyncExternalStore`; XPOrb +
+SpellsPanel migrated as proof-of-pattern. 90 registries × ~85 LOC =
+~7,650 LOC of standardized hot-reload pumping shipped today.**
+Branch pushed and ready for review.**
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
@@ -344,7 +361,7 @@ The work pattern has shifted from "find structural blockers" to
 | ~~AI service test coverage~~ | **DONE — Session 6 closed (M)** |
 | DataSourceRegistry / ui-pack | unchanged (M) |
 | CombatSystem decomposition | unchanged but moved plugin-side (L) |
-| Long-tail registry wiring | unchanged (M each) |
+| ~~Long-tail registry wiring~~ | **DONE — REFRESH 4 closed (M each → 100/104 instrumented)** |
 
 The next session's natural unit is **wire plugin into prod
 startup** (#1) — small effort, large payoff. After that the
