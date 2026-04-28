@@ -212,6 +212,7 @@ import { curvePreviewRegistration } from "./widgets/CurvePreviewWidget.js";
 import { contextMenuRegistration } from "./widgets/ContextMenuWidget.js";
 import { keyValueListRegistration } from "./widgets/KeyValueListWidget.js";
 import { cursorTooltipRegistration } from "./widgets/CursorTooltipWidget.js";
+import { notificationToastListRegistration } from "./widgets/NotificationToastListWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -441,6 +442,20 @@ export {
   calculateCursorTooltipPosition,
   type CursorTooltipProps,
 } from "./widgets/CursorTooltipWidget.js";
+export {
+  notificationToastListWidget,
+  notificationToastListRegistration,
+  NotificationToastList,
+  NOTIFICATION_TYPES,
+  NOTIFICATION_ANCHORS,
+  DEFAULT_NOTIFICATION_TYPE_STYLES,
+  type NotificationType,
+  type NotificationAnchor,
+  type NotificationToast,
+  type NotificationTypeStyle,
+  type NotificationToastListProps,
+  type NotificationToastListRuntimeProps,
+} from "./widgets/NotificationToastListWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -851,6 +866,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(contextMenuRegistration);
         ctx.widgets.register(keyValueListRegistration);
         ctx.widgets.register(cursorTooltipRegistration);
+        ctx.widgets.register(notificationToastListRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
