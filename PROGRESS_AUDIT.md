@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-28 (REFRESH 11)
+# Hyperscape Progress Audit — 2026-04-28 (REFRESH 12)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~87–89% of the way to "truly AAA, truly done"**. **REFRESH 11 (2026-04-27 evening / 2026-04-28): per-widget migration cycle on top-10 #5 continues — 9 more widgets shipped over slices 37-45. Total widget count this session arc: 15 widgets / ~3,900 LOC of widget code (slices 31-45). HUD set continued (ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb), then panel/modal categories seeded with 6 distinct shapes (SkillSelectModal, FloatingXPDrops, UnlocksSection, CoinPouch, SelectOption, ConfirmDialog). Plugin 218/218 → 321/321 (+103 new). 9 of ~19 HUDs done; 6 of ~50 panels — long-tail still long but recipe is fully mechanical and now proven across HUD/overlay/modal/panel categories.** REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 end-to-end. REFRESH 7 #7 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem). REFRESH 4 closed #10 (registry hot-reload). REFRESH 3 closed AI test-coverage gap.
+**~89–90% of the way to "truly AAA, truly done"**. **REFRESH 12 (2026-04-28 mid-day): D6.c long-tail continues — 13 more widgets shipped over slices 46-58. Total session arc widget count: 28 widgets / ~8,400 LOC of widget code / +240 plugin tests (slices 31-58, 198 → 438). All 6 manifest categories now seeded — overlay (5), HUD (7), modal (4), panel (8), menu (1), debug (1). New primitives this refresh: QuantityPrompt, IncomingRequestModal, EquipmentSlotIcon, DialoguePanel, ArrayInput, CurvePreview, ContextMenu, KeyValueList, CursorTooltip, NotificationToastList, BuffBar, VictoryOverlay, AlignmentGuides. Plugin 321/321 → 438/438 (+117 new this refresh). Recipe is fully mechanical across every shape (presentational, RAF tickers, callbacks, packet sends, canvas rendering, SVG-radial-progress, animation-token-driven re-mounts, generic primitives, abstract patterns).** REFRESH 11 (slices 37-45): 9 widgets, panel/modal categories seeded. REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 end-to-end. REFRESH 7 #7 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem). REFRESH 4 closed #10 (registry hot-reload). REFRESH 3 closed AI test-coverage gap.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -39,6 +39,80 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 12 — Top-10 #5 D6.c long-tail: 13 more widgets, all 6 categories seeded (2026-04-28 mid-day)
+
+Per-widget migration cycle on top-10 #5 continued. 13 more widgets
+shipped over slices 46-58. **All 6 manifest categories now have
+at least one widget.**
+
+| Slice | What | LOC | Tests |
+|---|---|---:|---:|
+| 46 `c88e710af` | QuantityPromptWidget — K/M-aware quantity input modal | 310 | 12 |
+| 47 `26d20872a` | IncomingRequestModalWidget — generic accept/decline modal (generalized from TradeRequestModal) | 325 | 6 |
+| 48 `a3c526acb` | EquipmentSlotIconWidget — 13 slot icons collapsed to one widget keyed by slot enum | 225 | 9 |
+| 49 `111643220` | DialoguePanelWidget — NPC dialogue interface; drops the 437-LOC Three.js portrait dep | 280 | 7 |
+| 50 `7fa7c7e57` | ArrayInputWidget — list-of-strings editor with text/textarea modes | 330 | 10 |
+| 51 `47f5dcf34` | CurvePreviewWidget — first canvas-rendering widget; drops `Curve` import via pre-evaluated samples | 210 | 9 |
+| 52 `fc204c12d` | ContextMenuWidget — first menu-category widget; click-outside + Escape + viewport clamp | 280 | 8 |
+| 53 `65592d21d` | KeyValueListWidget — first abstract pattern widget (no single legacy callsite) | 225 | 8 |
+| 54 `c2a4b034a` | CursorTooltipWidget — mouse-following tooltip with `calculateCursorTooltipPosition` helper + 4 unit tests | 250 | 10 |
+| 55 `1b945bf0a` | NotificationToastListWidget — 4-anchor toast stack with severity theming + slide-in keyframes | 360 | 11 |
+| 56 `301453b86` | BuffBarWidget — buff/debuff timer rings (SVG-radial-progress, reduced-motion pass-through) | 430 | 11 |
+| 57 `986bfc402` | VictoryOverlayWidget — celebratory headline with `key={animationToken}` re-mount pattern | 225 | 6 |
+| 58 `be4e1f3ab` | AlignmentGuidesWidget — first debug-category widget; drag guide overlay | 170 | 10 |
+
+Plugin tests: 321/321 → 438/438 (+117 new). Plugin type-check clean.
+~3,620 LOC of widget code shipped over this refresh window.
+
+**Cumulative session arc (slices 31-58)**: 28 widgets shipped end-
+to-end across ~32 hours. ~8,400 LOC of widget code. Plugin tests
+198/198 → 438/438 (+240). Recipe is fully mechanical across every
+manifest category.
+
+**All 6 manifest categories now seeded:**
+- **overlay (5)**: KickedOverlay, DisconnectedOverlay, DeathScreen,
+  CursorTooltip, NotificationToastList, VictoryOverlay
+- **HUD (7)**: ConnectionIndicator, MinimapStaminaOrb, MinimapCompass,
+  ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb,
+  FloatingXPDrops, BuffBar
+- **modal (4)**: SkillSelectModal, ConfirmDialog, QuantityPrompt,
+  IncomingRequestModal
+- **panel (8)**: UnlocksSection, CoinPouch, SelectOption,
+  EquipmentSlotIcon, DialoguePanel, ArrayInput, CurvePreview,
+  KeyValueList
+- **menu (1)**: ContextMenu
+- **debug (1)**: AlignmentGuides
+
+**New patterns proven this refresh:**
+- Canvas rendering with imperative `useEffect` + `getContext("2d")`
+  composing cleanly with Zod-validated props (CurvePreview).
+- SVG-radial-progress timer rings with reduced-motion pass-through
+  (BuffBar).
+- `key={animationToken}` re-mount as a clean alternative to manual
+  `classList.remove + offsetWidth + classList.add` reflow tricks
+  (VictoryOverlay).
+- Pure helpers exported alongside widgets for hosts to compose
+  (`calculateCursorTooltipPosition`, `parseQuantityInput`).
+- Abstract pattern widgets with no single legacy callsite —
+  derived from observed repetition (KeyValueList).
+- Click-outside + Escape-to-close behavior owned by the widget,
+  triggered through a single `onClose` callback (ContextMenu,
+  CursorTooltip).
+
+**Doesn't swap consumers yet** — the live client still mounts the
+hand-coded versions. Registration-path-first; consumer-swap is a
+separate consolidation cycle.
+
+**Top-10 #5 progression**: Long-tail still long (~50 panels remain
+mostly untouched, several HUD components untouched), but the recipe
+is at full velocity — each S-cut widget takes ~5-10 minutes from
+scratch to commit. Recommended next-cycle targets: legacy
+EscapeMenu (358 LOC) + StatusBars (725 LOC) HUD remainder; the
+remaining trade/duel/bank panel components; ProgressBar primitive
+(currently inlined in many places).
 
 ---
 
@@ -627,7 +701,7 @@ resolved. The new list reorders:
 | ~~2~~ | ~~**Game-data JSON extraction**~~ | ~~A~~ | ~~M~~ | **RESOLVED 2026-04-26 evening** — re-audit found all data/*.ts and constants/*.ts files already façaded |
 | ~~3~~ | ~~**Plugin Browser UI**~~ | ~~I5~~ | ~~M~~ | **DONE** — `PluginBrowserPanel.tsx` (666 lines) ships Browse + Installed tabs with `useSyncExternalStore` over the installed-plugins store, install button, sha-verified content download. |
 | ~~4~~ | ~~**D7 plugin widget contribution + D6.c.1 (XP orb)**~~ | ~~D~~ | ~~S~~ | **DONE** — `XPOrbWidget.tsx` + `LevelUpToastWidget.tsx` ship from `@hyperforge/hyperscape-plugin/src/widgets/`, registered via `ctx.widgets?.register(...)` in plugin onEnable. Both widgets unit-tested. Pattern established. |
-| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework. **IN PROGRESS 2026-04-28 — REFRESH 11**: 15 widgets shipped end-to-end on `feat/world-studio` (`bfd77e55b` → `0bc2ca82b`). **D6.c.2 overlay set closed**: KickedOverlay + DisconnectedOverlay + DeathScreen (slices 31-33). **D6.c HUDs**: ConnectionIndicator, MinimapStaminaOrb, MinimapCompass, ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb (slices 34-39). **Panels seeded**: SkillSelectModal, FloatingXPDrops, UnlocksSection, CoinPouch, SelectOption (slices 40-44). **Modals seeded**: SkillSelectModal, ConfirmDialog (slices 40, 45). Plugin tests 198/198 → 321/321 (+123 new). ~3,900 LOC of widget code. Per-widget recipe is fully mechanical and proven across all 4 categories (overlay/HUD/modal/panel). 9 of ~19 HUDs done; 6 of ~50 panels — long-tail still long but cost-per-widget is decreasing. Each remaining widget is its own focused S-M cut. Consumer-swap (deleting hand-coded files) is a separate consolidation cycle. |
+| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework. **IN PROGRESS 2026-04-28 — REFRESH 12**: 28 widgets shipped end-to-end on `feat/world-studio` (`bfd77e55b` → `be4e1f3ab`). **All 6 manifest categories now seeded**: overlay (5), HUD (7), modal (4), panel (8), menu (1), debug (1). Plugin tests 198/198 → 438/438 (+240 new). ~8,400 LOC of widget code. Per-widget recipe is fully mechanical and proven across every category. **New patterns proven**: canvas rendering, SVG-radial-progress, animation-token re-mount, exported pure helpers, abstract pattern widgets, click-outside owned by widget. ~9 of ~19 HUDs done; ~12 of ~50 panels (counting modals + menu + debug as panel-adjacent). Long-tail still long but cost-per-widget is at full velocity (S-cut ~5-10 min). Each remaining widget is its own focused cut. Consumer-swap (deleting hand-coded files) is a separate consolidation cycle. |
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | ~~7~~ | ~~**DataSourceRegistry (D8) + ui-pack.json (D9)**~~ | ~~D~~ | ~~M~~ | **RESOLVED 2026-04-27 — REFRESH 8**: D8 + D9 + D10 wire-through complete across 7 slices on `feat/world-studio` (commits `71fe4f0ac` → `c2a560b5e`). Shipped: `DataSourceRegistry` (pluggable bindings namespaces, 10 tests) + `UIPackManifestSchema` (wraps widget catalog + layouts + theme + customization, 13 tests) + `HYPERSCAPE_UI_PACK` (reference pack composing DEFAULT_UI_LAYOUT + HYPERSCAPE_DARK_THEME, 6 tests) + `loadUIPack` (pure engine runtime, 7 tests) + `uiPackLoader` (client bridge to themeRegistry, 5 tests) + `uiPackRegistry` + `useActiveUIPack` (D10 host-side state + React hook, 14 tests) + `ManifestHud` reads from active pack (D10 wire-through). 55 new tests across 7 slices; ui-framework 274/274 + plugin 198/198 + client ui-framework 117/117 throughout. Loading a pack now actually swaps the rendered HUD end-to-end. **Remaining polish (deferrable)**: persist HYPERSCAPE_UI_PACK to disk as `hyperscape.ui-pack.json` + file-loader; verify every Hyperscape HUD panel reads via DataSourceRegistry (gated by top-10 #5). |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M-L | **SUBSTANTIVELY COMPLETE 2026-04-27 — REFRESH 6 + 9**: 6 slices total. REFRESH 6: 4 type files migrated (quest-types/social-types/trade-types to plugin; interaction-types deleted as dead code). REFRESH 9: DuelSystem interface relocated to plugin (slice 29) + resource-processing-types split (slice 30 — footprint primitives stay shared, game types move to plugin). `packages/shared/src/types/game/` 11 → 7 files. The 5 remaining files (combat-types, duel-types, inventory-types, item-types, prayer-types) are all bidirectional engine substrate consumed by event-payloads/system-interfaces/components/utils/PrayerDataProvider — each remaining migration would duplicate duck-types in shared faster than removing them. Cleanup is functionally complete; remaining items are blocked by legitimate engine substrate needs. |
@@ -693,7 +767,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~87–89% to AAA done. Plugin tests stable at 321/321; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 11 (2026-04-28): 9 more widget migrations shipped end-to-end (slices 37-45). HUD set continued (ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb) + 4 panels seeded (SkillSelectModal, FloatingXPDrops, UnlocksSection, CoinPouch, SelectOption) + 1 generic modal (ConfirmDialog). 103 new tests; per-widget recipe fully mechanical and proven across all 4 categories. ~2,450 LOC of widget code this refresh; ~3,900 LOC across slices 31-45. 9 of ~19 HUDs done; 6 of ~50 panels — long-tail.** REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
+**Status: ~89–90% to AAA done. Plugin tests stable at 438/438; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 12 (2026-04-28 mid-day): 13 more widget migrations shipped end-to-end (slices 46-58). All 6 manifest categories now seeded (overlay/HUD/modal/panel/menu/debug). New primitives this refresh: QuantityPrompt, IncomingRequestModal, EquipmentSlotIcon, DialoguePanel, ArrayInput, CurvePreview, ContextMenu, KeyValueList, CursorTooltip, NotificationToastList, BuffBar, VictoryOverlay, AlignmentGuides. 117 new tests; ~3,620 LOC of widget code this refresh; ~8,400 LOC across slices 31-58. 28 widgets total this session arc (+240 plugin tests). Recipe at full velocity.** REFRESH 11 (slices 37-45): 9 widgets, panels/modals seeded. REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
