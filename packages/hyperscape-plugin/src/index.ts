@@ -215,6 +215,7 @@ import { cursorTooltipRegistration } from "./widgets/CursorTooltipWidget.js";
 import { notificationToastListRegistration } from "./widgets/NotificationToastListWidget.js";
 import { buffBarRegistration } from "./widgets/BuffBarWidget.js";
 import { victoryOverlayRegistration } from "./widgets/VictoryOverlayWidget.js";
+import { alignmentGuidesRegistration } from "./widgets/AlignmentGuidesWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -476,6 +477,15 @@ export {
   VictoryOverlay,
   type VictoryOverlayProps,
 } from "./widgets/VictoryOverlayWidget.js";
+export {
+  alignmentGuidesWidget,
+  alignmentGuidesRegistration,
+  AlignmentGuides,
+  ALIGNMENT_GUIDE_AXES,
+  type AlignmentGuideAxis,
+  type AlignmentGuide,
+  type AlignmentGuidesProps,
+} from "./widgets/AlignmentGuidesWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -889,6 +899,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(notificationToastListRegistration);
         ctx.widgets.register(buffBarRegistration);
         ctx.widgets.register(victoryOverlayRegistration);
+        ctx.widgets.register(alignmentGuidesRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
