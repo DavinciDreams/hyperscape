@@ -221,6 +221,7 @@ import { progressBarRegistration } from "./widgets/ProgressBarWidget.js";
 import { loadingSpinnerRegistration } from "./widgets/LoadingSpinnerWidget.js";
 import { toggleSwitchRegistration } from "./widgets/ToggleSwitchWidget.js";
 import { rangeSliderRegistration } from "./widgets/RangeSliderWidget.js";
+import { badgeRegistration } from "./widgets/BadgeWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -530,6 +531,15 @@ export {
   type RangeSliderProps,
   type RangeSliderRuntimeProps,
 } from "./widgets/RangeSliderWidget.js";
+export {
+  badgeWidget,
+  badgeRegistration,
+  Badge,
+  BADGE_VARIANTS,
+  DEFAULT_BADGE_VARIANT_COLORS,
+  type BadgeVariant,
+  type BadgeProps,
+} from "./widgets/BadgeWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -949,6 +959,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(loadingSpinnerRegistration);
         ctx.widgets.register(toggleSwitchRegistration);
         ctx.widgets.register(rangeSliderRegistration);
+        ctx.widgets.register(badgeRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
