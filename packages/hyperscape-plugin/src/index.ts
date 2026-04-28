@@ -207,6 +207,7 @@ import { quantityPromptRegistration } from "./widgets/QuantityPromptWidget.js";
 import { incomingRequestModalRegistration } from "./widgets/IncomingRequestModalWidget.js";
 import { equipmentSlotIconRegistration } from "./widgets/EquipmentSlotIconWidget.js";
 import { dialoguePanelRegistration } from "./widgets/DialoguePanelWidget.js";
+import { arrayInputRegistration } from "./widgets/ArrayInputWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -399,6 +400,15 @@ export {
   type DialoguePanelProps,
   type DialoguePanelRuntimeProps,
 } from "./widgets/DialoguePanelWidget.js";
+export {
+  arrayInputWidget,
+  arrayInputRegistration,
+  ArrayInput,
+  ARRAY_INPUT_TYPES,
+  type ArrayInputType,
+  type ArrayInputProps,
+  type ArrayInputRuntimeProps,
+} from "./widgets/ArrayInputWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -804,6 +814,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(incomingRequestModalRegistration);
         ctx.widgets.register(equipmentSlotIconRegistration);
         ctx.widgets.register(dialoguePanelRegistration);
+        ctx.widgets.register(arrayInputRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
