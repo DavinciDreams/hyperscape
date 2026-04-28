@@ -144,15 +144,20 @@ export type { GridLines } from "./grid";
 export {
   BindingExpressionSchema,
   BindingParseError,
+  CommandBindingExpressionSchema,
+  CommandBindingSchema,
   evaluateBinding,
   evaluateParsedBinding,
   parseBindingExpression,
+  parseCommandBinding,
   resolveWidgetProps,
 } from "./bindings";
 export type {
   BindingStep,
+  CommandBindingExpression,
   DataContext,
   ParsedBinding,
+  ParsedCommandBinding,
   PropResolutionIssue,
   PropResolutionResult,
 } from "./bindings";

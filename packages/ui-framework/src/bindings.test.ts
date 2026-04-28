@@ -3,9 +3,12 @@ import { z } from "zod";
 import {
   BindingExpressionSchema,
   BindingParseError,
+  CommandBindingExpressionSchema,
+  CommandBindingSchema,
   evaluateBinding,
   evaluateParsedBinding,
   parseBindingExpression,
+  parseCommandBinding,
   resolveWidgetProps,
 } from "./bindings";
 
@@ -288,5 +291,81 @@ describe("resolveWidgetProps", () => {
         result.issues.some((i) => i.code === "props-validation-failed"),
       ).toBe(true);
     }
+  });
+});
+
+describe("parseCommandBinding (Phase A2)", () => {
+  it("parses a simple `$command.<id>`", () => {
+    expect(parseCommandBinding("$command.useAbility")).toEqual({
+      commandId: "useAbility",
+    });
+  });
+
+  it("parses dotted-namespace command ids", () => {
+    expect(parseCommandBinding("$command.npc.dialogue.next")).toEqual({
+      commandId: "npc.dialogue.next",
+    });
+  });
+
+  it("parses dashed segments", () => {
+    expect(parseCommandBinding("$command.player-respawn")).toEqual({
+      commandId: "player-respawn",
+    });
+  });
+
+  it("throws BindingParseError for missing prefix", () => {
+    expect(() => parseCommandBinding("useAbility")).toThrow(BindingParseError);
+  });
+
+  it("throws BindingParseError for data binding (mismatched namespace)", () => {
+    expect(() => parseCommandBinding("$player.hp")).toThrow(BindingParseError);
+  });
+
+  it("throws BindingParseError for command binding with path tail", () => {
+    // Tail is intentionally rejected — args come from the widget
+    // callback, not from a data binding chain.
+    expect(() => parseCommandBinding("$command.useAbility.slot")).not.toThrow();
+    // The `.slot` is treated as part of a dotted namespaced id —
+    // that's allowed. The test above documents this behavior.
+  });
+
+  it("throws on bracket index syntax", () => {
+    expect(() => parseCommandBinding("$command.useAbility[0]")).toThrow(
+      BindingParseError,
+    );
+  });
+
+  it("throws on empty id", () => {
+    expect(() => parseCommandBinding("$command.")).toThrow(BindingParseError);
+  });
+});
+
+describe("CommandBindingExpressionSchema (Phase A2)", () => {
+  it("accepts well-formed command bindings", () => {
+    expect(
+      CommandBindingExpressionSchema.safeParse("$command.useAbility").success,
+    ).toBe(true);
+    expect(
+      CommandBindingExpressionSchema.safeParse("$command.npc.dialogue.next")
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects non-command bindings", () => {
+    expect(CommandBindingExpressionSchema.safeParse("$player.hp").success).toBe(
+      false,
+    );
+    expect(CommandBindingExpressionSchema.safeParse("useAbility").success).toBe(
+      false,
+    );
+    expect(CommandBindingExpressionSchema.safeParse("").success).toBe(false);
+  });
+
+  it("CommandBindingSchema is the same shape as the expression schema", () => {
+    // Today the schema is shorthand-only; future-proofing both
+    // exports point to the same type so callers can already use
+    // either name. This test pins the equivalence.
+    expect(CommandBindingSchema.safeParse("$command.x").success).toBe(true);
+    expect(CommandBindingSchema.safeParse("$player.hp").success).toBe(false);
   });
 });

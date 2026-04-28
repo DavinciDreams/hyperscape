@@ -8,6 +8,7 @@ import {
   UIOverrideSchema,
   UIUserLayoutSchema,
   WidgetCustomizationSchema,
+  WidgetInstanceSchema,
   WidgetPositionSchema,
   validateLayout,
   type UILayoutManifest,
@@ -729,5 +730,84 @@ describe("UILayoutManifestSchema variants (U9)", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("WidgetInstanceSchema actions (Phase A2)", () => {
+  const baseInstance = {
+    instanceId: "respawn-button",
+    widgetId: hpBarWidget.manifest.id,
+    position: {
+      kind: "anchored" as const,
+      anchor: "top-left" as const,
+      offset: { x: 0, y: 0 },
+    },
+    props: { current: 1, max: 10 },
+  };
+
+  it("accepts an instance without actions (back-compat)", () => {
+    const parsed = WidgetInstanceSchema.safeParse(baseInstance);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.actions).toBeUndefined();
+  });
+
+  it("accepts a single command-binding action", () => {
+    const parsed = WidgetInstanceSchema.safeParse({
+      ...baseInstance,
+      actions: { onClick: "$command.requestRespawn" },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.actions).toEqual({
+        onClick: "$command.requestRespawn",
+      });
+    }
+  });
+
+  it("accepts multiple action bindings on one instance", () => {
+    const parsed = WidgetInstanceSchema.safeParse({
+      ...baseInstance,
+      actions: {
+        onConfirm: "$command.useSkillLamp",
+        onCancel: "$command.closeModal",
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects malformed command-binding strings", () => {
+    expect(
+      WidgetInstanceSchema.safeParse({
+        ...baseInstance,
+        actions: { onClick: "requestRespawn" }, // missing $command. prefix
+      }).success,
+    ).toBe(false);
+    expect(
+      WidgetInstanceSchema.safeParse({
+        ...baseInstance,
+        actions: { onClick: "$player.hp" }, // wrong namespace
+      }).success,
+    ).toBe(false);
+    expect(
+      WidgetInstanceSchema.safeParse({
+        ...baseInstance,
+        actions: { onClick: "" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects non-string action values", () => {
+    expect(
+      WidgetInstanceSchema.safeParse({
+        ...baseInstance,
+        actions: { onClick: { command: "x" } }, // object form not yet supported
+      }).success,
+    ).toBe(false);
+    expect(
+      WidgetInstanceSchema.safeParse({
+        ...baseInstance,
+        actions: { onClick: 42 },
+      }).success,
+    ).toBe(false);
   });
 });

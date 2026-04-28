@@ -28,7 +28,11 @@
  */
 
 import { z } from "zod";
-import { BindingExpressionSchema, parseBindingExpression } from "./bindings";
+import {
+  BindingExpressionSchema,
+  CommandBindingSchema,
+  parseBindingExpression,
+} from "./bindings";
 import type { WidgetRegistry } from "./registry";
 import { ThemeManifestSchema } from "./theme";
 
@@ -199,6 +203,20 @@ export const WidgetInstanceSchema = z.object({
    * success is inherently a runtime concern.
    */
   bindings: z.record(z.string(), BindingExpressionSchema).optional(),
+  /**
+   * Optional command bindings, keyed by widget callback prop name
+   * (`onClick`, `onConfirm`, `onCancel`, etc.). Each value is a
+   * command binding expression of the form `"$command.<id>"` that
+   * resolves at render time to a host-registered command. The
+   * renderer (Phase A2.3) builds a callback that dispatches the
+   * command when the widget invokes the prop, passing through
+   * whatever arg value the widget supplied.
+   *
+   * Phase A2 of `PLAN_AI_AUTHORING_FOUNDATIONS.md`. Closes the
+   * JSON-authoring loop — interactive widgets can now ship from a
+   * pack manifest without host code.
+   */
+  actions: z.record(z.string(), CommandBindingSchema).optional(),
   /** Optional human-readable label — shown in the editor outliner. */
   label: z.string().optional(),
   /** If false, the widget is defined in the layout but not rendered. */

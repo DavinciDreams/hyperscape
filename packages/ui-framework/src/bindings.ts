@@ -222,3 +222,79 @@ export function resolveWidgetProps<P>(
   // them to the editor or logger.
   return { ok: true, props: parsedProps.data, issues };
 }
+
+// ── Command bindings (Phase A2) ─────────────────────────────────
+//
+// Action bindings flow data OUT of widgets via `$command.<id>`
+// expressions. Author syntax is intentionally narrower than
+// data-bindings: a command binding has no path tail. Args come
+// from whatever value the widget callback was invoked with —
+// the renderer (Phase A2.3) wraps the dispatch in a callback
+// shaped to the widget's `*RuntimeProps` callback signature.
+
+const COMMAND_EXPR_RE = new RegExp(
+  `^\\$command\\.(${IDENT_RE.source}(?:[.-]${IDENT_RE.source})*)$`,
+);
+
+/** Parsed command binding — just the command id, no path tail. */
+export interface ParsedCommandBinding {
+  /** The command id to dispatch (matches `Command.id`). */
+  readonly commandId: string;
+}
+
+/**
+ * Parse a command binding expression. Throws `BindingParseError` on
+ * malformed input.
+ *
+ *   "$command.useAbility"          → { commandId: "useAbility" }
+ *   "$command.requestRespawn"      → { commandId: "requestRespawn" }
+ *   "$command.npc.dialogue.next"   → { commandId: "npc.dialogue.next" }
+ *
+ * Convention: command ids are flat in the registry but author
+ * syntax allows dotted/dashed segments so plugins can namespace
+ * (`shooter.weapons.fire`) without colliding.
+ */
+export function parseCommandBinding(expression: string): ParsedCommandBinding {
+  const match = COMMAND_EXPR_RE.exec(expression);
+  if (!match) {
+    throw new BindingParseError(
+      expression,
+      "must match /^\\$command\\.<id>$/ where <id> is an identifier " +
+        '(dotted/dashed segments allowed). Examples: "$command.useAbility", ' +
+        '"$command.npc.dialogue.next"',
+    );
+  }
+  return { commandId: match[1] };
+}
+
+/** Zod schema: a string that parses cleanly as a command binding. */
+export const CommandBindingExpressionSchema = z.string().refine(
+  (v) => {
+    try {
+      parseCommandBinding(v);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  {
+    message:
+      'Not a valid command binding (expected "$command.<id>" — see parseCommandBinding)',
+  },
+);
+
+/**
+ * Layout-author shape for the `actions` field on a widget instance.
+ * Maps callback prop names (`onClick`, `onConfirm`, `onCancel`, …)
+ * to command bindings.
+ *
+ * Today the only supported binding form is the shorthand string
+ * `"$command.<id>"`. A future cut may extend this to an object form
+ * with author-supplied static args + per-arg binding expressions
+ * (e.g. `{ command: "useAbility", args: { slot: "$widget.slotIndex" } }`).
+ */
+export const CommandBindingSchema = CommandBindingExpressionSchema;
+
+export type CommandBindingExpression = z.infer<
+  typeof CommandBindingExpressionSchema
+>;
