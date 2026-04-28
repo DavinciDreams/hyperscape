@@ -217,6 +217,7 @@ import { buffBarRegistration } from "./widgets/BuffBarWidget.js";
 import { victoryOverlayRegistration } from "./widgets/VictoryOverlayWidget.js";
 import { alignmentGuidesRegistration } from "./widgets/AlignmentGuidesWidget.js";
 import { dragGhostOverlayRegistration } from "./widgets/DragGhostOverlayWidget.js";
+import { progressBarRegistration } from "./widgets/ProgressBarWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -495,6 +496,14 @@ export {
   type DragGhostKind,
   type DragGhostOverlayProps,
 } from "./widgets/DragGhostOverlayWidget.js";
+export {
+  progressBarWidget,
+  progressBarRegistration,
+  ProgressBar,
+  PROGRESS_BAR_ORIENTATIONS,
+  type ProgressBarOrientation,
+  type ProgressBarProps,
+} from "./widgets/ProgressBarWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -910,6 +919,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(victoryOverlayRegistration);
         ctx.widgets.register(alignmentGuidesRegistration);
         ctx.widgets.register(dragGhostOverlayRegistration);
+        ctx.widgets.register(progressBarRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
