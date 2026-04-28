@@ -234,6 +234,7 @@ import { checkboxRegistration } from "./widgets/CheckboxWidget.js";
 import { keyboardShortcutHintRegistration } from "./widgets/KeyboardShortcutHintWidget.js";
 import { paginationRegistration } from "./widgets/PaginationWidget.js";
 import { iconButtonRegistration } from "./widgets/IconButtonWidget.js";
+import { dividerRegistration } from "./widgets/DividerWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -670,6 +671,16 @@ export {
   type IconButtonProps,
   type IconButtonRuntimeProps,
 } from "./widgets/IconButtonWidget.js";
+export {
+  dividerWidget,
+  dividerRegistration,
+  Divider,
+  DIVIDER_ORIENTATIONS,
+  DIVIDER_STYLES,
+  type DividerOrientation,
+  type DividerStyle,
+  type DividerProps,
+} from "./widgets/DividerWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -1102,6 +1113,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(keyboardShortcutHintRegistration);
         ctx.widgets.register(paginationRegistration);
         ctx.widgets.register(iconButtonRegistration);
+        ctx.widgets.register(dividerRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
