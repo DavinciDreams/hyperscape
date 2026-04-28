@@ -179,6 +179,13 @@ export type {
 export { DataSourceRegistry } from "./dataSourceRegistry";
 export type { DataSource } from "./dataSourceRegistry";
 
+// Phase A2 — CommandRegistry. Mirror of DataSourceRegistry for the
+// reverse direction: data flows OUT of widgets via commands, not IN
+// via data sources. Closes the JSON-authoring loop that
+// `tinyThirdPartyPack.test.tsx` step 6 surfaced.
+export { CommandRegistry } from "./commands";
+export type { Command, CommandDispatchResult } from "./commands";
+
 // Phase D9 — UI Pack manifest. Wraps widget catalog + layouts + theme +
 // customization into a single shippable ui-pack.json per game module.
 export {
