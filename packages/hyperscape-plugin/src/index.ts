@@ -233,6 +233,7 @@ import { breadcrumbsRegistration } from "./widgets/BreadcrumbsWidget.js";
 import { checkboxRegistration } from "./widgets/CheckboxWidget.js";
 import { keyboardShortcutHintRegistration } from "./widgets/KeyboardShortcutHintWidget.js";
 import { paginationRegistration } from "./widgets/PaginationWidget.js";
+import { iconButtonRegistration } from "./widgets/IconButtonWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -656,6 +657,19 @@ export {
   type PaginationProps,
   type PaginationRuntimeProps,
 } from "./widgets/PaginationWidget.js";
+export {
+  iconButtonWidget,
+  iconButtonRegistration,
+  IconButton,
+  ICON_BUTTON_SIZES,
+  ICON_BUTTON_VARIANTS,
+  ICON_BUTTON_SIZE_TABLE,
+  DEFAULT_ICON_BUTTON_VARIANT_COLORS,
+  type IconButtonSize,
+  type IconButtonVariant,
+  type IconButtonProps,
+  type IconButtonRuntimeProps,
+} from "./widgets/IconButtonWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -1087,6 +1101,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(checkboxRegistration);
         ctx.widgets.register(keyboardShortcutHintRegistration);
         ctx.widgets.register(paginationRegistration);
+        ctx.widgets.register(iconButtonRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
