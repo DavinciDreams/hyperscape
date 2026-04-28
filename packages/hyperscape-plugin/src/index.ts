@@ -223,6 +223,7 @@ import { toggleSwitchRegistration } from "./widgets/ToggleSwitchWidget.js";
 import { rangeSliderRegistration } from "./widgets/RangeSliderWidget.js";
 import { badgeRegistration } from "./widgets/BadgeWidget.js";
 import { segmentedControlRegistration } from "./widgets/SegmentedControlWidget.js";
+import { textInputRegistration } from "./widgets/TextInputWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -552,6 +553,15 @@ export {
   type SegmentedControlProps,
   type SegmentedControlRuntimeProps,
 } from "./widgets/SegmentedControlWidget.js";
+export {
+  textInputWidget,
+  textInputRegistration,
+  TextInput,
+  TEXT_INPUT_TYPES,
+  type TextInputType,
+  type TextInputProps,
+  type TextInputRuntimeProps,
+} from "./widgets/TextInputWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -973,6 +983,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(rangeSliderRegistration);
         ctx.widgets.register(badgeRegistration);
         ctx.widgets.register(segmentedControlRegistration);
+        ctx.widgets.register(textInputRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
