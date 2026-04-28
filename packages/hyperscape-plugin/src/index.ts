@@ -236,6 +236,7 @@ import { paginationRegistration } from "./widgets/PaginationWidget.js";
 import { iconButtonRegistration } from "./widgets/IconButtonWidget.js";
 import { dividerRegistration } from "./widgets/DividerWidget.js";
 import { skeletonRegistration } from "./widgets/SkeletonWidget.js";
+import { stepIndicatorRegistration } from "./widgets/StepIndicatorWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -692,6 +693,18 @@ export {
   type SkeletonShape,
   type SkeletonProps,
 } from "./widgets/SkeletonWidget.js";
+export {
+  stepIndicatorWidget,
+  stepIndicatorRegistration,
+  StepIndicator,
+  STEP_STATES,
+  STEP_INDICATOR_ORIENTATIONS,
+  type StepState,
+  type StepIndicatorOrientation,
+  type StepIndicatorItem,
+  type StepIndicatorProps,
+  type StepIndicatorRuntimeProps,
+} from "./widgets/StepIndicatorWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -1126,6 +1139,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(iconButtonRegistration);
         ctx.widgets.register(dividerRegistration);
         ctx.widgets.register(skeletonRegistration);
+        ctx.widgets.register(stepIndicatorRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
