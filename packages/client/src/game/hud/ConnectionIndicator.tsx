@@ -1,37 +1,35 @@
 /**
- * ConnectionIndicator - Network Connection Status Display
+ * Connection Indicator — host adapter.
  *
- * Shows connection status and reconnection progress:
- * - Hidden when connected normally
- * - Shows reconnecting state with attempt count
- * - Shows failed state when max attempts exceeded
+ * Renders the registered `ConnectionIndicator` widget from the
+ * `@hyperforge/hyperscape` meta-plugin (slice 34 of the D6.c
+ * widget migration arc). This file is now a thin adapter:
+ *   - subscribes to the engine's NETWORK_* events
+ *   - projects the reconnect state machine into the widget's
+ *     typed props (`status`, `attempt`, `maxAttempts`)
+ *   - exposes the same `<ConnectionIndicator world={...} />`
+ *     surface so the call site in CoreUI.tsx stays unchanged
  *
- * @packageDocumentation
+ * Layout, animation, and visual states all live in the registered
+ * widget at
+ * `packages/hyperscape-plugin/src/widgets/ConnectionIndicatorWidget.tsx`.
  */
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { EventType } from "@hyperforge/shared";
+import {
+  ConnectionIndicator as ConnectionIndicatorWidget,
+  type ConnectionStatus,
+} from "@hyperforge/hyperscape";
 import type { ClientWorld } from "../../types";
-import { UI } from "../../constants/ui";
-import { zIndex } from "../../constants/tokens";
 
-/** Connection status states */
-type ConnectionStatus =
-  | "connected"
-  | "disconnected"
-  | "reconnecting"
-  | "failed";
-
-/** Reconnection state data */
 interface ReconnectState {
   status: ConnectionStatus;
   attempt: number;
   maxAttempts: number;
-  delayMs: number;
 }
 
 interface ConnectionIndicatorProps {
-  /** The world instance for event subscriptions */
   world: ClientWorld | null;
 }
 
@@ -42,65 +40,43 @@ export function ConnectionIndicator({
     status: "connected",
     attempt: 0,
     maxAttempts: 10,
-    delayMs: 0,
   });
 
-  // Handle network events
   const handleReconnecting = useCallback((payload: unknown) => {
-    const data = payload as {
-      attempt: number;
-      maxAttempts: number;
-      delayMs: number;
-    };
+    const data = payload as { attempt: number; maxAttempts: number };
     setState({
       status: "reconnecting",
       attempt: data.attempt,
       maxAttempts: data.maxAttempts,
-      delayMs: data.delayMs,
     });
   }, []);
 
   const handleReconnected = useCallback(() => {
-    setState({
-      status: "connected",
-      attempt: 0,
-      maxAttempts: 10,
-      delayMs: 0,
-    });
+    setState({ status: "connected", attempt: 0, maxAttempts: 10 });
   }, []);
 
   const handleDisconnected = useCallback(() => {
-    // Only update if not already reconnecting
     setState((prev) => {
-      if (prev.status === "reconnecting") {
-        return prev;
-      }
-      return {
-        ...prev,
-        status: "disconnected",
-      };
+      if (prev.status === "reconnecting") return prev;
+      return { ...prev, status: "disconnected" };
     });
   }, []);
 
   const handleReconnectFailed = useCallback((payload: unknown) => {
-    const data = payload as { attempts: number; reason: string };
+    const data = payload as { attempts: number };
     setState({
       status: "failed",
       attempt: data.attempts,
       maxAttempts: data.attempts,
-      delayMs: 0,
     });
   }, []);
 
-  // Subscribe to network events
   useEffect(() => {
     if (!world) return;
-
     world.on(EventType.NETWORK_RECONNECTING, handleReconnecting);
     world.on(EventType.NETWORK_RECONNECTED, handleReconnected);
     world.on(EventType.NETWORK_DISCONNECTED, handleDisconnected);
     world.on(EventType.NETWORK_RECONNECT_FAILED, handleReconnectFailed);
-
     return () => {
       world.off(EventType.NETWORK_RECONNECTING, handleReconnecting);
       world.off(EventType.NETWORK_RECONNECTED, handleReconnected);
@@ -115,145 +91,26 @@ export function ConnectionIndicator({
     handleReconnectFailed,
   ]);
 
-  // Don't render when connected
-  if (state.status === "connected") {
-    return null;
-  }
-
-  // Calculate progress for reconnecting state
-  const progress =
-    state.status === "reconnecting"
-      ? (state.attempt / state.maxAttempts) * 100
-      : state.status === "failed"
-        ? 100
-        : 0;
+  if (state.status === "connected") return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: `calc(${UI.SAFE_AREAS.TOP} + 16px)`,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: zIndex.toast,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 8,
-        padding: "12px 20px",
-        backgroundColor:
-          state.status === "failed"
-            ? "rgba(180, 30, 30, 0.95)"
-            : "rgba(40, 40, 40, 0.95)",
-        borderRadius: 8,
-        border: `1px solid ${state.status === "failed" ? "#c44" : "#555"}`,
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
-        minWidth: 200,
-        fontFamily: "system-ui, -apple-system, sans-serif",
-      }}
-    >
-      {/* Status Icon */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        {state.status === "reconnecting" && (
-          <div
-            style={{
-              width: 16,
-              height: 16,
-              border: "2px solid #888",
-              borderTopColor: "#fff",
-              borderRadius: "50%",
-              animation: "spin 1s linear infinite",
-            }}
-          />
-        )}
-        {state.status === "failed" && (
-          <div
-            style={{
-              width: 16,
-              height: 16,
-              color: "#fff",
-              fontSize: 16,
-              lineHeight: "16px",
-              textAlign: "center",
-            }}
-          >
-            ✕
-          </div>
-        )}
-        <span
-          style={{
-            color: "#fff",
-            fontSize: 14,
-            fontWeight: 500,
-          }}
-        >
-          {state.status === "reconnecting" && "Reconnecting..."}
-          {state.status === "disconnected" && "Disconnected"}
-          {state.status === "failed" && "Connection Lost"}
-        </span>
-      </div>
-
-      {/* Progress bar for reconnecting */}
-      {state.status === "reconnecting" && (
-        <>
-          <div
-            style={{
-              width: "100%",
-              height: 4,
-              backgroundColor: "#333",
-              borderRadius: 2,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${progress}%`,
-                height: "100%",
-                backgroundColor: "#4a9eff",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-          <span
-            style={{
-              color: "#aaa",
-              fontSize: 12,
-            }}
-          >
-            Attempt {state.attempt} of {state.maxAttempts}
-          </span>
-        </>
-      )}
-
-      {/* Failed state message */}
-      {state.status === "failed" && (
-        <span
-          style={{
-            color: "#faa",
-            fontSize: 12,
-            textAlign: "center",
-          }}
-        >
-          Please refresh the page to reconnect.
-        </span>
-      )}
-
-      {/* CSS animation for spinner */}
-      <style>
-        {`
-          @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-        `}
-      </style>
-    </div>
+    <ConnectionIndicatorWidget
+      status={state.status}
+      attempt={state.attempt}
+      maxAttempts={state.maxAttempts}
+      topOffsetPx={56}
+      zIndex={50}
+      panelBackgroundColor="rgba(40, 40, 40, 0.95)"
+      failedBackgroundColor="rgba(180, 30, 30, 0.95)"
+      borderColor="#555"
+      failedBorderColor="#c44"
+      textColor="#ffffff"
+      secondaryTextColor="#aaaaaa"
+      failedTextColor="#ffaaaa"
+      spinnerColor="#888888"
+      progressColor="#4a9eff"
+      progressTrackColor="#333333"
+    />
   );
 }
 
