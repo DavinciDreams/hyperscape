@@ -202,6 +202,7 @@ import { floatingXPDropsRegistration } from "./widgets/FloatingXPDropsWidget.js"
 import { unlocksSectionRegistration } from "./widgets/UnlocksSectionWidget.js";
 import { coinPouchRegistration } from "./widgets/CoinPouchWidget.js";
 import { selectOptionRegistration } from "./widgets/SelectOptionWidget.js";
+import { confirmDialogRegistration } from "./widgets/ConfirmDialogWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -354,6 +355,15 @@ export {
   type SelectOptionProps,
   type SelectOptionRuntimeProps,
 } from "./widgets/SelectOptionWidget.js";
+export {
+  confirmDialogWidget,
+  confirmDialogRegistration,
+  ConfirmDialog,
+  CONFIRM_DIALOG_VARIANTS,
+  type ConfirmDialogVariant,
+  type ConfirmDialogProps,
+  type ConfirmDialogRuntimeProps,
+} from "./widgets/ConfirmDialogWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -754,6 +764,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(unlocksSectionRegistration);
         ctx.widgets.register(coinPouchRegistration);
         ctx.widgets.register(selectOptionRegistration);
+        ctx.widgets.register(confirmDialogRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
