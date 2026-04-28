@@ -26,9 +26,12 @@
 
 import {
   isWidgetVisible,
+  parseCommandBinding,
   resolveWidgetProps,
   themeToCssVars,
   type AnchoredPosition,
+  type CommandDispatchResult,
+  type CommandRegistry,
   type DataContext,
   type PropResolutionIssue,
   type ThemeManifest,
@@ -131,6 +134,27 @@ export interface ManifestRendererProps {
    *     container (e.g. the World Studio PIE viewport overlay).
    */
   overlayPosition?: "fixed" | "absolute";
+  /**
+   * Optional command registry used to dispatch `actions` declared
+   * on widget instances (Phase A2 of
+   * `PLAN_AI_AUTHORING_FOUNDATIONS.md`). When omitted, widget
+   * actions on the layout are rendered as no-ops — useful for
+   * editor previews that show layout structure without firing
+   * commands.
+   */
+  commandRegistry?: CommandRegistry;
+  /**
+   * Optional sink for the result of every action-binding dispatch.
+   * Fires after each command resolves (or rejects). Defaults to a
+   * no-op; the live client wires it to a toast / telemetry
+   * pipeline so unknown-command / invalid-args / handler-threw
+   * errors surface to the player.
+   */
+  onActionResult?: (
+    instanceId: string,
+    callbackName: string,
+    result: CommandDispatchResult<unknown>,
+  ) => void;
 }
 
 /**
@@ -195,6 +219,12 @@ interface InstanceViewProps {
   layoutRevision: number | undefined;
   shell: ManifestWidgetShell;
   onIssues?: (instanceId: string, issues: PropResolutionIssue[]) => void;
+  commandRegistry?: CommandRegistry;
+  onActionResult?: (
+    instanceId: string,
+    callbackName: string,
+    result: CommandDispatchResult<unknown>,
+  ) => void;
 }
 
 function InstanceView({
@@ -205,6 +235,8 @@ function InstanceView({
   layoutRevision,
   shell: Shell,
   onIssues,
+  commandRegistry,
+  onActionResult,
 }: InstanceViewProps): ReactElement | null {
   const widget = registry.getWidget(instance.widgetId);
   if (!widget) {
@@ -232,6 +264,54 @@ function InstanceView({
     return null;
   }
 
+  // Build action callbacks. Each entry on `instance.actions` becomes
+  // a (arg) => void prop spread into the component. Without a
+  // command registry we leave the prop undefined; the widget's
+  // *RuntimeProps callback signature already treats it as optional.
+  const actionCallbacks: Record<string, (arg?: unknown) => void> = {};
+  if (commandRegistry && instance.actions) {
+    for (const [callbackName, expression] of Object.entries(instance.actions)) {
+      // Parse once outside the callback so a malformed expression
+      // surfaces synchronously rather than on first click.
+      let commandId: string;
+      try {
+        ({ commandId } = parseCommandBinding(expression));
+      } catch (err) {
+        if (onIssues) {
+          onIssues(instance.instanceId, [
+            {
+              code: "invalid-expression",
+              key: callbackName,
+              message:
+                err instanceof Error
+                  ? err.message
+                  : `Failed to parse action binding "${expression}"`,
+            },
+          ]);
+        }
+        continue;
+      }
+      actionCallbacks[callbackName] = (arg?: unknown) => {
+        // Fire-and-forget dispatch. The result is surfaced through
+        // `onActionResult`; callers that need to await dispatch
+        // (rare in click handlers) can capture the promise via the
+        // result sink.
+        void commandRegistry.dispatch(commandId, arg ?? {}).then(
+          (result) => {
+            if (onActionResult) {
+              onActionResult(instance.instanceId, callbackName, result);
+            }
+          },
+          // `.dispatch` already catches handler-thrown errors and
+          // returns them as `ok: false`. The reject branch should
+          // be unreachable, but defensive coverage keeps a
+          // promise-rejection from going to console.
+          /* istanbul ignore next */ () => {},
+        );
+      };
+    }
+  }
+
   // Only `anchored` positions are rendered in the live HUD so far.
   // Grid and flex come when the editor's layout canvas is flipped to
   // match (tracked in the D6 exit criterion).
@@ -249,7 +329,7 @@ function InstanceView({
       anchorStyle={style}
     >
       <div data-widget-id={instance.widgetId} style={{ pointerEvents: "auto" }}>
-        <Component {...resolved.props} />
+        <Component {...resolved.props} {...actionCallbacks} />
       </div>
     </Shell>
   );
@@ -270,6 +350,8 @@ export const ManifestRenderer = memo(function ManifestRenderer({
   onIssues,
   widgetShell,
   overlayPosition = "fixed",
+  commandRegistry,
+  onActionResult,
 }: ManifestRendererProps) {
   const Shell = widgetShell ?? PassthroughShell;
 
@@ -322,6 +404,8 @@ export const ManifestRenderer = memo(function ManifestRenderer({
           layoutRevision={layout.revision}
           shell={Shell}
           onIssues={onIssues}
+          commandRegistry={commandRegistry}
+          onActionResult={onActionResult}
         />
       ))}
     </div>

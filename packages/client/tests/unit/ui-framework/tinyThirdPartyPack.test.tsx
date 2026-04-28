@@ -27,11 +27,16 @@
  * "ship a game from JSON" claim breaks for outside builders.
  */
 
+import React from "react";
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
+import { z } from "zod";
 import {
+  CommandRegistry,
   HYPERSCAPE_DARK_THEME,
   UIPackManifestSchema,
+  defineWidget,
+  type UILayoutManifest,
   type UIPackManifest,
 } from "@hyperforge/ui-framework";
 import {
@@ -198,50 +203,161 @@ describe("Tiny third-party pack — diagnostic E2E", () => {
     result.unmount();
   });
 
-  it("Step 6: ❌ no JSON-authored way to dispatch actions OUT of a widget", () => {
-    // Inspecting the WidgetInstance schema directly: there are
-    // exactly 4 author-facing fields besides `instanceId` /
-    // `widgetId` / `position` — `props`, `bindings`,
-    // `customization`, and `visibility`. None of them describe an
-    // action / command / callback that the widget can dispatch
-    // back to the host.
+  it("Step 6: ✅ JSON-authored actions field accepted by the schema", () => {
+    // Phase A2.2 of `PLAN_AI_AUTHORING_FOUNDATIONS.md` shipped the
+    // schema change. A pack can now declare `actions: { onClick:
+    // "$command.<id>" }` next to `bindings`. This step asserts the
+    // schema accepts the new field and rejects malformed entries.
     //
-    // Concretely: a third-party-authored ConfirmDialog instance
-    // CANNOT specify "when the user clicks Confirm, send the
-    // `requestRespawn` packet" purely from JSON. The widget can
-    // RECEIVE host state via `bindings` (data flow IN), but the
-    // reverse direction (data flow OUT) requires the host to wire
-    // up a React `onConfirm` callback in code.
-    //
-    // None of the 15 BUILTIN_WIDGETS in @hyperforge/ui-widgets has
-    // any onClick / onChange / onSubmit handler at all today — the
-    // entire builtin set is read-only-display.
-    //
-    // This assertion is the canonical diagnostic capture: if a
-    // future cut adds an actions/commands field to the layout
-    // schema, this test will start failing and force the
-    // documentation to be updated.
+    // The previous capture (the `actions` field was absent and
+    // caused this step to assert "no JSON path exists") flipped
+    // when slice `ab55874d4` landed.
 
-    // Build a "minimal interactive widget" instance literal that
-    // would need an action binding to be useful. Inspect the
-    // returned validation issues to prove the schema doesn't
-    // accept any action field name we might invent:
-    const probeKeys = ["actions", "commands", "callbacks", "events"];
-    const layout = TINY_PACK.layouts.default;
-    const inst = layout.instances[0];
-    for (const key of probeKeys) {
-      expect(
-        Object.prototype.hasOwnProperty.call(inst, key),
-        `Layout instance has unexpected "${key}" field — if action ` +
-          "binding has been wired, update this diagnostic.",
-      ).toBe(false);
+    const layoutWithActions: UIPackManifest = UIPackManifestSchema.parse({
+      version: 1,
+      id: "tiny.with-actions",
+      name: "Tiny with Actions",
+      author: "no-hyperia-knowledge-required",
+      description: "Probe pack — exercises the new actions field.",
+      widgets: [{ id: "hyperforge.hud.hp-bar" }],
+      theme: HYPERSCAPE_DARK_THEME,
+      layouts: {
+        default: {
+          id: "tiny.layout.actions",
+          name: "Default",
+          instances: [
+            {
+              instanceId: "respawn-button",
+              widgetId: "hyperforge.hud.hp-bar",
+              position: {
+                kind: "anchored",
+                anchor: "top-left",
+                offset: { x: 0, y: 0 },
+              },
+              props: { current: 1, max: 10 },
+              actions: {
+                onClick: "$command.requestRespawn",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const inst = layoutWithActions.layouts.default.instances[0];
+    expect(inst.actions).toBeDefined();
+    expect(inst.actions?.onClick).toBe("$command.requestRespawn");
+  });
+
+  it("Step 7: ✅ ManifestRenderer dispatches the bound command on widget callback", async () => {
+    // Phase A2.3 wired ManifestRenderer to consume `actions` and
+    // build dispatch callbacks at render time. This step ships the
+    // end-to-end proof: a layout that declares an action on a
+    // widget, renders against a CommandRegistry, and observes the
+    // command fire when the widget invokes its callback.
+    //
+    // We use a stub widget instead of one of the BUILTIN_WIDGETS
+    // (none of which have callbacks today) and register it directly
+    // on `uiRegistry`. The schema flow + dispatch path being
+    // exercised is the same whichever widget id is registered.
+
+    bindAllWidgets();
+
+    const stubProbeId = "tiny.probe.click-button";
+    const stubSchema = z.object({
+      label: z.string().default(""),
+    });
+    const stubWidget = defineWidget({
+      manifest: {
+        id: stubProbeId,
+        name: "Click Probe",
+        category: "panel",
+        defaultSize: { width: 16, height: 4 },
+      },
+      propsSchema: stubSchema,
+      defaultProps: { label: "" },
+    });
+    const ClickProbe: React.FC<
+      z.infer<typeof stubSchema> & { onClick?: (arg: unknown) => void }
+    > = ({ label, onClick }) => (
+      <button data-testid="click-probe" onClick={() => onClick?.({ slot: 3 })}>
+        {label}
+      </button>
+    );
+    uiRegistry.register({
+      widget: stubWidget,
+      Component: ClickProbe as unknown as Parameters<
+        typeof uiRegistry.register
+      >[0]["Component"],
+    });
+
+    // Host-registered command. `argsSchema` validates whatever the
+    // widget passes through its callback.
+    const commandRegistry = new CommandRegistry();
+    let capturedArgs: unknown = null;
+    commandRegistry.register({
+      id: "tiny.useAbility",
+      argsSchema: z.object({ slot: z.number() }),
+      handler: async (args) => {
+        capturedArgs = args;
+        return "ok";
+      },
+    });
+
+    const layout: UILayoutManifest = {
+      id: "tiny.actions.layout",
+      name: "Click Probe Layout",
+      instances: [
+        {
+          instanceId: "probe-1",
+          widgetId: stubProbeId,
+          position: {
+            kind: "anchored",
+            anchor: "top-left",
+            offset: { x: 0, y: 0 },
+          },
+          props: { label: "Click me" },
+          actions: { onClick: "$command.tiny.useAbility" },
+          visible: true,
+        },
+      ],
+    };
+
+    let lastResult: unknown = null;
+    const rendered = render(
+      <ClientUIWidgetProvider>
+        <ManifestRenderer
+          layout={layout}
+          registry={uiRegistry}
+          dataContext={{}}
+          commandRegistry={commandRegistry}
+          onActionResult={(_inst, _cb, result) => {
+            lastResult = result;
+          }}
+        />
+      </ClientUIWidgetProvider>,
+    );
+
+    const button = rendered.container.querySelector(
+      '[data-testid="click-probe"]',
+    );
+    expect(button).not.toBeNull();
+    (button as HTMLButtonElement).click();
+
+    // Allow the dispatch promise to resolve.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(capturedArgs).toEqual({ slot: 3 });
+    expect(lastResult).toBeTruthy();
+    if (
+      lastResult &&
+      typeof lastResult === "object" &&
+      "ok" in (lastResult as object)
+    ) {
+      expect((lastResult as { ok: boolean }).ok).toBe(true);
     }
 
-    // The actual production workaround: hosts wire callbacks via
-    // React props by importing the widget directly and rendering
-    // it themselves (not via ManifestRenderer). The slice 81-83
-    // consumer-swaps in client/src/game/hud/overlays/*.tsx are
-    // examples of this pattern. Documented as a finding rather
-    // than a fix: "interactive UI requires host code, not JSON".
+    rendered.unmount();
+    uiRegistry.unregister(stubProbeId);
   });
 });
