@@ -229,6 +229,7 @@ import { emptyStateRegistration } from "./widgets/EmptyStateWidget.js";
 import { chipListRegistration } from "./widgets/ChipListWidget.js";
 import { sectionHeaderRegistration } from "./widgets/SectionHeaderWidget.js";
 import { countdownDisplayRegistration } from "./widgets/CountdownDisplayWidget.js";
+import { breadcrumbsRegistration } from "./widgets/BreadcrumbsWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -619,6 +620,14 @@ export {
   type CountdownFormat,
   type CountdownDisplayProps,
 } from "./widgets/CountdownDisplayWidget.js";
+export {
+  breadcrumbsWidget,
+  breadcrumbsRegistration,
+  Breadcrumbs,
+  type BreadcrumbItem,
+  type BreadcrumbsProps,
+  type BreadcrumbsRuntimeProps,
+} from "./widgets/BreadcrumbsWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -1046,6 +1055,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(chipListRegistration);
         ctx.widgets.register(sectionHeaderRegistration);
         ctx.widgets.register(countdownDisplayRegistration);
+        ctx.widgets.register(breadcrumbsRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
