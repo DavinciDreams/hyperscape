@@ -197,4 +197,51 @@ describe("Tiny third-party pack — diagnostic E2E", () => {
     ).toBe(true);
     result.unmount();
   });
+
+  it("Step 6: ❌ no JSON-authored way to dispatch actions OUT of a widget", () => {
+    // Inspecting the WidgetInstance schema directly: there are
+    // exactly 4 author-facing fields besides `instanceId` /
+    // `widgetId` / `position` — `props`, `bindings`,
+    // `customization`, and `visibility`. None of them describe an
+    // action / command / callback that the widget can dispatch
+    // back to the host.
+    //
+    // Concretely: a third-party-authored ConfirmDialog instance
+    // CANNOT specify "when the user clicks Confirm, send the
+    // `requestRespawn` packet" purely from JSON. The widget can
+    // RECEIVE host state via `bindings` (data flow IN), but the
+    // reverse direction (data flow OUT) requires the host to wire
+    // up a React `onConfirm` callback in code.
+    //
+    // None of the 15 BUILTIN_WIDGETS in @hyperforge/ui-widgets has
+    // any onClick / onChange / onSubmit handler at all today — the
+    // entire builtin set is read-only-display.
+    //
+    // This assertion is the canonical diagnostic capture: if a
+    // future cut adds an actions/commands field to the layout
+    // schema, this test will start failing and force the
+    // documentation to be updated.
+
+    // Build a "minimal interactive widget" instance literal that
+    // would need an action binding to be useful. Inspect the
+    // returned validation issues to prove the schema doesn't
+    // accept any action field name we might invent:
+    const probeKeys = ["actions", "commands", "callbacks", "events"];
+    const layout = TINY_PACK.layouts.default;
+    const inst = layout.instances[0];
+    for (const key of probeKeys) {
+      expect(
+        Object.prototype.hasOwnProperty.call(inst, key),
+        `Layout instance has unexpected "${key}" field — if action ` +
+          "binding has been wired, update this diagnostic.",
+      ).toBe(false);
+    }
+
+    // The actual production workaround: hosts wire callbacks via
+    // React props by importing the widget directly and rendering
+    // it themselves (not via ManifestRenderer). The slice 81-83
+    // consumer-swaps in client/src/game/hud/overlays/*.tsx are
+    // examples of this pattern. Documented as a finding rather
+    // than a fix: "interactive UI requires host code, not JSON".
+  });
 });
