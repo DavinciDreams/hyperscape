@@ -1,46 +1,43 @@
 /**
- * Kicked Overlay Component
+ * Kicked Overlay — host adapter.
  *
- * Shows when the player is kicked from the server.
- * Displays the reason for being kicked.
+ * Renders the registered `KickedOverlay` widget from the
+ * `@hyperforge/hyperscape` meta-plugin (slice 31 of the D6.c
+ * widget migration arc). This file is now a thin adapter:
+ *   - threads the active theme into the widget's typed color props
+ *   - exposes the same `<KickedOverlay code={...}>` surface so the
+ *     `./overlays` barrel + the single call site in CoreUI.tsx
+ *     stay unchanged
  *
- * @packageDocumentation
+ * The actual rendering — message lookup, layout, ARIA — lives in
+ * `packages/hyperscape-plugin/src/widgets/KickedOverlayWidget.tsx`.
  */
 
 import React from "react";
 import { useThemeStore } from "@/ui";
-
-/**
- * Kick reason messages
- */
-const kickMessages: Record<string, string> = {
-  duplicate_user: "Player already active on another device or window.",
-  player_limit: "Player limit reached.",
-  unknown: "You were kicked.",
-};
+import { KickedOverlay as KickedOverlayWidget } from "@hyperforge/hyperscape";
 
 interface KickedOverlayProps {
-  /** Kick reason code */
+  /** Kick reason code — looked up by the widget's `messages` map. */
   code: string;
 }
 
-/**
- * Kicked overlay component
- */
 export function KickedOverlay({
   code,
 }: KickedOverlayProps): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
-
   return (
-    <div
-      className="absolute inset-0 flex items-center justify-center pointer-events-auto"
-      style={{ backgroundColor: theme.colors.background.primary }}
-    >
-      <div className="text-lg" style={{ color: theme.colors.text.primary }}>
-        {kickMessages[code] || kickMessages.unknown}
-      </div>
-    </div>
+    <KickedOverlayWidget
+      code={code}
+      messages={{
+        duplicate_user: "Player already active on another device or window.",
+        player_limit: "Player limit reached.",
+        unknown: "You were kicked.",
+      }}
+      backgroundColor={theme.colors.background.primary}
+      textColor={theme.colors.text.primary}
+      fontSize={18}
+    />
   );
 }
 
