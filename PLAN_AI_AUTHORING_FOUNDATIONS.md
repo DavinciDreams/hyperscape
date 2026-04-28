@@ -118,7 +118,7 @@ Every item is **typed TypeScript service first**; agent shells
 (Eliza actions, MCP wrappers, CLI commands) come after. Each item
 is also a focused 1–3 day cut, not a multi-week mega-phase.
 
-### Phase A1 — Catalog discovery service ⚪ *(next)*
+### Phase A1 — Catalog discovery service ✅ *(shipped — `f3845ac36`)*
 
 **Goal:** make the existing 50-widget library AI-queryable in-process,
 without inventing a new agent framework.
@@ -152,7 +152,7 @@ this, an AI literally can't see what exists.
 
 ---
 
-### Phase A2 — Action / command bindings
+### Phase A2 — Action / command bindings ✅ *(shipped — `bb62db8d3` `ab55874d4` `ba05536f4`)*
 
 **Goal:** close the JSON authoring gap so interactive UIs can be
 authored from manifests, not host code.
@@ -183,7 +183,7 @@ to "fully-interactive-from-JSON". Critical for the vision.
 
 ---
 
-### Phase A3 — Plugin scaffolder service
+### Phase A3 — Plugin scaffolder service ✅ *(shipped — `c77229c2c`)*
 
 **Goal:** close the contributor flywheel half — make creating a
 new widget a programmatic call, not a manual file-by-file edit.
@@ -212,7 +212,7 @@ not engineer-hours.
 
 ---
 
-### Phase A4 — Agent shells (Eliza + MCP + CLI)
+### Phase A4 — Agent shells (Eliza + MCP + CLI) ⚪ *(next)*
 
 **Goal:** wrap A1 / A2 / A3 services with the consumer-facing
 interfaces an AI runtime needs.
