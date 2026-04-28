@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "build:catalog": "bun run scripts/build-catalog.ts",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",

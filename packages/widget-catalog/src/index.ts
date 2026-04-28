@@ -19,6 +19,15 @@ export {
 
 export { extractPropSummary } from "./extractPropSummary";
 
+export { extractJsdocSummary } from "./extractJsdocSummary";
+
+export {
+  buildStaticEntry,
+  buildStaticCatalogDocument,
+  type StaticCatalogEntry,
+  type StaticCatalogDocument,
+} from "./staticCatalog";
+
 export type {
   CatalogFilter,
   CatalogStats,
