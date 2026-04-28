@@ -1,0 +1,43 @@
+{
+  "name": "@hyperforge/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HyperForge command-line interface. Wraps @hyperforge/widget-catalog and @hyperforge/plugin-scaffolder so humans, CI, and AI agents (via subprocess) can list/search widgets and scaffold new ones without booting the framework.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "hyperforge": "dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hyperforge/plugin-scaffolder": "workspace:*",
+    "@hyperforge/widget-catalog": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}

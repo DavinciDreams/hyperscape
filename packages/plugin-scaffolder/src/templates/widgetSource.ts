@@ -18,8 +18,8 @@ import {
   emitDefaultPropsBody,
   emitDestructureList,
   emitPropsSchemaBody,
-} from "../emit";
-import type { WidgetSpec } from "../types";
+} from "../emit.js";
+import type { WidgetSpec } from "../types.js";
 
 export function renderWidgetSource(spec: WidgetSpec): string {
   const camel = camelize(spec.name);

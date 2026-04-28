@@ -24,9 +24,9 @@
 
 import type { Widget } from "@hyperforge/ui-framework";
 
-import { extractJsdocSummary } from "./extractJsdocSummary";
-import { toCatalogEntry } from "./service";
-import type { WidgetCatalogEntry } from "./types";
+import { extractJsdocSummary } from "./extractJsdocSummary.js";
+import { toCatalogEntry } from "./service.js";
+import type { WidgetCatalogEntry } from "./types.js";
 
 /**
  * Static catalog entry. Extends `WidgetCatalogEntry` with two

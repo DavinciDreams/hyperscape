@@ -8,14 +8,20 @@
  * (CLI, agent, test) decides where the bytes land.
  */
 
-export { scaffoldWidget } from "./scaffoldWidget";
+export { scaffoldWidget } from "./scaffoldWidget.js";
+
+export {
+  applyToWorkspace,
+  type ApplyToWorkspaceOptions,
+  type ApplyToWorkspaceReport,
+} from "./applyToWorkspace.js";
 
 export {
   assertWidgetSpec,
   validateWidgetSpec,
   type ScaffoldValidationIssue,
   type ScaffoldValidationResult,
-} from "./validate";
+} from "./validate.js";
 
 export {
   camelize,
@@ -24,13 +30,13 @@ export {
   emitLiteral,
   emitPropsSchemaBody,
   emitZodField,
-} from "./emit";
+} from "./emit.js";
 
-export { renderWidgetSource } from "./templates/widgetSource";
+export { renderWidgetSource } from "./templates/widgetSource.js";
 export {
   renderWidgetTest,
   type WidgetTestRenderOptions,
-} from "./templates/widgetTest";
+} from "./templates/widgetTest.js";
 
 export type {
   PropSpec,
@@ -40,4 +46,4 @@ export type {
   ScaffoldResult,
   ScaffoldWidgetOptions,
   WidgetSpec,
-} from "./types";
+} from "./types.js";

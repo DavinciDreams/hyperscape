@@ -5,7 +5,7 @@
  * future templates.
  */
 
-import type { PropSpec, WidgetSpec } from "./types";
+import type { PropSpec, WidgetSpec } from "./types.js";
 
 /**
  * `FooBar` → `fooBar`. Used for variable / registration names.

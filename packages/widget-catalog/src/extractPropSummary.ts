@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 
-import type { WidgetPropSummary } from "./types";
+import type { WidgetPropSummary } from "./types.js";
 
 /**
  * Given a Zod schema (typically `widget.propsSchema`), return a

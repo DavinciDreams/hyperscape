@@ -13,8 +13,8 @@
  * existing tests.
  */
 
-import { camelize } from "../emit";
-import type { WidgetSpec } from "../types";
+import { camelize } from "../emit.js";
+import type { WidgetSpec } from "../types.js";
 
 export interface WidgetTestRenderOptions {
   /**

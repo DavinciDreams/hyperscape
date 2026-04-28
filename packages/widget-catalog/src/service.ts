@@ -29,8 +29,12 @@ import type {
   WidgetRegistry,
 } from "@hyperforge/ui-framework";
 
-import { extractPropSummary } from "./extractPropSummary";
-import type { CatalogFilter, CatalogStats, WidgetCatalogEntry } from "./types";
+import { extractPropSummary } from "./extractPropSummary.js";
+import type {
+  CatalogFilter,
+  CatalogStats,
+  WidgetCatalogEntry,
+} from "./types.js";
 
 /**
  * Minimal interface the catalog needs from the registry. Decouples

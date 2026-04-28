@@ -6,7 +6,7 @@
  * report rather than the first failure.
  */
 
-import type { PropSpec, WidgetSpec } from "./types";
+import type { PropSpec, WidgetSpec } from "./types.js";
 
 export interface ScaffoldValidationIssue {
   /** Dotted path to the bad field, e.g. `"props[2].defaultValue"`. */

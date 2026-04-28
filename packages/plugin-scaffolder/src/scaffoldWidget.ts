@@ -6,16 +6,16 @@
  * (CLI, agent, test) decides what to do with the result.
  */
 
-import { renderWidgetSource } from "./templates/widgetSource";
-import { renderWidgetTest } from "./templates/widgetTest";
+import { renderWidgetSource } from "./templates/widgetSource.js";
+import { renderWidgetTest } from "./templates/widgetTest.js";
 import type {
   ScaffoldResult,
   ScaffoldWidgetOptions,
   ScaffoldedFile,
   RegistrationSite,
   WidgetSpec,
-} from "./types";
-import { assertWidgetSpec } from "./validate";
+} from "./types.js";
+import { assertWidgetSpec } from "./validate.js";
 
 const DEFAULT_WIDGETS_DIR = "packages/hyperscape-plugin/src/widgets";
 const DEFAULT_INDEX_FILE = "packages/hyperscape-plugin/src/index.ts";

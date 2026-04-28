@@ -15,22 +15,22 @@ export {
   toCatalogEntry,
   type CatalogRegistrySource,
   type WidgetCatalogServiceOptions,
-} from "./service";
+} from "./service.js";
 
-export { extractPropSummary } from "./extractPropSummary";
+export { extractPropSummary } from "./extractPropSummary.js";
 
-export { extractJsdocSummary } from "./extractJsdocSummary";
+export { extractJsdocSummary } from "./extractJsdocSummary.js";
 
 export {
   buildStaticEntry,
   buildStaticCatalogDocument,
   type StaticCatalogEntry,
   type StaticCatalogDocument,
-} from "./staticCatalog";
+} from "./staticCatalog.js";
 
 export type {
   CatalogFilter,
   CatalogStats,
   WidgetCatalogEntry,
   WidgetPropSummary,
-} from "./types";
+} from "./types.js";
