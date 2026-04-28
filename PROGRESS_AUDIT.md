@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-28 (REFRESH 12)
+# Hyperscape Progress Audit — 2026-04-28 (REFRESH 13)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -39,6 +39,94 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 13 — Pivot: diagnostic finds the framework works for read-only, not interactive; new plan for AI authoring foundations (2026-04-28 afternoon)
+
+The widget-stockpiling phase (slices 31-80, 50 widgets, +514 plugin
+tests) hit a natural pause point. Two strategic reframes happened
+in conversation that this refresh captures:
+
+**1. The vision is AI-buildable plugin marketplace, not just
+clean engine/game separation.** HyperForge's primary user is an AI
+agent that composes games from a growing plugin library, with both
+humans and AIs as contributors. The 50-widget catalog isn't
+"speculative primitives" — it's inventory for that flywheel.
+
+**2. AI runtime split.** ElizaOS (already used by
+`EmbeddedHyperiaService` for in-game agents) is the right
+orchestration runtime for game-design and in-game-NPC agents.
+**Code-writing agents** (filling in custom widget render logic,
+running tests, fixing types) belong on specialized infrastructure
+like Claude Code dispatched as a subprocess. Eliza coordinates;
+code-agents execute. Same shape as how the duel AI delegates
+pathfinding to engine systems.
+
+### Diagnostic experiment shipped (`cedf92723` → `5ab4af98b`)
+
+Instead of more consumer-swaps, ran a focused E2E experiment:
+**can a third party with no Hyperia knowledge ship a UI from JSON
+today?**
+
+Test: `packages/client/tests/unit/ui-framework/tinyThirdPartyPack.test.tsx`
+authors the smallest plausible third-party pack pinned to
+`BUILTIN_WIDGETS` (no plugin dep) and runs it through the
+production pipeline.
+
+| Step | Claim | Status |
+|---|---|---|
+| 1 | `UIPackManifestSchema` accepts hand-written pack | ✅ |
+| 2 | `loadUIPackOnClient` validates + registers + activates | ✅ |
+| 3 | `uiRegistry` binds every layout `widgetId` to a component | ✅ |
+| 4 | `ManifestRenderer` produces DOM | ✅ |
+| 5 | `bindings` resolve from `DataContext` (data flow IN) | ✅ |
+| 6 | No JSON path for action / command bindings (data flow OUT) | ❌ |
+
+**Findings:**
+- The framework works end-to-end for **read-only** UI authoring.
+  Health bars, chat logs, leaderboards, themed reskins — shippable
+  from JSON today.
+- **Interactive UI requires host code today.** No `actions` /
+  `commands` / `callbacks` field on `WidgetInstanceSchema`. None
+  of the 15 builtin widgets has any onClick handler.
+- 50 widgets shipped, **but the catalog is invisible to AI** — no
+  machine-readable index, no MCP server, no CLI. An LLM has to
+  grep through 52 widget files to discover what exists.
+
+### New plan: `PLAN_AI_AUTHORING_FOUNDATIONS.md`
+
+Five-phase plan for the foundations the AI authoring loop needs
+**before** any LLM is wired in:
+
+- **A1 — Catalog discovery service** (next up). Make the
+  50-widget library AI-queryable. Cheapest with highest leverage.
+- **A2 — Action / command bindings.** Close the JSON-authoring
+  gap so interactive UIs can ship from manifests, not host code.
+- **A3 — Plugin scaffolder service.** Make widget creation a
+  programmatic call so the library scales with agent-hours, not
+  engineer-hours.
+- **A4 — Agent shells (Eliza + MCP + CLI).** Wrap A1/A2/A3 with
+  the consumer-facing surfaces an AI runtime needs. First phase
+  that touches an AI runtime.
+- **A5 — Worked example: AI builds a tiny game.** Live-LLM
+  validation. Recording + script. Acts as marketing demo,
+  regression test, onboarding doc.
+
+Each phase ships a typed TypeScript service first; agent shells
+come after.
+
+**This pivot deprioritizes:**
+- Continuing the widget stockpile beyond slice 80 (52 widgets is
+  enough inventory for the diagnostic phase).
+- Continuing consumer-swap of legacy components (3 of 22 done in
+  slices 81-83 — pattern proven; remainder is mechanical, can
+  resume any time).
+
+**This pivot prioritizes:**
+- Making the existing inventory discoverable.
+- Closing the action-binding capability gap.
+- Proving the contributor flywheel with a real authoring loop.
 
 ---
 
@@ -767,7 +855,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~89–90% to AAA done. Plugin tests stable at 438/438; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 12 (2026-04-28 mid-day): 13 more widget migrations shipped end-to-end (slices 46-58). All 6 manifest categories now seeded (overlay/HUD/modal/panel/menu/debug). New primitives this refresh: QuantityPrompt, IncomingRequestModal, EquipmentSlotIcon, DialoguePanel, ArrayInput, CurvePreview, ContextMenu, KeyValueList, CursorTooltip, NotificationToastList, BuffBar, VictoryOverlay, AlignmentGuides. 117 new tests; ~3,620 LOC of widget code this refresh; ~8,400 LOC across slices 31-58. 28 widgets total this session arc (+240 plugin tests). Recipe at full velocity.** REFRESH 11 (slices 37-45): 9 widgets, panels/modals seeded. REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
+**Status: pivoted from widget stockpiling to AI authoring foundations.** Plugin tests stable at 712/712 (slices 31-80 = 50 widgets); ui-framework 274/274; client ui-framework 117/117 + 6 new diagnostic tests in `tinyThirdPartyPack.test.tsx`. **REFRESH 13 (2026-04-28 afternoon): diagnostic experiment proved framework supports read-only authoring end-to-end (5 of 6 checkpoints ✅) but interactive authoring requires host code (1 ❌ — no `actions` field on `WidgetInstanceSchema`). New plan `PLAN_AI_AUTHORING_FOUNDATIONS.md` defines 5-phase foundation work to close the gap (catalog discovery → action bindings → scaffolder → agent shells → worked example). Eliza orchestrates, Claude Code edits.** Slice 81-83 shipped 3 consumer-swaps (Kicked + Disconnected + DeathScreen + ConnectionIndicator + MinimapCompass) before the strategic pivot; pattern proven. Top-10 #5 widget stockpile is sufficient inventory for the diagnostic phase; further additions paused until the catalog is queryable. REFRESH 12 (slices 46-58): 13 widgets, 6 categories seeded. REFRESH 11 (slices 37-45): 9 widgets, panels/modals seeded. REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
