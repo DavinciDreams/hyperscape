@@ -130,18 +130,28 @@ export function resolveStreamDeliveryInfo(
 export function resolveExternalStreamDeliveryInfo(
   env: NodeJS.ProcessEnv = process.env,
 ): StreamExternalDeliveryInfo {
+  const deliveryMode = (env.STREAM_DELIVERY_MODE ?? "").trim().toLowerCase();
+  const allowLegacyFallback = deliveryMode !== "self_hls";
   const provider =
     asNonEmptyString(env.STREAM_EXTERNAL_DELIVERY_PROVIDER) ??
-    asNonEmptyString(env.STREAM_DELIVERY_PROVIDER);
+    (allowLegacyFallback
+      ? asNonEmptyString(env.STREAM_DELIVERY_PROVIDER)
+      : null);
   const hlsUrl =
     asNonEmptyString(env.STREAM_EXTERNAL_PLAYBACK_HLS_URL) ??
-    asNonEmptyString(env.STREAM_PLAYBACK_HLS_URL);
+    (allowLegacyFallback
+      ? asNonEmptyString(env.STREAM_PLAYBACK_HLS_URL)
+      : null);
   const llhlsUrl =
     asNonEmptyString(env.STREAM_EXTERNAL_PLAYBACK_LLHLS_URL) ??
-    asNonEmptyString(env.STREAM_PLAYBACK_LLHLS_URL);
+    (allowLegacyFallback
+      ? asNonEmptyString(env.STREAM_PLAYBACK_LLHLS_URL)
+      : null);
   const ingestUrl =
     asNonEmptyString(env.STREAM_EXTERNAL_INGEST_RTMPS_URL) ??
-    asNonEmptyString(env.STREAM_INGEST_RTMPS_URL);
+    (allowLegacyFallback
+      ? asNonEmptyString(env.STREAM_INGEST_RTMPS_URL)
+      : null);
 
   return {
     provider,

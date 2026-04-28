@@ -482,10 +482,13 @@ function findCanonicalStreamingDestination(params: {
   const destinations = Array.isArray(params.externalSnapshot?.destinations)
     ? params.externalSnapshot!.destinations
     : [];
-  const canonicalProvider = normalizeStreamDestinationProvider(
-    params.delivery.provider,
-    "Cloudflare",
-  );
+  const canonicalProvider =
+    params.delivery.mode === "self_hls"
+      ? "self_hls"
+      : normalizeStreamDestinationProvider(
+          params.delivery.provider,
+          "Cloudflare",
+        );
   const canonicalDestinationId = buildStreamDestinationId({
     role: "canonical",
     provider: canonicalProvider,
@@ -871,17 +874,32 @@ export function buildStreamingStatusPayload(params: {
   const externalClientConnected = asBoolean(
     effectiveExternalSnapshot?.clientConnected,
   );
-  const activeCanonicalProvider =
-    persistedAuthority?.canonicalProviderState?.activeProvider ??
-    (delivery.mode === "self_hls"
+  const configuredCanonicalProvider =
+    delivery.mode === "self_hls"
       ? "self_hls"
-      : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare"));
+      : normalizeStreamDestinationProvider(delivery.provider, "Cloudflare");
+  const activeCanonicalProvider =
+    delivery.mode === "self_hls"
+      ? "self_hls"
+      : (persistedAuthority?.canonicalProviderState?.activeProvider ??
+        configuredCanonicalProvider);
+  const matchingPersistedCanonicalProviderState =
+    persistedAuthority?.canonicalProviderState?.activeProvider ===
+    activeCanonicalProvider
+      ? persistedAuthority.canonicalProviderState
+      : null;
   const publicDestinations = redactIngestUrlsFromDestinations(
     (effectiveExternalSnapshot?.destinations ??
       params.base.destinations ??
       []) as readonly unknown[],
   );
   const publicDelivery = redactIngestUrlFromDelivery(delivery);
+  const publicHealthy =
+    delivery.mode === "self_hls"
+      ? normalizedCanonicalTruth.canonicalStatus.sourceReady &&
+        normalizedCanonicalTruth.canonicalStatus.canonicalTransportConnected &&
+        normalizedCanonicalTruth.canonicalStatus.canonicalPlaybackReady
+      : params.base.healthy;
   const cloudflarePlaybackProbe =
     activeCanonicalProvider === "cloudflare_stream" &&
     params.canonicalProbeSnapshot
@@ -907,6 +925,7 @@ export function buildStreamingStatusPayload(params: {
 
   return {
     ...params.base,
+    healthy: publicHealthy,
     running: externalActive ?? params.base.running,
     bridgeActive: externalActive ?? params.base.bridgeActive,
     ffmpegRunning: externalFfmpegRunning ?? params.base.ffmpegRunning,
@@ -938,8 +957,8 @@ export function buildStreamingStatusPayload(params: {
     authority: {
       activeCanonicalProvider,
       primaryHealthySince:
-        persistedAuthority?.canonicalProviderState?.primaryHealthySince ?? null,
-      updatedAt: persistedAuthority?.canonicalProviderState?.updatedAt ?? null,
+        matchingPersistedCanonicalProviderState?.primaryHealthySince ?? null,
+      updatedAt: matchingPersistedCanonicalProviderState?.updatedAt ?? null,
     },
     cloudflare: publicCloudflareStatus,
     captureDiagnostics: null,

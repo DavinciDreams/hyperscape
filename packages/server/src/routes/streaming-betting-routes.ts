@@ -303,10 +303,13 @@ export function registerStreamingBettingRoutes(
   const configuredSelfHostedPlaybackUrl = resolveSelfHostedStreamPlaybackUrl(
     process.env,
   );
-  const configuredCanonicalProvider = normalizeStreamDestinationProvider(
-    configuredDelivery.provider,
-    "Cloudflare",
-  );
+  const configuredCanonicalProvider =
+    configuredDelivery.mode === "self_hls"
+      ? "self_hls"
+      : normalizeStreamDestinationProvider(
+          configuredDelivery.provider,
+          "Cloudflare",
+        );
   const configuredCanonicalDestinationId = buildStreamDestinationId({
     role: "canonical",
     provider: configuredCanonicalProvider,
@@ -1342,10 +1345,10 @@ export function registerStreamingBettingRoutes(
         .find((candidate) => candidate?.ready === true) ?? null;
 
     if (!automaticFailoverEnabled()) {
-      const cloudflareCandidate =
-        candidatesByProvider.get("cloudflare_stream") ?? null;
+      const configuredCanonicalCandidate =
+        candidatesByProvider.get(configuredCanonicalProvider) ?? null;
       const nextCanonical =
-        cloudflareCandidate ?? primaryCandidate ?? params.candidates[0];
+        configuredCanonicalCandidate ?? primaryCandidate ?? params.candidates[0];
       canonicalProviderSelectionState.activeProvider = nextCanonical.provider;
       canonicalProviderSelectionState.primaryHealthySince =
         nextCanonical.provider === primaryProvider &&

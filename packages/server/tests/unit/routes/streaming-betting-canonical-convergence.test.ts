@@ -443,6 +443,115 @@ describe("streaming-betting canonical convergence", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("uses self-HLS as canonical when the delivery mode is self-hls", async () => {
+    stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
+    stubEnv("STREAM_DELIVERY_MODE", "self_hls");
+    stubEnv("STREAM_DELIVERY_PROVIDER", "self_hls");
+    stubEnv("STREAM_ENABLE_AUTOMATIC_FAILOVER", "false");
+    stubEnv("NODE_ENV", "development");
+    stubEnv("STREAM_PLAYBACK_URL", "https://self.example/live/stream.m3u8");
+    stubEnv(
+      "STREAM_PLAYBACK_HLS_URL",
+      "https://self.example/live/stream.m3u8",
+    );
+    stubEnv("STREAM_EXTERNAL_DELIVERY_PROVIDER", "");
+    stubEnv("STREAM_EXTERNAL_PLAYBACK_HLS_URL", "");
+    stubEnv("STREAM_EXTERNAL_PLAYBACK_LLHLS_URL", "");
+    stubEnv("STREAM_EXTERNAL_INGEST_RTMPS_URL", "");
+
+    const now = Date.now();
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "streaming-betting-self-hls-"),
+    );
+    const externalStatusFile = path.join(tempDir, "rtmp-status.json");
+    fs.writeFileSync(
+      externalStatusFile,
+      JSON.stringify({
+        active: true,
+        ffmpegRunning: true,
+        clientConnected: true,
+        destinations: [
+          {
+            id: "canonical-self-hls",
+            role: "canonical",
+            provider: "self_hls",
+            name: "Self-HLS",
+            transport: "hls",
+            playbackUrl: "https://self.example/live/stream.m3u8",
+            connected: true,
+            startedAt: now - 500,
+          },
+        ],
+        stats: {
+          healthy: true,
+        },
+        updatedAt: now,
+        hlsManifest: {
+          updatedAt: now,
+          mediaSequence: 456,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: now,
+        },
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "x11_nvenc",
+          degradedReason: null,
+          currentSceneUrl: "https://staging.example/stream",
+          activeBundle: null,
+          lastFrameAt: now,
+          lastRenderTickAt: now,
+          lastVisualChangeAt: now,
+          lastRecoveryAt: now - 1000,
+          recoveryCount: 0,
+          workerHeartbeatAt: now,
+        },
+      }),
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const options = createRouteOptions({
+      externalStatusFile,
+    });
+    const routes = registerStreamingBettingRoutes(options);
+
+    const response = await options.fastify.inject({
+      method: "GET",
+      url: "/api/internal/bet-sync/state",
+      headers: {
+        authorization: "Bearer bet-secret",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(payload.delivery).toMatchObject({
+      mode: "self_hls",
+      playbackUrl: "https://self.example/live/stream.m3u8",
+    });
+    expect(payload.channel.canonicalDestinationId).toBe("canonical-self-hls");
+    expect(payload.channel.fallbackDestinationId).toBeNull();
+    expect(payload.channel.publicReadiness).toMatchObject({
+      ready: true,
+      reason: null,
+    });
+    expect(payload.canonicalDestination).toMatchObject({
+      provider: "self_hls",
+      playbackReady: true,
+      playbackUrl: "https://self.example/live/stream.m3u8",
+    });
+    expect(payload.canonicalAuthority).toBeNull();
+
+    routes.close();
+    await options.fastify.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("keeps Cloudflare canonical by default even when provider priority prefers self-hls", async () => {
     stubEnv("BETTING_FEED_ACCESS_TOKEN", "bet-secret");
     stubEnv("STREAM_DELIVERY_MODE", "external_hls");
