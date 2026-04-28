@@ -1,0 +1,39 @@
+{
+  "name": "@hyperforge/widget-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed service for querying the registered widget catalog. Walks a `WidgetRegistry` and exposes widgets as queryable entries (manifest, schema-derived prop summary, source plugin id). The foundation any AI agent or build tool needs to discover what widgets exist in HyperForge.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@hyperforge/ui-framework": "workspace:*",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}
