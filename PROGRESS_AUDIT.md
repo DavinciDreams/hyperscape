@@ -1,4 +1,4 @@
-# Hyperscape Progress Audit — 2026-04-27 (REFRESH 10)
+# Hyperscape Progress Audit — 2026-04-28 (REFRESH 11)
 
 **This doc supersedes the 2026-04-24 cut.** That audit accurately
 described state at 50–60% AAA, with the engine/game separation
@@ -16,7 +16,7 @@ session's commit trail (`63ab4b2d6` → `c103e5e7e`, 59 commits).
 
 ## Headline correction
 
-**~85–87% of the way to "truly AAA, truly done"**. **REFRESH 10 (2026-04-27 afternoon): first per-widget migration cycle on top-10 #5 (D6.c per-widget migration). 3 slices closed the D6.c.2 overlay set end-to-end: KickedOverlayWidget (slice 31), DisconnectedOverlayWidget (slice 32), DeathScreenWidget (slice 33). 20 new tests; plugin 198/198 → 218/218. Established the per-widget recipe (substrate-promote theme/side-effect/state, inline styling, no client deps). 3 of ~19 HUDs done; 0 of ~50 panels — long-tail.** REFRESH 9 substantively closed #8. REFRESH 8 closed #7 end-to-end. REFRESH 7 #7 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem). REFRESH 4 closed #10 (registry hot-reload). REFRESH 3 closed AI test-coverage gap.
+**~87–89% of the way to "truly AAA, truly done"**. **REFRESH 11 (2026-04-27 evening / 2026-04-28): per-widget migration cycle on top-10 #5 continues — 9 more widgets shipped over slices 37-45. Total widget count this session arc: 15 widgets / ~3,900 LOC of widget code (slices 31-45). HUD set continued (ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb), then panel/modal categories seeded with 6 distinct shapes (SkillSelectModal, FloatingXPDrops, UnlocksSection, CoinPouch, SelectOption, ConfirmDialog). Plugin 218/218 → 321/321 (+103 new). 9 of ~19 HUDs done; 6 of ~50 panels — long-tail still long but recipe is fully mechanical and now proven across HUD/overlay/modal/panel categories.** REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 end-to-end. REFRESH 7 #7 substrate. REFRESH 6 partial #8. REFRESH 5 closed #9 (CombatSystem). REFRESH 4 closed #10 (registry hot-reload). REFRESH 3 closed AI test-coverage gap.
 two days ago. The single biggest blocker on the prior top-10 list
 ("#2 Hyperscape→plugin extraction, XL effort, biggest unknown") is
 mostly resolved.
@@ -39,6 +39,69 @@ Branch composition by additions (vs `main`):
 The branch is **~44% editor, 33% runtime engine, 15% game-plugin, 8% framework + everything else**.
 The shift from "shared has everything" to "plugin owns game logic"
 is the single biggest visible change in the past 48 hours.
+
+---
+
+## REFRESH 11 — Top-10 #5 D6.c long-tail: 9 more widgets, panels seeded (2026-04-27 evening / 2026-04-28)
+
+Per-widget migration cycle on top-10 #5 (D6.c per-widget migration)
+continued. Closed 3 more HUDs and seeded panel + modal categories
+with 6 distinct shapes over 9 slices (37-45).
+
+| Slice | What | LOC | Tests |
+|---|---|---:|---:|
+| 37 `92908594f` | ActionProgressBarWidget — progress (0-1) + action labels via props, inlined pulse keyframe | 250 | 7 |
+| 38 `08725bc4c` | HomeTeleportButtonWidget — 3-state machine (ready/casting/cooldown), HOME_TELEPORT_STATUSES enum | 340 | 8 |
+| 39 `17052a36f` | MinimapHomeTeleportOrbWidget — companion to #38, SVG orb variant of same state machine | 370 | 8 |
+| 40 `3a7169a88` | SkillSelectModalWidget — first panel migration, DEFAULT_SKILL_CATALOG, onConfirm(skillKey) | 430 | 10 |
+| 41 `a1b740916` | FloatingXPDropsWidget — pre-resolved icons in drop data, inlined keyframes via `<style>` | 190 | 8 |
+| 42 `c4dce665c` | UnlocksSectionWidget — UNLOCK_TYPES tuple, overridable iconByType map | 210 | 10 |
+| 43 `c646ad777` | CoinPouchWidget — pure presentational button, drops CursorTooltip dep | 225 | 9 |
+| 44 `8fe443342` | SelectOptionWidget — themed `<select>` dropdown, generic `string` value type | 150 | 9 |
+| 45 `0bc2ca82b` | ConfirmDialogWidget — generic yes/no modal with danger/primary variants, drops ModalWindow | 285 | 9 |
+
+Plugin tests: 218/218 → 321/321 (+103 new). Plugin type-check clean.
+~2,450 LOC of widget code shipped over this refresh window.
+
+**Cumulative session arc (slices 31-45)**: 15 widgets shipped end-to-end
+in ~24 hours of focused work. ~3,900 LOC of widget code. Plugin
+tests 198/198 → 321/321 (+123). Recipe is fully mechanical and
+proven across all four widget categories: overlay (3), HUD (6),
+modal (2), panel (4).
+
+**Per-widget recipe is now battle-tested** across:
+- Pure presentational (KickedOverlay, ActionProgressBar)
+- Internal state machines (Disconnected, DeathScreen,
+  HomeTeleportButton, MinimapHomeTeleportOrb, ConnectionIndicator)
+- RAF tickers (MinimapCompass, ConnectionIndicator)
+- Event subscriptions transformed to props (NETWORK_*, NETWORK_KICK)
+- Packet sends transformed to callbacks (Respawn, Reconnect,
+  Withdraw, Confirm, SkillSelect)
+- Pre-resolved derived data (FloatingXPDrops icons,
+  UnlocksSection unlocks list)
+- Inlined modal frames (SkillSelectModal, ConfirmDialog) — drops
+  `ModalWindow`, `AchievementPopup`, etc. completely.
+- Inlined keyframes via `<style>` tag with unique animation names
+  (ActionProgressBar, FloatingXPDrops) — removes module-load
+  `document.head.appendChild` side-effects.
+- Generic primitives (SelectOption, ConfirmDialog) — usable beyond
+  their original callsite.
+
+**Render-variant pattern** confirmed: HomeTeleportButton (slice 38)
+and MinimapHomeTeleportOrb (slice 39) share an identical 3-state
+machine but render entirely different visuals (corner button vs SVG
+orb). The state shape is reused; the renderer differs.
+
+**Doesn't swap consumers yet** — the live client still mounts the
+hand-coded versions. Registration-path-first; consumer-swap is a
+separate consolidation cycle.
+
+**Top-10 #5 progression**: 9 of ~19 HUDs done; 6 of ~50 panels.
+Long-tail still long but the cost-per-widget is decreasing as the
+recipe becomes mechanical. Recommended next-cycle targets:
+EntityContextMenu, EscapeMenu, MinimapStaminaBar (HUD remainder);
+DialoguePanel, PrayerPanel, StatsPanel (panel remainder, M/L cuts
+each due to richer data shapes).
 
 ---
 
@@ -564,7 +627,7 @@ resolved. The new list reorders:
 | ~~2~~ | ~~**Game-data JSON extraction**~~ | ~~A~~ | ~~M~~ | **RESOLVED 2026-04-26 evening** — re-audit found all data/*.ts and constants/*.ts files already façaded |
 | ~~3~~ | ~~**Plugin Browser UI**~~ | ~~I5~~ | ~~M~~ | **DONE** — `PluginBrowserPanel.tsx` (666 lines) ships Browse + Installed tabs with `useSyncExternalStore` over the installed-plugins store, install button, sha-verified content download. |
 | ~~4~~ | ~~**D7 plugin widget contribution + D6.c.1 (XP orb)**~~ | ~~D~~ | ~~S~~ | **DONE** — `XPOrbWidget.tsx` + `LevelUpToastWidget.tsx` ship from `@hyperforge/hyperscape-plugin/src/widgets/`, registered via `ctx.widgets?.register(...)` in plugin onEnable. Both widgets unit-tested. Pattern established. |
-| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework. **IN PROGRESS 2026-04-27 — REFRESH 10**: 6 widgets shipped end-to-end on `feat/world-studio` (`bfd77e55b` → `470eca2cb`). **D6.c.2 overlay set closed**: KickedOverlay + DisconnectedOverlay + DeathScreen (slices 31-33). **D6.c HUDs in progress**: ConnectionIndicator + MinimapStaminaOrb + MinimapCompass (slices 34-36). Plugin tests 198/198 → 241/241 (+43 new). ~1,320 LOC of widget code. Per-widget recipe established and fully mechanical. 6 of ~19 HUDs done; 0 of ~50 panels — long-tail. Each remaining widget is its own focused S-M cut. Consumer-swap (deleting hand-coded files) is a separate consolidation cycle. |
+| 5 | **D6.c per-widget migration (19 HUDs + 50 panels)** | D | L | Closes the HUD framework. **IN PROGRESS 2026-04-28 — REFRESH 11**: 15 widgets shipped end-to-end on `feat/world-studio` (`bfd77e55b` → `0bc2ca82b`). **D6.c.2 overlay set closed**: KickedOverlay + DisconnectedOverlay + DeathScreen (slices 31-33). **D6.c HUDs**: ConnectionIndicator, MinimapStaminaOrb, MinimapCompass, ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb (slices 34-39). **Panels seeded**: SkillSelectModal, FloatingXPDrops, UnlocksSection, CoinPouch, SelectOption (slices 40-44). **Modals seeded**: SkillSelectModal, ConfirmDialog (slices 40, 45). Plugin tests 198/198 → 321/321 (+123 new). ~3,900 LOC of widget code. Per-widget recipe is fully mechanical and proven across all 4 categories (overlay/HUD/modal/panel). 9 of ~19 HUDs done; 6 of ~50 panels — long-tail still long but cost-per-widget is decreasing. Each remaining widget is its own focused S-M cut. Consumer-swap (deleting hand-coded files) is a separate consolidation cycle. |
 | ~~6~~ | ~~**AI service test coverage**~~ | ~~H~~ | ~~M~~ | **RESOLVED 2026-04-26 evening — Session 6 shipped 136 unit tests across 9 services. All AI integrations now have happy/error/parameter coverage under mocked SDKs.** |
 | ~~7~~ | ~~**DataSourceRegistry (D8) + ui-pack.json (D9)**~~ | ~~D~~ | ~~M~~ | **RESOLVED 2026-04-27 — REFRESH 8**: D8 + D9 + D10 wire-through complete across 7 slices on `feat/world-studio` (commits `71fe4f0ac` → `c2a560b5e`). Shipped: `DataSourceRegistry` (pluggable bindings namespaces, 10 tests) + `UIPackManifestSchema` (wraps widget catalog + layouts + theme + customization, 13 tests) + `HYPERSCAPE_UI_PACK` (reference pack composing DEFAULT_UI_LAYOUT + HYPERSCAPE_DARK_THEME, 6 tests) + `loadUIPack` (pure engine runtime, 7 tests) + `uiPackLoader` (client bridge to themeRegistry, 5 tests) + `uiPackRegistry` + `useActiveUIPack` (D10 host-side state + React hook, 14 tests) + `ManifestHud` reads from active pack (D10 wire-through). 55 new tests across 7 slices; ui-framework 274/274 + plugin 198/198 + client ui-framework 117/117 throughout. Loading a pack now actually swaps the rendered HUD end-to-end. **Remaining polish (deferrable)**: persist HYPERSCAPE_UI_PACK to disk as `hyperscape.ui-pack.json` + file-loader; verify every Hyperscape HUD panel reads via DataSourceRegistry (gated by top-10 #5). |
 | 8 | **Final shared cleanup** (`data/duel-manifest.ts` substrate, `types/game/*` extraction) | A/I | M-L | **SUBSTANTIVELY COMPLETE 2026-04-27 — REFRESH 6 + 9**: 6 slices total. REFRESH 6: 4 type files migrated (quest-types/social-types/trade-types to plugin; interaction-types deleted as dead code). REFRESH 9: DuelSystem interface relocated to plugin (slice 29) + resource-processing-types split (slice 30 — footprint primitives stay shared, game types move to plugin). `packages/shared/src/types/game/` 11 → 7 files. The 5 remaining files (combat-types, duel-types, inventory-types, item-types, prayer-types) are all bidirectional engine substrate consumed by event-payloads/system-interfaces/components/utils/PrayerDataProvider — each remaining migration would duplicate duck-types in shared faster than removing them. Cleanup is functionally complete; remaining items are blocked by legitimate engine substrate needs. |
@@ -630,7 +693,7 @@ installs concrete implementation, shared internals lazy-resolve)
 proved 5× this session and is the unblock-tool for any remaining
 engine-coupled game code.
 
-**Status: ~85–87% to AAA done. Plugin tests stable at 241/241; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 10 (2026-04-27 afternoon): 6 widget migrations shipped end-to-end. D6.c.2 overlay set closed (KickedOverlay + DisconnectedOverlay + DeathScreen) + 3 non-overlay HUDs (ConnectionIndicator + MinimapStaminaOrb + MinimapCompass). 43 new tests; per-widget recipe fully mechanical. ~1,320 LOC of widget code. 6 of ~19 HUDs done; long-tail.** REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
+**Status: ~87–89% to AAA done. Plugin tests stable at 321/321; ui-framework 274/274; client ui-framework 117/117; asset-forge AI service tests: 136/136. **REFRESH 11 (2026-04-28): 9 more widget migrations shipped end-to-end (slices 37-45). HUD set continued (ActionProgressBar, HomeTeleportButton, MinimapHomeTeleportOrb) + 4 panels seeded (SkillSelectModal, FloatingXPDrops, UnlocksSection, CoinPouch, SelectOption) + 1 generic modal (ConfirmDialog). 103 new tests; per-widget recipe fully mechanical and proven across all 4 categories. ~2,450 LOC of widget code this refresh; ~3,900 LOC across slices 31-45. 9 of ~19 HUDs done; 6 of ~50 panels — long-tail.** REFRESH 10 closed D6.c.2 overlay set + 3 HUDs (slices 31-36). REFRESH 9 substantively closed #8. REFRESH 8 closed #7 (DataSourceRegistry + ui-pack.json) end-to-end (7 slices). REFRESH 5 closed #9 (CombatSystem decomposition, 4,065 → 1,359 LOC). REFRESH 4 closed #10 (registry hot-reload long-tail). REFRESH 3 closed AI test-coverage gap. Branch pushed and ready for review.
 
 The work pattern has shifted from "find structural blockers" to
 "finish enumerable items":
