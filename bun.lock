@@ -199,6 +199,7 @@
         "@hyperforge/skills": "workspace:*",
         "@hyperforge/ui-framework": "workspace:*",
         "@hyperforge/ui-widgets": "workspace:*",
+        "@hyperforge/widget-catalog": "workspace:*",
         "@pixiv/three-vrm": "^3.5.1",
         "@privy-io/react-auth": "^3.13.1",
         "@rollup/rollup-darwin-x64": "^4.52.4",
