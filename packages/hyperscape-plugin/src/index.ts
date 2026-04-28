@@ -226,6 +226,7 @@ import { segmentedControlRegistration } from "./widgets/SegmentedControlWidget.j
 import { textInputRegistration } from "./widgets/TextInputWidget.js";
 import { avatarRegistration } from "./widgets/AvatarWidget.js";
 import { emptyStateRegistration } from "./widgets/EmptyStateWidget.js";
+import { chipListRegistration } from "./widgets/ChipListWidget.js";
 import { WaterfallVisualsSystem } from "./systems/WaterfallVisualsSystem.js";
 import { ZoneVisualsSystem } from "./systems/ZoneVisualsSystem.js";
 
@@ -585,6 +586,19 @@ export {
   type EmptyStateProps,
   type EmptyStateRuntimeProps,
 } from "./widgets/EmptyStateWidget.js";
+export {
+  chipListWidget,
+  chipListRegistration,
+  ChipList,
+  CHIP_VARIANTS,
+  CHIP_LIST_ORIENTATIONS,
+  DEFAULT_CHIP_VARIANT_COLORS,
+  type ChipVariant,
+  type ChipListOrientation,
+  type ChipItem,
+  type ChipListProps,
+  type ChipListRuntimeProps,
+} from "./widgets/ChipListWidget.js";
 
 // TradingSystem + DuelSystem — consumed by `@hyperforge/server` via
 // re-export shims (and DuelSystem also by integration tests).
@@ -1009,6 +1023,7 @@ const defaultFactory: PluginFactory<HyperscapeContext> = () => {
         ctx.widgets.register(textInputRegistration);
         ctx.widgets.register(avatarRegistration);
         ctx.widgets.register(emptyStateRegistration);
+        ctx.widgets.register(chipListRegistration);
       }
 
       // Register Hyperia entity types with the engine ECS. Pre-2026-04-26
