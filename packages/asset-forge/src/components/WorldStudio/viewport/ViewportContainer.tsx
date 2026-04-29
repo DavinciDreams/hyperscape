@@ -305,13 +305,18 @@ export function ViewportContainer() {
   // Forward every PIE script-runtime debug entry into the global debug store
   // so the PIE Console panel can render them live.
   const appendDebugEntry = usePIEDebugStore((s) => s.append);
-  const { startPIE, stopPIE, interactAtCenter, getWidgetRegistry } =
-    usePIESession({
-      sceneRefs: sceneRefsRef.current,
-      state,
-      onExit: () => actions.pieStop(),
-      onDebug: appendDebugEntry,
-    });
+  const {
+    startPIE,
+    stopPIE,
+    interactAtCenter,
+    getWidgetRegistry,
+    getDataContext,
+  } = usePIESession({
+    sceneRefs: sceneRefsRef.current,
+    state,
+    onExit: () => actions.pieStop(),
+    onDebug: appendDebugEntry,
+  });
 
   // React to PIE state changes from toolbar
   const prevPieRef = useRef(state.pie);
@@ -2143,6 +2148,7 @@ export function ViewportContainer() {
       {state.pie.active && state.pie.mode === "play" ? (
         <PIEHudOverlay
           registry={getWidgetRegistry()}
+          getDataContext={getDataContext}
           gameId={resolveGamePluginSetId()}
         />
       ) : null}

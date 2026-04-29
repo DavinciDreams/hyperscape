@@ -1191,7 +1191,23 @@ export function usePIESession({
     return sessionRef.current.widgetRegistry;
   }, []);
 
-  return { startPIE, stopPIE, interactAtCenter, getWidgetRegistry };
+  /**
+   * B0.3 — Snapshot of live player state for the PIE HUD overlay.
+   * Polled on each PIEHudOverlay render so widgets bound to
+   * `$player.hp` etc. show real values instead of placeholders.
+   * Returns `{}` when PIE isn't running.
+   */
+  const getDataContext = useCallback(() => {
+    return sessionRef.current.world?.getDataContext() ?? {};
+  }, []);
+
+  return {
+    startPIE,
+    stopPIE,
+    interactAtCenter,
+    getWidgetRegistry,
+    getDataContext,
+  };
 }
 
 // ---------------------------------------------------------------------------

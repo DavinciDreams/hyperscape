@@ -1257,6 +1257,61 @@ export class PIEEditorSession {
     });
   }
 
+  /**
+   * B0.3 — Snapshot of live player state for the manifest HUD.
+   *
+   * Builds a `DataContext`-shaped record (matching the namespace
+   * convention of `buildPlayerDataContext` in
+   * `packages/client/src/ui-framework/dataContext.ts`) so widgets
+   * with bindings like `$player.hp` resolve to the running PIE
+   * server's player record.
+   *
+   * Returns an empty `{}` when the session isn't running or the
+   * player isn't yet spawned — `resolveWidgetProps` then falls back
+   * to each widget's static props (the same behavior the production
+   * client uses pre-spawn).
+   *
+   * Polled on each PIEHudOverlay render. The cost is bounded by
+   * `world.entities.get(id)` being O(1) and the namespace build
+   * being a few field copies; cheaper than the equivalent React
+   * subscription chain would be at this scale.
+   */
+  getDataContext(): Record<string, unknown> {
+    if (!this._running || !this._server || !this.player) return {};
+    const player = this._server.world.entities?.get?.(
+      this.player.id,
+    ) as unknown as
+      | {
+          health?: { current?: number; max?: number };
+          stats?: {
+            health?: { current?: number; max?: number };
+            prayer?: { current?: number; max?: number };
+            combatLevel?: number;
+          };
+          position?: { x?: number; y?: number; z?: number };
+          inCombat?: boolean;
+        }
+      | undefined;
+    if (!player) return {};
+
+    const hp =
+      player.health?.current ?? player.stats?.health?.current ?? undefined;
+    const maxHp = player.health?.max ?? player.stats?.health?.max ?? undefined;
+    const prayer = player.stats?.prayer?.current;
+    const maxPrayer = player.stats?.prayer?.max;
+
+    return {
+      player: {
+        hp,
+        maxHp,
+        prayer,
+        maxPrayer,
+        combatLevel: player.stats?.combatLevel,
+        inCombat: player.inCombat,
+      },
+    };
+  }
+
   /** Teardown. Symmetric to `start()`. Safe to call multiple times. */
   async stop(): Promise<void> {
     if (!this._running) return;

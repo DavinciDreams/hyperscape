@@ -38,7 +38,7 @@ import {
   type UIWidgetComponent,
 } from "@hyperforge/ui-widgets";
 import type { WidgetRegistry } from "@hyperforge/ui-framework";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { GamePluginSetId } from "../toolbar/gamePluginResolver";
 import { useAgentPack } from "../state/agentPack";
@@ -101,9 +101,22 @@ export interface PIEHudOverlayProps {
    * at PIE start. Determines which layout to render.
    */
   gameId: GamePluginSetId;
+  /**
+   * B0.3 — Live snapshot of player state from PIEEditorSession's
+   * in-process server world. Polled every animation frame so widgets
+   * with bindings like `$player.hp` reflect real values. Falls back
+   * to empty record (which `resolveWidgetProps` handles by keeping
+   * each widget's static prop) when PIE isn't running or the player
+   * record isn't available.
+   */
+  getDataContext?: () => Record<string, unknown>;
 }
 
-export function PIEHudOverlay({ registry, gameId }: PIEHudOverlayProps) {
+export function PIEHudOverlay({
+  registry,
+  gameId,
+  getDataContext,
+}: PIEHudOverlayProps) {
   const agentPack = useAgentPack();
   // Agent-emitted pack wins over the static per-game layout when set.
   // Designers using the AI tab in the right sidebar see their
@@ -128,6 +141,31 @@ export function PIEHudOverlay({ registry, gameId }: PIEHudOverlayProps) {
     });
   }
 
+  // B0.3 — Poll live player state from PIE every animation frame.
+  // `getDataContext` is stable (memo'd in usePIESession via
+  // useCallback), so the effect only re-runs when registry mounts.
+  // Each tick stores the new context in component state, triggering
+  // a re-render of ManifestRenderer with fresh values. Widgets bound
+  // to `$player.hp` etc. now show real values; others (purely
+  // prop-driven, like the crosshair) ignore the data and behave
+  // identically to before.
+  const [dataContext, setDataContext] = useState<Record<string, unknown>>({});
+  useEffect(() => {
+    if (!getDataContext || !registry) return;
+    let raf = 0;
+    const tick = () => {
+      const next = getDataContext();
+      // Cheap reference compare won't help (new object each frame),
+      // but React batching means the re-render itself is cheap when
+      // values haven't changed. Skip if no agent pack and the layout
+      // has no bindings — avoids work in the hyperscape-no-pack case.
+      setDataContext(next);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [getDataContext, registry]);
+
   if (!registry) return null;
   if (layout.instances.length === 0) return null;
 
@@ -135,10 +173,7 @@ export function PIEHudOverlay({ registry, gameId }: PIEHudOverlayProps) {
     <ManifestRenderer
       registry={registry}
       layout={layout}
-      // PIE doesn't yet plumb live player state into the overlay —
-      // the only widget rendered today (crosshair) is purely prop-
-      // driven, so an empty data context is fine.
-      dataContext={{}}
+      dataContext={dataContext}
       overlayPosition="absolute"
     />
   );
