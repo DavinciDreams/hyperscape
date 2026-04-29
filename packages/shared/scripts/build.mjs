@@ -110,8 +110,12 @@ async function buildLibrary() {
 
   // Build client-only library (no Node.js modules)
   console.log('Building framework.client.js (client-only)...')
+  // Build from `index.ts` — the same entry the .d.ts file is generated
+  // from — so the runtime export surface always matches the type surface.
+  // Server-only modules are kept out of the browser bundle by the
+  // `external` list below, not by source-file curation.
   const ctxClient = await esbuild.context({
-    entryPoints: ['src/index.client.ts'],
+    entryPoints: ['src/index.ts'],
     outfile: 'build/framework.client.js',
     platform: 'browser',
     format: 'esm',
