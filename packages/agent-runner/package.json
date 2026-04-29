@@ -1,0 +1,42 @@
+{
+  "name": "@hyperforge/agent-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runtime-agnostic LLM tool-use loop. Adapts ElizaOS `Action[]` → Anthropic tool definitions, drives the conversation, dispatches tool calls to action handlers. The bridge between our typed services and a live LLM.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "example:live": "bun run examples/live-agent.ts",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@elizaos/core": "alpha",
+    "@hyperforge/eliza-game-builder": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}
