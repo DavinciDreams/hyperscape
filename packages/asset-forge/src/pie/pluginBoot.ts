@@ -169,10 +169,33 @@ function buildContextFactory(
         return ctx as PluginContextBase;
       }
       case hyperscapeManifest.id: {
+        // Mirror the shooter-demo branch: when the PIE overlay supplied
+        // a widget registry, expose a `widgets` field so the plugin's
+        // onEnable can `ctx.widgets.register(...)` its 50+ widgets into
+        // the same registry that PIEHudOverlay reads from. Without this
+        // adapter the plugin's widget contributions optional-chain to
+        // no-ops and the registry stays empty (only framework builtins
+        // bound by `bindAllWidgets()` resolve).
+        const widgets: WidgetContributionRegistry | undefined = uiWidgetRegistry
+          ? {
+              register(contribution: WidgetContribution) {
+                const reg = contribution as unknown as WidgetRegistration<
+                  Record<string, unknown>,
+                  UIWidgetComponent
+                >;
+                uiWidgetRegistry.register(reg);
+                const widgetId = reg.widget.manifest.id;
+                scope.register(() => {
+                  uiWidgetRegistry.unregister?.(widgetId);
+                });
+              },
+            }
+          : undefined;
         const ctx: HyperscapeContext = {
           pluginId,
           scope,
           world,
+          widgets,
         };
         return ctx as PluginContextBase;
       }
