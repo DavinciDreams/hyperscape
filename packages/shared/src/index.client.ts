@@ -1736,3 +1736,15 @@ export {
   hasHealth,
   isEntityDead,
 } from "./utils/typeGuards";
+
+// Mirror SeededRandom RNG utilities — pure browser-safe deterministic
+// PRNG, no fs/server deps. MobEntity uses `getGameRng()` for tile spawn
+// jitter and AI decision RNG.
+export {
+  SeededRandom,
+  initializeGameRng,
+  getGameRng,
+  getGameSeed,
+  getGameRngState,
+} from "./utils/SeededRandom";
+export type { SeededRandomState } from "./utils/SeededRandom";
