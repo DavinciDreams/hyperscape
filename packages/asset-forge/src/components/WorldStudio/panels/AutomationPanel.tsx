@@ -364,7 +364,21 @@ export function AutomationPanel() {
               // Push into the editor-local agent-pack store. PIE's HUD
               // overlay subscribes to this and re-renders with the
               // agent's design once PIE is running.
-              setAgentPack(pack);
+              const result = setAgentPack(pack);
+              if (result.ok) {
+                // eslint-disable-next-line no-console
+                console.info(
+                  "[AgentBuilder] Pack stored. Layout instances:",
+                  result.loaded.defaultLayout?.instances.length ?? 0,
+                  "Press Play to render in PIE.",
+                );
+              } else {
+                // eslint-disable-next-line no-console
+                console.warn(
+                  "[AgentBuilder] Pack rejected by client validator:",
+                  result.issues,
+                );
+              }
             }}
           />
         </div>

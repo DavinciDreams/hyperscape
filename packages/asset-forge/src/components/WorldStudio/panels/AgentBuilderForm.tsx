@@ -177,6 +177,10 @@ export function AgentBuilderForm({
           <div className="text-xs text-success p-2 bg-bg-primary rounded">
             ✓ Pack composed ({status.turns} turn{status.turns === 1 ? "" : "s"})
           </div>
+          <div className="text-xs text-text-secondary p-2 bg-bg-primary rounded">
+            Press <strong>Play</strong> in the toolbar to see this HUD render
+            over your world.
+          </div>
           {status.finalText && (
             <div className="text-xs text-text-secondary p-2 bg-bg-primary rounded whitespace-pre-wrap max-h-32 overflow-y-auto">
               {status.finalText}

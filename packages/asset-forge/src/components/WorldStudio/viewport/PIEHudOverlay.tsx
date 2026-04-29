@@ -113,6 +113,21 @@ export function PIEHudOverlay({ registry, gameId }: PIEHudOverlayProps) {
     [agentPack, gameId],
   );
 
+  // Debug: surface what PIE is about to render so the chat-to-HUD
+  // loop is observable in the console while the demo flow is new.
+  if (typeof window !== "undefined") {
+    const unresolved = layout.instances.filter(
+      (inst) => !registry?.hasComponent(inst.widgetId),
+    );
+    // eslint-disable-next-line no-console
+    console.info("[PIEHud] mount", {
+      source: agentPack ? "agent" : "static",
+      instances: layout.instances.length,
+      registry: registry ? "ready" : "null",
+      unresolvedWidgetIds: unresolved.map((i) => i.widgetId),
+    });
+  }
+
   if (!registry) return null;
   if (layout.instances.length === 0) return null;
 
