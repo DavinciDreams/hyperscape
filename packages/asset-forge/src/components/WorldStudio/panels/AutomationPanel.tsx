@@ -404,7 +404,25 @@ export function AutomationPanel() {
           rest of the panel (procedural automation) operates on the
           generated world. */}
       <div className="p-2 border-b border-border-primary">
-        <AgentBuilderForm />
+        <AgentBuilderForm
+          onPackReceived={(pack) => {
+            const result = setAgentPack(pack);
+            if (result.ok) {
+              // eslint-disable-next-line no-console
+              console.info(
+                "[AgentBuilder] Pack stored. Layout instances:",
+                result.loaded.defaultLayout?.instances.length ?? 0,
+                "Press Play to render in PIE.",
+              );
+            } else {
+              // eslint-disable-next-line no-console
+              console.warn(
+                "[AgentBuilder] Pack rejected by client validator:",
+                result.issues,
+              );
+            }
+          }}
+        />
       </div>
 
       {/* Tools */}
