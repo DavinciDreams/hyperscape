@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "id": "com.hyperforge.minimal-hud",
+  "name": "Minimal HUD",
+  "description": "Minimal HUD with HP bar (top-left) and chat log (bottom-left)",
+  "widgets": [
+    {
+      "id": "com.hyperforge.hyperscape.progress-bar"
+    },
+    {
+      "id": "com.hyperforge.hyperscape.notification-toast-list"
+    }
+  ],
+  "layouts": {
+    "default": {
+      "id": "minimal-hud-layout",
+      "name": "Minimal HUD Layout",
+      "revision": 1,
+      "instances": [
+        {
+          "instanceId": "hp-bar",
+          "widgetId": "com.hyperforge.hyperscape.progress-bar",
+          "position": {
+            "kind": "anchored",
+            "anchor": "top-left",
+            "offset": {
+              "x": 16,
+              "y": 16
+            }
+          },
+          "props": {
+            "label": "HP",
+            "showPercent": true,
+            "lengthPx": 200,
+            "thicknessPx": 24,
+            "fillColor": "#22c55e",
+            "trackColor": "#1f2937",
+            "borderColor": "#374151",
+            "borderRadiusPx": 4
+          }
+        },
+        {
+          "instanceId": "chat-log",
+          "widgetId": "com.hyperforge.hyperscape.notification-toast-list",
+          "position": {
+            "kind": "anchored",
+            "anchor": "bottom-left",
+            "offset": {
+              "x": 16,
+              "y": -16
+            }
+          },
+          "props": {
+            "anchor": "bottom-left"
+          }
+        }
+      ]
+    }
+  }
+}
