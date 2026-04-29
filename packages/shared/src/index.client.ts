@@ -1816,7 +1816,15 @@ export {
 } from "./data/live/trading-live";
 export { ELEMENTAL_STAVES, RUNE_NAMES, VALID_RUNES } from "./data/runes";
 export { runesRegistry } from "./runes/index";
-export { GameEventType } from "./systems/shared/EventStore";
+export { GameEventType, EventStore } from "./systems/shared/EventStore";
+export type {
+  GameEvent,
+  EntitySnapshot,
+  CombatSnapshot,
+  GameSnapshot,
+  GameStateInfo,
+  EventStoreConfig,
+} from "./systems/shared/EventStore";
 export {
   GRAVESTONE_ID_PREFIX,
   ITEMS_KEPT_ON_DEATH,
