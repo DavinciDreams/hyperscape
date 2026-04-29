@@ -32,6 +32,85 @@ interface DesignResponse {
   code?: string;
 }
 
+// Hardcoded demo packs for debugging the chat-to-PIE wiring without
+// burning agent API tokens. Both packs are pre-validated against
+// UIPackManifestSchema.
+//
+// `BUILTIN_DEMO_PACK` uses `hyperforge.hud.hp-bar` — always registered
+// in PIE via `bindAllWidgets()`, so if this pack renders correctly the
+// agent → store → render chain is sound.
+//
+// `PLUGIN_DEMO_PACK` uses `com.hyperforge.hyperscape.progress-bar` —
+// only registered when the hyperscape plugin contributes it. If the
+// builtin pack works but this one doesn't, the issue is plugin widget
+// registration in the PIE session, not the wiring.
+const BUILTIN_DEMO_PACK = {
+  version: 1 as const,
+  id: "demo.builtin-hud",
+  name: "Demo Builtin HUD",
+  description: "Hardcoded test pack — uses framework builtin hp-bar.",
+  widgets: [{ id: "hyperforge.hud.hp-bar" }],
+  layouts: {
+    default: {
+      id: "demo-builtin-hud",
+      name: "Demo Builtin HUD",
+      revision: 1,
+      instances: [
+        {
+          instanceId: "hp-bar-demo",
+          widgetId: "hyperforge.hud.hp-bar",
+          position: {
+            kind: "anchored" as const,
+            anchor: "top-left" as const,
+            offset: { x: 16, y: 16 },
+          },
+          props: {
+            orientation: "horizontal",
+            showNumeric: true,
+            current: 75,
+            max: 100,
+          },
+        },
+      ],
+    },
+  },
+};
+
+const PLUGIN_DEMO_PACK = {
+  version: 1 as const,
+  id: "demo.plugin-hud",
+  name: "Demo Plugin HUD",
+  description: "Hardcoded test pack — uses hyperscape plugin's progress-bar.",
+  widgets: [{ id: "com.hyperforge.hyperscape.progress-bar" }],
+  layouts: {
+    default: {
+      id: "demo-plugin-hud",
+      name: "Demo Plugin HUD",
+      revision: 1,
+      instances: [
+        {
+          instanceId: "progress-bar-demo",
+          widgetId: "com.hyperforge.hyperscape.progress-bar",
+          position: {
+            kind: "anchored" as const,
+            anchor: "bottom-left" as const,
+            offset: { x: 20, y: -20 },
+          },
+          props: {
+            label: "HP",
+            progress: 0.75,
+            showPercent: true,
+            lengthPx: 200,
+            thicknessPx: 24,
+            fillColor: "#22c55e",
+            trackColor: "#1f2937",
+          },
+        },
+      ],
+    },
+  },
+};
+
 type Status =
   | { kind: "idle" }
   | { kind: "running" }
@@ -123,6 +202,22 @@ export function AgentBuilderForm({
     abortRef.current?.abort();
   }, []);
 
+  // Bypass the agent: feed a hardcoded pack through the same
+  // success path so the chat-to-PIE wiring can be tested without
+  // burning API tokens.
+  const loadDemoPack = useCallback(
+    (pack: unknown, label: string) => {
+      setStatus({
+        kind: "done",
+        pack,
+        finalText: `Loaded "${label}" — hardcoded demo pack (no agent call).`,
+        turns: 0,
+      });
+      onPackReceived?.(pack, `demo:${label}`);
+    },
+    [onPackReceived],
+  );
+
   return (
     <div className="flex flex-col gap-2 p-3 border border-bg-tertiary rounded bg-bg-secondary">
       <div className="text-sm font-semibold text-text-primary">
@@ -165,6 +260,32 @@ export function AgentBuilderForm({
           </button>
         )}
       </form>
+
+      {status.kind !== "running" && (
+        <div className="flex flex-col gap-1 pt-2 border-t border-bg-tertiary">
+          <div className="text-xs text-text-tertiary">
+            Debug — load a hardcoded pack (no agent call):
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => loadDemoPack(BUILTIN_DEMO_PACK, "builtin")}
+              className="flex-1 px-2 py-1 text-xs bg-bg-tertiary text-text-primary rounded cursor-pointer"
+              title="Uses hyperforge.hud.hp-bar — always registered in PIE"
+            >
+              Builtin demo
+            </button>
+            <button
+              type="button"
+              onClick={() => loadDemoPack(PLUGIN_DEMO_PACK, "plugin")}
+              className="flex-1 px-2 py-1 text-xs bg-bg-tertiary text-text-primary rounded cursor-pointer"
+              title="Uses com.hyperforge.hyperscape.progress-bar — registered via plugin"
+            >
+              Plugin demo
+            </button>
+          </div>
+        </div>
+      )}
 
       {status.kind === "running" && (
         <div className="text-xs text-text-secondary p-2 bg-bg-primary rounded">
