@@ -601,12 +601,17 @@ export type {
   Item,
   Inventory,
   PlayerEquipment,
-  AttackType,
   CombatStyle,
-  ItemType,
   CombatBonuses,
   EquipmentSlot,
 } from "./types/core/core";
+// AttackType + ItemType are runtime enums (defined in
+// types/game/item-types.ts). They need value exports — esbuild strips
+// type-only exports from the .client build, so consumers like
+// MobEntity.ts that do `import { AttackType }` at runtime hit a
+// "module does not provide X" error otherwise.
+// (WeaponType + EquipmentSlotName are already value-exported above.)
+export { AttackType, ItemType } from "./types/core/core";
 // ItemRarity is an enum — needs value export.
 export { ItemRarity } from "./types/entities/entities";
 
