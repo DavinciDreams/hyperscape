@@ -483,14 +483,6 @@ export default defineConfig(({ mode }) => {
                 target: resolvedPublicApiUrl.replace(/\/$/, ""),
                 changeOrigin: true,
               },
-              // @hyperforge/agent-server runs on port 5180 by default.
-              // The chat panel POSTs to /api/agent/design and the proxy
-              // rewrites it to the server's /design route.
-              "/api/agent": {
-                target: process.env.AGENT_SERVER_URL ?? "http://localhost:5180",
-                changeOrigin: true,
-                rewrite: (path: string) => path.replace(/^\/api\/agent/, ""),
-              },
             },
           }
         : {}),

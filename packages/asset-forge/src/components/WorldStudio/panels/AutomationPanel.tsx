@@ -21,6 +21,7 @@ import {
 import React, { useState, useCallback, useMemo } from "react";
 
 import { useWorldStudio } from "../WorldStudioContext";
+import { AgentBuilderForm } from "./AgentBuilderForm";
 import { PropertySection } from "./properties/PropertyControls";
 import { QuestGraphPanel } from "./QuestGraphPanel";
 
@@ -345,20 +346,43 @@ export function AutomationPanel() {
 
   if (!world) {
     return (
-      <div className="flex items-center justify-center h-32 text-text-tertiary text-xs">
-        Generate a world to use automation tools
+      <div className="flex flex-col h-full overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary">
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
+            <Wand2 size={12} />
+            AI tools
+          </span>
+        </div>
+
+        {/* Agent builder is available even before a world is generated —
+            it works against the widget catalog, not world content. */}
+        <div className="p-2">
+          <AgentBuilderForm />
+        </div>
+
+        <div className="flex items-center justify-center h-32 text-text-tertiary text-xs px-3">
+          Generate a world to unlock procedural automation tools.
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary">
         <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
           <Wand2 size={12} />
-          Automation
+          AI tools
         </span>
+      </div>
+
+      {/* Agent builder — chat with the live game-builder agent. The
+          rest of the panel (procedural automation) operates on the
+          generated world. */}
+      <div className="p-2 border-b border-border-primary">
+        <AgentBuilderForm />
       </div>
 
       {/* Tools */}
