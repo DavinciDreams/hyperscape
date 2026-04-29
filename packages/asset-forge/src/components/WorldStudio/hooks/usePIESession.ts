@@ -760,6 +760,8 @@ export function usePIESession({
         ? {
             viewport: refs.container,
             camera: refs.camera,
+            renderer: refs.renderer,
+            scene: refs.scene,
             playerObject: playerObject!,
           }
         : {}),

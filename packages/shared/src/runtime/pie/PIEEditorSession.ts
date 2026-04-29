@@ -50,7 +50,8 @@
  * only as a testable scaffold.
  */
 
-import { Object3D, type Camera } from "three";
+import { Object3D, type Camera, type Scene } from "three";
+import { type WebGPURenderer } from "three/webgpu";
 
 import type { World } from "../../core/World";
 import { createNodeClientWorld } from "../createNodeClientWorld";
@@ -597,6 +598,25 @@ export interface PIEEditorSessionOptions {
   viewport?: HTMLElement;
   camera?: Camera;
   playerObject?: Object3D;
+  /**
+   * The editor's WebGPU renderer. When supplied, PIE mounts it onto
+   * `_clientWorld.graphics` so the real `InteractionRouter`
+   * (registered on the client world) can read
+   * `world.graphics.renderer.domElement` to bind canvas events.
+   * Without it, PIE falls back to `PIEInteractionRouterShim`.
+   *
+   * Part of B0.2 — bridge editor refs onto PIE's client world so
+   * the production interaction stack runs unmodified.
+   */
+  renderer?: WebGPURenderer;
+  /**
+   * The editor's THREE scene. When supplied, PIE mounts it onto
+   * `_clientWorld.stage.scene` so `RaycastService` (used by
+   * `InteractionRouter`) can resolve raycasts against the editor's
+   * scene graph. PIE markers are added to this scene's
+   * `markerGroup`, so raycasts hit them naturally.
+   */
+  scene?: Scene;
   mode?: "play" | "simulate";
   /**
    * Plugin-boot hooks. The host (editor/tests) decides which plugin
@@ -816,6 +836,38 @@ export class PIEEditorSession {
     //    client speaks. No world.init() needed; attachPreconnectedSocket
     //    bypasses the wsUrl + auth handshake.
     this._clientWorld = createNodeClientWorld();
+
+    // B0.2b — Mount editor refs onto _clientWorld so the real
+    // InteractionRouter (and any other system that reads
+    // `world.graphics`/`world.stage`/`world.camera`) can run against
+    // PIE's loopback unmodified. NodeClientWorld is headless by
+    // default; this assignment elevates it to a "browser-equivalent"
+    // surface using the editor's actual viewport renderer + scene +
+    // camera.
+    //
+    // Lossless when these options are absent — the existing
+    // PIEInteractionRouterShim path still runs as today's fallback.
+    // B0.2c will route through `world.entities`; B0.2d swaps the
+    // shim for the real router.
+    if (options.renderer) {
+      const w = this._clientWorld as unknown as {
+        graphics?: { renderer: { domElement: HTMLCanvasElement } };
+      };
+      w.graphics = {
+        renderer: { domElement: options.renderer.domElement },
+      };
+    }
+    if (options.scene) {
+      const w = this._clientWorld as unknown as {
+        stage?: { scene?: Scene };
+      };
+      w.stage = { scene: options.scene };
+    }
+    if (options.camera) {
+      const w = this._clientWorld as unknown as { camera?: Camera };
+      w.camera = options.camera;
+    }
+
     const network = (this._clientWorld as unknown as { network: ClientNetwork })
       .network;
     this._clientAdapter = asClientWebSocket(client);
