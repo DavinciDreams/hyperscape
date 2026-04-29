@@ -115,9 +115,9 @@ render correctly in PIE). Three gameplay-loop gaps remain:
        - **b)** Register `InteractionRouter` and explicitly call `.start()` on it post-register (~half day; doesn't address the broader `_clientWorld.start()` question but unblocks the immediate slice).
      - **Recommendation:** path (b) for the immediate slice; path (a) is its own architectural cleanup.
      - Plus B0.2c proper: spawn an entity in PIE, verify `_clientWorld.entities.get(id)` returns it (smoke test, ~30min).
-   - ⚪ B0.2d — Register real `InteractionRouter` against `_clientWorld`, delete `PIEInteractionRouterShim` (~half day, follows c-b above)
-3. **B0.3 — Live DataContext bridge in PIE** (~3 days). Pulls live state from in-process `ServerNetwork`.
-4. **B0.4 — Parity smoke test** (~2 days). Catches regressions automatically.
+   - ✅ B0.2d — Register real `InteractionRouter` on `_clientWorld` when refs available; explicitly call `.start()` since PIE skips `_clientWorld.start()`; fallback to shim when refs absent (`d1f25db74`). **Manual smoke deferred to user — press Play in dev:forge, click NPC; if dialogue/context menu opens, real router is working. If shim fallback fires, console warns visibly.** Shim file kept (not deleted yet) so test harnesses still resolve it.
+3. ~~**B0.3 — Live DataContext bridge in PIE**~~ ✅ **SHIPPED** (`7e2fa0b18`). `PIEEditorSession.getDataContext()` reads `_server.world.entities.get(playerId)`, builds player namespace (hp/maxHp/prayer/combatLevel/inCombat). `usePIESession` exposes it; `PIEHudOverlay` polls every animation frame. Production wires reactive subscriptions; PIE polls because in-process server doesn't emit equivalent events through loopback. Could revisit if perf metrics suggest it.
+4. **B0.4 — Parity smoke test** (~2 days). Scripted scenario (spawn → walk → click NPC → talk → walk to mob → attack → take damage → die → respawn) compared across both real Hyperia + PIE, asserts state-equivalence at each tick. **NEXT slice in B0.**
 
 ### Then AAA capability tier
 
