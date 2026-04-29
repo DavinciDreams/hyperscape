@@ -1735,6 +1735,21 @@ export {
   hasServerEmote,
   hasHealth,
   isEntityDead,
+  hasPendingAttacker,
+  getPendingAttacker,
+  clearPendingAttacker,
+  isPlayerLike,
+  hasNetworkDirty,
+  hasAIDamageHandler,
+  hasPlayerCombatManager,
+  hasDeathStateManager,
+  // isObject already exported from ValidationUtils above; both are
+  // unknown→object guards. Skip the typeGuards re-export to avoid
+  // a duplicate-export build error.
+  hasMethod,
+  hasProperty,
+  isPlayerDamageHandler,
+  isMobEntity,
 } from "./utils/typeGuards";
 
 // Mirror SeededRandom RNG utilities — pure browser-safe deterministic
