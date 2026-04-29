@@ -72,6 +72,7 @@ import { DndKitDragOverlayRenderer } from "./DndKitOverlay";
 // when the flag is off). Mounts alongside the hand-coded HUD so we
 // can A/B visually per widget during migration.
 import { ManifestHud } from "@/ui-framework/ManifestHud";
+import { AgentBuilderPanelToggle } from "@/ui-framework/AgentBuilderPanel";
 
 interface WindowStorePersistApi {
   hasHydrated: () => boolean;
@@ -475,6 +476,12 @@ function DesktopInterfaceManager({
             is enabled. Mounts last so its position: fixed overlay
             layers above the hand-coded HUD during A/B migration. */}
         <ManifestHud />
+
+        {/* Agent builder chat panel — toggled with Ctrl/Cmd+Shift+B.
+            Lazy: panel itself is unmounted while hidden. POSTs to
+            `/api/agent/design` (proxied to @hyperforge/agent-server)
+            and applies the returned UIPack via loadUIPackOnClient. */}
+        <AgentBuilderPanelToggle />
       </DndProvider>
     </HintProvider>
   );
