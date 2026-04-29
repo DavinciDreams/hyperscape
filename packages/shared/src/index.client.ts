@@ -134,16 +134,64 @@ export type {
   PendingLootTransaction,
 } from "./types/death";
 
-// Export tile utilities (used for tile-based-MMORPG-style tile-based distance checks)
+// Export tile utilities (used for tile-based-MMORPG-style tile-based distance checks).
+// Mirrors the export block in `index.ts` so client-side consumers
+// (asset-forge / World Studio / hyperscape-plugin) get the full
+// surface — partial re-exports caused runtime "module does not provide
+// X" errors in Vite dev because esbuild stripped missing values.
 export {
+  // Constants
+  TILE_SIZE,
+  TICK_DURATION_MS,
+  TILES_PER_TICK_WALK,
+  TILES_PER_TICK_RUN,
+  MAX_PATH_LENGTH,
+  PATHFIND_RADIUS,
+  TILE_DIRECTIONS,
+  // Utility functions
   worldToTile,
+  worldToTileInto,
   tileToWorld,
+  tileToWorldInto,
+  snapToTileCenter,
+  tileManhattanDistance,
+  tileChebyshevDistance,
   tilesEqual,
   tilesAdjacent,
   tilesWithinRange,
-  TILE_SIZE,
+  tilesWithinMeleeRange,
+  tilesCardinallyAdjacent,
+  getBestAdjacentTile,
+  getBestCombatRangeTile,
+  getBestMeleeTile,
+  getBestUnoccupiedMeleeTile,
+  getBestStepOutTile,
+  getAdjacentTiles,
+  getResourceAdjacentTiles,
+  findBestResourceInteractionTile,
+  isAdjacentToResource,
+  // Cardinal-only resource interaction
+  getCardinalAdjacentTiles,
+  findBestCardinalInteractionTile,
+  isCardinallyAdjacentToResource,
+  getCardinalFaceDirection,
+  getCardinalFaceAngle,
+  CARDINAL_FACE_ANGLES,
+  isDiagonal,
+  tileKey,
   parseTileKey,
-  type TileCoord,
+  clampTile,
+  createTileMovementState,
+  // Combat pathfinding
+  hasLineOfSight,
+  getValidRangedTiles,
+  getValidMeleeTiles,
+} from "./systems/shared/movement/TileSystem";
+export type {
+  TileCoord,
+  TileMovementState,
+  TileFlags,
+  CardinalDirection,
 } from "./systems/shared/movement/TileSystem";
 
 // Export item helpers used by server network snapshot
@@ -1097,13 +1145,9 @@ export {
 } from "./constants/SmithingConstants";
 export { getHammerItemId } from "./data/live/smithing-live";
 
-// Tile pathfinding helpers — `hasLineOfSight` etc. consumed by
-// PathfindingDebugSystem + future migrated combat.
-export {
-  hasLineOfSight,
-  getValidRangedTiles,
-  getValidMeleeTiles,
-} from "./systems/shared/movement/TileSystem";
+// Tile pathfinding helpers (`hasLineOfSight`, `getValidRangedTiles`,
+// `getValidMeleeTiles`) — re-exported above as part of the unified
+// TileSystem block.
 
 // Processing data provider + recipe types.
 export { processingDataProvider } from "./data/ProcessingDataProvider";
@@ -1357,7 +1401,10 @@ export type {
 } from "./types/world/world-types";
 export type { BuildingLayoutInput } from "./types/world/building-collision-types";
 // cellToWorldTile already exported above (building collision utilities).
-export { tileKey } from "./types/world/building-collision-types";
+// `tileKey` from building-collision-types collides with the TileSystem
+// `tileKey` exported in the unified block above. Aliased here so both
+// remain reachable.
+export { tileKey as buildingCollisionTileKey } from "./types/world/building-collision-types";
 export type {
   FlatZone,
   FlatZoneTile,
