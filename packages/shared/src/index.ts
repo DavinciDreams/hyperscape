@@ -2664,3 +2664,38 @@ export {
   type CombatRole,
   type EngagementRange,
 } from "./ai/index.js";
+
+// ---------------------------------------------------------------------------
+// Editor + viewer entry points (previously only in index.client.ts).
+// Now that framework.client.js builds from index.ts, these need to be
+// reachable from the canonical entry too. World Studio + asset-forge
+// import them at runtime; the runtime client and node clients use
+// createClientWorld + createNodeClientWorld.
+// ---------------------------------------------------------------------------
+export { createClientWorld } from "./runtime/createClientWorld";
+export { createViewerWorld } from "./runtime/createViewerWorld";
+export {
+  createEditorWorld,
+  initEditorWorld,
+  EditorWorld,
+  editorDataManager,
+} from "./runtime/createEditorWorld";
+export type { EditorWorldOptions } from "./runtime/createEditorWorld";
+export { World } from "./core/World";
+export {
+  EditorCameraSystem,
+  EditorSelectionSystem,
+  EditorGizmoSystem,
+} from "./systems/editor";
+export type {
+  EditorCameraMode,
+  EditorCameraConfig,
+  CameraBookmark,
+  Selectable,
+  SelectionChangeEvent,
+  EditorSelectionConfig,
+  TransformMode,
+  TransformSpace,
+  TransformEvent,
+  EditorGizmoConfig,
+} from "./systems/editor";
