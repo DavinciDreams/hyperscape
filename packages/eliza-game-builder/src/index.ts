@@ -25,6 +25,7 @@ import {
   catalogStatsAction,
   getWidgetAction,
   listWidgetsAction,
+  proposeUIPackAction,
   scaffoldWidgetAction,
   searchWidgetsAction,
 } from "./actions/index.js";
@@ -42,6 +43,7 @@ export const gameBuilderPlugin: Plugin = {
     listWidgetsAction,
     getWidgetAction,
     searchWidgetsAction,
+    proposeUIPackAction,
     scaffoldWidgetAction,
   ],
 
@@ -64,6 +66,7 @@ export {
   catalogStatsAction,
   getWidgetAction,
   listWidgetsAction,
+  proposeUIPackAction,
   scaffoldWidgetAction,
   searchWidgetsAction,
 } from "./actions/index.js";

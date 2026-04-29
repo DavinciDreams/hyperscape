@@ -362,6 +362,7 @@
       "dependencies": {
         "@elizaos/core": "alpha",
         "@hyperforge/plugin-scaffolder": "workspace:*",
+        "@hyperforge/ui-framework": "workspace:*",
         "@hyperforge/widget-catalog": "workspace:*",
       },
       "devDependencies": {

@@ -9,3 +9,4 @@ export { getWidgetAction } from "./getWidget.js";
 export { searchWidgetsAction } from "./searchWidgets.js";
 export { catalogStatsAction } from "./catalogStats.js";
 export { scaffoldWidgetAction } from "./scaffoldWidget.js";
+export { proposeUIPackAction } from "./proposeUIPack.js";

@@ -340,12 +340,13 @@ describe("gameBuilderPlugin", () => {
     const mod = await import("../index.js");
     const plugin = mod.gameBuilderPlugin;
     expect(plugin.name).toBe("@hyperforge/eliza-game-builder");
-    expect(plugin.actions?.length).toBe(5);
+    expect(plugin.actions?.length).toBe(6);
     expect(plugin.services?.length).toBe(1);
     expect(plugin.actions?.map((a) => a.name).sort()).toEqual([
       "GET_CATALOG_STATS",
       "GET_GAME_WIDGET",
       "LIST_GAME_WIDGETS",
+      "PROPOSE_UI_PACK",
       "SCAFFOLD_WIDGET",
       "SEARCH_GAME_WIDGETS",
     ]);
