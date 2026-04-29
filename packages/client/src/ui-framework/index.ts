@@ -54,6 +54,9 @@ export {
 } from "./uiPackRegistry";
 export { useActiveUIPack } from "./useActiveUIPack";
 
+export { installRuntimeDevApi } from "./devApi";
+export type { RuntimeDevApi } from "./devApi";
+
 export {
   buildPlayerDataContext,
   playerDataSourceRegistry,

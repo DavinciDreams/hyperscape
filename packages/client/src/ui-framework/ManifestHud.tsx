@@ -43,6 +43,15 @@ function ensureWidgetsBound(): void {
   }
 }
 
+let devApiInstalled = false;
+function ensureRuntimeDevApi(): void {
+  if (devApiInstalled) return;
+  devApiInstalled = true;
+  // Lazy require so the dev API import doesn't pull into bundle
+  // graphs that don't need it (tests, server-rendered shells, etc.).
+  void import("./devApi").then((m) => m.installRuntimeDevApi());
+}
+
 export const ManifestHud = memo(function ManifestHud() {
   const enabled = isManifestHudEnabled();
 
@@ -51,6 +60,7 @@ export const ManifestHud = memo(function ManifestHud() {
   // deferred this to useEffect. `ensureWidgetsBound` is idempotent.
   if (enabled) {
     ensureWidgetsBound();
+    ensureRuntimeDevApi();
   }
 
   const { inventory, equipment, playerStats, coins } = usePlayerDataContext();
