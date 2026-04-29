@@ -212,7 +212,7 @@ not engineer-hours.
 
 ---
 
-### Phase A4 — Agent shells (Eliza + MCP + CLI) ⚪ *(next)*
+### Phase A4 — Agent shells (Eliza + MCP + CLI) 🟡 *(CLI shipped — `6006bb63b`; MCP + Eliza next)*
 
 **Goal:** wrap A1 / A2 / A3 services with the consumer-facing
 interfaces an AI runtime needs.
