@@ -364,6 +364,15 @@ function _createTileRng(
 export interface TerrainSceneRefs {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /**
+   * The WebGPU renderer driving the viewport. Exposed so
+   * `usePIESession` can mount it onto PIE's `_clientWorld.graphics`,
+   * letting the real `InteractionRouter` (which reads
+   * `world.graphics.renderer.domElement` to bind canvas events)
+   * run unmodified. Lifecycle owned by `ViewportRenderLoop`; this
+   * is a stable reference for the duration of the session.
+   */
+  renderer: THREE.WebGPURenderer;
   raycaster: THREE.Raycaster;
   /** DOM container element for mouse event binding */
   container: HTMLDivElement;
@@ -3004,6 +3013,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       onSceneReady?.({
         scene,
         camera,
+        renderer: renderLoop.renderer,
         raycaster: raycasterRef.current,
         container,
         terrainContainer,

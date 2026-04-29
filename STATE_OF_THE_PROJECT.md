@@ -104,8 +104,13 @@ render correctly in PIE). Three gameplay-loop gaps remain:
 
 ### Hard blockers (must complete in order)
 
-1. **B0.1 — Session 1 plugin boot in prod** (~1 week). Unblocks every architecture claim.
-2. **B0.2 — Real InteractionRouter in PIE** (~5–7 days). Requires exposing renderer 3 levels through `ViewportRenderLoop` → `TileBasedTerrain` → `TerrainSceneRefs` → `usePIESession`.
+1. ~~**B0.1 — Session 1 plugin boot in prod**~~ ✅ **SHIPPED** (verified 2026-04-29). Server `startup/world.ts:149` calls `bootServerPlugins(world)`; client `GameClient.tsx:407` calls `bootClientPlugins(world, undefined, uiRegistry)`. Plugin tests at 712/712 (plan target was 187 — substantial overshoot). Server typecheck has 82 unrelated Eliza-version-drift errors (separate concern).
+2. **B0.2 — Real InteractionRouter in PIE** (~5–7 days). Three integration layers:
+   - ✅ B0.2a — Expose `renderer: WebGPURenderer` on `TerrainSceneRefs` (shipped 2026-04-29 in this session)
+   - ⚪ B0.2b — Add `renderer`/`scene` options to `PIEEditorSession`, mount editor refs onto `_clientWorld.graphics` / `.stage.scene` / `.camera` (~half day)
+   - ⚪ B0.2c — Entity registry parity: PIE markers currently live in scene only, not `world.entities`. `RaycastService.getEntityAtPosition` looks up entities by ID in `world.entities`. Either route the server's entities packet through PIE's loopback into `world.entities` (preferred — proves end-to-end packet protocol parity), or adapt RaycastService to fall back to scene userData (~2–3 days, larger because it requires auditing what the server sends through the loopback)
+   - ⚪ B0.2d — Register real `InteractionRouter` against `_clientWorld`, delete `PIEInteractionRouterShim` (~half day, gated on a/b/c)
+   **NEXT slice in B0.**
 3. **B0.3 — Live DataContext bridge in PIE** (~3 days). Pulls live state from in-process `ServerNetwork`.
 4. **B0.4 — Parity smoke test** (~2 days). Catches regressions automatically.
 
