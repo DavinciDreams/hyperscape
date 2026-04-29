@@ -1828,8 +1828,8 @@ export {
   getGlobalCullingManager,
   getGlobalTerrainComputeContext,
   isNetworkingComputeAvailable,
+  NetworkingComputeContext,
 } from "./utils/compute";
-export type { NetworkingComputeContext } from "./utils/compute";
 export {
   calculateDamage,
   calculateHitChance,
