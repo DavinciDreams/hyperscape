@@ -21,6 +21,9 @@
  *     the host to feed to `loadUIPackOnClient`.
  */
 
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   GameBuilderService,
@@ -32,6 +35,33 @@ import {
   scaffoldWidgetAction,
 } from "@hyperforge/eliza-game-builder";
 import { runAgentLoop, type LLMClient } from "../src/index.js";
+
+// Load package-local `.env` so the key can live next to the example
+// regardless of the cwd the script is invoked from. Variables already
+// set in the environment win — explicit override.
+loadPackageEnv();
+
+function loadPackageEnv(): void {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const envPath = resolve(here, "..", ".env");
+  if (!existsSync(envPath)) return;
+  const raw = readFileSync(envPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
 
 const DEFAULT_PROMPT =
   "Design a minimal HUD for a Hyperia world. I want just an HP bar in the top-left and a chat log in the bottom-left. Don't include anything else. Use existing widgets from the catalog if available.";
