@@ -51,7 +51,87 @@ so the priority order matters.
 
 ## Phase B — AAA quality, in priority order
 
-### Phase B1 — Agent authors world content ⚪ *(next)*
+> **Audit-driven correction (2026-04-29):** the original Phase B
+> was structured around new authoring capabilities. After auditing
+> the broader plan ecosystem (`PLAN_NEXT_SESSIONS`,
+> `PLAN_SERVERNETWORK_MIGRATION`, `PLAN_ENGINE_GAME_SEPARATION`,
+> `PLAN_WORLD_STUDIO_AAA_COMPLETION`) it's clear that AAA depends
+> on closing existing in-flight migrations FIRST. Phase B0 (below)
+> captures that work. B1+ are unchanged from the prior version of
+> this plan but only meaningful once B0 lands.
+
+### Phase B0 — Hyperia ↔ PIE parity ⚪ *(next; supersedes B1 in priority)*
+
+**Goal:** When the user presses **Play** on the hyperscape project
+in World Studio, the gameplay produced by PIE is **bit-for-bit
+identical** to playing Hyperia on port 3333. This is the regression
+test for the decomposition itself: if Hyperia can't be rebuilt
+from its own building blocks, neither can any game an agent
+designs from those blocks.
+
+**What audit found (2026-04-29):**
+
+The decomposition is partly done. World data (NPCs, mobs, resources,
+manifests) renders correctly in PIE. The gameplay loop has two
+visible gaps:
+
+| Gap | Root cause | Plan that already addresses it |
+|---|---|---|
+| Click-to-interact dead in PIE (no NPC dialogue, no resource gather, no context menus) | `PIEInteractionRouterShim` is throwaway scaffolding from before the real loopback existed (Step 9 of `PLAN_SERVERNETWORK_MIGRATION` shipped that loopback at `054588a48`); shim never replaced | `PLAN_SERVERNETWORK_MIGRATION` Step 9 footnote, `PLAN_ENGINE_GAME_SEPARATION` Phase 3 |
+| HUD shows placeholders, not live HP/inventory | PIE has the registry but no `DataContext` bridge from in-process server world state | `PLAN_WORLD_STUDIO_AAA_COMPLETION` Phase 3, this plan's B5 |
+| Production server still monolithic; PIE is plugin-loaded | Two divergent code paths drift over time | `PLAN_NEXT_SESSIONS` Session 1 |
+
+**Sub-slices:**
+
+- **B0.1 — `PLAN_NEXT_SESSIONS` Session 1**: wire the plugin loader
+  into the **real server's** startup so prod and PIE share one code
+  path. Existing plan; just needs to land. ~1 week.
+
+- **B0.2 — Real `InteractionRouter` in PIE**: delete
+  `PIEInteractionRouterShim` (`packages/shared/src/runtime/pieShims/`),
+  register the real `InteractionRouter` against PIE's
+  `_clientWorld`. Requires bridging the editor's THREE renderer +
+  scene + camera onto `_clientWorld.graphics` / `.stage.scene` /
+  `.camera`. The renderer currently lives 3 levels deep
+  (`ViewportRenderLoop` → `TileBasedTerrain` → `TerrainSceneRefs`),
+  so the first step is exposing it on `TerrainSceneRefs`. Scope:
+  ~5–7 days. Includes its own multi-file refactor.
+
+- **B0.3 — Live `DataContext` bridge** (was B5): expose live player
+  state from `PIEEditorSession`'s in-memory `ServerNetwork` as the
+  `DataContext` `ManifestRenderer` reads. After this lands, agent-
+  designed HUDs show real HP/position/inventory in PIE instead of
+  placeholders. ~3 days.
+
+- **B0.4 — Parity smoke test**: scripted scenario (spawn → walk →
+  click NPC → talk → walk to mob → attack → take damage → die →
+  respawn) run in both real Hyperia and PIE, asserts state-
+  equivalence at each tick. Catches regressions automatically going
+  forward. ~2 days.
+
+**Exit criteria:**
+- A user pressing Play on the hyperscape project in World Studio
+  reaches the same observable state as playing on port 3333 across
+  movement, interaction, combat, HUD, and persistence-on-this-tick
+- Parity smoke test passes; CI catches regressions automatically
+- The two stub shims (`PIEInteractionRouterShim`,
+  `PIEOrbitCameraShim`) are deleted
+
+**Sizing:** ~3 weeks if Session 1 isn't already in flight; ~2 weeks
+if it is.
+
+**Leverage:** highest. AAA is undefined without it — the platform
+claim ("AI builds games on these blocks") presupposes the blocks
+faithfully reproduce the reference game.
+
+**Why this is B0 not B1:** B1+ assume a validated substrate. Adding
+agent authoring of world content (B1) on top of an unvalidated PIE
+means every B1 bug looks like an authoring bug when it might be a
+substrate bug. Closing B0 first localizes future failures.
+
+---
+
+### Phase B1 — Agent authors world content (was "next")
 
 **Goal:** Expand the agent from "UI composer" to "world co-author."
 The platform-defining offensive move. Once an agent can place NPCs
@@ -338,11 +418,11 @@ B7  ──→  B8  (multi-agent needs test gating)
 B10 (orthogonal — sustainability layer; ship anytime after B1)
 ```
 
-**Recommended order:**
+**Recommended order (revised 2026-04-29):**
 
-1. B1 — world content (offensive; platform-defining)
-2. B2 — persistence (defensive; foundation)
-3. B5 — live data binding (PIE quality)
+1. **B0 — Hyperia ↔ PIE parity** *(blocking; AAA undefined without it)*
+2. B1 — world content (offensive; platform-defining)
+3. B2 — persistence (defensive; foundation)
 4. B3 — state awareness (now valuable since B1 produced content)
 5. B6 — streaming UX (demo polish)
 6. B4 — iteration (now valuable since B2 persists artifacts)
@@ -351,30 +431,35 @@ B10 (orthogonal — sustainability layer; ship anytime after B1)
 9. B8 — multi-agent orchestration
 10. B10 — CI coverage (can slot in earlier opportunistically)
 
+(Phase B5 from the prior version is now folded into B0.3 — live
+`DataContext` bridge in PIE — since it's a parity concern, not a
+new-capability concern.)
+
 ## Sizing
 
 Rough working-week estimates per phase, assuming focused single-track work:
 
 | Phase | Estimate | Notes |
 |---|---|---|
+| **B0** | **2–3 weeks** | **Session 1 plugin boot in prod (~1wk) + real InteractionRouter in PIE (~5–7d) + DataContext bridge (~3d) + parity smoke (~2d). Multi-file, multi-package. Audit-driven sizing.** |
 | B1 | 1.5–2.5 weeks | 4 actions × ~2 days each + integration |
 | B2 | 3–5 days | Server endpoint + read/write/compile |
 | B3 | 3–5 days | World-state extraction + prompt plumbing |
 | B4 | 1 week | Multi-turn UI + refine action |
-| B5 | 2–3 days | Mostly DataContext plumbing |
 | B6 | 3–5 days | SSE plumbing + UI |
 | B7 | 3–5 days | Test runner + agent feedback path |
 | B8 | 1–2 weeks | Orchestration is genuinely tricky |
 | B9 | 1 week | Asset gen integration |
 | B10 | 3–5 days | Mostly CI work |
 
-**Total to AAA: ~10–14 focused weeks of single-track work.**
-Realistically with context-switching, holds, and unknown unknowns:
-~3–5 calendar months.
+**Total to AAA: ~12–17 focused weeks of single-track work**
+(B0 added ~2–3 weeks vs the prior estimate). Realistically with
+context-switching, holds, and unknown unknowns: ~4–6 calendar
+months.
 
-The first 4 phases (B1–B5 in recommended order) get most of the
-demo-quality jump in ~3–5 weeks. Phases B6–B10 are quality polish
-that compound over time.
+After B0 + B1 + B2 + B3 ship (~8–10 focused weeks), the demo-quality
+jump is real. Phases B4–B10 are quality polish that compound over
+time.
 
 ## What this plan does NOT cover
 
