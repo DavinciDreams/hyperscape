@@ -61,6 +61,7 @@ import {
   type InMemoryClientSocket,
 } from "../../platform/shared/InMemorySocketPair";
 import type { ClientNetwork } from "../../systems/client/ClientNetwork";
+import { InteractionRouter } from "../../systems/client/interaction/InteractionRouter";
 
 import type { PlayerController } from "../../gameMode/controllers/PlayerController";
 import type { CameraController } from "../../gameMode/cameras/CameraController";
@@ -661,6 +662,13 @@ export class PIEEditorSession {
   private _playerController: PlayerController | null = null;
   private _cameraController: CameraController | null = null;
   private _routerShim: PIEInteractionRouterShim | null = null;
+  /**
+   * Real `InteractionRouter` registered on `_clientWorld` when the
+   * editor supplied renderer + scene + camera. Wins over the shim;
+   * the shim only instantiates as a fallback for callers that don't
+   * pass viewport refs (tests, headless harnesses).
+   */
+  private _interactionRouter: InteractionRouter | null = null;
   private _orbitShim: PIEOrbitCameraShim | null = null;
   private _pawn: Pawn | null = null;
   private _camera: Camera | null = null;
@@ -1091,22 +1099,76 @@ export class PIEEditorSession {
         options.viewport &&
         this.gameMode.id === CLICK_TO_WALK_CONTROLLER_ID
       ) {
-        this._routerShim = new PIEInteractionRouterShim({
-          viewport: options.viewport,
-          camera: options.camera,
-          bus: {
-            emit: (_t: string, _p: unknown) => {
-              // TODO(slice 4): route through `client.ws.send(writePacket(...))`
-              // so click-to-walk issues a real movement request instead of
-              // a local event. Slice 2 keeps it local so the scaffold works.
+        // B0.2d — When the editor supplied renderer + scene + camera,
+        // we already mounted them onto `_clientWorld.graphics` /
+        // `.stage.scene` / `.camera` (B0.2b). Register the real
+        // production `InteractionRouter` against `_clientWorld` so PIE
+        // exercises the same code path port 3333 does.
+        //
+        // PIE skips `_clientWorld.start()` (per the
+        // `attachPreconnectedSocket` design — comment at line ~870)
+        // so we explicitly call `interactionRouter.start()` to bind
+        // canvas events. Plugin-registered systems are similarly
+        // half-initialized in PIE today; that's a separate
+        // architectural cleanup (path-a in B0.2c findings).
+        //
+        // Falls back to `PIEInteractionRouterShim` when refs are
+        // absent (tests, headless callers) so existing test harnesses
+        // keep working.
+        const haveRealRouterRefs =
+          options.renderer !== undefined &&
+          options.scene !== undefined &&
+          options.camera !== undefined &&
+          this._clientWorld !== null;
+
+        if (haveRealRouterRefs) {
+          try {
+            const router = (this._clientWorld as World).register(
+              "interaction",
+              InteractionRouter,
+            ) as InteractionRouter;
+            // Bind canvas events. start() reads
+            // world.graphics.renderer.domElement so the editor's
+            // renderer must be mounted (B0.2b) — we asserted that
+            // above.
+            router.start();
+            this._interactionRouter = router;
+            // Mirror the shim's registry slot so any legacy caller
+            // resolving `interaction-router` gets *something*.
+            this.systems.set(
+              "interaction-router",
+              router as unknown as PIEInteractionRouterShim,
+            );
+          } catch (err) {
+            console.warn(
+              "[PIEEditorSession] Real InteractionRouter failed to start; falling back to shim:",
+              err,
+            );
+            this._interactionRouter = null;
+          }
+        }
+
+        // Fallback: shim path when refs missing OR when real router
+        // construction threw.
+        if (!this._interactionRouter) {
+          this._routerShim = new PIEInteractionRouterShim({
+            viewport: options.viewport,
+            camera: options.camera,
+            bus: {
+              emit: (_t: string, _p: unknown) => {
+                // TODO(slice 4): route through `client.ws.send(writePacket(...))`
+                // so click-to-walk issues a real movement request instead of
+                // a local event. Slice 2 keeps it local so the scaffold works.
+              },
             },
-          },
-        });
-        this._routerShim.setPawn(pawn);
-        // Controllers resolve the router via `world.getSystem(...)` — register
-        // under the same id the live `InteractionRouter` system uses so the
-        // resolution chain is identical in play mode.
-        this.systems.set("interaction-router", this._routerShim);
+          });
+          this._routerShim.setPawn(pawn);
+          // Controllers resolve the router via `world.getSystem(...)` —
+          // register under the same id the live `InteractionRouter`
+          // system uses so the resolution chain is identical in play
+          // mode.
+          this.systems.set("interaction-router", this._routerShim);
+        }
       }
 
       const ctx = {
@@ -1205,6 +1267,19 @@ export class PIEEditorSession {
     this._cameraController?.detach();
     this._routerShim?.dispose();
     this._orbitShim?.dispose();
+    // Real InteractionRouter (when active) — destroy unbinds canvas
+    // events and tears down the visual feedback / highlight services.
+    if (this._interactionRouter) {
+      try {
+        this._interactionRouter.destroy();
+      } catch (err) {
+        console.warn(
+          "[PIEEditorSession] InteractionRouter.destroy threw:",
+          err,
+        );
+      }
+      this._interactionRouter = null;
+    }
     this._playerController = null;
     this._cameraController = null;
     this._routerShim = null;
