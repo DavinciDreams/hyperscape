@@ -1784,6 +1784,77 @@ export { DataManager } from "./data/DataManager";
 // DuelSessionManager + matchmaking systems instantiate it.
 export { InMemorySessionStore } from "./infrastructure/session-store";
 export type { SessionStore } from "./infrastructure/session-store";
+
+// ---------------------------------------------------------------------------
+// Server-network services that are actually browser-safe
+//
+// These live under `systems/server/network/*` for organizational reasons
+// (the server runs them) but every one of these modules contains pure
+// runtime/utility logic — no fs, no http, no fastify/express. Audited
+// against `from "node:|fs|express|fastify"` and confirmed clean.
+//
+// The original sweep skipped them by path-pattern; that was wrong.
+// Anything pulling in real server-only deps (none of these) would be
+// caught at build time by tree-shake elimination of node:* imports.
+// ---------------------------------------------------------------------------
+export { AuditLogger } from "./systems/server/network/services/AuditLogger";
+export {
+  IntervalRateLimiter,
+  RateLimitService,
+} from "./systems/server/network/services/IntervalRateLimiter";
+export {
+  Logger as NetworkLogger,
+  LogLevel,
+} from "./systems/server/network/services/Logger";
+export {
+  isProductionRuntime,
+  getDefaultPublicWsUrl,
+  getDefaultElizaOsApiUrl,
+  getDefaultPublicAppUrl,
+} from "./systems/server/network/services/PublicUrls";
+export {
+  isValidItemId,
+  isValidStoreId,
+  isValidQuantity,
+  wouldOverflow,
+  isValidInventorySlot,
+  isValidBankSlot,
+  isValidBankMoveMode,
+  isValidBankTabIndex,
+  isValidCustomBankTabIndex,
+  isValidNpcId,
+  isValidResponseIndex,
+  validateRequestTimestamp,
+  isValidSlotIndex,
+} from "./systems/server/network/services/InputValidation";
+export {
+  createRateLimiter,
+  getPickupRateLimiter,
+  getMoveRateLimiter,
+  getDropRateLimiter,
+  getEquipRateLimiter,
+  getConsumeRateLimiter,
+  getTileMovementRateLimiter,
+  getPathfindRateLimiter,
+  getCombatRateLimiter,
+  getFollowRateLimiter,
+  getCoinPouchRateLimiter,
+  getPrayerRateLimiter,
+  getQuestListRateLimiter,
+  getQuestDetailRateLimiter,
+  getQuestAcceptRateLimiter,
+  getQuestAbandonRateLimiter,
+  getQuestCompleteRateLimiter,
+  getGlobalSocketRateLimiter,
+  getChatRateLimiter,
+  getUnknownMessageRateLimiter,
+  destroyAllRateLimiters,
+} from "./systems/server/network/services/SlidingWindowRateLimiter";
+export {
+  MovementInputValidator,
+  MovementViolationSeverity,
+} from "./systems/server/network/movement/MovementInputValidator";
+export { MovementAntiCheat } from "./systems/server/network/movement/MovementAntiCheat";
 export {
   MAGIC_STYLE_BONUSES,
   RANGED_STYLE_BONUSES,
