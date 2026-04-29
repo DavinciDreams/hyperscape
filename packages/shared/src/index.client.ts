@@ -1784,7 +1784,7 @@ export {
 } from "./constants/CombatConstants";
 export { mobLootTableMappingsProvider } from "./data/MobLootTableMappingsProvider";
 export { ARROW_DATA, BOW_TIERS } from "./data/ammunition";
-export { COMBAT_SPELLS } from "./data/combat-spells";
+export { COMBAT_SPELLS, SPELL_ORDER } from "./data/combat-spells";
 export {
   getDuelArenaConfig,
   isPositionInsideCombatArena,
