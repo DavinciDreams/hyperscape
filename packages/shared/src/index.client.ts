@@ -1780,6 +1780,10 @@ export { StatsComponent } from "./components/StatsComponent";
 // `dataManager` (the singleton) is already exported above; only the
 // class itself was missing.
 export { DataManager } from "./data/DataManager";
+// In-memory session store — pure JS Map wrapper, browser-safe.
+// DuelSessionManager + matchmaking systems instantiate it.
+export { InMemorySessionStore } from "./infrastructure/session-store";
+export type { SessionStore } from "./infrastructure/session-store";
 export {
   MAGIC_STYLE_BONUSES,
   RANGED_STYLE_BONUSES,
