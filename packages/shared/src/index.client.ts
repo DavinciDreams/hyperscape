@@ -666,7 +666,7 @@ export type {
 export type { LoaderResult } from "./types/index";
 export type { ComponentDefinition, EntityData } from "./types/index";
 export type { Entities as EntitiesInterface } from "./types/index";
-export type { SystemLogger } from "./utils/Logger";
+export { SystemLogger } from "./utils/Logger";
 
 // Export network/system interface types
 export type { NetworkSystem } from "./types/systems/system-interfaces";
