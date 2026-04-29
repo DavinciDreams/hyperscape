@@ -1808,7 +1808,10 @@ export {
   isPositionInBounds,
   sanitizeKilledBy,
   splitItemsForSafeDeath,
-  // validatePosition already exported earlier in this file.
+  // DeathUtils.validatePosition collides with ValidationUtils.validatePosition
+  // (already exported earlier in this file). index.ts aliases this one
+  // as `validateDeathPosition` — mirror that contract here.
+  validatePosition as validateDeathPosition,
 } from "./systems/shared/combat/DeathUtils";
 export {
   chaseStep,
