@@ -2666,6 +2666,20 @@ export {
 } from "./ai/index.js";
 
 // ---------------------------------------------------------------------------
+// ServerNetwork — exposed as part of the engine substrate (Step 9 of
+// PLAN_SERVERNETWORK_MIGRATION). Server source must import this via
+// the package barrel, NOT via relative `../../../shared/src/...`.
+// Reaching in directly defeats esbuild's `external: ['@hyperforge/shared']`
+// rule, which causes Entities.ts (and transitively the EntityTypes
+// Map) to get bundled inline into the server. The plugin's
+// `registerEntityType()` writes go to one Map; the server's
+// `getEntityType()` reads from another. Symptom:
+// "EntityClass is not a constructor" at world.entities.add() in
+// handleEnterWorld.
+// ---------------------------------------------------------------------------
+export { ServerNetwork } from "./systems/server/network/index.js";
+
+// ---------------------------------------------------------------------------
 // Editor + viewer entry points (previously only in index.client.ts).
 // Now that framework.client.js builds from index.ts, these need to be
 // reachable from the canonical entry too. World Studio + asset-forge

@@ -1729,8 +1729,7 @@ export function registerAgentRoutes(
       }
 
       // Get goal and available goals from ServerNetwork storage
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       const goal = ServerNetwork.agentGoals.get(characterId);
       const availableGoals =
         ServerNetwork.agentAvailableGoals.get(characterId) || [];
@@ -1845,8 +1844,7 @@ export function registerAgentRoutes(
       }
 
       // Get the socket for this character
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -1918,8 +1916,7 @@ export function registerAgentRoutes(
       }
 
       // Get the socket for this character
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -1985,8 +1982,7 @@ export function registerAgentRoutes(
       }
 
       // Get the socket for this character
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -2060,8 +2056,7 @@ export function registerAgentRoutes(
       }
 
       // Get the socket for this character
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       const socket = ServerNetwork.characterSockets.get(characterId);
 
       if (!socket) {
@@ -2327,8 +2322,7 @@ export function registerAgentRoutes(
       nearbyLocations.sort((a, b) => a.distance - b.distance);
 
       // Get available goals from ServerNetwork storage
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       const availableGoalsRaw = (ServerNetwork.agentAvailableGoals.get(
         characterId,
       ) || []) as Array<{
@@ -2660,8 +2654,7 @@ export function registerAgentRoutes(
       }
 
       // Get activity from ServerNetwork storage (if we add activity tracking there)
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
 
       // Check if activity tracking exists
       const activityData = (
@@ -2902,8 +2895,7 @@ export function registerAgentRoutes(
       }
 
       // Get thoughts from ServerNetwork in-memory cache first
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
 
       let thoughts =
         (
@@ -3010,8 +3002,7 @@ export function registerAgentRoutes(
       }
 
       // Clear thoughts from ServerNetwork storage
-      const { ServerNetwork } =
-        await import("../../../../shared/src/systems/server/network/index");
+      const { ServerNetwork } = await import("@hyperforge/shared");
       ServerNetwork.agentThoughts.delete(characterId);
 
       console.log(

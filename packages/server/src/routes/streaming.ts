@@ -156,8 +156,7 @@ async function getThoughtsSnapshot(
   characterId: string,
   limit: number = 10,
 ): Promise<ThoughtSnapshot[]> {
-  const { ServerNetwork } =
-    await import("../../../shared/src/systems/server/network/index");
+  const { ServerNetwork } = await import("@hyperforge/shared");
   const thoughts =
     (
       ServerNetwork as {

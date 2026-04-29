@@ -1060,8 +1060,7 @@ export function registerAdminRoutes(
       try {
         const { getAgentManager, getRunningAgents } =
           await import("../../eliza/index.js");
-        const { ServerNetwork } =
-          await import("../../../../shared/src/systems/server/network/index");
+        const { ServerNetwork } = await import("@hyperforge/shared");
         const agentManager = getAgentManager();
 
         // Get ECS systems for inventory/equipment/skills/quests lookup

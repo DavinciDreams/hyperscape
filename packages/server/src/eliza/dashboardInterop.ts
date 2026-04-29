@@ -5,7 +5,7 @@ import type {
   NearbyEntityData,
 } from "./types.js";
 import type { EmbeddedHyperiaService } from "./EmbeddedHyperiaService.js";
-import { ServerNetwork } from "../../../shared/src/systems/server/network/index";
+import { ServerNetwork } from "@hyperforge/shared";
 import { agentThoughts as agentThoughtsTable } from "../database/schema.js";
 
 type DashboardThought = {

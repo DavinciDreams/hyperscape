@@ -121,9 +121,34 @@ class GenericEntity extends Entity {
  * imported every entity class as a runtime dep. Decoupled to keep
  * shared engine-only.
  */
-const EntityTypes: Record<string, EntityConstructor> = {
-  entity: GenericEntity as EntityConstructor,
+// Registry storage — pinned to globalThis so dual-module situations
+// (server bundle inlines Entities.ts via a transitive relative-path
+// reach-in like `from "../../../shared/src/..."` while the plugin
+// imports `@hyperforge/shared` externally) still share one Map.
+//
+// Prior to this pinning, the symptom was "EntityClass is not a
+// constructor" at world.entities.add() during handleEnterWorld:
+// plugin's registerEntityType('player', PlayerEntity) wrote to one
+// EntityTypes Map; server's getEntityType('player') read from a
+// different Map. The fix is mechanical — single source-of-truth
+// keyed on a Symbol that survives module duplication.
+//
+// Long-term the right fix is to eliminate the relative-path reach-ins
+// from server/src so esbuild's `external: ['@hyperforge/shared']`
+// rule actually catches everything. That's a multi-file refactor
+// tracked separately. This guard makes both states correct.
+const ENTITY_TYPES_GLOBAL_KEY = Symbol.for("@hyperforge/shared/EntityTypes");
+type EntityTypesGlobal = typeof globalThis & {
+  [ENTITY_TYPES_GLOBAL_KEY]?: Record<string, EntityConstructor>;
 };
+const _global = globalThis as EntityTypesGlobal;
+if (!_global[ENTITY_TYPES_GLOBAL_KEY]) {
+  _global[ENTITY_TYPES_GLOBAL_KEY] = {
+    entity: GenericEntity as EntityConstructor,
+  };
+}
+const EntityTypes: Record<string, EntityConstructor> =
+  _global[ENTITY_TYPES_GLOBAL_KEY]!;
 
 /**
  * Public API — register an entity constructor under a string type tag.

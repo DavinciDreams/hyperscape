@@ -27,7 +27,7 @@ import {
 } from "@hyperforge/shared";
 import { NodeStorage as Storage } from "@hyperforge/shared";
 import type { World, SystemDatabase } from "@hyperforge/shared";
-import { ServerNetwork } from "../../../shared/src/systems/server/network/index";
+import { ServerNetwork } from "@hyperforge/shared";
 import type { ServerConfig } from "./config.js";
 import type { DatabaseContext } from "./database.js";
 
