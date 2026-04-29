@@ -1900,6 +1900,11 @@ export {
 } from "./data/live/combat-live";
 export { getGatheringRange } from "./data/live/gathering-live";
 export {
+  getMaxFriends,
+  getMaxIgnore,
+  getPrivateMessageMaxLength,
+} from "./data/live/social-live";
+export {
   getActivityTimeoutMs,
   getRequestCooldownMs,
   getRequestTimeoutMs,
