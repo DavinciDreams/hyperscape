@@ -1691,3 +1691,48 @@ export type { TargetType, SourceItem } from "./types/item-targeting";
 // plugin-side.
 export type { NPCDiedPayload } from "./types/events/event-payloads";
 export { validateKillToken } from "./utils/game/KillTokenUtils";
+
+// ---------------------------------------------------------------------------
+// Client-entry parity sweep (2026-04-28)
+//
+// Symbols imported by hyperscape-plugin entities (MobEntity,
+// AIStateMachine, WorldDropConditionEvaluators, etc.) that were only
+// re-exported from the server entry (index.ts). Browser builds resolve
+// `@hyperforge/shared` to framework.client.js; missing exports here
+// surface as runtime "does not provide an export named ..." SyntaxErrors
+// at module-eval time.
+//
+// Pre-emptively mirroring the WHOLE combat-live + typeGuards modules
+// rather than per-symbol — every export below is browser-safe (pure
+// data lookups, pure type guards). Stops the per-symbol whack-a-mole
+// the prior fixes (SystemLogger, TileSystem, AttackType, ItemType) had
+// to do one at a time.
+// ---------------------------------------------------------------------------
+export {
+  getCombatTimeoutTicks,
+  getDefaultMagicRange,
+  getHitDelayConfig,
+  getSpellLaunchDelayMs,
+  getArrowLaunchDelayMs,
+  getDefaultNpcAttackSpeedTicks,
+  getDefaultRangedRange,
+  getDamageBaseConstant,
+  getEffectiveLevelConstant,
+  getDamageDivisor,
+  getTickDurationMs,
+  getAnimationConfig,
+  getDefaultAttackSpeedTicks,
+  getAfkDisableRetaliateTicks,
+} from "./data/live/combat-live";
+export {
+  isTerrainSystem,
+  isMobSystem,
+  isEquipmentSystem,
+  isMobLike,
+  hasMobConfig,
+  getMobRetaliates,
+  getMobAttackType,
+  hasServerEmote,
+  hasHealth,
+  isEntityDead,
+} from "./utils/typeGuards";
