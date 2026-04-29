@@ -21,6 +21,7 @@ import {
 import React, { useState, useCallback, useMemo } from "react";
 
 import { useWorldStudio } from "../WorldStudioContext";
+import { setAgentPack } from "../state/agentPack";
 import { AgentBuilderForm } from "./AgentBuilderForm";
 import { PropertySection } from "./properties/PropertyControls";
 import { QuestGraphPanel } from "./QuestGraphPanel";
@@ -358,7 +359,14 @@ export function AutomationPanel() {
         {/* Agent builder is available even before a world is generated —
             it works against the widget catalog, not world content. */}
         <div className="p-2">
-          <AgentBuilderForm />
+          <AgentBuilderForm
+            onPackReceived={(pack) => {
+              // Push into the editor-local agent-pack store. PIE's HUD
+              // overlay subscribes to this and re-renders with the
+              // agent's design once PIE is running.
+              setAgentPack(pack);
+            }}
+          />
         </div>
 
         <div className="flex items-center justify-center h-32 text-text-tertiary text-xs px-3">

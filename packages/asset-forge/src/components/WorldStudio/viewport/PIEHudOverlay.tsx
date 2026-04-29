@@ -41,6 +41,7 @@ import type { WidgetRegistry } from "@hyperforge/ui-framework";
 import { useMemo } from "react";
 
 import type { GamePluginSetId } from "../toolbar/gamePluginResolver";
+import { useAgentPack } from "../state/agentPack";
 
 const SHOOTER_DEMO_PIE_LAYOUT: UILayoutManifest = UILayoutManifestSchema.parse({
   id: "shooter-demo.pie",
@@ -103,7 +104,14 @@ export interface PIEHudOverlayProps {
 }
 
 export function PIEHudOverlay({ registry, gameId }: PIEHudOverlayProps) {
-  const layout = useMemo(() => pickLayoutForGame(gameId), [gameId]);
+  const agentPack = useAgentPack();
+  // Agent-emitted pack wins over the static per-game layout when set.
+  // Designers using the AI tab in the right sidebar see their
+  // chat-designed HUD render live in PIE.
+  const layout = useMemo(
+    () => agentPack?.defaultLayout ?? pickLayoutForGame(gameId),
+    [agentPack, gameId],
+  );
 
   if (!registry) return null;
   if (layout.instances.length === 0) return null;
