@@ -212,7 +212,7 @@ not engineer-hours.
 
 ---
 
-### Phase A4 — Agent shells (Eliza + MCP + CLI) 🟡 *(CLI `6006bb63b`, Eliza `777460446`, PROPOSE_UI_PACK + worked-example `736071af1`, agent-runner `4479a4594` shipped; MCP optional)*
+### Phase A4 — Agent shells (Eliza + MCP + CLI) ✅ *(CLI `6006bb63b`, Eliza `777460446`, PROPOSE_UI_PACK + worked-example `736071af1`, agent-runner `4479a4594`, dev-API `bd2eeafb0`, agent-server `fcafb6a41`, chat panel `fc2e40929` shipped — full chat-to-HUD loop in browser; MCP optional)*
 
 **Goal:** wrap A1 / A2 / A3 services with the consumer-facing
 interfaces an AI runtime needs.
