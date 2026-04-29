@@ -6,7 +6,9 @@
  *
  *   ANTHROPIC_API_KEY            (required)
  *   HYPERFORGE_CATALOG_PATH      (optional; defaults to monorepo location)
- *   HYPERFORGE_WORKSPACE_ROOT    (optional; defaults to process.cwd())
+ *   HYPERFORGE_WORKSPACE_ROOT    (optional; defaults to the monorepo root,
+ *                                 found by walking up from this script
+ *                                 until package.json with `workspaces` is hit)
  *   AGENT_SERVER_PORT            (optional; defaults to 5180)
  *   AGENT_SERVER_HOSTNAME        (optional; defaults to 0.0.0.0)
  *   AGENT_SERVER_MODEL           (optional; defaults to claude-sonnet-4-5)
@@ -47,6 +49,34 @@ function loadPackageEnv(): void {
   }
 }
 
+/**
+ * Walk up from the script's directory until we find a package.json
+ * with a `workspaces` field — that's the monorepo root, where the
+ * catalog lives. Falls back to process.cwd() if not found, matching
+ * the prior behavior.
+ */
+function findMonorepoRoot(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  for (let i = 0; i < 10; i++) {
+    const pkgPath = resolve(dir, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+          workspaces?: unknown;
+        };
+        if (pkg.workspaces) return dir;
+      } catch {
+        // Ignore parse errors, keep walking.
+      }
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
 function main(): void {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -58,8 +88,10 @@ function main(): void {
   const hostname = process.env.AGENT_SERVER_HOSTNAME ?? "0.0.0.0";
   const defaultModel = process.env.AGENT_SERVER_MODEL ?? "claude-sonnet-4-5";
 
+  const workspaceRoot =
+    process.env.HYPERFORGE_WORKSPACE_ROOT ?? findMonorepoRoot();
   const service = GameBuilderService.create({
-    workspaceRoot: process.env.HYPERFORGE_WORKSPACE_ROOT ?? process.cwd(),
+    workspaceRoot,
     catalogPath: process.env.HYPERFORGE_CATALOG_PATH,
   });
   const stats = service.getCatalog().stats;
