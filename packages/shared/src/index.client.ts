@@ -1777,6 +1777,9 @@ export type { SeededRandomState } from "./utils/SeededRandom";
 // or main entry, not the .client one.
 // ---------------------------------------------------------------------------
 export { StatsComponent } from "./components/StatsComponent";
+// `dataManager` (the singleton) is already exported above; only the
+// class itself was missing.
+export { DataManager } from "./data/DataManager";
 export {
   MAGIC_STYLE_BONUSES,
   RANGED_STYLE_BONUSES,
