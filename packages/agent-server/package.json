@@ -1,0 +1,47 @@
+{
+  "name": "@hyperforge/agent-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny HTTP wrapper around @hyperforge/agent-runner. Exposes POST /design so a browser can ask Claude to design a UIPack and get back JSON the running client can paste into loadPack(). Stateless, single-endpoint, no auth — the bridge between the chat UI and the live agent loop.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "hyperforge-agent-server": "dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "start": "bun run src/bin.ts",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@elizaos/core": "alpha",
+    "@hyperforge/agent-runner": "workspace:*",
+    "@hyperforge/eliza-game-builder": "workspace:*",
+    "@hyperforge/widget-catalog": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "GPL-3.0"
+}
