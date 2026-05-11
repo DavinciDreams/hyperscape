@@ -39,6 +39,7 @@ test-*.png
 **/.env.local
 **/.env.production
 **/.env.development
+.cert/
 # Allow .env.example files (documentation only, no secrets)
 !.env.example
 !**/.env.example

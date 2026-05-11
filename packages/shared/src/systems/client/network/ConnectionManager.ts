@@ -265,7 +265,7 @@ export class ConnectionManager {
         if (!packet || packet.length === 0) return;
 
         const [method, data] = packet;
-        if (method === "onAuthResult") {
+        if (method === "onAuthResult" || method === "authResult") {
           const result = data as { success: boolean; error?: string };
 
           // Remove auth handler - we're done with auth phase
