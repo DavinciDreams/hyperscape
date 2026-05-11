@@ -1,6 +1,6 @@
 # Generation Pipeline
 
-[← Back to Index](../README.md)
+[← Back to Index](../../README.md)
 
 ---
 
@@ -1209,4 +1209,4 @@ try {
 
 ---
 
-[← Back to Index](../README.md) | [Next: Prompt Engineering →](./prompt-engineering.md)
+[← Back to Index](../../README.md) | [Next: Prompt Engineering →](./prompt-engineering.md)

@@ -304,7 +304,7 @@ You should now see a capsule representing the player!
 
 ## Step 7: Add Player Movement
 
-Add keyboard controls:
+Add keyboard controls for this standalone sample:
 
 ```typescript
 // ... (previous code) ...
@@ -374,10 +374,10 @@ function gameLoop(time: number) {
 
 requestAnimationFrame(gameLoop);
 
-console.log('Controls: WASD to move');
+console.log('Controls: keyboard movement enabled for this sample');
 ```
 
-You can now move the player with WASD keys!
+You can now move the player with the keyboard in this minimal sample. The full Hyperscape RPG client uses RuneScape-style click-to-move instead.
 
 ---
 
@@ -527,7 +527,7 @@ function gameLoop(time: number) {
 
 requestAnimationFrame(gameLoop);
 
-console.log('Game running! Use WASD to move.');
+console.log('Game running! Keyboard movement is enabled for this sample.');
 ```
 
 ---
@@ -539,7 +539,7 @@ Congratulations! You've created:
 - ✅ 3D world with Hyperscape
 - ✅ Ground plane and lighting
 - ✅ Player character
-- ✅ WASD movement
+- ✅ Basic sample movement
 - ✅ Third-person camera
 - ✅ Static obstacles
 
@@ -630,7 +630,7 @@ await avatar.load();
 
 ### Movement Not Working
 
-**Problem:** WASD doesn't move player
+**Problem:** Keyboard movement doesn't move player
 
 **Solution:**
 - Check keyboard event listeners are attached
@@ -643,7 +643,7 @@ await avatar.load();
 
 - [Installation Guide](installation.md) - Detailed setup
 - [User Guides](../03-user-guides/creating-worlds.md) - Deep dives
-- [API Reference](../12-api-reference/world-api.md) - Complete API docs
+- [API Reference](../README.md) - Shared package documentation index
 - [Examples](https://github.com/hyperscape/examples) - More examples
 
 ---

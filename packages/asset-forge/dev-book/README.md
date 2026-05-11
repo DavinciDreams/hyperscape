@@ -28,7 +28,7 @@ Learn how to use each feature:
 Understand the system design:
 - [System Overview](04-architecture/system-overview.md) - High-level architecture
 - [Frontend Architecture](04-architecture/frontend-architecture.md) - React/Three.js structure
-- [Backend Architecture](04-architecture/backend-architecture.md) - Express/Node.js design
+- [Backend Architecture](04-architecture/backend-architecture.md) - Elysia/Bun API design
 - [State Management](04-architecture/state-management.md) - Zustand stores explained
 - [Data Flow](04-architecture/data-flow.md) - Request/response patterns
 
@@ -49,12 +49,12 @@ Explore the server-side architecture:
 
 ### 🤖 AI Pipeline
 Understand the generation pipeline:
-- [Generation Pipeline](07-ai-pipeline/generation-pipeline.md) - Complete workflow
-- [Prompt Engineering](07-ai-pipeline/prompt-engineering.md) - AI prompts
-- [Image Generation](07-ai-pipeline/image-generation.md) - OpenAI DALL-E
-- [3D Conversion](07-ai-pipeline/3d-conversion.md) - Meshy.ai integration
-- [Retexturing](07-ai-pipeline/retexturing.md) - Material variants
-- [Rigging](07-ai-pipeline/rigging.md) - Character rigging
+- [Generation Pipeline](08-features/07-ai-pipeline/generation-pipeline.md) - Complete workflow
+- [Prompt Engineering](08-features/07-ai-pipeline/prompt-engineering.md) - AI prompts
+- [Image Generation](08-features/07-ai-pipeline/image-generation.md) - Image model integration
+- [3D Conversion](08-features/07-ai-pipeline/3d-conversion.md) - Meshy.ai integration
+- [Retexturing](08-features/07-ai-pipeline/retexturing.md) - Material variants
+- [Rigging](08-features/07-ai-pipeline/rigging.md) - Character rigging
 
 ### 🎯 Features Deep Dive
 Advanced feature documentation:
@@ -132,9 +132,9 @@ Asset Forge is a comprehensive AI-powered 3D asset generation and management sys
 ### Technology Stack
 
 - **Frontend**: React 19.2, TypeScript 5.3, Three.js 0.178, Zustand 5.0, Tailwind CSS 3.3
-- **Backend**: Node.js 18+, Express.js 4.18, Bun runtime
-- **AI Services**: OpenAI GPT-4/DALL-E, Meshy.ai, MediaPipe Hands
-- **Build Tools**: Vite 6.0, TypeScript Compiler, ESLint
+- **Backend**: Bun runtime, Elysia API server
+- **AI Services**: OpenAI, Vercel AI Gateway, Meshy.ai, Tripo, MediaPipe Hands
+- **Build Tools**: Vite, TypeScript Compiler, ESLint
 
 ### Architecture
 
@@ -148,7 +148,7 @@ Asset Forge is a comprehensive AI-powered 3D asset generation and management sys
 └──────────────────────┬──────────────────────────────┘
                        │ HTTP/REST API
 ┌──────────────────────┴──────────────────────────────┐
-│               Backend (Express.js)                   │
+│                Backend (Elysia/Bun)                  │
 │  ┌────────────┐  ┌────────────┐  ┌───────────────┐ │
 │  │   Routes   │  │  Services  │  │  Middleware   │ │
 │  └────────────┘  └────────────┘  └───────────────┘ │
@@ -176,10 +176,10 @@ Asset Forge is a comprehensive AI-powered 3D asset generation and management sys
 cd packages/asset-forge
 
 # Install dependencies
-npm install  # or: bun install
+bun install
 
 # Configure environment
-cp env.example .env
+cp .env.example .env
 # Edit .env with your API keys
 ```
 
@@ -187,14 +187,14 @@ cp env.example .env
 
 ```bash
 # Start both frontend and backend
-npm run dev
+bun run dev
 
 # Or run separately:
-npm run dev:frontend  # Port 3003
-npm run dev:backend   # Port 3004 + 8081
+bun run dev:frontend  # Port 3400
+bun run dev:backend   # Port 3401
 ```
 
-Visit [http://localhost:3003](http://localhost:3003) to access Asset Forge.
+Visit [http://localhost:3400](http://localhost:3400) to access Asset Forge.
 
 ### Generate Your First Asset
 
@@ -235,7 +235,7 @@ Part of the Hyperscape project.
 ## 🔗 Related Documentation
 
 - [Hyperscape Main README](../../../README.md)
-- [Hyperscape Package Docs](../../hyperscape/README.md)
+- [Hyperscape Client Docs](../../client/README.md)
 - [Plugin Hyperscape Docs](../../plugin-hyperscape/README.md)
 
 ---
