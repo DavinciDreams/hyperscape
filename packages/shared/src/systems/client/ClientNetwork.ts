@@ -127,6 +127,7 @@ import { type TileCoord } from "../shared/movement/TileSystem"; // Internal impo
 type ClientNetworkEnv = {
   PUBLIC_DISABLE_NETWORK?: string;
   DISABLE_NETWORK?: string;
+  PUBLIC_PRIVY_APP_ID?: string;
   PUBLIC_INTERPOLATION_MAX_PER_FRAME?: string;
   INTERPOLATION_MAX_PER_FRAME?: string;
 };
@@ -146,6 +147,34 @@ const isNetworkDisabled = (): boolean => {
     isTruthy(processEnv?.PUBLIC_DISABLE_NETWORK) ||
     isTruthy(processEnv?.DISABLE_NETWORK)
   );
+};
+
+const hasConfiguredPrivyAppId = (): boolean => {
+  const runtimeEnv = (globalThis as { env?: ClientNetworkEnv }).env;
+  const processEnv =
+    typeof process !== "undefined" && typeof process.env !== "undefined"
+      ? process.env
+      : undefined;
+  const raw =
+    runtimeEnv?.PUBLIC_PRIVY_APP_ID ?? processEnv?.PUBLIC_PRIVY_APP_ID ?? "";
+  const appId = raw.trim();
+  return (
+    appId.length > 0 &&
+    !["undefined", "null", "false", "0"].includes(appId.toLowerCase()) &&
+    !appId.includes("your-privy-app-id")
+  );
+};
+
+const shouldAutoEnterAnonymousWorld = (): boolean => {
+  const isPlaywrightRuntime =
+    process.env.PLAYWRIGHT_TEST === "true" ||
+    (typeof window !== "undefined" &&
+      (
+        window as Window & {
+          __PLAYWRIGHT_TEST__?: boolean;
+        }
+      ).__PLAYWRIGHT_TEST__ === true);
+  return isPlaywrightRuntime || !hasConfiguredPrivyAppId();
 };
 
 const readPositiveIntegerEnv = (...keys: string[]): number | null => {
@@ -259,7 +288,10 @@ export class ClientNetwork extends SystemBase {
   // Application-level keepalive to prevent Cloudflare/proxy WebSocket idle timeout
   // WS protocol-level ping/pong may not be counted as "activity" by reverse proxies
   private keepaliveIntervalId: ReturnType<typeof setInterval> | null = null;
-  private static readonly KEEPALIVE_INTERVAL_MS = 30_000; // 30 seconds
+  // Keep this below the server's default heartbeat window (5s interval, 3 misses).
+  // Some local HTTPS/proxy paths do not reliably surface protocol-level pongs,
+  // so application traffic is also used as proof of life on the server.
+  private static readonly KEEPALIVE_INTERVAL_MS = 4_000;
 
   // Outgoing message queue (for messages sent while disconnected)
   private outgoingQueue: Array<{
@@ -720,7 +752,7 @@ export class ClientNetwork extends SystemBase {
         if (!packet || packet.length === 0) return;
 
         const [method, data] = packet;
-        if (method === "onAuthResult") {
+        if (method === "onAuthResult" || method === "authResult") {
           const result = data as { success: boolean; error?: string };
 
           // Remove auth handler - we're done with auth phase
@@ -1143,9 +1175,9 @@ export class ClientNetwork extends SystemBase {
           );
           this.send("enterWorld", { characterId });
         } else {
-          if (process.env.PLAYWRIGHT_TEST === "true") {
+          if (shouldAutoEnterAnonymousWorld()) {
             console.log(
-              "[PlayerLoading] No characterId available in PLAYWRIGHT_TEST, sending anonymous enterWorld",
+              "[PlayerLoading] No characterId available with auth disabled, sending anonymous enterWorld",
             );
             this.send("enterWorld", {});
           } else {

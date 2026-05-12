@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,15 @@ export default defineConfig(({ mode }) => {
     __dirname,
     `node_modules/.vite-${cacheMode}-${cacheFlavor}`,
   );
+  const httpsKeyPath = process.env.VITE_HTTPS_KEY;
+  const httpsCertPath = process.env.VITE_HTTPS_CERT;
+  const localHttps =
+    httpsKeyPath && httpsCertPath
+      ? {
+          key: fs.readFileSync(httpsKeyPath),
+          cert: fs.readFileSync(httpsCertPath),
+        }
+      : undefined;
 
   const optimizeDepsExclude = [
     "@hyperscape/shared", // CRITICAL: Exclude from dep optimization so changes are detected
@@ -431,6 +441,9 @@ export default defineConfig(({ mode }) => {
             ? "https://assets.hyperscape.club"
             : "http://localhost:5555/game-assets"),
       ),
+      "process.env.PUBLIC_PRIVY_APP_ID": JSON.stringify(
+        env.PUBLIC_PRIVY_APP_ID || "",
+      ),
       "process.env.PUBLIC_STARTER_ITEMS": JSON.stringify(
         env.PUBLIC_STARTER_ITEMS || "",
       ),
@@ -472,6 +485,7 @@ export default defineConfig(({ mode }) => {
       port: Number(env.VITE_PORT) || 3333,
       open: false,
       host: true,
+      https: localHttps,
       hmr: disableSharedWatch ? false : undefined,
       // Do not proxy /env.js: public/env.js provides loopback defaults when the game server
       // is down or restarting; proxying returned 502 and blocked bootstrap. Server still
@@ -481,6 +495,11 @@ export default defineConfig(({ mode }) => {
             proxy: {
               "/game-assets": {
                 target: resolvedPublicApiUrl.replace(/\/$/, ""),
+                changeOrigin: true,
+              },
+              "/ws": {
+                target: `ws://127.0.0.1:${defaultWsPort}`,
+                ws: true,
                 changeOrigin: true,
               },
             },
@@ -501,7 +520,7 @@ export default defineConfig(({ mode }) => {
       },
       fs: {
         // Allow serving files from the shared package
-        allow: [".."],
+        allow: [workspaceRoot],
       },
     },
 

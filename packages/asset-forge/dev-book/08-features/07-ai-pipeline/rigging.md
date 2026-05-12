@@ -1,6 +1,6 @@
 # Rigging
 
-[← Back to Index](../README.md)
+[← Back to Index](../../README.md)
 
 ---
 
@@ -1065,4 +1065,4 @@ async function rigCharacterComplete(assetId: string, baseTaskId: string, heightM
 
 ---
 
-[← Back to Retexturing](./retexturing.md) | [Back to Index](../README.md)
+[← Back to Retexturing](./retexturing.md) | [Back to Index](../../README.md)

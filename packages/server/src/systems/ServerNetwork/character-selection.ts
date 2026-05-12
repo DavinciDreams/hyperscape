@@ -540,6 +540,8 @@ export async function handleEnterWorld(
   }
   const accountId = socket.accountId || undefined;
   const isPlaywrightTest = process.env.PLAYWRIGHT_TEST === "true";
+  const isLocalAuthDisabled = process.env.DISABLE_AUTH === "true";
+  const allowLocalFallbackCharacter = isPlaywrightTest || isLocalAuthDisabled;
 
   // Non-bot players must enter with a persistent character ID.
   if (!characterId && !isLoadTestBot && !isDuelBot) {
@@ -566,9 +568,9 @@ export async function handleEnterWorld(
           console.log(
             `[CharacterSelection] Resolved missing characterId to ${characterId} for account ${accountId}`,
           );
-        } else if (isPlaywrightTest) {
-          const generatedCharacterId = `e2e_${uuid()}`;
-          const fallbackName = `E2E_${accountId.slice(0, 8)}`;
+        } else if (allowLocalFallbackCharacter) {
+          const generatedCharacterId = `${isPlaywrightTest ? "e2e" : "local"}_${uuid()}`;
+          const fallbackName = `${isPlaywrightTest ? "E2E" : "Local"}_${accountId.slice(0, 8)}`;
           const created = await databaseSystem.createCharacter(
             accountId,
             generatedCharacterId,
@@ -583,7 +585,7 @@ export async function handleEnterWorld(
           }
           if (characterId) {
             console.log(
-              `[CharacterSelection] PLAYWRIGHT_TEST created fallback character ${characterId} for account ${accountId}`,
+              `[CharacterSelection] Local/test auth created fallback character ${characterId} for account ${accountId}`,
             );
           }
         }
@@ -638,9 +640,9 @@ export async function handleEnterWorld(
 
     // If we found an active socket with this character, reject immediately
     if (existingActiveSocket) {
-      if (isPlaywrightTest) {
+      if (allowLocalFallbackCharacter) {
         console.warn(
-          `[CharacterSelection] PLAYWRIGHT_TEST forcing character handoff for ${characterId}: closing old socket ${existingActiveSocket.id} in favor of ${socket.id}`,
+          `[CharacterSelection] Local/test auth forcing character handoff for ${characterId}: closing old socket ${existingActiveSocket.id} in favor of ${socket.id}`,
         );
         // Release the character claim immediately to avoid reconnect races.
         existingActiveSocket.characterId = undefined;
@@ -648,11 +650,11 @@ export async function handleEnterWorld(
         try {
           existingActiveSocket.ws?.close?.(
             4002,
-            "Superseded by PLAYWRIGHT_TEST reconnect",
+            "Superseded by local/test reconnect",
           );
         } catch (closeErr) {
           console.warn(
-            "[CharacterSelection] PLAYWRIGHT_TEST failed to close prior socket:",
+            "[CharacterSelection] Local/test auth failed to close prior socket:",
             closeErr,
           );
         }

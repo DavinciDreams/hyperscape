@@ -1,12 +1,12 @@
 # 3D Asset Forge
 
-A comprehensive React/Vite application for AI-powered 3D asset generation, rigging, and fitting. Built for the Hyperscape RPG, this system combines OpenAI's GPT-4 and DALL-E with Meshy.ai to create game-ready 3D models from text descriptions.
+A comprehensive React/Vite application for AI-powered 3D asset generation, rigging, and fitting. Built for the Hyperscape RPG, this system combines language and image models, Meshy.ai, Tripo, and local processing tools to create game-ready 3D models from text descriptions.
 
 ## Features
 
 ### 🎨 **AI-Powered Asset Generation**
-- Generate 3D models from text descriptions using GPT-4 and Meshy.ai
-- Automatic concept art creation with DALL-E
+- Generate 3D models from text descriptions using AI prompt/image services and Meshy.ai
+- Optional image generation through OpenAI or Vercel AI Gateway configuration
 - Support for various asset types: weapons, armor, characters, items
 - Material variant generation (bronze, steel, mithril, etc.)
 - Batch generation capabilities
@@ -31,12 +31,12 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 
 ## Tech Stack
 
-- **Frontend**: React 18, TypeScript, Vite
+- **Frontend**: React 19, TypeScript, Vite
 - **3D Graphics**: Three.js, React Three Fiber, Drei
 - **State Management**: Zustand, Immer
-- **AI Integration**: OpenAI API, Meshy.ai API
+- **AI Integration**: OpenAI API, Vercel AI Gateway, Meshy.ai API, Tripo API
 - **ML/Computer Vision**: TensorFlow.js, MediaPipe (hand detection)
-- **Backend**: Express.js, Node.js
+- **Backend**: Elysia, Bun
 - **Styling**: Tailwind CSS
 - **Build Tool**: Bun [[memory:4609218]]
 
@@ -51,7 +51,7 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 1. Clone the repository
 ```bash
 git clone [repository-url]
-cd packages/generation
+cd packages/asset-forge
 ```
 
 2. Install dependencies using Bun [[memory:4609218]]
@@ -61,41 +61,44 @@ bun install
 
 3. Create a `.env` file from the example
 ```bash
-cp env.example .env
+cp .env.example .env
 ```
 
 4. Add your API keys to `.env`
 ```
-VITE_OPENAI_API_KEY=your-openai-api-key
-VITE_MESHY_API_KEY=your-meshy-api-key
+OPENAI_API_KEY=your-openai-api-key
+MESHY_API_KEY=your-meshy-api-key
+# Optional:
+TRIPO_API_KEY=your-tripo-api-key
+AI_GATEWAY_API_KEY=your-vercel-ai-gateway-key
 ```
 
 ### Running the Application
 
 Start both frontend and backend services:
 ```bash
-# Terminal 1: Start the React app
-bun run dev:all
+# Start the React app and Elysia API together
+bun run dev
 
 # Or run separately:
-bun run dev           # Terminal 1: Frontend only
-bun run dev:backend   # Terminal 2: Backend services
+bun run dev:frontend  # Terminal 1: Frontend only, default port 3400
+bun run dev:backend   # Terminal 2: API only, default port 3401
 ```
 
-The app will be available at `http://localhost:3003`
+The app will be available at `http://localhost:3400`, with the API on `http://localhost:3401`.
 
 ## Project Structure
 
 ```
-generation/
+asset-forge/
 ├── src/                    # React application source
 │   ├── components/         # UI components
 │   ├── services/          # Core services (AI, fitting, rigging)
 │   ├── pages/             # Main application pages
 │   ├── hooks/             # Custom React hooks
 │   └── store/             # Zustand state management
-├── server/                # Express.js backend
-│   ├── api.mjs           # API endpoints
+├── server/                # Elysia/Bun backend
+│   ├── api-elysia.ts     # API endpoints
 │   └── services/         # Backend services
 ├── gdd-assets/           # Generated 3D assets [[memory:3843922]]
 │   └── [asset-name]/     # Individual asset folders
@@ -148,8 +151,8 @@ generation/
 
 ## Scripts
 
-- `bun run dev` - Start frontend development server
-- `bun run dev:all` - Start both frontend and backend development servers
+- `bun run dev` - Start frontend and backend development servers
+- `bun run dev:frontend` - Start frontend development server
 - `bun run dev:backend` - Start backend services only
 - `bun run build` - Build for production
 - `bun run start` - Start production backend services

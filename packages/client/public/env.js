@@ -20,9 +20,10 @@
 
   if (isLocalDevServer) {
     const host = window.location.hostname || "127.0.0.1";
-    env.PUBLIC_API_URL ||= `http://${host}:5555`;
-    env.PUBLIC_WS_URL ||= `ws://${host}:5556/ws`;
-    env.PUBLIC_CDN_URL ||= `http://${host}:5555/game-assets`;
+    const isHttps = window.location.protocol === "https:";
+    env.PUBLIC_API_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5558" : "5555"}`;
+    env.PUBLIC_WS_URL ||= `${isHttps ? "wss" : "ws"}://${host}:${isHttps ? currentPort || "3333" : "5556"}/ws`;
+    env.PUBLIC_CDN_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5559" : "8080"}`;
   }
 
   window.env = env;

@@ -17,7 +17,7 @@ The Hyperscape RPG is a persistent multiplayer RPG featuring:
 ### TL;DR - Get Playing Fast
 
 ```bash
-cd packages/hyperscape
+cd packages/client
 bun install
 bun run dev
 # Open http://localhost:3333 and start playing!
@@ -36,7 +36,7 @@ bun run dev
 ```bash
 # Clone the repository
 git clone https://github.com/hyperscapeai/hyperscape
-cd hyperscape/packages/hyperscape
+cd hyperscape/packages/client
 
 # Install dependencies
 bun install
@@ -143,7 +143,7 @@ PRIVY_APP_SECRET=your-secret
 
 1. **Authenticate** using Privy (wallet, email, or social login)
 2. **Create character** - choose your name in-game
-3. **Explore** - Use WASD to move, click to interact with objects
+3. **Explore** - Click the ground to move, RuneScape-style, and click objects/NPCs to interact
 4. **Right-click** for context menus and advanced actions
 5. **Open menus** - Use left sidebar buttons for Inventory, Skills, Equipment, etc.
 
@@ -157,7 +157,7 @@ npm run config:check  # Desktop development
 npm run config:check:mobile  # Mobile development
 ```
 
-See [CONFIG.md](./CONFIG.md) for complete configuration documentation.
+See the root README and environment examples for the current port and environment variable reference.
 
 ### Mobile Development
 
@@ -178,7 +178,7 @@ npm run dev
 npm run ios:dev      # or android:dev
 ```
 
-See [MOBILE-QUICKSTART.md](./MOBILE-QUICKSTART.md) for quick reference or [MOBILE.md](./MOBILE.md) for complete documentation.
+The Capacitor setup is still present, but package-local mobile docs are not currently checked in.
 
 ### Farcaster Frame v2 Deployment
 
@@ -347,7 +347,7 @@ Equipment slots:
 
 ### Controls
 
-- **Movement**: WASD keys or click-to-move
+- **Movement**: Click-to-move, RuneScape-style
 - **Camera**: Mouse look (hold right-click to rotate, scroll to zoom)
 - **Interact**: Left-click on objects/NPCs
 - **Context menu**: Right-click for advanced actions

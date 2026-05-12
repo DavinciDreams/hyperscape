@@ -39,6 +39,8 @@ export function useQuestStatusSync({
 }: UseQuestStatusSyncOptions): void {
   useEffect(() => {
     let fetchTimeout: ReturnType<typeof setTimeout> | null = null;
+    let retryInterval: ReturnType<typeof setInterval> | null = null;
+    let hasLoadedQuestList = false;
 
     const fetchQuestList = () => {
       world.network?.send?.("getQuestList", {});
@@ -69,6 +71,11 @@ export function useQuestStatusSync({
         mapped.push({ id: quest.id, state });
       }
 
+      hasLoadedQuestList = true;
+      if (retryInterval) {
+        clearInterval(retryInterval);
+        retryInterval = null;
+      }
       questStatusesRef.current = map;
       setQuestStatuses(mapped);
     };
@@ -84,12 +91,21 @@ export function useQuestStatusSync({
     world.on(EventType.QUEST_STARTED, onQuestEvent);
     world.on(EventType.QUEST_PROGRESSED, onQuestEvent);
     world.on(EventType.QUEST_COMPLETED, onQuestEvent);
+    world.on(EventType.PLAYER_SPAWNED, onQuestEvent);
 
     fetchQuestList();
+    retryInterval = setInterval(() => {
+      if (!hasLoadedQuestList) {
+        fetchQuestList();
+      }
+    }, 1_000);
 
     return () => {
       if (fetchTimeout) {
         clearTimeout(fetchTimeout);
+      }
+      if (retryInterval) {
+        clearInterval(retryInterval);
       }
       world.network?.off("questList", onQuestList);
       world.network?.off("questStarted", onQuestEvent);
@@ -98,6 +114,7 @@ export function useQuestStatusSync({
       world.off(EventType.QUEST_STARTED, onQuestEvent);
       world.off(EventType.QUEST_PROGRESSED, onQuestEvent);
       world.off(EventType.QUEST_COMPLETED, onQuestEvent);
+      world.off(EventType.PLAYER_SPAWNED, onQuestEvent);
     };
   }, [world, questStatusesRef, setQuestStatuses]);
 }

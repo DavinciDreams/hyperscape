@@ -497,7 +497,8 @@ export class ConnectionHandler {
           };
 
           const allowAnonymousDeferredAuth =
-            process.env.PLAYWRIGHT_TEST === "true";
+            process.env.PLAYWRIGHT_TEST === "true" ||
+            process.env.DISABLE_AUTH === "true";
 
           if (!authData.authToken && !allowAnonymousDeferredAuth) {
             console.warn(
@@ -514,7 +515,7 @@ export class ConnectionHandler {
 
           if (!authData.authToken && allowAnonymousDeferredAuth) {
             console.log(
-              "[ConnectionHandler] ℹ️ Authenticate packet missing authToken; allowing anonymous fallback in PLAYWRIGHT_TEST",
+              "[ConnectionHandler] ℹ️ Authenticate packet missing authToken; allowing anonymous fallback for local/test auth",
             );
           }
 
