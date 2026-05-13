@@ -162,7 +162,6 @@ export async function createHttpServer(
     "https://hyperscape.pages.dev",
     "https://hyperscape-betting.pages.dev",
     "https://hyperbet.pages.dev",
-    "https://hyperbet-solana.pages.dev",
     "https://hyperbet-bsc.pages.dev",
     "https://hyperscape-production.up.railway.app",
     "https://api.hyperbet.win",
@@ -171,7 +170,6 @@ export async function createHttpServer(
     "http://hyperscape.pages.dev",
     "http://hyperscape-betting.pages.dev",
     "http://hyperbet.pages.dev",
-    "http://hyperbet-solana.pages.dev",
     "http://hyperbet-bsc.pages.dev",
     // Development (from env vars or defaults)
     elizaOSUrl, // ElizaOS API
@@ -183,7 +181,6 @@ export async function createHttpServer(
     /^https?:\/\/.+\.hyperbet\.win$/, // hyperbet.win subdomains
     /^https?:\/\/.+\.hyperscape-betting\.pages\.dev$/, // Existing Hyperbet Pages preview deployments
     /^https?:\/\/.+\.hyperbet\.pages\.dev$/, // Hyperbet Pages preview deployments
-    /^https?:\/\/.+\.hyperbet-solana\.pages\.dev$/, // Hyperbet Solana preview deployments
     /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
@@ -208,7 +205,6 @@ export async function createHttpServer(
       "Authorization",
       "X-Requested-With",
       "X-CSRF-Token", // Allow CSRF token header
-      "solana-client", // Required by @solana/web3.js browser RPC requests
       "x-hyperscape-origin-secret",
       "x-admin-code", // Admin panel authentication
     ],

@@ -15,7 +15,7 @@
  */
 
 import { expect } from "@playwright/test";
-import { evmTest } from "./fixtures/wallet-fixtures";
+import { authTest } from "./fixtures/auth-fixtures";
 import {
   completeFullLoginFlow,
   waitForAppReady,
@@ -38,7 +38,7 @@ import {
 } from "./utils/testWorld";
 import { BASE_URL } from "./fixtures/test-config";
 
-const test = evmTest;
+const test = authTest;
 
 test.describe("Complete Journey: Login to Walking", () => {
   // Extended timeout for full journey tests

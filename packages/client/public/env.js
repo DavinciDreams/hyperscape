@@ -23,7 +23,7 @@
     const isHttps = window.location.protocol === "https:";
     env.PUBLIC_API_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5558" : "5555"}`;
     env.PUBLIC_WS_URL ||= `${isHttps ? "wss" : "ws"}://${host}:${isHttps ? currentPort || "3333" : "5556"}/ws`;
-    env.PUBLIC_CDN_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5559" : "8080"}`;
+    env.PUBLIC_CDN_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5559" : "5555/game-assets"}`;
   }
 
   window.env = env;

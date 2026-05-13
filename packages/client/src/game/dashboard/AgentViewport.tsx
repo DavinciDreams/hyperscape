@@ -1,7 +1,6 @@
 import { GAME_API_URL } from "@/lib/api-config";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import type { Agent } from "./types";
-import { usePrivy } from "@privy-io/react-auth";
 
 interface AgentViewportProps {
   agent: Agent;
@@ -19,8 +18,10 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
   const fetchInFlightRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // Use Privy hook to get fresh access token (not stale localStorage token)
-  const { getAccessToken, user } = usePrivy();
+  const getAccessToken = useCallback(async () => {
+    return localStorage.getItem("hyperscape_dashboard_token") || "";
+  }, []);
+  const user = { id: localStorage.getItem("hyperscape_player_id") || "" };
 
   const clearPolling = useCallback(() => {
     if (pollingTimeoutRef.current) {
@@ -53,13 +54,13 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
       };
 
       try {
-        // Get FRESH Privy token using the SDK (not stale localStorage)
+        // Get FRESH auth token using the SDK (not stale localStorage)
         // This ensures we always have a valid, non-expired token
-        const privyToken = await getAccessToken();
+        const authToken = await getAccessToken();
 
-        if (!privyToken) {
+        if (!authToken) {
           console.warn(
-            "[AgentViewport] No Privy token available - spectator mode requires authentication",
+            "[AgentViewport] No auth token available - spectator mode requires authentication",
           );
           setError("Please log in to view the agent viewport");
           setLoading(false);
@@ -68,7 +69,7 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           return;
         }
 
-        // Exchange Privy token for permanent spectator JWT
+        // Exchange auth token for permanent spectator JWT
         // This solves the token expiration issue - spectator JWT never expires
         const tokenResponse = await fetch(
           `${GAME_API_URL}/api/spectator/token`,
@@ -79,7 +80,7 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
             },
             body: JSON.stringify({
               agentId: agent.id,
-              privyToken: privyToken,
+              authToken: authToken,
             }),
           },
         );
@@ -93,13 +94,13 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
           setError(null);
           clearPolling();
         } else if (tokenResponse.status === 401) {
-          // Privy token expired - user needs to re-authenticate
-          console.warn("[AgentViewport] Privy token expired, need to re-login");
+          // auth token expired - user needs to re-authenticate
+          console.warn("[AgentViewport] auth token expired, need to re-login");
           setError("Session expired. Please log out and log back in.");
           setWaitingForAgent(false);
           clearPolling();
           // Clear stale token from localStorage
-          localStorage.removeItem("privy_auth_token");
+          localStorage.removeItem("hyperscape_dashboard_token");
         } else if (tokenResponse.status === 403) {
           setError("You don't have permission to view this agent");
           setWaitingForAgent(false);
@@ -124,12 +125,12 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
             if (mappingData.characterId) {
               setCharacterId(mappingData.characterId);
               setWaitingForAgent(false);
-              // Use Privy token as fallback (will expire)
-              setAuthToken(privyToken);
+              // Use auth token as fallback (will expire)
+              setAuthToken(authToken);
               setError(null);
               clearPolling();
               console.warn(
-                "[AgentViewport] Using Privy token as fallback - may expire in ~1 hour",
+                "[AgentViewport] Using auth token as fallback - may expire in ~1 hour",
               );
             } else {
               // No characterId yet, wait for agent
@@ -268,9 +269,9 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
   }
 
   // Build iframe URL for spectator mode
-  // authToken is now a permanent Hyperscape JWT (obtained by exchanging Privy token)
+  // authToken is now a permanent Hyperscape JWT (obtained by exchanging auth token)
   // This JWT never expires, solving the session timeout issue
-  const privyUserId = user?.id || "";
+  const userId = user?.id || "";
 
   const iframeParams = new URLSearchParams({
     embedded: "true",
@@ -279,7 +280,7 @@ export const AgentViewport: React.FC<AgentViewportProps> = ({ agent }) => {
     authToken: authToken, // Permanent spectator JWT (never expires)
     characterId: characterId,
     followEntity: characterId, // Camera will follow this entity
-    privyUserId: privyUserId, // For additional verification
+    userId: userId, // For additional verification
     hiddenUI: "chat,inventory,minimap,hotbar,stats",
     quality: "low", // Use low quality for embedded viewports to improve performance
   });

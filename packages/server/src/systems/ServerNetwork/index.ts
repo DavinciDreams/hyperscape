@@ -257,7 +257,7 @@ import {
 } from "./handlers/friends";
 import { TradingSystem } from "../TradingSystem";
 import { DuelSystem } from "../DuelSystem";
-import { DuelScheduler, DuelBettingBridge } from "../DuelScheduler";
+import { DuelScheduler } from "../DuelScheduler";
 import {
   handleDuelChallenge,
   handleDuelChallengeRespond,
@@ -460,7 +460,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
   private tradingSystem!: TradingSystem;
   private duelSystem!: DuelSystem;
   private duelScheduler!: DuelScheduler;
-  private duelBettingBridge!: DuelBettingBridge;
   private actionQueue!: ActionQueue;
   private tickSystem!: TickSystem;
   private socketManager!: SocketManager;
@@ -1134,17 +1133,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       (this.world as { duelScheduler?: DuelScheduler }).duelScheduler =
         this.duelScheduler;
     }
-
-    // DuelBettingBridge - connects duel results to Solana prediction markets
-    // Creates betting markets when duels are scheduled and resolves them when complete
-    // Enable via DUEL_BETTING_ENABLED=true environment variable
-    this.duelBettingBridge = new DuelBettingBridge(this.world);
-    this.duelBettingBridge.init();
-
-    // Store betting bridge on world for external access
-    (
-      this.world as { duelBettingBridge?: DuelBettingBridge }
-    ).duelBettingBridge = this.duelBettingBridge;
 
     // Listen for player teleport events (used by duel system)
     this.onWorld("player:teleport", (event) => {

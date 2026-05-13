@@ -15,9 +15,9 @@
 import { expect, type Page } from "@playwright/test";
 import { completeFullLoginFlow } from "./fixtures/privy-helpers";
 import {
-  evmTest as test,
-  type HeadlessWeb3Wallet,
-} from "./fixtures/wallet-fixtures";
+  authTest as test,
+  type TestAuthIdentity,
+} from "./fixtures/auth-fixtures";
 import {
   waitForPlayerSpawn,
   openPanel,
@@ -27,10 +27,7 @@ import {
 
 const PLAYER_SPAWN_TIMEOUT_MS = 60_000;
 
-async function enterGame(
-  page: Page,
-  wallet: HeadlessWeb3Wallet,
-): Promise<void> {
+async function enterGame(page: Page, wallet: TestAuthIdentity): Promise<void> {
   await page.goto("/");
   expect(await completeFullLoginFlow(page, wallet)).toBe(true);
   await waitForPlayerSpawn(page, PLAYER_SPAWN_TIMEOUT_MS);

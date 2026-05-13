@@ -5,14 +5,12 @@
  * This username is different from character names and represents the main account.
  *
  * Flow:
- * 1. User authenticates with Privy → Gets Privy ID and main HD wallet (index 0)
- * 2. If no username exists → Show this screen
- * 3. User chooses username → Account created with username + main wallet
- * 4. Proceed to character selection
+ * 1. User chooses username
+ * 2. Account is created with local identity metadata
+ * 3. Proceed to character selection
  */
 
 import React from "react";
-import { usePrivy } from "@privy-io/react-auth";
 import { GAME_API_URL } from "@/lib/api-config";
 import { useThemeStore } from "@/ui";
 import { privyAuthManager } from "@/auth/PrivyAuthManager";
@@ -28,7 +26,8 @@ export function UsernameSelectionScreen({
   const [username, setUsername] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const { user, ready, authenticated } = usePrivy();
+  const ready = true;
+  const authenticated = true;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,32 +48,15 @@ export function UsernameSelectionScreen({
       return;
     }
 
-    if (!ready || !authenticated || !user) {
-      setError("Please wait for authentication to complete");
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
-      // Get user's embedded wallet (HD index 0)
-      const embeddedWallet = user.wallet;
-      if (!embeddedWallet?.address) {
-        setError("No wallet found. Please refresh the page and try again.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Use PrivyAuthManager with localStorage fallback
       const accountId =
-        privyAuthManager.getUserId() || localStorage.getItem("privy_user_id");
-      if (!accountId) {
-        setError("Authentication error. Please refresh the page.");
-        setIsSubmitting(false);
-        return;
-      }
+        privyAuthManager.getUserId() ||
+        localStorage.getItem("hyperscape_player_id") ||
+        crypto.randomUUID();
+      localStorage.setItem("hyperscape_player_id", accountId);
 
-      // Create user account with username and main wallet
       const authToken =
         privyAuthManager.getToken() || localStorage.getItem("privy_auth_token");
       const headers: Record<string, string> = {
@@ -89,7 +71,6 @@ export function UsernameSelectionScreen({
         body: JSON.stringify({
           accountId,
           username: trimmedUsername,
-          wallet: embeddedWallet.address,
         }),
       });
 

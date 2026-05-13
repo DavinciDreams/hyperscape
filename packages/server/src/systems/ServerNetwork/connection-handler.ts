@@ -659,7 +659,7 @@ export class ConnectionHandler {
     data: {
       user: { id: string; name: string };
       authToken?: string;
-      userWithPrivy?: { privyUserId?: string | null };
+      userWithPrivy?: { id?: string | null };
       livekit?: unknown;
       characters: unknown[];
     },
@@ -680,7 +680,7 @@ export class ConnectionHandler {
         accountId: data.user.id,
         name: data.user.name,
         providers: {
-          privyUserId: data.userWithPrivy?.privyUserId || null,
+          privyUserId: null,
         },
       },
       characters: data.characters,

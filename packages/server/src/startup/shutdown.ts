@@ -41,14 +41,6 @@ import { getStreamingDuelScheduler } from "../systems/StreamingDuelScheduler/ind
 import { destroyAllRateLimiters } from "../systems/ServerNetwork/services/SlidingWindowRateLimiter.js";
 import { destroyIdempotencyService } from "../systems/ServerNetwork/services/IdempotencyService.js";
 import { stopMemoryMonitor } from "../infrastructure/memory-monitor.js";
-import { getDuelArenaOraclePublisher } from "../oracle/DuelArenaOraclePublisher.js";
-
-/**
- * Web3 context for chain writer shutdown
- */
-interface Web3Context {
-  shutdown: () => Promise<void>;
-}
 
 /**
  * Shutdown context for cleanup
@@ -57,7 +49,6 @@ interface ShutdownContext {
   fastify: FastifyInstance;
   world: World;
   dbContext: DatabaseContext;
-  web3Context: Web3Context | null;
 }
 
 const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
@@ -103,13 +94,11 @@ async function sendAlert(
  * @param fastify - Fastify server instance
  * @param world - Game world instance
  * @param dbContext - Database context with connections and Docker manager
- * @param web3Context - Optional Web3 context for chain writer shutdown
  */
 export function registerShutdownHandlers(
   fastify: FastifyInstance,
   world: World,
   dbContext: DatabaseContext,
-  web3Context: Web3Context | null = null,
 ): void {
   const dbWriteErrorsNonFatal = /^(1|true|yes|on)$/i.test(
     process.env.DB_WRITE_ERRORS_NON_FATAL || "",
@@ -138,7 +127,7 @@ export function registerShutdownHandlers(
     );
   }
 
-  const context: ShutdownContext = { fastify, world, dbContext, web3Context };
+  const context: ShutdownContext = { fastify, world, dbContext };
 
   // Track if we're shutting down (prevent duplicate shutdowns)
   let isShuttingDown = false;
@@ -202,10 +191,7 @@ export function registerShutdownHandlers(
       // Thoughts module may not have been loaded
     }
 
-    // Step 2b: Shutdown Web3 chain writer (flush pending writes)
-    await shutdownWeb3(context);
-
-    // Step 2c: Shutdown StreamingDuelScheduler (stop duel cycle timers)
+    // Step 2b: Shutdown StreamingDuelScheduler (stop duel cycle timers)
     try {
       const scheduler = getStreamingDuelScheduler();
       if (scheduler) {
@@ -214,19 +200,6 @@ export function registerShutdownHandlers(
     } catch (err) {
       console.error(
         "[Shutdown] Failed to destroy StreamingDuelScheduler:",
-        err,
-      );
-    }
-
-    // Step 2d: Shutdown DuelArenaOraclePublisher
-    try {
-      const oraclePublisher = getDuelArenaOraclePublisher(context.world);
-      if (oraclePublisher) {
-        oraclePublisher.destroy();
-      }
-    } catch (err) {
-      console.error(
-        "[Shutdown] Failed to destroy DuelArenaOraclePublisher:",
         err,
       );
     }
@@ -390,26 +363,6 @@ async function shutdownAgents(): Promise<void> {
     await stopAllModelAgents();
   } catch (err) {
     console.error("[Shutdown] Error stopping model agents:", err);
-  }
-}
-
-/**
- * Shutdown Web3 chain writer
- *
- * Flushes any pending on-chain writes before shutdown.
- *
- * @param context - Shutdown context
- * @private
- */
-async function shutdownWeb3(context: ShutdownContext): Promise<void> {
-  if (!context.web3Context) {
-    return;
-  }
-
-  try {
-    await context.web3Context.shutdown();
-  } catch (err) {
-    console.error("[Shutdown] Error shutting down Web3:", err);
   }
 }
 

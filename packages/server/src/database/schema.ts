@@ -1614,49 +1614,8 @@ export const combatStatEvents = pgTable(
   }),
 );
 
-/**
- * Onchain Outbox - strong transactional outbox for combat stat writes.
- *
- * Rows are produced in the same DB transaction as stat updates, then
- * asynchronously drained by the backend writer in MODE=web3.
- */
-export const onchainOutbox = pgTable(
-  "onchain_outbox",
-  {
-    id: serial("id").primaryKey(),
-    stream: text("stream").notNull().default("combat_stats"),
-    eventType: text("eventType").notNull(), // PLAYER_STATS_SNAPSHOT
-    dedupeKey: text("dedupeKey").notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    status: text("status").notNull().default("pending"), // pending | processing | retry | sent | dead
-    attemptCount: integer("attemptCount").notNull().default(0),
-    nextAttemptAt: bigint("nextAttemptAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-    lockedBy: text("lockedBy"),
-    lockedAt: bigint("lockedAt", { mode: "number" }),
-    lastError: text("lastError"),
-    sentAt: bigint("sentAt", { mode: "number" }),
-    createdAt: bigint("createdAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-    updatedAt: bigint("updatedAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-  },
-  (table) => ({
-    dedupeIdx: uniqueIndex("uidx_onchain_outbox_dedupe").on(table.dedupeKey),
-    statusNextIdx: index("idx_onchain_outbox_status_next_attempt").on(
-      table.status,
-      table.nextAttemptAt,
-    ),
-    lockedIdx: index("idx_onchain_outbox_locked_at").on(table.lockedAt),
-    streamIdx: index("idx_onchain_outbox_stream").on(table.stream),
-  }),
-);
-
 // ============================================================================
-// STREAMED ARENA + SOLANA PREDICTION TABLES
+// STREAMED ARENA TABLES
 // ============================================================================
 
 /**
@@ -1761,114 +1720,6 @@ export const arenaRoundEvents = pgTable(
     roundIdx: index("idx_arena_round_events_round").on(table.roundId),
     typeIdx: index("idx_arena_round_events_type").on(table.eventType),
     createdIdx: index("idx_arena_round_events_created").on(table.createdAt),
-  }),
-);
-
-/**
- * Solana Markets - on-chain market metadata per arena round.
- */
-export const solanaMarkets = pgTable(
-  "solana_markets",
-  {
-    roundId: text("roundId")
-      .primaryKey()
-      .references(() => arenaRounds.id, { onDelete: "cascade" }),
-    marketPda: text("marketPda").notNull(),
-    oraclePda: text("oraclePda").notNull(),
-    mint: text("mint").notNull(),
-    vault: text("vault"),
-    feeVault: text("feeVault"),
-    closeSlot: bigint("closeSlot", { mode: "number" }),
-    resolvedSlot: bigint("resolvedSlot", { mode: "number" }),
-    status: text("status").notNull().default("PENDING"),
-    winnerSide: text("winnerSide"),
-    resultSignature: text("resultSignature"),
-    createdAt: bigint("createdAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-    updatedAt: bigint("updatedAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-  },
-  (table) => ({
-    statusIdx: index("idx_solana_markets_status").on(table.status),
-    marketIdx: uniqueIndex("uidx_solana_markets_market_pda").on(
-      table.marketPda,
-    ),
-    oracleIdx: uniqueIndex("uidx_solana_markets_oracle_pda").on(
-      table.oraclePda,
-    ),
-  }),
-);
-
-/**
- * Solana Bets - user intents + signed transaction metadata.
- *
- * One record per submitted bet transaction.
- */
-export const solanaBets = pgTable(
-  "solana_bets",
-  {
-    id: text("id").primaryKey(),
-    roundId: text("roundId")
-      .notNull()
-      .references(() => arenaRounds.id, { onDelete: "cascade" }),
-    bettorWallet: text("bettorWallet").notNull(),
-    side: text("side").notNull(),
-    sourceAsset: text("sourceAsset").notNull(), // GOLD|SOL|USDC
-    sourceAmount: text("sourceAmount").notNull(),
-    goldAmount: text("goldAmount").notNull(),
-    quoteJson: jsonb("quoteJson").$type<Record<string, unknown>>(),
-    txSignature: text("txSignature"),
-    status: text("status").notNull().default("PENDING"),
-    createdAt: bigint("createdAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-    updatedAt: bigint("updatedAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-  },
-  (table) => ({
-    roundIdx: index("idx_solana_bets_round").on(table.roundId),
-    roundWalletIdx: index("idx_solana_bets_round_wallet").on(
-      table.roundId,
-      table.bettorWallet,
-    ),
-    walletIdx: index("idx_solana_bets_wallet").on(table.bettorWallet),
-    statusIdx: index("idx_solana_bets_status").on(table.status),
-    sigIdx: uniqueIndex("uidx_solana_bets_signature").on(table.txSignature),
-  }),
-);
-
-/**
- * Solana payout jobs - keeper queue for claim_for retries.
- */
-export const solanaPayoutJobs = pgTable(
-  "solana_payout_jobs",
-  {
-    id: text("id").primaryKey(),
-    roundId: text("roundId")
-      .notNull()
-      .references(() => arenaRounds.id, { onDelete: "cascade" }),
-    bettorWallet: text("bettorWallet").notNull(),
-    status: text("status").notNull().default("PENDING"),
-    attempts: integer("attempts").notNull().default(0),
-    lastError: text("lastError"),
-    claimSignature: text("claimSignature"),
-    nextAttemptAt: bigint("nextAttemptAt", { mode: "number" }),
-    createdAt: bigint("createdAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-    updatedAt: bigint("updatedAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-  },
-  (table) => ({
-    roundIdx: index("idx_solana_payout_jobs_round").on(table.roundId),
-    statusIdx: index("idx_solana_payout_jobs_status").on(table.status),
-    nextAttemptIdx: index("idx_solana_payout_jobs_next_attempt").on(
-      table.nextAttemptAt,
-    ),
   }),
 );
 
@@ -2392,44 +2243,6 @@ export const arenaFeeShares = pgTable(
       table.inviteCode,
     ),
     createdIdx: index("idx_arena_fee_shares_created").on(table.createdAt),
-  }),
-);
-
-/**
- * Arena Wallet Links - immutable wallet-pair links for cross-chain identity.
- *
- * Supports EVM<->Solana linking so referral mapping and bonus points can be
- * applied consistently across linked wallets.
- */
-export const arenaWalletLinks = pgTable(
-  "arena_wallet_links",
-  {
-    id: serial("id").primaryKey(),
-    walletA: text("walletA").notNull(),
-    walletAPlatform: text("walletAPlatform").notNull(), // SOLANA|BSC|BASE
-    walletB: text("walletB").notNull(),
-    walletBPlatform: text("walletBPlatform").notNull(), // SOLANA|BSC|BASE
-    pairKey: text("pairKey").notNull(),
-    createdAt: bigint("createdAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-    updatedAt: bigint("updatedAt", { mode: "number" })
-      .notNull()
-      .default(sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT`),
-  },
-  (table) => ({
-    pairKeyUnique: uniqueIndex("uidx_arena_wallet_links_pair_key").on(
-      table.pairKey,
-    ),
-    walletAIdx: index("idx_arena_wallet_links_wallet_a").on(table.walletA),
-    walletBIdx: index("idx_arena_wallet_links_wallet_b").on(table.walletB),
-    walletAPlatformIdx: index("idx_arena_wallet_links_wallet_a_platform").on(
-      table.walletAPlatform,
-    ),
-    walletBPlatformIdx: index("idx_arena_wallet_links_wallet_b_platform").on(
-      table.walletBPlatform,
-    ),
-    createdIdx: index("idx_arena_wallet_links_created").on(table.createdAt),
   }),
 );
 

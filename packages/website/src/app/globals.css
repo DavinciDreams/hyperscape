@@ -713,37 +713,6 @@ a, button {
 }
 
 /* ============================================
-   Token Shine Effect
-   ============================================ */
-.token-shine {
-  position: relative;
-  overflow: hidden;
-}
-
-.token-shine::after {
-  content: '';
-  position: absolute;
-  inset: -100%;
-  background: linear-gradient(
-    105deg,
-    transparent 30%,
-    var(--gold-glow-strong) 40%,
-    rgba(245, 230, 184, 0.4) 50%,
-    var(--gold-glow-strong) 60%,
-    transparent 70%
-  );
-  animation: tokenShine 4s ease-in-out infinite;
-  pointer-events: none;
-  border-radius: inherit;
-  z-index: 1;
-}
-
-@keyframes tokenShine {
-  0%, 100% { transform: translateX(-120%) rotate(20deg); }
-  50% { transform: translateX(120%) rotate(20deg); }
-}
-
-/* ============================================
    CTA Atmospheric Glow
    ============================================ */
 .cta-glow {
@@ -844,7 +813,6 @@ a, button {
 
   .animate-glow-pulse,
   .text-shimmer-gold,
-  .token-shine::after,
   .cta-glow::before,
   .cta-glow::after,
   .btn-sweep::after {

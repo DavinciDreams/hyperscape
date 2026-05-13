@@ -2,8 +2,7 @@
  * Authentication Module
  *
  * Handles user authentication through multiple providers:
- * - Privy (wallet and social authentication)
- * - Legacy JWT (custom token authentication)
+ * - Hyperscape JWT (custom token authentication)
  * - Anonymous users (fallback)
  * - Load test mode (in-memory users, no DB)
  *
@@ -18,10 +17,6 @@ import type {
   User,
   SystemDatabase,
 } from "../../shared/types";
-import {
-  isPrivyEnabled,
-  verifyPrivyToken,
-} from "../../infrastructure/auth/privy-auth";
 import { createJWT, verifyJWT } from "../../shared/utils";
 import { uuid } from "@hyperscape/shared";
 import { errMsg } from "../../shared/errMsg.js";
@@ -146,9 +141,8 @@ export async function checkUserBan(
  * Authenticates a user from connection parameters
  *
  * Authentication flow:
- * 1. Try Privy authentication (if enabled and token provided)
- * 2. Fall back to legacy JWT authentication
- * 3. Create anonymous user if no authentication succeeds
+ * 1. Try Hyperscape JWT authentication
+ * 2. Create anonymous user if no authentication succeeds
  *
  * @param params - Connection parameters from WebSocket
  * @param db - Database instance for user lookups/creation
@@ -160,112 +154,14 @@ export async function authenticateUser(
 ): Promise<{
   user: User;
   authToken: string;
-  userWithPrivy?: User & {
-    privyUserId?: string | null;
-    farcasterFid?: string | null;
-  };
+  userWithPrivy?: User;
 }> {
   let authToken = params.authToken;
   const name = params.name;
   const avatar = params.avatar;
-  const privyUserId = (params as { privyUserId?: string }).privyUserId;
 
   let user: User | undefined;
-  let userWithPrivy:
-    | (User & { privyUserId?: string | null; farcasterFid?: string | null })
-    | undefined;
 
-  // Try Privy authentication first if enabled
-  if (isPrivyEnabled() && authToken && privyUserId) {
-    try {
-      const privyInfo = await verifyPrivyToken(authToken);
-
-      if (privyInfo && privyInfo.privyUserId === privyUserId) {
-        let dbResult: User | undefined;
-        try {
-          dbResult = (await db("users")
-            .where("privyUserId", privyUserId)
-            .first()) as User | undefined;
-        } catch (_e) {
-          dbResult = (await db("users").where("id", privyUserId).first()) as
-            | User
-            | undefined;
-        }
-
-        if (dbResult) {
-          // Existing Privy user
-          userWithPrivy = dbResult as User & {
-            privyUserId?: string | null;
-            farcasterFid?: string | null;
-          };
-          user = userWithPrivy;
-        } else {
-          // New Privy user - create account with stable id equal to privyUserId
-          const timestamp = new Date().toISOString();
-          const newUser: {
-            id: string;
-            name: string;
-            avatar: string | null;
-            roles: string;
-            createdAt: string;
-            privyUserId?: string;
-            farcasterFid?: string;
-          } = {
-            id: privyInfo.privyUserId,
-            name: name || "Adventurer",
-            avatar: avatar || null,
-            roles: "",
-            createdAt: timestamp,
-          };
-          try {
-            newUser.privyUserId = privyInfo.privyUserId;
-            if (privyInfo.farcasterFid) {
-              newUser.farcasterFid = privyInfo.farcasterFid;
-            }
-            await db("users").insert(newUser);
-          } catch (_err) {
-            await db("users").insert({
-              id: newUser.id,
-              name: newUser.name,
-              avatar: newUser.avatar,
-              roles: newUser.roles,
-              createdAt: newUser.createdAt,
-            });
-          }
-          userWithPrivy = newUser as User & {
-            privyUserId?: string | null;
-            farcasterFid?: string | null;
-          };
-          user = userWithPrivy;
-        }
-
-        // Generate a Hyperscape JWT for this user
-        authToken = await createJWT({ userId: (user as User).id });
-      } else {
-        console.warn(
-          "[Authentication] Privy token verification failed or user ID mismatch",
-        );
-      }
-    } catch (err) {
-      // JWT expiration is expected behavior, not an error
-      if (err instanceof Error && err.message.includes("exp")) {
-        console.warn(
-          "[Authentication] Privy token expired - user needs to re-authenticate",
-        );
-      } else if (
-        err instanceof Error &&
-        (err.message.includes("alg") || err.name === "JOSEAlgNotAllowed")
-      ) {
-        // Algorithm mismatch is expected when a Hyperscape JWT is passed to Privy
-        // This happens with agent tokens - silently fall through to Hyperscape JWT verification
-      } else {
-        console.error("[Authentication] Privy authentication error:", err);
-      }
-      // Fall through to legacy authentication
-    }
-  }
-
-  // Fall back to Hyperscape JWT authentication if Privy didn't work
   if (!user && authToken) {
     try {
       const jwtPayload = await verifyJWT(authToken);
@@ -282,15 +178,10 @@ export async function authenticateUser(
           const jwtUserId = jwtPayload.userId as string;
           const newUser = {
             id: jwtUserId,
-            name:
-              name ||
-              (jwtUserId.startsWith("did:privy:") ? "Adventurer" : "Agent"),
+            name: name || "Agent",
             avatar: avatar || null,
             roles: "",
             createdAt: timestamp,
-            privyUserId: jwtUserId.startsWith("did:privy:")
-              ? jwtUserId
-              : undefined,
           };
 
           try {
@@ -380,12 +271,12 @@ export async function authenticateUser(
     }
   }
 
-  return { user, authToken: authToken || "", userWithPrivy };
+  return { user, authToken: authToken || "", userWithPrivy: user };
 }
 
 /**
- * True when connection params carry a cryptographically valid identity (Privy access token
- * + matching privyUserId, or valid Hyperscape JWT) and the user is not banned.
+ * True when connection params carry a cryptographically valid Hyperscape JWT
+ * and the user is not banned.
  *
  * Used only for `mode=streaming` when public stream delay is enabled (`STREAMING_PUBLIC_DELAY_MS` > 0): anonymous
  * public viewers stay on the delayed surface, while logged-in accounts can open a
@@ -396,31 +287,17 @@ export async function verifyStreamingViewerCredentials(
   db: SystemDatabase,
 ): Promise<boolean> {
   const authToken = params.authToken;
-  const privyUserId = params.privyUserId;
   if (!authToken || authToken.length === 0) return false;
 
   let resolvedUserId: string | undefined;
 
-  if (isPrivyEnabled() && privyUserId) {
-    try {
-      const privyInfo = await verifyPrivyToken(authToken);
-      if (privyInfo && privyInfo.privyUserId === privyUserId) {
-        resolvedUserId = privyInfo.privyUserId;
-      }
-    } catch {
-      // Wrong token type or network — try Hyperscape JWT below
+  try {
+    const jwtPayload = await verifyJWT(authToken);
+    if (jwtPayload && jwtPayload.userId) {
+      resolvedUserId = jwtPayload.userId as string;
     }
-  }
-
-  if (!resolvedUserId) {
-    try {
-      const jwtPayload = await verifyJWT(authToken);
-      if (jwtPayload && jwtPayload.userId) {
-        resolvedUserId = jwtPayload.userId as string;
-      }
-    } catch {
-      return false;
-    }
+  } catch {
+    return false;
   }
 
   if (!resolvedUserId) return false;

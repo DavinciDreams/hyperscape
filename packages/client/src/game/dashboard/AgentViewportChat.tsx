@@ -4,7 +4,6 @@ import {
   formatDashboardAgentReplyMetaLine,
   type DashboardMessageApiPayload,
 } from "@/lib/formatDashboardAgentReply";
-import { usePrivy } from "@privy-io/react-auth";
 import {
   Bot,
   Maximize2,
@@ -98,7 +97,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
 }) => {
   const [characterId, setCharacterId] = useState<string>("");
   const [authToken, setAuthToken] = useState<string>("");
-  const [needsPrivyLogin, setNeedsPrivyLogin] = useState(false);
+  const [needsauthLogin, setNeedsauthLogin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [waitingForEntity, setWaitingForEntity] = useState(false);
   const [entityError, setEntityError] = useState<string | null>(null);
@@ -127,7 +126,10 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
   authTokenRef.current = authToken;
   characterIdRef.current = characterId;
 
-  const { getAccessToken, user } = usePrivy();
+  const getAccessToken = useCallback(async () => {
+    return localStorage.getItem("hyperscape_dashboard_token") || "";
+  }, []);
+  const user = { id: localStorage.getItem("hyperscape_player_id") || "" };
 
   // ── Mount / unmount lifecycle ──────────────────────────────────────────────
   useEffect(() => {
@@ -165,7 +167,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
 
   // ── Unread badge when chat is closed ────────────────────────────────────
   useEffect(() => {
-    if (!chatOpen && messages.at(-1)?.sender === "agent") {
+    if (!chatOpen && messages[messages.length - 1]?.sender === "agent") {
       setUnreadCount((n) => n + 1);
     }
   }, [messages]); // chatOpen intentionally omitted: only trigger on new messages
@@ -184,12 +186,12 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
       isMountedRef.current && requestedAgentId === latestAgentIdRef.current;
 
     try {
-      setNeedsPrivyLogin(false);
+      setNeedsauthLogin(false);
 
-      const privyToken = await getAccessToken();
+      const authToken = await getAccessToken();
       if (!stillThisAgent()) return;
-      if (!privyToken) {
-        setNeedsPrivyLogin(true);
+      if (!authToken) {
+        setNeedsauthLogin(true);
         setLoading(false);
         return;
       }
@@ -202,7 +204,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ agentId: requestedAgentId, privyToken }),
+            body: JSON.stringify({ agentId: requestedAgentId, authToken }),
           },
         );
 
@@ -226,7 +228,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         } else if (tokenResponse.status === 401) {
-          localStorage.removeItem("privy_auth_token");
+          localStorage.removeItem("hyperscape_dashboard_token");
           if (stillThisAgent()) setLoading(false);
           return;
         } else if (tokenResponse.status === 403) {
@@ -245,7 +247,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
           if (mappingResponse.ok) {
             const mappingData = await mappingResponse.json();
             setCharacterId(mappingData.characterId || "");
-            setAuthToken(privyToken);
+            setAuthToken(authToken);
           }
           if (stillThisAgent()) setLoading(false);
           return;
@@ -448,7 +450,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
     );
   }
 
-  if (needsPrivyLogin || !authToken) {
+  if (needsauthLogin || !authToken) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-[#0b0a15] text-[#f2d08a]/60">
         <div className="text-5xl mb-4">🔐</div>
@@ -456,8 +458,8 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
           Authentication Required
         </h2>
         <p className="text-center max-w-md text-sm">
-          {needsPrivyLogin
-            ? "Sign in with Privy to open the live viewfinder."
+          {needsauthLogin
+            ? "Sign in with auth to open the live viewfinder."
             : "Please log in to view and interact with the agent."}
         </p>
       </div>
@@ -493,7 +495,7 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
   // Main viewport + chat panel render
   // ─────────────────────────────────────────────────────────────────────────
 
-  const privyUserId = user?.id || "";
+  const userId = user?.id || "";
   // SECURITY: authToken is NOT included in the iframe URL — it would appear in
   // server logs, browser history, and referrer headers.  Instead it is delivered
   // to the embedded client via a HYPERSCAPE_AUTH postMessage after the iframe
@@ -504,12 +506,13 @@ export const AgentViewportChat: React.FC<AgentViewportChatProps> = ({
     agentId: agent.id,
     characterId,
     followEntity: characterId,
-    privyUserId,
+    userId,
     hiddenUI: "chat,inventory,minimap,hotbar,stats",
   });
 
   const agentDisplayName = agent.characterName || agent.name;
-  const lastAgentMsg = messages.filter((m) => m.sender === "agent").at(-1);
+  const agentMessages = messages.filter((m) => m.sender === "agent");
+  const lastAgentMsg = agentMessages[agentMessages.length - 1];
 
   return (
     <div

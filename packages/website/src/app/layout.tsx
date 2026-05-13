@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     "RuneScape",
     "ElizaOS",
     "autonomous agents",
-    "Web3 gaming",
+    "browser MMO",
     "multiplayer",
     "RPG",
   ],

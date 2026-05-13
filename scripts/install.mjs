@@ -2,7 +2,7 @@
 /**
  * Hyperscape install bootstrap
  *
- * Ensures local prerequisites used by `bun run duel` are ready:
+ * Ensures local prerequisites used by local development are ready:
  * - synced game assets
  * - Playwright Chromium browser (used by stream-to-rtmp capture)
  */
@@ -47,7 +47,7 @@ function main() {
     );
   }
 
-  console.log("[install] Done. Next: bun run duel --fresh");
+  console.log("[install] Done. Next: bun run dev");
 }
 
 try {

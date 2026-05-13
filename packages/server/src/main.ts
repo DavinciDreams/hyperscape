@@ -18,10 +18,7 @@ import { errMsg } from "./shared/errMsg.js";
 // Import embedded agent system
 import { initializeAgents } from "./eliza/index.js";
 
-// Import streaming duel scheduler
 import { initStreamingDuelScheduler } from "./systems/StreamingDuelScheduler/index.js";
-import { DuelArenaOraclePublisher } from "./oracle/DuelArenaOraclePublisher.js";
-import { getDuelArenaOracleConfig } from "./oracle/config.js";
 
 // Import stream capture pipeline
 import { initStreamCapture } from "./streaming/stream-capture.js";
@@ -115,36 +112,6 @@ async function startServer() {
 
   // Step 3: Initialize world
   const world = await initializeWorld(config, dbContext);
-
-  if (process.env.DUEL_ARENA_ORACLE_ENABLED === "true") {
-    try {
-      const oraclePublisher = new DuelArenaOraclePublisher(
-        world,
-        getDuelArenaOracleConfig(),
-      );
-      await oraclePublisher.init();
-    } catch (err) {
-      console.error(
-        "[Server] ⚠️ Duel arena oracle publisher failed to initialize, continuing degraded:",
-        errMsg(err),
-      );
-    }
-  }
-
-  // Step 3b: Initialize Web3 (EVM chain writer) if enabled
-  let web3Context: { shutdown: () => Promise<void> } | null = null;
-  if (process.env.WEB3_ENABLED === "true") {
-    try {
-      const { initializeWeb3 } = await import("./startup/web3.js");
-      web3Context = await initializeWeb3(world);
-    } catch (err) {
-      console.warn(
-        "[Server] ⚠️ Web3 initialization failed, continuing without chain writer:",
-        errMsg(err),
-      );
-      web3Context = null;
-    }
-  }
 
   // Step 4: Create HTTP server
   const fastify = await createHttpServer(config);
@@ -252,7 +219,7 @@ async function startServer() {
   }
 
   // Register shutdown handlers
-  registerShutdownHandlers(fastify, world, dbContext, web3Context);
+  registerShutdownHandlers(fastify, world, dbContext);
 
   // Start periodic memory monitoring to catch leaks early
   startMemoryMonitor(world);
