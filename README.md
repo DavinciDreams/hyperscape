@@ -172,6 +172,12 @@ bun run assets:sync    # Pull latest assets from repo (local dev only)
 
 **Production/CI**: Manifests are committed to the repo at `packages/server/world/assets/manifests/`.
 
+**Unified pipeline**: Hill is the creation/optimization pipeline, VRM Viewer is
+the asset inventory and metadata manager, and Hyperscape imports deployable
+packs through `scripts/import-hill-manifest.mjs`. See
+`docs/asset-pipeline.md` for the manifest contract, LOD budgets, licensing
+rules, and import workflow.
+
 ## Configuration
 
 **Required for local development:**
@@ -183,7 +189,7 @@ Both must use the same Privy App ID from [Privy Dashboard](https://dashboard.pri
 **Optional configuration** - see `.env.example` files for all options:
 - `packages/server/.env.example` - Database, ports, LiveKit voice chat
 - `packages/client/.env.example` - API URLs, Farcaster integration
-- `packages/asset-forge/.env.example` - AI API keys (OpenAI, Meshy)
+- `packages/asset-forge/.env.example` - legacy AI provider configuration and local generation endpoints
 - `packages/plugin-hyperscape/.env.example` - ElizaOS agent config
 
 ### Default Ports

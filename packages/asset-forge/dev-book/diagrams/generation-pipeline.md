@@ -1,5 +1,11 @@
 # Generation Pipeline Flowcharts
 
+> Current direction: these diagrams describe the legacy Asset Forge cloud
+> generation path. The canonical unified pipeline is Hill/local DGX creation,
+> VRM Viewer inventory management, and Hyperscape deployment through the Hill
+> manifest importer. See
+> [`../../../../docs/asset-pipeline.md`](../../../../docs/asset-pipeline.md).
+
 This document provides comprehensive flowcharts and sequence diagrams illustrating the Asset Forge generation pipeline, from initial user input to completed 3D assets.
 
 ## Pipeline Overview

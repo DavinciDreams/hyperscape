@@ -1,12 +1,21 @@
 # 3D Asset Forge
 
-A comprehensive React/Vite application for AI-powered 3D asset generation, rigging, and fitting. Built for the Hyperscape RPG, this system combines language and image models, Meshy.ai, Tripo, and local processing tools to create game-ready 3D models from text descriptions.
+A React/Vite application for reviewing, generating, rigging, fitting, and
+organizing game-ready 3D assets for Hyperscape.
+
+The current asset strategy is documented in
+[`../../docs/asset-pipeline.md`](../../docs/asset-pipeline.md). Hill is the
+preferred creation and optimization pipeline, VRM Viewer owns asset inventory
+metadata, and Hyperscape imports deployable packs through
+`scripts/import-hill-manifest.mjs`. The older OpenAI/Meshy flow remains a
+legacy provider path, not the default production direction.
 
 ## Features
 
 ### 🎨 **AI-Powered Asset Generation**
-- Generate 3D models from text descriptions using AI prompt/image services and Meshy.ai
-- Optional image generation through OpenAI or Vercel AI Gateway configuration
+- Generate 3D models from text descriptions using pluggable provider pipelines
+- Preferred local provider path: Nemotron prompt optimization, Flux Klein image generation, Trellis2 mesh generation, repair, Draco compression, LODs, and optional sprites or impostors
+- Legacy cloud provider path: OpenAI/Vercel AI Gateway image and prompt services with Meshy/Tripo model generation
 - Support for various asset types: weapons, armor, characters, items
 - Material variant generation (bronze, steel, mithril, etc.)
 - Batch generation capabilities
@@ -14,7 +23,7 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 ### 🎮 **3D Asset Management**
 - Interactive 3D viewer with Three.js
 - Asset library with categorization and filtering
-- Metadata management and asset organization
+- Metadata management and asset organization, including descriptions, keywords, tags, visibility, and licensing
 - GLB/GLTF format support
 
 ### 🤖 **Advanced Rigging & Fitting**
@@ -34,7 +43,7 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 - **Frontend**: React 19, TypeScript, Vite
 - **3D Graphics**: Three.js, React Three Fiber, Drei
 - **State Management**: Zustand, Immer
-- **AI Integration**: OpenAI API, Vercel AI Gateway, Meshy.ai API, Tripo API
+- **AI Integration**: Local DGX provider adapter target, OpenAI API, Vercel AI Gateway, Meshy.ai API, Tripo API
 - **ML/Computer Vision**: TensorFlow.js, MediaPipe (hand detection)
 - **Backend**: Elysia, Bun
 - **Styling**: Tailwind CSS
@@ -44,7 +53,8 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 
 ### Prerequisites
 - Node.js 18+ or Bun runtime
-- API keys for OpenAI and Meshy.ai
+- For local generation: access to the Hill/DGX provider service
+- For legacy cloud generation: API keys for OpenAI, Meshy.ai, or Tripo
 
 ### Installation
 
@@ -64,8 +74,12 @@ bun install
 cp .env.example .env
 ```
 
-4. Add your API keys to `.env`
+4. Add provider configuration to `.env`
 ```
+# Preferred local provider wiring depends on the Hill/DGX service URL.
+LOCAL_DGX_GENERATION_URL=http://localhost:8000
+
+# Legacy cloud provider keys:
 OPENAI_API_KEY=your-openai-api-key
 MESHY_API_KEY=your-meshy-api-key
 # Optional:
@@ -112,10 +126,26 @@ asset-forge/
 
 ### 1. Asset Generation (`/generation`)
 - Text-to-3D model pipeline
-- Prompt enhancement with GPT-4
+- Prompt enhancement with local Nemotron or legacy cloud models
 - Concept art generation
-- 3D model creation via Meshy.ai
+- 3D model creation via local Trellis2 or legacy Meshy/Tripo providers
 - Material variant generation
+
+### Unified Manifest Import
+
+Hill-generated packs should produce a `unified_manifest.json` that preserves the
+creator-facing metadata needed by VRM Viewer and the runtime metadata needed by
+Hyperscape. Import a pack from the Hyperscape repo root:
+
+```bash
+bun scripts/import-hill-manifest.mjs \
+  --manifest /path/to/hill/output/unified_manifest.json \
+  --assets-root packages/server/world/assets \
+  --biomes plains,forest
+```
+
+Use `--dry-run` first to verify copied GLBs, thumbnails, vegetation patches, and
+biome updates before writing files.
 
 ### 2. Asset Library (`/assets`)
 - Browse and manage generated assets
@@ -182,5 +212,5 @@ This project is licensed under the MIT License.
 ## Acknowledgments
 
 - Built for the Hyperscape RPG project
-- Powered by OpenAI and Meshy.ai APIs
+- Designed to support local DGX generation through Hill, with legacy cloud providers available where configured
 - Uses Three.js for 3D visualization
