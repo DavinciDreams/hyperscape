@@ -18,6 +18,7 @@ import fs from "fs/promises";
 import path from "path";
 
 import fetch from "node-fetch";
+import { ComfyUITrellisService } from "./ComfyUITrellisService";
 
 // ==================== Type Definitions ====================
 
@@ -466,324 +467,439 @@ export class GenerationService extends EventEmitter {
         }
       }
 
-      // Stage 3: Image to 3D with Meshy AI
+      // Stage 3: Image to 3D with the configured provider
       pipeline.stages.image3D.status = "processing";
 
       try {
-        // Save image to disk first if it's a data URL
-        let imageUrlForMeshy = imageUrl!;
-        if (imageUrl!.startsWith("data:")) {
-          const imageData = imageUrl!.split(",")[1];
-          const imageBuffer = Buffer.from(imageData, "base64");
-          const imagePath = path.join(
-            "temp-images",
-            `${pipeline.config.assetId}-concept.png`,
-          );
-          await fs.mkdir("temp-images", { recursive: true });
-          await fs.writeFile(imagePath, imageBuffer);
+        const modelProvider = this.getModelProvider();
 
-          // If we have an image server, use it
-          if (process.env.IMAGE_SERVER_URL) {
-            imageUrlForMeshy = `${process.env.IMAGE_SERVER_URL}/temp-images/${path.basename(imagePath)}`;
-          } else {
-            // Need to upload to a public URL for Meshy
-            console.warn(
-              "No IMAGE_SERVER_URL configured, Meshy needs a public URL",
-            );
-          }
-        }
-
-        // Ensure we have a publicly accessible URL for Meshy
-        console.log("📸 Initial image URL:", imageUrlForMeshy);
-
-        // Meshy can't access localhost, 127.0.0.1, or data URIs - rehost if needed
-        if (
-          imageUrlForMeshy.startsWith("data:") ||
-          imageUrlForMeshy.includes("localhost") ||
-          imageUrlForMeshy.includes("127.0.0.1")
-        ) {
-          console.warn(
-            "⚠️ Non-public image reference detected - uploading to public hosting...",
-          );
-
-          // Use the image hosting service to get a public URL
-          try {
-            imageUrlForMeshy = await this.imageHostingService.uploadImage(
-              imageUrl!,
-            );
-            console.log("✅ Image uploaded to public URL:", imageUrlForMeshy);
-          } catch (uploadError) {
-            console.error(
-              "❌ Failed to upload image:",
-              (uploadError as Error).message,
-            );
-            console.log(ImageHostingService.getSetupInstructions());
-            throw new Error(
-              "Cannot make image publicly accessible. See instructions above.",
-            );
-          }
-        }
-
-        // Determine quality settings based on explicit config, style cues, and avatar type
-        const styleText =
-          (pipeline.config.customPrompts &&
-            pipeline.config.customPrompts.gameStyle) ||
-          "";
-        const wantsHighQuality =
-          /\b(4k|ultra|high\s*quality|realistic|cinematic|marvel|skyrim)\b/i.test(
-            styleText,
-          );
-        const isAvatar =
-          pipeline.config.generationType === "avatar" ||
-          pipeline.config.type === "character";
-
-        const quality =
-          pipeline.config.quality ||
-          (wantsHighQuality || isAvatar ? "ultra" : "standard");
-        const targetPolycount =
-          quality === "ultra" ? 20000 : quality === "high" ? 12000 : 6000;
-        const textureResolution =
-          quality === "ultra" ? 4096 : quality === "high" ? 2048 : 1024;
-        const enablePbr = quality !== "standard";
-
-        // Allow per-quality model selection via env, with a sensible default
-        const qualityUpper = quality.toUpperCase();
-        const aiModelEnv =
-          process.env[`MESHY_MODEL_${qualityUpper}`] ||
-          process.env.MESHY_MODEL_DEFAULT;
-        const aiModel = aiModelEnv || "meshy-5";
-
-        const meshyTaskIdResult = await this.aiService
-          .getMeshyService()
-          .startImageTo3D(imageUrlForMeshy, {
-            enable_pbr: enablePbr,
-            ai_model: aiModel,
-            topology: "quad",
-            targetPolycount: targetPolycount,
-            texture_resolution: textureResolution,
+        if (modelProvider === "comfyui-trellis") {
+          console.log("🧊 Starting ComfyUI Trellis image-to-3D generation...");
+          const trellisService = new ComfyUITrellisService();
+          const trellisResult = await trellisService.generateModel({
+            assetId: pipeline.config.assetId,
+            prompt: enhancedPrompt,
+            imageUrl: imageUrl!,
+            quality: pipeline.config.quality,
+            onProgress: (progress) => {
+              pipeline.stages.image3D.progress = progress;
+            },
           });
-        meshyTaskId =
-          typeof meshyTaskIdResult === "string"
-            ? meshyTaskIdResult
-            : meshyTaskIdResult.task_id || meshyTaskIdResult.id || null;
 
-        // Poll for completion
-        let meshyResult: MeshyResult | null = null;
-        let attempts = 0;
-        const pollIntervalMs = parseInt(
-          process.env.MESHY_POLL_INTERVAL_MS || "5000",
-          10,
-        );
-        const timeoutMs = parseInt(
-          process.env[`MESHY_TIMEOUT_${qualityUpper}_MS`] ||
-            process.env.MESHY_TIMEOUT_MS ||
-            "300000",
-          10,
-        );
-        const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          await fs.mkdir(outputDir, { recursive: true });
 
-        console.log(
-          `⏳ Meshy polling configured: quality=${quality}, model=${aiModel}, interval=${pollIntervalMs}ms, timeout=${timeoutMs}ms, maxAttempts=${maxAttempts}`,
-        );
-
-        while (attempts < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-
-          if (!meshyTaskId) {
-            throw new Error("Meshy task ID is null");
-          }
-
-          const status = await this.aiService
-            .getMeshyService()
-            .getTaskStatus(meshyTaskId);
-          pipeline.stages.image3D.progress =
-            status.progress || (attempts / maxAttempts) * 100;
-
-          if (status.status === "SUCCEEDED") {
-            meshyResult = status as MeshyResult;
-            break;
-          } else if (status.status === "FAILED") {
-            throw new Error(status.error || "Meshy conversion failed");
-          }
-
-          attempts++;
-        }
-
-        if (!meshyResult) {
-          throw new Error("Meshy conversion timed out");
-        }
-
-        // Download and save the model
-        const modelBuffer = await this.downloadFile(meshyResult.model_urls.glb);
-        const outputDir = path.join("gdd-assets", pipeline.config.assetId);
-        await fs.mkdir(outputDir, { recursive: true });
-
-        // Save raw model first
-        const rawModelPath = path.join(
-          outputDir,
-          `${pipeline.config.assetId}_raw.glb`,
-        );
-        await fs.writeFile(rawModelPath, modelBuffer);
-
-        // Normalize the model based on type
-        let normalizedModelPath = path.join(
-          outputDir,
-          `${pipeline.config.assetId}.glb`,
-        );
-
-        if (pipeline.config.type === "character") {
-          // Normalize character height
-          console.log("🔧 Normalizing character model...");
-          try {
-            const { AssetNormalizationService } =
-              await import("../../src/services/processing/AssetNormalizationService.js");
-            const normalizer = new AssetNormalizationService();
-
-            const targetHeight =
-              pipeline.config.metadata?.characterHeight ||
-              pipeline.config.riggingOptions?.heightMeters ||
-              1.83;
-
-            const normalized = await normalizer.normalizeCharacter(
-              rawModelPath,
-              targetHeight,
-            );
-            await fs.writeFile(
-              normalizedModelPath,
-              Buffer.from(normalized.glb),
-            );
-
-            console.log(`✅ Character normalized to ${targetHeight}m height`);
-
-            // Update with normalized dimensions
-            pipeline.stages.image3D.normalized = true;
-            pipeline.stages.image3D.dimensions = normalized.metadata.dimensions;
-          } catch (error) {
-            console.warn(
-              "⚠️ Normalization failed, using raw model:",
-              (error as Error).message,
-            );
-            await fs.copyFile(rawModelPath, normalizedModelPath);
-          }
-        } else if (pipeline.config.type === "weapon") {
-          // Normalize weapon with grip at origin
-          console.log("🔧 Normalizing weapon model...");
-          try {
-            const { WeaponHandleDetector } =
-              await import("../../src/services/processing/WeaponHandleDetector.js");
-            const detector = new WeaponHandleDetector();
-
-            const result = await detector.exportNormalizedWeapon(
-              rawModelPath,
-              normalizedModelPath,
-            );
-
-            console.log(`✅ Weapon normalized with grip at origin`);
-
-            // Update with normalized dimensions
-            pipeline.stages.image3D.normalized = true;
-            pipeline.stages.image3D.dimensions = {
-              width: result.dimensions.width,
-              height: result.dimensions.height,
-              depth: result.dimensions.length,
-            };
-          } catch (error) {
-            console.warn(
-              "⚠️ Weapon normalization failed, using raw model:",
-              (error as Error).message,
-            );
-            await fs.copyFile(rawModelPath, normalizedModelPath);
-          }
-        } else {
-          // For other types, just copy for now
-          await fs.copyFile(rawModelPath, normalizedModelPath);
-        }
-
-        baseModelPath = normalizedModelPath;
-
-        // Save concept art
-        if (imageUrl!.startsWith("data:")) {
-          const imageData = imageUrl!.split(",")[1];
-          const imageBuffer = Buffer.from(imageData, "base64");
-          await fs.writeFile(
-            path.join(outputDir, "concept-art.png"),
-            imageBuffer,
+          const rawModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}_raw.glb`,
           );
-        }
+          await fs.writeFile(rawModelPath, trellisResult.modelBuffer);
 
-        // Save metadata - EXACT structure from arrows-base reference
-        const metadata = {
-          id: pipeline.config.assetId,
-          name: pipeline.config.assetId,
-          gameId: pipeline.config.assetId,
-          type: pipeline.config.type,
-          subtype: pipeline.config.subtype,
-          description: pipeline.config.description,
-          detailedPrompt: enhancedPrompt,
-          generatedAt: new Date().toISOString(),
-          completedAt: new Date().toISOString(),
-          isBaseModel: true,
-          materialVariants: pipeline.config.materialPresets
-            ? pipeline.config.materialPresets.map((preset) => preset.id)
-            : [],
-          isPlaceholder: false,
-          hasModel: true,
-          hasConceptArt: true,
-          modelPath: baseModelPath,
-          conceptArtUrl: "./concept-art.png",
-          gddCompliant: true,
-          workflow: "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
-          meshyTaskId: meshyTaskId,
-          meshyStatus: "completed",
-          variants: [], // Will be populated as variants are generated
-          variantCount: 0,
-          lastVariantGenerated: null,
-          updatedAt: new Date().toISOString(),
-          // Normalization info
-          normalized: pipeline.stages.image3D.normalized || false,
-          normalizationDate: pipeline.stages.image3D.normalized
-            ? new Date().toISOString()
-            : undefined,
-          dimensions: pipeline.stages.image3D.dimensions || undefined,
-          // Ownership tracking (Phase 1)
-          createdBy: pipeline.config.user?.privyId || null,
-          walletAddress: pipeline.config.user?.walletAddress || null,
-          isPublic: true, // Default to public for Phase 1
-        };
+          const normalizedModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}.glb`,
+          );
+          await fs.copyFile(rawModelPath, normalizedModelPath);
+          baseModelPath = normalizedModelPath;
 
-        await fs.writeFile(
-          path.join(outputDir, "metadata.json"),
-          JSON.stringify(metadata, null, 2),
-        );
-
-        // Create database record for the asset
-        if (pipeline.config.user?.privyId) {
-          try {
-            await assetDatabaseService.createAssetRecord(
-              pipeline.config.assetId,
-              metadata as AssetMetadataType,
-              pipeline.config.user.privyId,
-              `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            await fs.writeFile(
+              path.join(outputDir, "concept-art.png"),
+              imageBuffer,
             );
-          } catch (error) {
-            console.error(
-              "[GenerationService] Failed to create database record for asset:",
-              error,
-            );
-            // Continue - don't fail pipeline if DB creation fails
           }
-        }
 
-        pipeline.stages.image3D.status = "completed";
-        pipeline.stages.image3D.progress = 100;
-        pipeline.stages.image3D.result = {
-          taskId: meshyTaskId,
-          modelUrl: meshyResult.model_urls.glb,
-          polycount: meshyResult.polycount,
-          localPath: baseModelPath,
-        };
-        pipeline.results.image3D = pipeline.stages.image3D.result;
-        pipeline.progress = 50;
+          const metadata = {
+            id: pipeline.config.assetId,
+            name: pipeline.config.assetId,
+            gameId: pipeline.config.assetId,
+            type: pipeline.config.type,
+            subtype: pipeline.config.subtype,
+            description: pipeline.config.description,
+            detailedPrompt: enhancedPrompt,
+            generatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            isBaseModel: true,
+            materialVariants: pipeline.config.materialPresets
+              ? pipeline.config.materialPresets.map((preset) => preset.id)
+              : [],
+            isPlaceholder: false,
+            hasModel: true,
+            hasConceptArt: true,
+            modelPath: baseModelPath,
+            conceptArtUrl: "./concept-art.png",
+            gddCompliant: true,
+            workflow:
+              "GPT-5 → GPT-Image-1 → ComfyUI Trellis Image-to-3D (Base Model)",
+            generationProvider: "comfyui-trellis",
+            comfyPromptId: trellisResult.promptId,
+            comfyOutputFile: trellisResult.outputFile,
+            variants: [],
+            variantCount: 0,
+            lastVariantGenerated: null,
+            updatedAt: new Date().toISOString(),
+            normalized: false,
+            createdBy: pipeline.config.user?.privyId || null,
+            walletAddress: pipeline.config.user?.walletAddress || null,
+            isPublic: true,
+          };
+
+          await fs.writeFile(
+            path.join(outputDir, "metadata.json"),
+            JSON.stringify(metadata, null, 2),
+          );
+
+          if (pipeline.config.user?.privyId) {
+            try {
+              await assetDatabaseService.createAssetRecord(
+                pipeline.config.assetId,
+                metadata as AssetMetadataType,
+                pipeline.config.user.privyId,
+                `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+              );
+            } catch (error) {
+              console.error(
+                "[GenerationService] Failed to create database record for asset:",
+                error,
+              );
+            }
+          }
+
+          pipeline.stages.image3D.status = "completed";
+          pipeline.stages.image3D.progress = 100;
+          pipeline.stages.image3D.result = {
+            taskId: trellisResult.promptId,
+            provider: "comfyui-trellis",
+            modelUrl: trellisResult.modelUrl,
+            localPath: baseModelPath,
+          };
+          pipeline.results.image3D = pipeline.stages.image3D.result;
+          pipeline.progress = 50;
+        } else {
+          // Save image to disk first if it's a data URL
+          let imageUrlForMeshy = imageUrl!;
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            const imagePath = path.join(
+              "temp-images",
+              `${pipeline.config.assetId}-concept.png`,
+            );
+            await fs.mkdir("temp-images", { recursive: true });
+            await fs.writeFile(imagePath, imageBuffer);
+
+            // If we have an image server, use it
+            if (process.env.IMAGE_SERVER_URL) {
+              imageUrlForMeshy = `${process.env.IMAGE_SERVER_URL}/temp-images/${path.basename(imagePath)}`;
+            } else {
+              // Need to upload to a public URL for Meshy
+              console.warn(
+                "No IMAGE_SERVER_URL configured, Meshy needs a public URL",
+              );
+            }
+          }
+
+          // Ensure we have a publicly accessible URL for Meshy
+          console.log("📸 Initial image URL:", imageUrlForMeshy);
+
+          // Meshy can't access localhost, 127.0.0.1, or data URIs - rehost if needed
+          if (
+            imageUrlForMeshy.startsWith("data:") ||
+            imageUrlForMeshy.includes("localhost") ||
+            imageUrlForMeshy.includes("127.0.0.1")
+          ) {
+            console.warn(
+              "⚠️ Non-public image reference detected - uploading to public hosting...",
+            );
+
+            // Use the image hosting service to get a public URL
+            try {
+              imageUrlForMeshy = await this.imageHostingService.uploadImage(
+                imageUrl!,
+              );
+              console.log("✅ Image uploaded to public URL:", imageUrlForMeshy);
+            } catch (uploadError) {
+              console.error(
+                "❌ Failed to upload image:",
+                (uploadError as Error).message,
+              );
+              console.log(ImageHostingService.getSetupInstructions());
+              throw new Error(
+                "Cannot make image publicly accessible. See instructions above.",
+              );
+            }
+          }
+
+          // Determine quality settings based on explicit config, style cues, and avatar type
+          const styleText =
+            (pipeline.config.customPrompts &&
+              pipeline.config.customPrompts.gameStyle) ||
+            "";
+          const wantsHighQuality =
+            /\b(4k|ultra|high\s*quality|realistic|cinematic|marvel|skyrim)\b/i.test(
+              styleText,
+            );
+          const isAvatar =
+            pipeline.config.generationType === "avatar" ||
+            pipeline.config.type === "character";
+
+          const quality =
+            pipeline.config.quality ||
+            (wantsHighQuality || isAvatar ? "ultra" : "standard");
+          const targetPolycount =
+            quality === "ultra" ? 20000 : quality === "high" ? 12000 : 6000;
+          const textureResolution =
+            quality === "ultra" ? 4096 : quality === "high" ? 2048 : 1024;
+          const enablePbr = quality !== "standard";
+
+          // Allow per-quality model selection via env, with a sensible default
+          const qualityUpper = quality.toUpperCase();
+          const aiModelEnv =
+            process.env[`MESHY_MODEL_${qualityUpper}`] ||
+            process.env.MESHY_MODEL_DEFAULT;
+          const aiModel = aiModelEnv || "meshy-5";
+
+          const meshyTaskIdResult = await this.aiService
+            .getMeshyService()
+            .startImageTo3D(imageUrlForMeshy, {
+              enable_pbr: enablePbr,
+              ai_model: aiModel,
+              topology: "quad",
+              targetPolycount: targetPolycount,
+              texture_resolution: textureResolution,
+            });
+          meshyTaskId =
+            typeof meshyTaskIdResult === "string"
+              ? meshyTaskIdResult
+              : meshyTaskIdResult.task_id || meshyTaskIdResult.id || null;
+
+          // Poll for completion
+          let meshyResult: MeshyResult | null = null;
+          let attempts = 0;
+          const pollIntervalMs = parseInt(
+            process.env.MESHY_POLL_INTERVAL_MS || "5000",
+            10,
+          );
+          const timeoutMs = parseInt(
+            process.env[`MESHY_TIMEOUT_${qualityUpper}_MS`] ||
+              process.env.MESHY_TIMEOUT_MS ||
+              "300000",
+            10,
+          );
+          const maxAttempts = Math.max(
+            1,
+            Math.ceil(timeoutMs / pollIntervalMs),
+          );
+
+          console.log(
+            `⏳ Meshy polling configured: quality=${quality}, model=${aiModel}, interval=${pollIntervalMs}ms, timeout=${timeoutMs}ms, maxAttempts=${maxAttempts}`,
+          );
+
+          while (attempts < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+            if (!meshyTaskId) {
+              throw new Error("Meshy task ID is null");
+            }
+
+            const status = await this.aiService
+              .getMeshyService()
+              .getTaskStatus(meshyTaskId);
+            pipeline.stages.image3D.progress =
+              status.progress || (attempts / maxAttempts) * 100;
+
+            if (status.status === "SUCCEEDED") {
+              meshyResult = status as MeshyResult;
+              break;
+            } else if (status.status === "FAILED") {
+              throw new Error(status.error || "Meshy conversion failed");
+            }
+
+            attempts++;
+          }
+
+          if (!meshyResult) {
+            throw new Error("Meshy conversion timed out");
+          }
+
+          // Download and save the model
+          const modelBuffer = await this.downloadFile(
+            meshyResult.model_urls.glb,
+          );
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          await fs.mkdir(outputDir, { recursive: true });
+
+          // Save raw model first
+          const rawModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}_raw.glb`,
+          );
+          await fs.writeFile(rawModelPath, modelBuffer);
+
+          // Normalize the model based on type
+          let normalizedModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}.glb`,
+          );
+
+          if (pipeline.config.type === "character") {
+            // Normalize character height
+            console.log("🔧 Normalizing character model...");
+            try {
+              const { AssetNormalizationService } =
+                await import("../../src/services/processing/AssetNormalizationService.js");
+              const normalizer = new AssetNormalizationService();
+
+              const targetHeight =
+                pipeline.config.metadata?.characterHeight ||
+                pipeline.config.riggingOptions?.heightMeters ||
+                1.83;
+
+              const normalized = await normalizer.normalizeCharacter(
+                rawModelPath,
+                targetHeight,
+              );
+              await fs.writeFile(
+                normalizedModelPath,
+                Buffer.from(normalized.glb),
+              );
+
+              console.log(`✅ Character normalized to ${targetHeight}m height`);
+
+              // Update with normalized dimensions
+              pipeline.stages.image3D.normalized = true;
+              pipeline.stages.image3D.dimensions =
+                normalized.metadata.dimensions;
+            } catch (error) {
+              console.warn(
+                "⚠️ Normalization failed, using raw model:",
+                (error as Error).message,
+              );
+              await fs.copyFile(rawModelPath, normalizedModelPath);
+            }
+          } else if (pipeline.config.type === "weapon") {
+            // Normalize weapon with grip at origin
+            console.log("🔧 Normalizing weapon model...");
+            try {
+              const { WeaponHandleDetector } =
+                await import("../../src/services/processing/WeaponHandleDetector.js");
+              const detector = new WeaponHandleDetector();
+
+              const result = await detector.exportNormalizedWeapon(
+                rawModelPath,
+                normalizedModelPath,
+              );
+
+              console.log(`✅ Weapon normalized with grip at origin`);
+
+              // Update with normalized dimensions
+              pipeline.stages.image3D.normalized = true;
+              pipeline.stages.image3D.dimensions = {
+                width: result.dimensions.width,
+                height: result.dimensions.height,
+                depth: result.dimensions.length,
+              };
+            } catch (error) {
+              console.warn(
+                "⚠️ Weapon normalization failed, using raw model:",
+                (error as Error).message,
+              );
+              await fs.copyFile(rawModelPath, normalizedModelPath);
+            }
+          } else {
+            // For other types, just copy for now
+            await fs.copyFile(rawModelPath, normalizedModelPath);
+          }
+
+          baseModelPath = normalizedModelPath;
+
+          // Save concept art
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            await fs.writeFile(
+              path.join(outputDir, "concept-art.png"),
+              imageBuffer,
+            );
+          }
+
+          // Save metadata - EXACT structure from arrows-base reference
+          const metadata = {
+            id: pipeline.config.assetId,
+            name: pipeline.config.assetId,
+            gameId: pipeline.config.assetId,
+            type: pipeline.config.type,
+            subtype: pipeline.config.subtype,
+            description: pipeline.config.description,
+            detailedPrompt: enhancedPrompt,
+            generatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            isBaseModel: true,
+            materialVariants: pipeline.config.materialPresets
+              ? pipeline.config.materialPresets.map((preset) => preset.id)
+              : [],
+            isPlaceholder: false,
+            hasModel: true,
+            hasConceptArt: true,
+            modelPath: baseModelPath,
+            conceptArtUrl: "./concept-art.png",
+            gddCompliant: true,
+            workflow: "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
+            meshyTaskId: meshyTaskId,
+            meshyStatus: "completed",
+            variants: [], // Will be populated as variants are generated
+            variantCount: 0,
+            lastVariantGenerated: null,
+            updatedAt: new Date().toISOString(),
+            // Normalization info
+            normalized: pipeline.stages.image3D.normalized || false,
+            normalizationDate: pipeline.stages.image3D.normalized
+              ? new Date().toISOString()
+              : undefined,
+            dimensions: pipeline.stages.image3D.dimensions || undefined,
+            // Ownership tracking (Phase 1)
+            createdBy: pipeline.config.user?.privyId || null,
+            walletAddress: pipeline.config.user?.walletAddress || null,
+            isPublic: true, // Default to public for Phase 1
+          };
+
+          await fs.writeFile(
+            path.join(outputDir, "metadata.json"),
+            JSON.stringify(metadata, null, 2),
+          );
+
+          // Create database record for the asset
+          if (pipeline.config.user?.privyId) {
+            try {
+              await assetDatabaseService.createAssetRecord(
+                pipeline.config.assetId,
+                metadata as AssetMetadataType,
+                pipeline.config.user.privyId,
+                `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+              );
+            } catch (error) {
+              console.error(
+                "[GenerationService] Failed to create database record for asset:",
+                error,
+              );
+              // Continue - don't fail pipeline if DB creation fails
+            }
+          }
+
+          pipeline.stages.image3D.status = "completed";
+          pipeline.stages.image3D.progress = 100;
+          pipeline.stages.image3D.result = {
+            taskId: meshyTaskId,
+            provider: "meshy",
+            modelUrl: meshyResult.model_urls.glb,
+            polycount: meshyResult.polycount,
+            localPath: baseModelPath,
+          };
+          pipeline.results.image3D = pipeline.stages.image3D.result;
+          pipeline.progress = 50;
+        }
       } catch (error) {
         console.error("Image to 3D conversion failed:", error);
         pipeline.stages.image3D.status = "failed";
@@ -793,6 +909,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 4: Material Variant Generation (Retexturing)
       if (
+        this.getModelProvider() === "meshy" &&
         pipeline.config.enableRetexturing &&
         pipeline.config.materialPresets?.length! > 0
       ) {
@@ -988,6 +1105,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 5: Auto-Rigging (for avatars only)
       if (
+        this.getModelProvider() === "meshy" &&
         pipeline.config.generationType === "avatar" &&
         pipeline.config.enableRigging &&
         meshyTaskId
@@ -1203,6 +1321,31 @@ export class GenerationService extends EventEmitter {
       pipeline.error = (error as Error).message;
       throw error;
     }
+  }
+
+  private getModelProvider(): "meshy" | "comfyui-trellis" {
+    const provider = (
+      process.env.GENERATION_3D_PROVIDER ||
+      process.env.ASSET_FORGE_3D_PROVIDER ||
+      ""
+    ).toLowerCase();
+
+    if (
+      provider === "comfyui-trellis" ||
+      provider === "trellis" ||
+      provider === "comfyui"
+    ) {
+      return "comfyui-trellis";
+    }
+
+    if (
+      process.env.COMFYUI_TRELLIS_WORKFLOW_PATH &&
+      !process.env.MESHY_API_KEY
+    ) {
+      return "comfyui-trellis";
+    }
+
+    return "meshy";
   }
 
   /**

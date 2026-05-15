@@ -322,17 +322,35 @@ export class LODBakingService {
     }
 
     // LOD1
-    const lod1Path = basePath.replace(/\.glb$/, "_lod1.glb");
-    const lod1FilePath = path.isAbsolute(lod1Path)
-      ? lod1Path
-      : path.join(this.projectRoot, lod1Path);
+    const findVariantPath = async (
+      suffix: "_lod1" | "_lod2",
+    ): Promise<{ bundlePath: string; filePath: string } | null> => {
+      const candidates = [".glb", ".vrm"].map((ext) =>
+        basePath.replace(/\.(glb|vrm)$/i, `${suffix}${ext}`),
+      );
 
-    if (await Bun.file(lod1FilePath).exists()) {
-      const stat = await fs.promises.stat(lod1FilePath);
-      const lod1Stats = await this.extractGLBStats(lod1FilePath);
+      for (const candidate of candidates) {
+        const candidateFilePath = path.isAbsolute(candidate)
+          ? candidate
+          : path.join(this.projectRoot, candidate);
+
+        if (await Bun.file(candidateFilePath).exists()) {
+          return { bundlePath: candidate, filePath: candidateFilePath };
+        }
+      }
+
+      return null;
+    };
+
+    // LOD1
+    const lod1Variant = await findVariantPath("_lod1");
+
+    if (lod1Variant) {
+      const stat = await fs.promises.stat(lod1Variant.filePath);
+      const lod1Stats = await this.extractGLBStats(lod1Variant.filePath);
       variants.push({
         level: "lod1",
-        modelPath: lod1Path,
+        modelPath: lod1Variant.bundlePath,
         vertices: lod1Stats.vertices,
         faces: lod1Stats.faces,
         fileSize: stat.size,
@@ -345,17 +363,14 @@ export class LODBakingService {
     }
 
     // LOD2
-    const lod2Path = basePath.replace(/\.glb$/, "_lod2.glb");
-    const lod2FilePath = path.isAbsolute(lod2Path)
-      ? lod2Path
-      : path.join(this.projectRoot, lod2Path);
+    const lod2Variant = await findVariantPath("_lod2");
 
-    if (await Bun.file(lod2FilePath).exists()) {
-      const stat = await fs.promises.stat(lod2FilePath);
-      const lod2Stats = await this.extractGLBStats(lod2FilePath);
+    if (lod2Variant) {
+      const stat = await fs.promises.stat(lod2Variant.filePath);
+      const lod2Stats = await this.extractGLBStats(lod2Variant.filePath);
       variants.push({
         level: "lod2",
-        modelPath: lod2Path,
+        modelPath: lod2Variant.bundlePath,
         vertices: lod2Stats.vertices,
         faces: lod2Stats.faces,
         fileSize: stat.size,
@@ -368,7 +383,7 @@ export class LODBakingService {
     }
 
     // Imposter
-    const imposterPath = basePath.replace(/\.glb$/, "_imposter.png");
+    const imposterPath = basePath.replace(/\.(glb|vrm)$/i, "_imposter.png");
     const imposterFilePath = path.isAbsolute(imposterPath)
       ? imposterPath
       : path.join(this.projectRoot, imposterPath);
@@ -471,11 +486,13 @@ export class LODBakingService {
       return absolutePaths;
     }
 
-    // Find all GLB files in asset directories
+    // Find all model files in asset directories
     // Note: vegetation assets are in packages/server/world/assets/vegetation
     // Rocks are now procedurally generated via @hyperscape/procgen/rock
     const patterns = [
       "packages/server/world/assets/vegetation/**/*.glb",
+      "packages/asset-forge/gdd-assets/**/*.glb",
+      "packages/asset-forge/gdd-assets/**/*.vrm",
       "assets/trees/**/*.glb",
       "assets/grass/**/*.glb",
     ];
@@ -485,7 +502,14 @@ export class LODBakingService {
     for (const pattern of patterns) {
       const files = await glob(pattern, {
         cwd: this.projectRoot,
-        ignore: ["**/*_lod1.glb", "**/*_lod.glb"],
+        ignore: [
+          "**/*_lod1.glb",
+          "**/*_lod1.vrm",
+          "**/*_lod2.glb",
+          "**/*_lod2.vrm",
+          "**/*_lod.glb",
+          "**/*_lod.vrm",
+        ],
       });
 
       for (const file of files) {
@@ -532,7 +556,7 @@ export class LODBakingService {
     const results = [];
 
     for (const assetPath of assetPaths) {
-      const assetId = path.basename(assetPath, ".glb");
+      const assetId = path.basename(assetPath, path.extname(assetPath));
       const category = this.inferCategory(assetPath);
       const name = assetId.replace(/_/g, " ");
       const relativePath = path.relative(this.projectRoot, assetPath);
@@ -701,7 +725,7 @@ export class LODBakingService {
       assetPaths = assetIds.map((id) => {
         // Try to find the asset path - this would need to query the asset database
         // For now, assume a standard path pattern
-        return `assets/vegetation/${id}/${id}.glb`;
+        return `packages/asset-forge/gdd-assets/${id}/${id}.glb`;
       });
     }
 
@@ -778,7 +802,7 @@ export class LODBakingService {
     const results: LODBakeAssetResult[] = [];
 
     for (const assetPath of assets) {
-      const assetId = path.basename(assetPath, ".glb");
+      const assetId = path.basename(assetPath, path.extname(assetPath));
       const category = this.inferCategory(assetPath);
       const settings = getCategoryDefaults(category);
 
@@ -803,7 +827,7 @@ export class LODBakingService {
             : settings.lod2.minVertices;
 
         const suffix = level === "lod1" ? "_lod1" : "_lod2";
-        const outputPath = assetPath.replace(/\.glb$/, `${suffix}.glb`);
+        const outputPath = assetPath.replace(/\.(glb|vrm)$/i, `${suffix}.glb`);
 
         if (dryRun) {
           console.log(
@@ -924,7 +948,7 @@ export class LODBakingService {
         : settings.lod2.minVertices);
 
     const suffix = level === "lod1" ? "_lod1" : "_lod2";
-    const outputPath = assetPath.replace(/\.glb$/, `${suffix}.glb`);
+    const outputPath = assetPath.replace(/\.(glb|vrm)$/i, `${suffix}.glb`);
 
     return this.glbDecimationService.decimateGLBFile(assetPath, outputPath, {
       targetPercent,
@@ -1095,7 +1119,7 @@ export class LODBakingService {
    */
   private async updateLODBundles(assets: string[]): Promise<void> {
     for (const asset of assets) {
-      const assetId = path.basename(asset, ".glb");
+      const assetId = path.basename(asset, path.extname(asset));
       const category = this.inferCategory(asset);
       const name = assetId.replace(/_/g, " ");
 
@@ -1133,7 +1157,7 @@ export class LODBakingService {
         if (match) {
           const originalVerts = parseInt(match[1], 10);
           const finalVerts = parseInt(match[2], 10);
-          const outputPath = asset.replace(/\.glb$/, `${suffix}.glb`);
+          const outputPath = asset.replace(/\.(glb|vrm)$/i, `${suffix}.glb`);
           const reduction =
             originalVerts > 0
               ? (((originalVerts - finalVerts) / originalVerts) * 100).toFixed(

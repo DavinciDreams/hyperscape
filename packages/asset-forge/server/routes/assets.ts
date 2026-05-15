@@ -7,12 +7,39 @@ import { Elysia, t } from "elysia";
 import path from "path";
 import fs from "fs";
 import type { AssetService } from "../services/AssetService";
+import type { LODBakingService } from "../services/LODBakingService";
 import * as Models from "../models";
 
 export const createAssetRoutes = (
   rootDir: string,
   assetService: AssetService,
+  lodService?: LODBakingService,
 ) => {
+  const assetsRoot = path.join(rootDir, "gdd-assets");
+  const projectRoot = path.resolve(rootDir, "../..");
+
+  const slugifyAssetId = (value: string): string => {
+    const slug = value
+      .toLowerCase()
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    return slug || `asset-${Date.now()}`;
+  };
+
+  const getUniqueAssetId = async (baseId: string): Promise<string> => {
+    let assetId = baseId;
+    let suffix = 2;
+
+    while (await Bun.file(path.join(assetsRoot, assetId)).exists()) {
+      assetId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
+    return assetId;
+  };
+
   return new Elysia({ prefix: "/api/assets", name: "assets" }).guard(
     {
       beforeHandle: ({ request }) => {
@@ -441,6 +468,116 @@ export const createAssetRoutes = (
               tags: ["Assets"],
               summary: "Save aligned GLB model",
               description: "Saves an aligned (fitted) GLB model for an asset.",
+            },
+          },
+        )
+
+        // Import a GLB/VRM as a first-class Asset Forge asset and register its LOD bundle
+        .post(
+          "/import",
+          async ({ body, set }) => {
+            const formData = body as {
+              file?: File;
+              name?: string;
+              type?: string;
+              category?: string;
+              description?: string;
+            };
+            const file = formData.file;
+
+            if (!file) {
+              set.status = 400;
+              return { error: "No file provided" };
+            }
+
+            const originalName = path.basename(file.name);
+            const ext = path.extname(originalName).toLowerCase();
+            const supportedExtensions = new Set([".glb", ".vrm"]);
+
+            if (!supportedExtensions.has(ext)) {
+              set.status = 400;
+              return { error: "Only .glb and .vrm files can be imported" };
+            }
+
+            const baseName = formData.name?.trim() || originalName;
+            const assetId = await getUniqueAssetId(slugifyAssetId(baseName));
+            const assetType =
+              formData.type?.trim() || (ext === ".vrm" ? "character" : "prop");
+            const category = formData.category?.trim() || assetType;
+            const assetDir = path.join(assetsRoot, assetId);
+            const modelFilename = `${assetId}${ext}`;
+            const modelPath = path.join(assetDir, modelFilename);
+
+            await fs.promises.mkdir(assetDir, { recursive: true });
+            await Bun.write(modelPath, file);
+
+            const now = new Date().toISOString();
+            const relativeModelPath = path.relative(projectRoot, modelPath);
+            const metadata = {
+              id: assetId,
+              gameId: assetId,
+              name: baseName.replace(/\.[^.]+$/, ""),
+              description:
+                formData.description?.trim() ||
+                `Imported ${ext.slice(1).toUpperCase()} asset`,
+              type: assetType,
+              subtype: category,
+              category,
+              isBaseModel: true,
+              isVariant: false,
+              meshyTaskId: "manual-import",
+              generationMethod: "manual",
+              variants: [],
+              variantCount: 0,
+              modelPath: modelFilename,
+              lodSourcePath: relativeModelPath,
+              hasModel: true,
+              hasConceptArt: false,
+              workflow: "manual-import",
+              gddCompliant: false,
+              isPlaceholder: false,
+              format: ext.slice(1).toUpperCase(),
+              createdAt: now,
+              updatedAt: now,
+              generatedAt: now,
+              importedAt: now,
+              originalFilename: originalName,
+            };
+
+            const metadataPath = path.join(assetDir, "metadata.json");
+            await Bun.write(metadataPath, JSON.stringify(metadata, null, 2));
+
+            if (lodService) {
+              await lodService.createOrUpdateBundle(
+                assetId,
+                metadata.name,
+                category,
+                relativeModelPath,
+              );
+            }
+
+            const asset = await assetService.loadAsset(assetId);
+
+            return {
+              success: true,
+              assetId,
+              asset,
+              message: `Imported ${metadata.name}`,
+            };
+          },
+          {
+            body: t.Object({
+              file: t.File({ maxSize: "200m" }),
+              name: t.Optional(t.String()),
+              type: t.Optional(t.String()),
+              category: t.Optional(t.String()),
+              description: t.Optional(t.String()),
+            }),
+            detail: {
+              tags: ["Assets"],
+              summary: "Import GLB or VRM asset",
+              description:
+                "Imports a local GLB or VRM file into Asset Forge and creates its initial LOD bundle.",
             },
           },
         )

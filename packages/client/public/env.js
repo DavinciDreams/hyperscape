@@ -16,7 +16,10 @@
   const env = typeof window.env === "object" && window.env ? window.env : {};
   const currentPort = window.location.port;
   const isLocalDevServer =
-    currentPort === "3333" || currentPort === "4173" || currentPort === "5173";
+    currentPort === "3333" ||
+    currentPort === "3343" ||
+    currentPort === "4173" ||
+    currentPort === "5173";
 
   if (isLocalDevServer) {
     const host = window.location.hostname || "127.0.0.1";

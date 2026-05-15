@@ -118,25 +118,6 @@ export default defineConfig(({ mode }) => {
     "graceful-fs",
   ];
 
-  // Privy's ESM build pulls Coinbase internals with .cjs files.
-  // Explicit optimization guarantees CJS interop and avoids runtime export errors.
-  const authOptimizeDeps = [
-    "@privy-io/react-auth",
-    "@privy-io/react-auth/farcaster",
-    "@privy-io/react-auth/solana",
-    "@coinbase/wallet-sdk",
-  ];
-
-  // When noDiscovery is enabled (e.g. PLAYWRIGHT_TEST), these must be explicit
-  // or Vite serves raw web3 ESM that imports CJS bn.js without interop.
-  const solanaOptimizeDeps = [
-    "@solana/web3.js",
-    "@solana/kit",
-    "@solana/wallet-adapter-react",
-    "@solana/wallet-adapter-react-ui",
-    "@solana-mobile/wallet-standard-mobile",
-  ];
-
   return {
     plugins: [
       react(),
@@ -635,8 +616,6 @@ export default defineConfig(({ mode }) => {
             "canonicalize",
             "fetch-retry",
             "three/examples/jsm/exporters/GLTFExporter.js",
-            ...authOptimizeDeps,
-            ...solanaOptimizeDeps,
           ],
           exclude: optimizeDepsExclude,
           force: forceOptimizeDeps,
@@ -651,8 +630,6 @@ export default defineConfig(({ mode }) => {
             "react-device-detect",
             "canonicalize",
             "fetch-retry",
-            ...authOptimizeDeps,
-            ...solanaOptimizeDeps,
           ],
           exclude: optimizeDepsExclude,
           force: forceOptimizeDeps,

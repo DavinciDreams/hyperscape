@@ -43,6 +43,16 @@ type SpawnMobOptions = {
   spawnKey?: string;
 };
 
+function hostileMobSpawningEnabled(): boolean {
+  const env =
+    typeof process !== "undefined" && typeof process.env !== "undefined"
+      ? process.env
+      : undefined;
+  const value =
+    env?.HOSTILE_MOBS_ENABLED ?? env?.MOBS_ENABLED ?? env?.ENABLE_MOBS;
+  return value === "true" || value === "1";
+}
+
 export class MobNPCSpawnerSystem extends SystemBase {
   private spawnedMobs = new Map<string, string>(); // mobId -> entityId
   private spawnedMobDetails = new Map<string, SpawnedMobDetail>();
@@ -108,8 +118,13 @@ export class MobNPCSpawnerSystem extends SystemBase {
       await this.spawnAllNPCsFromManifest();
       // Spawn procedural building NPCs inside town buildings
       await this.spawnBuildingNPCs();
-      // Spawn a default test goblin near origin for testing combat
-      await this.spawnDefaultMob();
+      if (hostileMobSpawningEnabled()) {
+        await this.spawnDefaultMob();
+      } else {
+        console.log(
+          "[MobNPCSpawnerSystem] Hostile mob spawning disabled (set HOSTILE_MOBS_ENABLED=true to enable)",
+        );
+      }
     }
     // Additional mobs are spawned reactively as terrain tiles generate via biomes.json
   }
@@ -860,6 +875,9 @@ export class MobNPCSpawnerSystem extends SystemBase {
   }): void {
     // CRITICAL: Only server should spawn mobs - clients receive them via network sync
     if (!this.world.isServer) {
+      return;
+    }
+    if (!hostileMobSpawningEnabled()) {
       return;
     }
 
