@@ -78,7 +78,7 @@ cp .env.example .env
 ```
 # Preferred local provider: Asset Forge calls the DGX Hill/VRM bridge.
 ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
-HILL_API_BASE_URL=http://192.168.1.177:3100
+HILL_API_BASE_URL=https://vrmviewer.flobots.xyz
 HILL_GENERATION_MODE=create
 HILL_EXPORT_TARGET=library
 NEMOTRON_BASE_URL=http://monumentals-mac-studio.local:12345
@@ -112,7 +112,7 @@ For the deployed Asset Forge, set these Coolify environment variables:
 
 ```bash
 ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
-HILL_API_BASE_URL=http://<dgx-or-vrm-viewer-host>:3100
+HILL_API_BASE_URL=https://vrmviewer.flobots.xyz
 HILL_GENERATION_MODE=create
 HILL_EXPORT_TARGET=library
 HILL_API_POLL_INTERVAL_MS=3000
@@ -124,9 +124,10 @@ NEMOTRON_MAX_TOKENS=450
 VITE_GENERATION_API_URL=/api
 ```
 
-`HILL_API_BASE_URL` should point at the VRM Viewer asset-library server, not the
-Vite UI proxy. In local dev that is usually port `3100`. It must expose
-`/api/hill/conjure-jobs` and `/api/hill/file`. With the provider set to
+`HILL_API_BASE_URL` should point at the deployed VRM Viewer asset-library
+server. It must expose `/api/hill/conjure-jobs` and `/api/hill/file`, and the
+container must either mount the same `/tank` asset paths or proxy those file
+requests back to the DGX. With the provider set to
 `hill_dgx`, the existing `POST /api/generation/pipeline` endpoint stays the
 same for the UI, but the backend submits the job to Hill using the Flux Klein →
 Bruno Trellis2 `1024` no-cascade path with 2048 textures and LOD generation.
