@@ -1719,9 +1719,48 @@ Your task is to enhance the user's description to create better results with ima
     );
     const startedAt = Date.now();
     let job = submitted;
+    const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+    await fs.mkdir(outputDir, { recursive: true });
+    let conceptArtPath: string | undefined;
+    let conceptArtUrl: string | undefined;
+    let remoteConceptArtUrl: string | undefined;
 
     while (Date.now() - startedAt < timeoutMs) {
       job = await this.getHillConjureJob(submitted.id);
+
+      if (
+        pipeline.stages.imageGeneration.status !== "completed" &&
+        job.result?.ref_image
+      ) {
+        remoteConceptArtUrl = this.hillFileUrl(job.result.ref_image);
+        if (remoteConceptArtUrl) {
+          try {
+            conceptArtPath = path.join(outputDir, "concept-art.png");
+            const conceptBuffer = await this.downloadFile(remoteConceptArtUrl);
+            await fs.writeFile(conceptArtPath, conceptBuffer);
+            conceptArtUrl = `/api/assets/${pipeline.config.assetId}/concept-art.png`;
+
+            pipeline.stages.imageGeneration.status = "completed";
+            pipeline.stages.imageGeneration.progress = 100;
+            pipeline.stages.imageGeneration.result = {
+              provider: "hill_dgx",
+              imageModel: "flux_klein",
+              imageUrl: conceptArtUrl,
+              remoteImageUrl: remoteConceptArtUrl,
+              sourcePath: job.result.ref_image,
+            };
+            pipeline.results.imageGeneration =
+              pipeline.stages.imageGeneration.result;
+            pipeline.progress = Math.max(pipeline.progress, 45);
+          } catch (error) {
+            console.warn(
+              `[HillDGX] Reference image announced but not readable yet for ${submitted.id}:`,
+              error instanceof Error ? error.message : error,
+            );
+            conceptArtPath = undefined;
+          }
+        }
+      }
 
       if (job.status === "completed") break;
       if (job.status === "failed") {
@@ -1738,30 +1777,29 @@ Your task is to enhance the user's description to create better results with ima
 
     const result = job.result || {};
     const remoteModelUrl = this.hillFileUrl(result.glb);
-    const remoteConceptArtUrl = this.hillFileUrl(result.ref_image);
+    remoteConceptArtUrl =
+      remoteConceptArtUrl || this.hillFileUrl(result.ref_image);
     if (!remoteModelUrl) {
       throw new Error("Hill DGX job completed without a GLB result");
     }
-
-    const outputDir = path.join("gdd-assets", pipeline.config.assetId);
-    await fs.mkdir(outputDir, { recursive: true });
 
     const modelFilename = `${pipeline.config.assetId}.glb`;
     const modelPath = path.join(outputDir, modelFilename);
     const modelBuffer = await this.downloadFile(remoteModelUrl);
     await fs.writeFile(modelPath, modelBuffer);
 
-    let conceptArtPath: string | undefined;
-    if (remoteConceptArtUrl) {
+    if (remoteConceptArtUrl && !conceptArtPath) {
       conceptArtPath = path.join(outputDir, "concept-art.png");
       const conceptBuffer = await this.downloadFile(remoteConceptArtUrl);
       await fs.writeFile(conceptArtPath, conceptBuffer);
     }
 
     const modelUrl = `/api/assets/${pipeline.config.assetId}/model`;
-    const conceptArtUrl = conceptArtPath
-      ? `/api/assets/${pipeline.config.assetId}/concept-art.png`
-      : undefined;
+    conceptArtUrl =
+      conceptArtUrl ||
+      (conceptArtPath
+        ? `/api/assets/${pipeline.config.assetId}/concept-art.png`
+        : undefined);
 
     const metadataRecord = {
       id: pipeline.config.assetId,
@@ -1814,6 +1852,7 @@ Your task is to enhance the user's description to create better results with ima
       provider: "hill_dgx",
       imageModel: "flux_klein",
       imageUrl: conceptArtUrl,
+      remoteImageUrl: remoteConceptArtUrl,
       sourcePath: result.ref_image,
     };
     pipeline.results.imageGeneration = pipeline.stages.imageGeneration.result;
