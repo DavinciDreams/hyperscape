@@ -6,6 +6,7 @@
 import EventEmitter from "events";
 import type { UserContextType, AssetMetadataType } from "../models";
 import { AICreationService } from "./AICreationService";
+import { ComfyUIService } from "./ComfyUIService";
 import { ImageHostingService } from "./ImageHostingService";
 import { assetDatabaseService } from "./AssetDatabaseService";
 import {
@@ -215,6 +216,7 @@ interface VariantResult {
 export class GenerationService extends EventEmitter {
   private activePipelines: Map<string, Pipeline>;
   private aiService: AICreationService;
+  private comfyService: ComfyUIService;
   private imageHostingService: ImageHostingService;
 
   constructor() {
@@ -245,6 +247,8 @@ export class GenerationService extends EventEmitter {
         baseUrl: "https://api.meshy.ai",
       },
     });
+
+    this.comfyService = new ComfyUIService();
 
     // Initialize image hosting service
     this.imageHostingService = new ImageHostingService();
@@ -447,9 +451,11 @@ export class GenerationService extends EventEmitter {
             }
           }
 
-          const imageResult = await this.aiService
-            .getImageService()
-            .generateImage(imagePrompt, pipeline.config.type, effectiveStyle);
+          const imageResult = this.shouldUseComfyImage()
+            ? await this.generateImageWithComfy(imagePrompt)
+            : await this.aiService
+                .getImageService()
+                .generateImage(imagePrompt, pipeline.config.type, effectiveStyle);
 
           imageUrl = imageResult.imageUrl;
 
@@ -493,128 +499,149 @@ export class GenerationService extends EventEmitter {
           }
         }
 
-        // Ensure we have a publicly accessible URL for Meshy
-        console.log("📸 Initial image URL:", imageUrlForMeshy);
+        let modelBuffer: Buffer;
+        let modelUrl = "";
+        let modelPolycount: number | undefined;
 
-        // Meshy can't access localhost, 127.0.0.1, or data URIs - rehost if needed
-        if (
-          imageUrlForMeshy.startsWith("data:") ||
-          imageUrlForMeshy.includes("localhost") ||
-          imageUrlForMeshy.includes("127.0.0.1")
-        ) {
-          console.warn(
-            "⚠️ Non-public image reference detected - uploading to public hosting...",
+        if (this.shouldUseComfy3D()) {
+          const imagePath = await this.writeImageToTempFile(
+            imageUrl!,
+            pipeline.config.assetId,
           );
-
-          // Use the image hosting service to get a public URL
-          try {
-            imageUrlForMeshy = await this.imageHostingService.uploadImage(
-              imageUrl!,
-            );
-            console.log("✅ Image uploaded to public URL:", imageUrlForMeshy);
-          } catch (uploadError) {
-            console.error(
-              "❌ Failed to upload image:",
-              (uploadError as Error).message,
-            );
-            console.log(ImageHostingService.getSetupInstructions());
-            throw new Error(
-              "Cannot make image publicly accessible. See instructions above.",
-            );
-          }
-        }
-
-        // Determine quality settings based on explicit config, style cues, and avatar type
-        const styleText =
-          (pipeline.config.customPrompts &&
-            pipeline.config.customPrompts.gameStyle) ||
-          "";
-        const wantsHighQuality =
-          /\b(4k|ultra|high\s*quality|realistic|cinematic|marvel|skyrim)\b/i.test(
-            styleText,
+          const comfyResult = await this.comfyService.generateModelFromImage(
+            imagePath,
+            enhancedPrompt,
           );
-        const isAvatar =
-          pipeline.config.generationType === "avatar" ||
-          pipeline.config.type === "character";
+          meshyTaskId = `comfy:${comfyResult.promptId}`;
+          modelBuffer = comfyResult.buffer;
+          modelUrl = comfyResult.url;
+          pipeline.stages.image3D.progress = 100;
+        } else {
+          // Ensure we have a publicly accessible URL for Meshy
+          console.log("📸 Initial image URL:", imageUrlForMeshy);
 
-        const quality =
-          pipeline.config.quality ||
-          (wantsHighQuality || isAvatar ? "ultra" : "standard");
-        const targetPolycount =
-          quality === "ultra" ? 20000 : quality === "high" ? 12000 : 6000;
-        const textureResolution =
-          quality === "ultra" ? 4096 : quality === "high" ? 2048 : 1024;
-        const enablePbr = quality !== "standard";
+          // Meshy can't access localhost, 127.0.0.1, or data URIs - rehost if needed
+          if (
+            imageUrlForMeshy.startsWith("data:") ||
+            imageUrlForMeshy.includes("localhost") ||
+            imageUrlForMeshy.includes("127.0.0.1")
+          ) {
+            console.warn(
+              "⚠️ Non-public image reference detected - uploading to public hosting...",
+            );
 
-        // Allow per-quality model selection via env, with a sensible default
-        const qualityUpper = quality.toUpperCase();
-        const aiModelEnv =
-          process.env[`MESHY_MODEL_${qualityUpper}`] ||
-          process.env.MESHY_MODEL_DEFAULT;
-        const aiModel = aiModelEnv || "meshy-5";
-
-        const meshyTaskIdResult = await this.aiService
-          .getMeshyService()
-          .startImageTo3D(imageUrlForMeshy, {
-            enable_pbr: enablePbr,
-            ai_model: aiModel,
-            topology: "quad",
-            targetPolycount: targetPolycount,
-            texture_resolution: textureResolution,
-          });
-        meshyTaskId =
-          typeof meshyTaskIdResult === "string"
-            ? meshyTaskIdResult
-            : meshyTaskIdResult.task_id || meshyTaskIdResult.id || null;
-
-        // Poll for completion
-        let meshyResult: MeshyResult | null = null;
-        let attempts = 0;
-        const pollIntervalMs = parseInt(
-          process.env.MESHY_POLL_INTERVAL_MS || "5000",
-          10,
-        );
-        const timeoutMs = parseInt(
-          process.env[`MESHY_TIMEOUT_${qualityUpper}_MS`] ||
-            process.env.MESHY_TIMEOUT_MS ||
-            "300000",
-          10,
-        );
-        const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
-
-        console.log(
-          `⏳ Meshy polling configured: quality=${quality}, model=${aiModel}, interval=${pollIntervalMs}ms, timeout=${timeoutMs}ms, maxAttempts=${maxAttempts}`,
-        );
-
-        while (attempts < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-
-          if (!meshyTaskId) {
-            throw new Error("Meshy task ID is null");
+            // Use the image hosting service to get a public URL
+            try {
+              imageUrlForMeshy = await this.imageHostingService.uploadImage(
+                imageUrl!,
+              );
+              console.log("✅ Image uploaded to public URL:", imageUrlForMeshy);
+            } catch (uploadError) {
+              console.error(
+                "❌ Failed to upload image:",
+                (uploadError as Error).message,
+              );
+              console.log(ImageHostingService.getSetupInstructions());
+              throw new Error(
+                "Cannot make image publicly accessible. See instructions above.",
+              );
+            }
           }
 
-          const status = await this.aiService
+          // Determine quality settings based on explicit config, style cues, and avatar type
+          const styleText =
+            (pipeline.config.customPrompts &&
+              pipeline.config.customPrompts.gameStyle) ||
+            "";
+          const wantsHighQuality =
+            /\b(4k|ultra|high\s*quality|realistic|cinematic|marvel|skyrim)\b/i.test(
+              styleText,
+            );
+          const isAvatar =
+            pipeline.config.generationType === "avatar" ||
+            pipeline.config.type === "character";
+
+          const quality =
+            pipeline.config.quality ||
+            (wantsHighQuality || isAvatar ? "ultra" : "standard");
+          const targetPolycount =
+            quality === "ultra" ? 20000 : quality === "high" ? 12000 : 6000;
+          const textureResolution =
+            quality === "ultra" ? 4096 : quality === "high" ? 2048 : 1024;
+          const enablePbr = quality !== "standard";
+
+          // Allow per-quality model selection via env, with a sensible default
+          const qualityUpper = quality.toUpperCase();
+          const aiModelEnv =
+            process.env[`MESHY_MODEL_${qualityUpper}`] ||
+            process.env.MESHY_MODEL_DEFAULT;
+          const aiModel = aiModelEnv || "meshy-5";
+
+          const meshyTaskIdResult = await this.aiService
             .getMeshyService()
-            .getTaskStatus(meshyTaskId);
-          pipeline.stages.image3D.progress =
-            status.progress || (attempts / maxAttempts) * 100;
+            .startImageTo3D(imageUrlForMeshy, {
+              enable_pbr: enablePbr,
+              ai_model: aiModel,
+              topology: "quad",
+              targetPolycount: targetPolycount,
+              texture_resolution: textureResolution,
+            });
+          meshyTaskId =
+            typeof meshyTaskIdResult === "string"
+              ? meshyTaskIdResult
+              : meshyTaskIdResult.task_id || meshyTaskIdResult.id || null;
 
-          if (status.status === "SUCCEEDED") {
-            meshyResult = status as MeshyResult;
-            break;
-          } else if (status.status === "FAILED") {
-            throw new Error(status.error || "Meshy conversion failed");
+          // Poll for completion
+          let meshyResult: MeshyResult | null = null;
+          let attempts = 0;
+          const pollIntervalMs = parseInt(
+            process.env.MESHY_POLL_INTERVAL_MS || "5000",
+            10,
+          );
+          const timeoutMs = parseInt(
+            process.env[`MESHY_TIMEOUT_${qualityUpper}_MS`] ||
+              process.env.MESHY_TIMEOUT_MS ||
+              "300000",
+            10,
+          );
+          const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
+
+          console.log(
+            `⏳ Meshy polling configured: quality=${quality}, model=${aiModel}, interval=${pollIntervalMs}ms, timeout=${timeoutMs}ms, maxAttempts=${maxAttempts}`,
+          );
+
+          while (attempts < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+            if (!meshyTaskId) {
+              throw new Error("Meshy task ID is null");
+            }
+
+            const status = await this.aiService
+              .getMeshyService()
+              .getTaskStatus(meshyTaskId);
+            pipeline.stages.image3D.progress =
+              status.progress || (attempts / maxAttempts) * 100;
+
+            if (status.status === "SUCCEEDED") {
+              meshyResult = status as MeshyResult;
+              break;
+            } else if (status.status === "FAILED") {
+              throw new Error(status.error || "Meshy conversion failed");
+            }
+
+            attempts++;
           }
 
-          attempts++;
+          if (!meshyResult) {
+            throw new Error("Meshy conversion timed out");
+          }
+
+          modelUrl = meshyResult.model_urls.glb;
+          modelPolycount = meshyResult.polycount;
+          modelBuffer = await this.downloadFile(modelUrl);
         }
 
-        if (!meshyResult) {
-          throw new Error("Meshy conversion timed out");
-        }
-
-        // Download and save the model
-        const modelBuffer = await this.downloadFile(meshyResult.model_urls.glb);
         const outputDir = path.join("gdd-assets", pipeline.config.assetId);
         await fs.mkdir(outputDir, { recursive: true });
 
@@ -732,7 +759,9 @@ export class GenerationService extends EventEmitter {
           modelPath: baseModelPath,
           conceptArtUrl: "./concept-art.png",
           gddCompliant: true,
-          workflow: "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
+          workflow: this.shouldUseComfy3D()
+            ? "GPT-5 → ComfyUI Flux/Klein → ComfyUI Trellis (Base Model)"
+            : "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
           meshyTaskId: meshyTaskId,
           meshyStatus: "completed",
           variants: [], // Will be populated as variants are generated
@@ -778,8 +807,8 @@ export class GenerationService extends EventEmitter {
         pipeline.stages.image3D.progress = 100;
         pipeline.stages.image3D.result = {
           taskId: meshyTaskId,
-          modelUrl: meshyResult.model_urls.glb,
-          polycount: meshyResult.polycount,
+          modelUrl,
+          polycount: modelPolycount,
           localPath: baseModelPath,
         };
         pipeline.results.image3D = pipeline.stages.image3D.result;
@@ -1407,6 +1436,64 @@ Your task is to enhance the user's description to create better results with ima
     });
 
     return [...new Set(keywords)];
+  }
+
+  private shouldUseComfyImage(): boolean {
+    const provider =
+      process.env.ASSET_FORGE_IMAGE_PROVIDER ||
+      process.env.LOCAL_IMAGE_PROVIDER ||
+      "";
+    return provider.toLowerCase() === "comfy";
+  }
+
+  private shouldUseComfy3D(): boolean {
+    const provider =
+      process.env.ASSET_FORGE_3D_PROVIDER ||
+      process.env.LOCAL_3D_PROVIDER ||
+      "";
+    return ["comfy", "trellis"].includes(provider.toLowerCase());
+  }
+
+  private async generateImageWithComfy(
+    prompt: string,
+  ): Promise<ImageGenerationResult> {
+    const result = await this.comfyService.generateImage(prompt);
+    const extension = path.extname(result.file.filename).toLowerCase();
+    const mimeType =
+      extension === ".jpg" || extension === ".jpeg"
+        ? "image/jpeg"
+        : extension === ".webp"
+          ? "image/webp"
+          : "image/png";
+
+    return {
+      imageUrl: `data:${mimeType};base64,${result.buffer.toString("base64")}`,
+      prompt,
+      metadata: {
+        model: "comfyui",
+        resolution: "workflow",
+        quality: "workflow",
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
+
+  private async writeImageToTempFile(
+    imageUrl: string,
+    assetId: string,
+  ): Promise<string> {
+    await fs.mkdir("temp-images", { recursive: true });
+    const imagePath = path.join("temp-images", `${assetId}-concept.png`);
+
+    if (imageUrl.startsWith("data:")) {
+      const imageData = imageUrl.split(",")[1];
+      await fs.writeFile(imagePath, Buffer.from(imageData, "base64"));
+      return imagePath;
+    }
+
+    const buffer = await this.downloadFile(imageUrl);
+    await fs.writeFile(imagePath, buffer);
+    return imagePath;
   }
 
   /**
