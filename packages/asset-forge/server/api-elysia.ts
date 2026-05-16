@@ -65,6 +65,7 @@ import { TripoService } from "./services/armor-pipeline/TripoService";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
+const DIST_DIR = path.join(ROOT_DIR, "dist");
 
 // Ensure temp directories exist
 await fs.promises.mkdir(path.join(ROOT_DIR, "temp-images"), {
@@ -103,6 +104,33 @@ const shellTextureService = new ShellTextureService({
 const tripoService = new TripoService({
   tripoApiKey: process.env.TRIPO_API_KEY || "",
 });
+
+async function serveFrontend(pathname: string, set: { status?: number; headers: Record<string, string> }) {
+  const normalizedPath = pathname === "/" ? "/index.html" : pathname;
+  const safePath = path
+    .normalize(normalizedPath)
+    .replace(/^(\.\.(\/|\\|$))+/, "")
+    .replace(/^\/+/, "");
+  const requestedFile = path.join(DIST_DIR, safePath);
+  const distRoot = path.resolve(DIST_DIR);
+  const resolvedFile = path.resolve(requestedFile);
+
+  if (resolvedFile.startsWith(distRoot)) {
+    const file = Bun.file(resolvedFile);
+    if (await file.exists()) {
+      return file;
+    }
+  }
+
+  const indexFile = Bun.file(path.join(DIST_DIR, "index.html"));
+  if (await indexFile.exists()) {
+    set.headers["content-type"] = "text/html; charset=utf-8";
+    return indexFile;
+  }
+
+  set.status = 404;
+  return { error: "Asset Forge frontend has not been built" };
+}
 
 // Create Elysia app
 const app = new Elysia()
@@ -352,6 +380,26 @@ const app = new Elysia()
   .use(createArmorPipelineRoutes(shellTextureService))
   // Tripo pipeline (Tripo 3D AI)
   .use(createTripoPipelineRoutes(tripoService))
+  // Built Asset Forge frontend. Keep API-like prefixes as JSON 404s instead of
+  // returning index.html for typoed endpoints.
+  .get("/*", async ({ request, set }) => {
+    const pathname = new URL(request.url).pathname;
+    const apiPrefixes = [
+      "/api",
+      "/swagger",
+      "/gdd-assets",
+      "/temp-images",
+      "/temp-shells",
+      "/game-models",
+    ];
+
+    if (apiPrefixes.some((prefix) => pathname.startsWith(prefix))) {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+
+    return serveFrontend(pathname, set);
+  })
 
   // Start server
   .listen(API_PORT);

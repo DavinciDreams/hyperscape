@@ -49,7 +49,7 @@ import {
 } from "@/utils/webgpu-renderer";
 
 // API base
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export const PlantGenPage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);

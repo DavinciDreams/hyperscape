@@ -44,7 +44,7 @@ import type { BuildingPreset } from "@/types/ProcgenPresets";
 import { notify } from "@/utils/notify";
 
 // API base
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Lazy load the viewers to avoid SSR issues with Three.js
 const BuildingViewer = React.lazy(() =>

@@ -61,7 +61,7 @@ const TerrainNodeMat = MeshStandardNodeMaterial;
 const BasicNodeMat = MeshBasicNodeMaterial;
 
 // API base URL for manifest loading
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // ============================================================
 // BUILDING RECIPES AND CONSTANTS

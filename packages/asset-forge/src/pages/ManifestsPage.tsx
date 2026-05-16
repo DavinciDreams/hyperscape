@@ -49,7 +49,7 @@ import {
 } from "@/components/common";
 
 // API base URL
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Manifest categories with icons
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
