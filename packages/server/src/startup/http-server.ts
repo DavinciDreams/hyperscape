@@ -289,7 +289,7 @@ export async function createHttpServer(
   if (isRateLimitEnabled()) {
     await fastify.register(rateLimit, getGlobalRateLimit());
     console.log(
-      "[HTTP] ✅ Rate limiting enabled (100 requests/min per IP globally)",
+      "[HTTP] ✅ Rate limiting enabled (global API limit, static assets allowlisted)",
     );
   } else {
     console.log("[HTTP] ⚠️  Rate limiting disabled (development mode)");

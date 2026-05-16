@@ -7,7 +7,8 @@
  * **Rate Limiting Strategy**:
  * - Upload endpoints: 10 requests per minute (file uploads are resource-intensive)
  * - Action endpoints: 60 requests per minute (game actions need reasonable throughput)
- * - General API: 100 requests per minute (default for other endpoints)
+ * - General API: 600 requests per minute (default for other endpoints)
+ * - Static assets and health/status endpoints bypass the global limiter
  * - WebSocket: No rate limiting (handled by connection limits)
  *
  * **Implementation**:
@@ -28,6 +29,36 @@
  */
 
 import type { RateLimitOptions } from "@fastify/rate-limit";
+import type { FastifyRequest } from "fastify";
+
+const DEFAULT_GLOBAL_RATE_LIMIT_MAX = 600;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isStaticOrHealthRequest(request: FastifyRequest): boolean {
+  if (request.method !== "GET" && request.method !== "HEAD") return false;
+
+  const url = request.url.split("?", 1)[0] ?? request.url;
+  return (
+    url === "/" ||
+    url === "/health" ||
+    url === "/status" ||
+    url === "/favicon.ico" ||
+    url === "/manifest.webmanifest" ||
+    url === "/registerSW.js" ||
+    url === "/sw.js" ||
+    url === "/env.js" ||
+    url.startsWith("/assets/") ||
+    url.startsWith("/web/") ||
+    url.startsWith("/world/") ||
+    url.startsWith("/live/") ||
+    url.startsWith("/luts/")
+  );
+}
 
 /**
  * Global rate limit configuration
@@ -36,16 +67,23 @@ import type { RateLimitOptions } from "@fastify/rate-limit";
  * Prevents general API abuse across all endpoints.
  *
  * Limits:
- * - 100 requests per minute per IP
+ * - 600 requests per minute per IP by default (`GLOBAL_RATE_LIMIT_MAX` overrides)
+ * - Static assets and health/status endpoints are allowlisted
  * - 429 status code on limit exceeded
  * - Standard error response format
  *
  * @returns Rate limit configuration for general API endpoints
  */
 export function getGlobalRateLimit(): RateLimitOptions {
+  const max = parsePositiveInt(
+    process.env.GLOBAL_RATE_LIMIT_MAX,
+    DEFAULT_GLOBAL_RATE_LIMIT_MAX,
+  );
+
   return {
-    max: 100,
+    max,
     timeWindow: "1 minute",
+    allowList: request => isStaticOrHealthRequest(request),
     errorResponseBuilder: (_request, context) => ({
       statusCode: 429,
       error: "Too Many Requests",
