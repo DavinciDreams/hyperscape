@@ -211,6 +211,40 @@ interface VariantResult {
   error?: string;
 }
 
+interface HillApiResponse<T> {
+  success?: boolean;
+  data?: T;
+  error?: string;
+}
+
+interface HillConjureResult {
+  glb?: string;
+  ref_image?: string;
+  lod_dir?: string | null;
+  pipeline_type?: string;
+  quality?: string;
+  textureSize?: number;
+  reviewStatus?: string;
+  reviewNote?: string | null;
+  meshMetrics?: Record<string, unknown>;
+  wall_s?: number;
+  elapsed_s?: number;
+}
+
+interface HillConjureJob {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  prompt?: string;
+  name?: string;
+  mode?: string;
+  quality?: string;
+  exportTarget?: string;
+  error?: string;
+  assetId?: string;
+  assetName?: string;
+  result?: HillConjureResult;
+}
+
 // ==================== Service Class ====================
 
 export class GenerationService extends EventEmitter {
@@ -334,9 +368,13 @@ export class GenerationService extends EventEmitter {
       let imageUrl: string | null = null;
       let meshyTaskId: string | null = null;
       let baseModelPath: string | null = null;
+      const useHillDgx = this.shouldUseHillDgxProvider(pipeline.config);
 
       // Stage 1: GPT-5 Prompt Enhancement (honor toggle; skip if explicitly disabled)
-      if (pipeline.config.metadata?.useGPT5Enhancement !== false) {
+      if (
+        !useHillDgx &&
+        pipeline.config.metadata?.useGPT5Enhancement !== false
+      ) {
         pipeline.stages.promptOptimization.status = "processing";
 
         try {
@@ -364,8 +402,40 @@ export class GenerationService extends EventEmitter {
         }
 
         pipeline.progress = 10;
+      } else if (useHillDgx) {
+        pipeline.stages.promptOptimization.status = "processing";
+        try {
+          const optimizationResult = await this.enhancePromptWithLocalNemotron(
+            pipeline.config,
+          );
+          enhancedPrompt = optimizationResult.optimizedPrompt;
+          pipeline.stages.promptOptimization.result = {
+            ...optimizationResult,
+          };
+        } catch (error) {
+          console.warn(
+            "Local Nemotron enhancement failed, using original prompt:",
+            error,
+          );
+          pipeline.stages.promptOptimization.result = {
+            originalPrompt: pipeline.config.description,
+            optimizedPrompt: pipeline.config.description,
+            provider: "local_nemotron",
+            error: (error as Error).message,
+          };
+        }
+        pipeline.stages.promptOptimization.status = "completed";
+        pipeline.stages.promptOptimization.progress = 100;
+        pipeline.results.promptOptimization =
+          pipeline.stages.promptOptimization.result;
+        pipeline.progress = 10;
       } else {
         pipeline.stages.promptOptimization.status = "skipped";
+      }
+
+      if (useHillDgx) {
+        await this.processHillDgxPipeline(pipeline, enhancedPrompt);
+        return;
       }
 
       // Stage 2: Image Source (User-provided or AI-generated)
@@ -1346,6 +1416,338 @@ export class GenerationService extends EventEmitter {
     }
 
     return "meshy";
+  }
+
+  private shouldUseHillDgxProvider(config: PipelineConfig): boolean {
+    const metadata = config.metadata as Record<string, unknown> | undefined;
+    const requestedProvider =
+      typeof metadata?.provider === "string" ? metadata.provider : undefined;
+    const envProvider =
+      process.env.ASSET_FORGE_GENERATION_PROVIDER ||
+      process.env.GENERATION_PROVIDER;
+
+    return (
+      requestedProvider === "hill_dgx" ||
+      requestedProvider === "local_dgx_trellis2" ||
+      envProvider === "hill_dgx" ||
+      envProvider === "local_dgx_trellis2"
+    );
+  }
+
+  private getHillApiBaseUrl(): string {
+    const baseUrl =
+      process.env.HILL_API_BASE_URL ||
+      process.env.HILL_ASSET_LIBRARY_URL ||
+      process.env.VRM_VIEWER_API_URL;
+
+    if (!baseUrl) {
+      throw new Error(
+        "HILL_API_BASE_URL is required when ASSET_FORGE_GENERATION_PROVIDER=hill_dgx",
+      );
+    }
+
+    return baseUrl.replace(/\/+$/, "");
+  }
+
+  private hillApiUrl(pathname: string): string {
+    return new URL(pathname, `${this.getHillApiBaseUrl()}/`).toString();
+  }
+
+  private hillFileUrl(filePath?: string | null): string | undefined {
+    if (!filePath) return undefined;
+    const url = new URL("/api/hill/file", `${this.getHillApiBaseUrl()}/`);
+    url.searchParams.set("path", filePath);
+    return url.toString();
+  }
+
+  private getHillHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (process.env.HILL_API_TOKEN) {
+      headers.Authorization = `Bearer ${process.env.HILL_API_TOKEN}`;
+    }
+    return headers;
+  }
+
+  private async readHillJson<T>(
+    url: string,
+    init?: Parameters<typeof fetch>[1],
+  ): Promise<T> {
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        ...this.getHillHeaders(),
+        ...(init?.headers as Record<string, string> | undefined),
+      },
+    });
+
+    const payload = (await response
+      .json()
+      .catch(() => null)) as HillApiResponse<T> | null;
+    if (!response.ok || payload?.success === false) {
+      throw new Error(
+        payload?.error || `Hill API request failed with ${response.status}`,
+      );
+    }
+
+    return (payload?.data ?? payload) as T;
+  }
+
+  private async getHillConjureJob(jobId: string): Promise<HillConjureJob> {
+    const jobs = await this.readHillJson<HillConjureJob[]>(
+      this.hillApiUrl("/api/hill/conjure-jobs"),
+    );
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) {
+      throw new Error(`Hill conjure job ${jobId} not found`);
+    }
+    return job;
+  }
+
+  private async processHillDgxPipeline(
+    pipeline: Pipeline,
+    enhancedPrompt: string,
+  ): Promise<void> {
+    const metadata = pipeline.config.metadata as
+      | Record<string, unknown>
+      | undefined;
+    const mode =
+      (typeof metadata?.hillMode === "string" && metadata.hillMode) ||
+      process.env.HILL_GENERATION_MODE ||
+      "create";
+    const exportTarget =
+      (typeof metadata?.exportTarget === "string" && metadata.exportTarget) ||
+      process.env.HILL_EXPORT_TARGET ||
+      "library";
+
+    pipeline.stages.imageGeneration.status = "processing";
+    pipeline.stages.imageGeneration.progress = 20;
+    pipeline.stages.imageGeneration.result = {
+      provider: "hill_dgx",
+      imageModel: "flux_klein",
+      source: "remote-dgx",
+    };
+    pipeline.results.imageGeneration = pipeline.stages.imageGeneration.result;
+    pipeline.progress = 20;
+
+    pipeline.stages.image3D.status = "processing";
+    pipeline.stages.image3D.progress = 5;
+
+    const submitBody = {
+      prompt: enhancedPrompt,
+      name: pipeline.config.assetId || pipeline.config.name,
+      mode,
+      quality: "medium",
+      exportTarget,
+      generateLods: true,
+      seed: Number.isFinite(Number(metadata?.seed))
+        ? Number(metadata?.seed)
+        : undefined,
+    };
+
+    const submitted = await this.readHillJson<HillConjureJob>(
+      this.hillApiUrl("/api/hill/conjure-jobs"),
+      {
+        method: "POST",
+        body: JSON.stringify(submitBody),
+      },
+    );
+
+    const pollIntervalMs = Number.parseInt(
+      process.env.HILL_API_POLL_INTERVAL_MS || "3000",
+      10,
+    );
+    const timeoutMs = Number.parseInt(
+      process.env.HILL_API_TIMEOUT_MS || "1800000",
+      10,
+    );
+    const startedAt = Date.now();
+    let job = submitted;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      job = await this.getHillConjureJob(submitted.id);
+
+      if (job.status === "completed") break;
+      if (job.status === "failed") {
+        throw new Error(job.error || "Hill DGX generation failed");
+      }
+
+      pipeline.stages.image3D.progress = job.status === "running" ? 55 : 15;
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    if (job.status !== "completed") {
+      throw new Error(`Hill DGX generation timed out for job ${submitted.id}`);
+    }
+
+    const result = job.result || {};
+    const modelUrl = this.hillFileUrl(result.glb);
+    const conceptArtUrl = this.hillFileUrl(result.ref_image);
+    if (!modelUrl) {
+      throw new Error("Hill DGX job completed without a GLB result");
+    }
+
+    const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+    await fs.mkdir(outputDir, { recursive: true });
+    const metadataRecord = {
+      id: pipeline.config.assetId,
+      name: pipeline.config.name,
+      gameId: pipeline.config.assetId,
+      type: pipeline.config.type,
+      subtype: pipeline.config.subtype,
+      description: pipeline.config.description,
+      detailedPrompt: enhancedPrompt,
+      generatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      isBaseModel: true,
+      isPlaceholder: false,
+      hasModel: true,
+      hasConceptArt: !!conceptArtUrl,
+      modelUrl,
+      conceptArtUrl,
+      modelPath: result.glb,
+      conceptArtPath: result.ref_image,
+      lodDir: result.lod_dir,
+      gddCompliant: true,
+      workflow: "Hill DGX → Flux Klein → Bruno Trellis2 1024 → LOD",
+      provider: "hill_dgx",
+      hillJobId: job.id,
+      hillAssetId: job.assetId,
+      hillAssetName: job.assetName,
+      pipelineType: result.pipeline_type,
+      quality: result.quality,
+      textureSize: result.textureSize,
+      reviewStatus: result.reviewStatus,
+      reviewNote: result.reviewNote,
+      meshMetrics: result.meshMetrics,
+      generatedLods: !!result.lod_dir,
+      isPublic: true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await fs.writeFile(
+      path.join(outputDir, "metadata.json"),
+      JSON.stringify(metadataRecord, null, 2),
+    );
+
+    pipeline.stages.imageGeneration.status = "completed";
+    pipeline.stages.imageGeneration.progress = 100;
+    pipeline.stages.imageGeneration.result = {
+      provider: "hill_dgx",
+      imageModel: "flux_klein",
+      imageUrl: conceptArtUrl,
+      sourcePath: result.ref_image,
+    };
+    pipeline.results.imageGeneration = pipeline.stages.imageGeneration.result;
+
+    pipeline.stages.image3D.status = "completed";
+    pipeline.stages.image3D.progress = 100;
+    pipeline.stages.image3D.result = {
+      provider: "hill_dgx",
+      taskId: job.id,
+      modelUrl,
+      conceptArtUrl,
+      localPath: result.glb,
+      lodDir: result.lod_dir,
+      pipelineType: result.pipeline_type,
+      wallSeconds: result.wall_s,
+      elapsedSeconds: result.elapsed_s,
+      meshMetrics: result.meshMetrics,
+    };
+    pipeline.results.image3D = pipeline.stages.image3D.result;
+
+    pipeline.stages.textureGeneration.status = "skipped";
+    if (pipeline.stages.rigging) pipeline.stages.rigging.status = "skipped";
+    if (pipeline.stages.spriteGeneration) {
+      pipeline.stages.spriteGeneration.status = "skipped";
+    }
+
+    pipeline.status = "completed";
+    pipeline.completedAt = new Date().toISOString();
+    pipeline.progress = 100;
+    pipeline.finalAsset = {
+      id: pipeline.config.assetId,
+      name: pipeline.config.name,
+      modelUrl,
+      conceptArtUrl: conceptArtUrl || "",
+      variants: [],
+    };
+  }
+
+  private async enhancePromptWithLocalNemotron(
+    config: PipelineConfig,
+  ): Promise<PromptEnhancementResult> {
+    const baseUrl = (
+      process.env.NEMOTRON_BASE_URL ||
+      process.env.LOCAL_PROMPT_MODEL_BASE_URL ||
+      "http://monumentals-mac-studio.local:12345"
+    ).replace(/\/+$/, "");
+    const model =
+      process.env.NEMOTRON_MODEL ||
+      process.env.LOCAL_PROMPT_MODEL ||
+      "mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4";
+    const systemPrompt =
+      "You rewrite short creator requests into strong image-to-3D reference prompts for game assets. " +
+      "Return only the improved prompt, no markdown. Preserve the user's subject and style. " +
+      "Make the prompt describe one complete isolated asset on a clean neutral background, with full silhouette visible, " +
+      "PBR material detail, readable shape, and no cropped edges. For buildings, insist on a complete enclosed exterior, " +
+      "visible footprint, roof, doors, windows, and no single-corner/facade/cutaway failure. For trees, insist on full trunk, roots, and canopy.";
+
+    const userPrompt = [
+      `Name: ${config.name}`,
+      `Type: ${config.type}`,
+      `Subtype: ${config.subtype}`,
+      `Style: ${config.style || "game-ready"}`,
+      `Prompt: ${config.description}`,
+    ].join("\n");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (process.env.NEMOTRON_API_KEY) {
+      headers.Authorization = `Bearer ${process.env.NEMOTRON_API_KEY}`;
+    }
+
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: Number(process.env.NEMOTRON_TEMPERATURE || "0.2"),
+        max_tokens: Number(process.env.NEMOTRON_MAX_TOKENS || "450"),
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Nemotron prompt enhancement failed with ${response.status}: ${text.slice(0, 500)}`,
+      );
+    }
+
+    const data = (await response.json()) as GPT5ChatResponse;
+    const optimizedPrompt = data.choices?.[0]?.message?.content?.trim();
+    if (!optimizedPrompt) {
+      throw new Error("Nemotron returned an empty prompt");
+    }
+
+    return {
+      originalPrompt: config.description,
+      optimizedPrompt,
+      model,
+      keywords: [
+        config.type,
+        config.subtype,
+        "game-ready",
+        "pbr",
+        "complete-asset",
+      ].filter(Boolean),
+    };
   }
 
   /**

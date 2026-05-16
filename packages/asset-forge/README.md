@@ -76,8 +76,13 @@ cp .env.example .env
 
 4. Add provider configuration to `.env`
 ```
-# Preferred local provider wiring depends on the Hill/DGX service URL.
-LOCAL_DGX_GENERATION_URL=http://localhost:8000
+# Preferred local provider: Asset Forge calls the DGX Hill/VRM bridge.
+ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
+HILL_API_BASE_URL=http://192.168.1.177:3100
+HILL_GENERATION_MODE=create
+HILL_EXPORT_TARGET=library
+NEMOTRON_BASE_URL=http://monumentals-mac-studio.local:12345
+NEMOTRON_MODEL=mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4
 
 # Legacy cloud provider keys:
 OPENAI_API_KEY=your-openai-api-key
@@ -100,6 +105,33 @@ bun run dev:backend   # Terminal 2: API only, default port 3401
 ```
 
 The app will be available at `http://localhost:3400`, with the API on `http://localhost:3401`.
+
+### Coolify + DGX Hill Provider
+
+For the deployed Asset Forge, set these Coolify environment variables:
+
+```bash
+ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
+HILL_API_BASE_URL=http://<dgx-or-vrm-viewer-host>:3100
+HILL_GENERATION_MODE=create
+HILL_EXPORT_TARGET=library
+HILL_API_POLL_INTERVAL_MS=3000
+HILL_API_TIMEOUT_MS=1800000
+NEMOTRON_BASE_URL=http://monumentals-mac-studio.local:12345
+NEMOTRON_MODEL=mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4
+NEMOTRON_TEMPERATURE=0.2
+NEMOTRON_MAX_TOKENS=450
+VITE_GENERATION_API_URL=/api
+```
+
+`HILL_API_BASE_URL` should point at the VRM Viewer asset-library server, not the
+Vite UI proxy. In local dev that is usually port `3100`. It must expose
+`/api/hill/conjure-jobs` and `/api/hill/file`. With the provider set to
+`hill_dgx`, the existing `POST /api/generation/pipeline` endpoint stays the
+same for the UI, but the backend submits the job to Hill using the Flux Klein →
+Bruno Trellis2 `1024` no-cascade path with 2048 textures and LOD generation.
+Before submission, Asset Forge asks the local Nemotron OpenAI-compatible server
+to rewrite the creator request into a safer image-to-3D prompt.
 
 ## Project Structure
 
