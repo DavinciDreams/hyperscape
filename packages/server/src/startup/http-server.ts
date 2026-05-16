@@ -157,6 +157,7 @@ export async function createHttpServer(
     "https://www.bsc.hyperbet.win",
     "https://hyperscape.gg",
     "https://www.hyperscape.gg",
+    "https://hyperscape.flobots.xyz",
     "https://hyperscape.club",
     "https://www.hyperscape.club",
     "https://hyperscape.pages.dev",
@@ -187,6 +188,7 @@ export async function createHttpServer(
     /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
+    /^https?:\/\/.+\.flobots\.xyz$/, // flobots.xyz subdomains
     /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
     /^https:\/\/.+\.farcaster\.xyz$/,
     /^https:\/\/.+\.warpcast\.com$/,
