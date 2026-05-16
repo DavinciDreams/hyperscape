@@ -1,6 +1,7 @@
 export * from "./AssetService";
 export * from "./RetextureService";
 export * from "./GenerationService";
+export * from "./HillDGXService";
 export * from "./AICreationService";
 export * from "./ImageHostingService";
 export * from "./ElevenLabsVoiceService";

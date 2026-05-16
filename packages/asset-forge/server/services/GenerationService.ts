@@ -7,6 +7,7 @@ import EventEmitter from "events";
 import type { UserContextType, AssetMetadataType } from "../models";
 import { AICreationService } from "./AICreationService";
 import { ComfyUIService } from "./ComfyUIService";
+import { HillDGXService } from "./HillDGXService";
 import { ImageHostingService } from "./ImageHostingService";
 import { assetDatabaseService } from "./AssetDatabaseService";
 import {
@@ -217,6 +218,7 @@ export class GenerationService extends EventEmitter {
   private activePipelines: Map<string, Pipeline>;
   private aiService: AICreationService;
   private comfyService: ComfyUIService;
+  private hillDGXService: HillDGXService;
   private imageHostingService: ImageHostingService;
 
   constructor() {
@@ -249,6 +251,7 @@ export class GenerationService extends EventEmitter {
     });
 
     this.comfyService = new ComfyUIService();
+    this.hillDGXService = new HillDGXService();
 
     // Initialize image hosting service
     this.imageHostingService = new ImageHostingService();
@@ -728,6 +731,35 @@ export class GenerationService extends EventEmitter {
 
         baseModelPath = normalizedModelPath;
 
+        let hillLibraryAsset: Record<string, unknown> | undefined;
+        if (this.shouldExportToHillDGX()) {
+          try {
+            const normalizedBuffer = await fs.readFile(normalizedModelPath);
+            const hillAsset = await this.hillDGXService.publishModel(
+              normalizedBuffer,
+              {
+                assetId: pipeline.config.assetId,
+                name: pipeline.config.name || pipeline.config.assetId,
+                description: pipeline.config.description,
+                type: pipeline.config.type,
+                subtype: pipeline.config.subtype,
+                prompt: enhancedPrompt,
+              },
+            );
+            hillLibraryAsset = hillAsset as Record<string, unknown>;
+            console.log(
+              `[GenerationService] Exported ${pipeline.config.assetId} to Hill library`,
+              hillAsset.uuid || hillAsset.id || hillAsset.name || "",
+            );
+          } catch (error) {
+            console.error(
+              "[GenerationService] Hill DGX library export failed:",
+              error,
+            );
+            throw error;
+          }
+        }
+
         // Save concept art
         if (imageUrl!.startsWith("data:")) {
           const imageData = imageUrl!.split(",")[1];
@@ -761,9 +793,15 @@ export class GenerationService extends EventEmitter {
           gddCompliant: true,
           workflow: this.shouldUseComfy3D()
             ? "GPT-5 → ComfyUI Flux/Klein → ComfyUI Trellis (Base Model)"
-            : "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
+            : this.shouldExportToHillDGX()
+              ? "GPT-5 → GPT-Image-1 → Meshy Image-to-3D → Hill DGX Library (Base Model)"
+              : "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
           meshyTaskId: meshyTaskId,
           meshyStatus: "completed",
+          hillDGXAssetId:
+            (hillLibraryAsset?.uuid as string | undefined) ||
+            (hillLibraryAsset?.id as string | undefined),
+          hillDGXSourcePath: hillLibraryAsset?.sourcePath as string | undefined,
           variants: [], // Will be populated as variants are generated
           variantCount: 0,
           lastVariantGenerated: null,
@@ -810,6 +848,7 @@ export class GenerationService extends EventEmitter {
           modelUrl,
           polycount: modelPolycount,
           localPath: baseModelPath,
+          hillDGX: hillLibraryAsset,
         };
         pipeline.results.image3D = pipeline.stages.image3D.result;
         pipeline.progress = 50;
@@ -1452,6 +1491,20 @@ Your task is to enhance the user's description to create better results with ima
       process.env.LOCAL_3D_PROVIDER ||
       "";
     return ["comfy", "trellis"].includes(provider.toLowerCase());
+  }
+
+  private shouldExportToHillDGX(): boolean {
+    const provider = (
+      process.env.ASSET_FORGE_GENERATION_PROVIDER ||
+      process.env.ASSET_FORGE_3D_PROVIDER ||
+      process.env.LOCAL_3D_PROVIDER ||
+      ""
+    ).toLowerCase();
+    const exportTarget = (process.env.HILL_EXPORT_TARGET || "").toLowerCase();
+    return (
+      this.hillDGXService.isConfigured &&
+      (provider === "hill_dgx" || exportTarget === "library")
+    );
   }
 
   private async generateImageWithComfy(

@@ -6,11 +6,13 @@
 import { Elysia } from "elysia";
 import * as Models from "../models";
 import { ComfyUIService } from "../services/ComfyUIService";
+import { HillDGXService } from "../services/HillDGXService";
 
 export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
   "/health",
   async () => {
     const comfy = new ComfyUIService();
+    const hillDGX = new HillDGXService();
     const comfyEnabled = !!(
       process.env.ASSET_FORGE_IMAGE_PROVIDER === "comfy" ||
       process.env.ASSET_FORGE_3D_PROVIDER === "comfy" ||
@@ -28,6 +30,10 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
         openai: !!process.env.OPENAI_API_KEY,
         comfy: comfyEnabled ? await comfy.health() : false,
         comfyUrl: comfy.baseUrl,
+        hillDGX: hillDGX.isConfigured ? await hillDGX.health() : false,
+        hillDGXUrl: hillDGX.baseUrl || undefined,
+        generationProvider:
+          process.env.ASSET_FORGE_GENERATION_PROVIDER || undefined,
       },
     };
   },

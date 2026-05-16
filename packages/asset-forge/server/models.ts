@@ -45,6 +45,9 @@ export const HealthResponse = t.Object({
     openai: t.Boolean(),
     comfy: t.Optional(t.Boolean()),
     comfyUrl: t.Optional(t.String()),
+    hillDGX: t.Optional(t.Boolean()),
+    hillDGXUrl: t.Optional(t.String()),
+    generationProvider: t.Optional(t.String()),
   }),
 });
 
