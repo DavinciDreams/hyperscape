@@ -1316,6 +1316,121 @@ export class GenerationService extends EventEmitter {
   /**
    * Enhance prompt with GPT-5, Nemotron, or another OpenAI-compatible model.
    */
+  private hasWeaponIntent(text: string): boolean {
+    const normalized = text.toLowerCase().replace(/[_-]+/g, " ");
+    return [
+      "weapon",
+      "sword",
+      "blade",
+      "dagger",
+      "axe",
+      "mace",
+      "staff",
+      "spear",
+      "bow",
+      "crossbow",
+      "wand",
+      "club",
+      "hammer",
+      "halberd",
+      "scythe",
+      "shield",
+      "gun",
+      "rifle",
+      "pistol",
+    ].some((term) => new RegExp(`\\b${term}\\b`, "i").test(normalized));
+  }
+
+  private inferPromptSubjectType(config: PipelineConfig): string {
+    const requestedType = (config.type || "asset").toLowerCase();
+    const description = `${config.name ?? ""} ${config.description ?? ""}`
+      .toLowerCase()
+      .replace(/[_-]+/g, " ");
+
+    const hasAny = (terms: string[]) =>
+      terms.some((term) => new RegExp(`\\b${term}\\b`, "i").test(description));
+
+    const hasWeaponIntent = this.hasWeaponIntent(description);
+
+    if (requestedType === "weapon" && !hasWeaponIntent) {
+      if (
+        hasAny([
+          "dog",
+          "doberman",
+          "pinscher",
+          "cat",
+          "horse",
+          "wolf",
+          "bear",
+          "boar",
+          "deer",
+          "fox",
+          "bird",
+          "fish",
+          "creature",
+          "animal",
+          "beast",
+          "monster",
+          "pet",
+          "npc",
+          "character",
+        ])
+      ) {
+        return "creature";
+      }
+      if (
+        hasAny([
+          "house",
+          "hut",
+          "cabin",
+          "cottage",
+          "tower",
+          "building",
+          "shop",
+          "inn",
+          "temple",
+        ])
+      ) {
+        return "building";
+      }
+      if (hasAny(["tree", "plant", "flower", "bush", "mushroom", "log"])) {
+        return "natural prop";
+      }
+      return "prop";
+    }
+
+    return requestedType;
+  }
+
+  private sanitizeEnhancedPrompt(
+    prompt: string,
+    config: PipelineConfig,
+    promptSubjectType: string,
+  ): string {
+    const baseText = `${config.name ?? ""} ${config.description ?? ""}`;
+    const originalHadWeaponIntent = this.hasWeaponIntent(baseText);
+    const enhancedHasWeaponIntent = this.hasWeaponIntent(prompt);
+    if (!originalHadWeaponIntent && enhancedHasWeaponIntent) {
+      console.warn(
+        `[PromptEnhancement] Discarding weapon-contaminated prompt for ${promptSubjectType}: ${prompt}`,
+      );
+      return [
+        config.description,
+        `${config.style || "game-ready"} style`,
+        `faithful ${promptSubjectType} subject`,
+        "single centered subject, full form visible",
+        "clean silhouette, neutral studio lighting",
+        "no weapons, no blade, no handle, no held items",
+      ].join(", ");
+    }
+
+    return prompt
+      .replace(/^["'`]+|["'`]+$/g, "")
+      .replace(/\*\*/g, "")
+      .replace(/^#+\s*/gm, "")
+      .trim();
+  }
+
   private async enhancePromptWithGPT5(
     config: PipelineConfig,
   ): Promise<PromptEnhancementResult> {
@@ -1341,9 +1456,12 @@ export class GenerationService extends EventEmitter {
     // Load GPT-5 enhancement prompts
     const gpt5Prompts = await getGPT5EnhancementPrompts();
 
+    const promptSubjectType = this.inferPromptSubjectType(config);
+    const requestedType = (config.type || "").toLowerCase();
+    const typeWasInferred = promptSubjectType !== requestedType;
     const isAvatar =
-      config.generationType === "avatar" || config.type === "character";
-    const isArmor = config.type === "armor";
+      config.generationType === "avatar" || promptSubjectType === "character";
+    const isArmor = promptSubjectType === "armor";
     const isChestArmor =
       isArmor &&
       (config.subtype?.toLowerCase().includes("chest") ||
@@ -1377,6 +1495,16 @@ Your task is to enhance the user's description to create better results with ima
         " " +
         (gpt5Prompts?.typeSpecific?.armor?.positioning ||
           "The armor MUST be positioned and SHAPED for a SCARECROW/T-POSE body...");
+    }
+
+    systemPrompt +=
+      "\nSubject fidelity rules:\n" +
+      "- Preserve the user's requested subject exactly; do not turn animals, characters, buildings, or props into weapons unless the user explicitly asked for a weapon.\n" +
+      "- Do not add blades, handles, grips, barrels, guards, or weapon parts unless they are present in the user's description.\n" +
+      "- Output only the final image-to-3D prompt as plain text; no markdown, headings, explanations, or bullet lists.";
+
+    if (typeWasInferred) {
+      systemPrompt += `\nThe UI category was "${config.type}", but the description reads as a ${promptSubjectType}. Treat it as a ${promptSubjectType}, not as a ${config.type}.`;
     }
 
     // Add focus points
@@ -1430,7 +1558,7 @@ Your task is to enhance the user's description to create better results with ima
       ? (gpt5Prompts?.typeSpecific?.armor?.enhancementPrefix ||
           `Enhance this armor piece description for 3D generation. CRITICAL: The armor must be SHAPED FOR A T-POSE BODY - shoulder openings must point STRAIGHT SIDEWAYS at 90 degrees (like a scarecrow), NOT angled downward! Should look like a wide "T" shape. Ends at shoulders (no arm extensions), hollow openings, no armor stand: `) +
         `"${baseDescription}"`
-      : `Enhance this ${config.type} asset description for 3D generation: "${baseDescription}"`;
+      : `Enhance this ${promptSubjectType} description for image-to-3D asset generation: "${baseDescription}"`;
 
     try {
       const nemotronBaseUrl = (
@@ -1477,7 +1605,7 @@ Your task is to enhance the user's description to create better results with ima
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
           ],
-          temperature: 0.7,
+          temperature: Number(process.env.NEMOTRON_TEMPERATURE || "0.2"),
           max_tokens: 200,
         }),
       });
@@ -1487,7 +1615,11 @@ Your task is to enhance the user's description to create better results with ima
       }
 
       const data = (await response.json()) as GPT5ChatResponse;
-      const optimizedPrompt = data.choices[0].message.content.trim();
+      const optimizedPrompt = this.sanitizeEnhancedPrompt(
+        data.choices[0].message.content.trim(),
+        config,
+        promptSubjectType,
+      );
 
       return {
         originalPrompt: config.description,
