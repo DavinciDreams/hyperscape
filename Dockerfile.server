@@ -18,7 +18,7 @@ FROM oven/bun:1.1.38-debian AS builder
 RUN apt-get update && apt-get install -y \
     python3 make g++ pkg-config \
     libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
-    ca-certificates git \
+    ca-certificates git git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -88,8 +88,13 @@ RUN mkdir -p \
     packages/web3/node_modules \
     packages/client/node_modules
 
-# Download game asset manifests (bypass CDN reliance on boot).
-RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
+# Download the full game asset pack for standalone deployments.
+#
+# The server image serves /game-assets directly. If this runs in CI mode the
+# assets repo is cloned with GIT_LFS_SKIP_SMUDGE=1, leaving GLB/VRM/texture
+# files as tiny Git LFS pointer text files that the browser cannot parse.
+RUN git lfs install && rm -rf packages/server/world/assets && \
+    env -u CI -u SKIP_ASSETS bun scripts/ensure-assets.mjs
 
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
