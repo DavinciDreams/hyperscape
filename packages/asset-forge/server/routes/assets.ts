@@ -10,9 +10,28 @@ import type { AssetService } from "../services/AssetService";
 import * as Models from "../models";
 
 export const createAssetRoutes = (
-  rootDir: string,
+  assetsDir: string,
   assetService: AssetService,
 ) => {
+  const safeAssetDir = (assetId: string) => path.join(assetsDir, assetId);
+  const isInsideAssetsDir = (candidatePath: string) => {
+    const normalizedCandidate = path.resolve(candidatePath);
+    const normalizedRoot = path.resolve(assetsDir);
+    return (
+      normalizedCandidate === normalizedRoot ||
+      normalizedCandidate.startsWith(`${normalizedRoot}${path.sep}`)
+    );
+  };
+  const isInsideAssetDir = (assetId: string, candidatePath: string) => {
+    const normalizedCandidate = path.resolve(candidatePath);
+    const normalizedAssetDir = path.resolve(safeAssetDir(assetId));
+    return (
+      isInsideAssetsDir(candidatePath) &&
+      (normalizedCandidate === normalizedAssetDir ||
+        normalizedCandidate.startsWith(`${normalizedAssetDir}${path.sep}`))
+    );
+  };
+
   return new Elysia({ prefix: "/api/assets", name: "assets" }).guard(
     {
       beforeHandle: ({ request }) => {
@@ -76,13 +95,10 @@ export const createAssetRoutes = (
           const assetId = params.id;
           const filePath = params["*"]; // Everything after the asset ID
 
-          const fullPath = path.join(rootDir, "gdd-assets", assetId, filePath);
+          const fullPath = path.join(safeAssetDir(assetId), filePath);
 
           // Security check to prevent directory traversal
-          const normalizedPath = path.normalize(fullPath);
-          const assetDir = path.join(rootDir, "gdd-assets", assetId);
-
-          if (!normalizedPath.startsWith(assetDir)) {
+          if (!isInsideAssetDir(assetId, fullPath)) {
             set.status = 403;
             return { error: "Access denied" };
           }
@@ -103,13 +119,10 @@ export const createAssetRoutes = (
           const assetId = params.id;
           const filePath = params["*"]; // Everything after the asset ID
 
-          const fullPath = path.join(rootDir, "gdd-assets", assetId, filePath);
+          const fullPath = path.join(safeAssetDir(assetId), filePath);
 
           // Security check to prevent directory traversal
-          const normalizedPath = path.normalize(fullPath);
-          const assetDir = path.join(rootDir, "gdd-assets", assetId);
-
-          if (!normalizedPath.startsWith(assetDir)) {
+          if (!isInsideAssetDir(assetId, fullPath)) {
             set.status = 403;
             return new Response(null, { status: 403 });
           }
@@ -219,7 +232,10 @@ export const createAssetRoutes = (
             );
 
             // Create sprites directory
-            const assetDir = path.join(rootDir, "gdd-assets", id);
+            const assetDir = safeAssetDir(id);
+            if (!isInsideAssetDir(id, assetDir)) {
+              throw new Error("Access denied");
+            }
             const spritesDir = path.join(assetDir, "sprites");
 
             console.log(`[Sprites] Creating directory: ${spritesDir}`);
@@ -320,14 +336,11 @@ export const createAssetRoutes = (
 
             for (const assetId of assetIds) {
               try {
-                const assetDir = path.join(rootDir, "gdd-assets", assetId);
+                const assetDir = safeAssetDir(assetId);
                 const metadataPath = path.join(assetDir, "metadata.json");
 
                 // Security check
-                const normalizedPath = path.normalize(metadataPath);
-                if (
-                  !normalizedPath.startsWith(path.join(rootDir, "gdd-assets"))
-                ) {
+                if (!isInsideAssetsDir(metadataPath)) {
                   console.warn(
                     `[Batch Fitting] Skipping ${assetId}: path traversal`,
                   );
@@ -386,11 +399,10 @@ export const createAssetRoutes = (
               `[Save Aligned] Saving aligned GLB for asset: ${id} (${(file.size / 1024).toFixed(1)} KB)`,
             );
 
-            const assetDir = path.join(rootDir, "gdd-assets", id);
+            const assetDir = safeAssetDir(id);
 
             // Security check
-            const normalizedPath = path.normalize(assetDir);
-            if (!normalizedPath.startsWith(path.join(rootDir, "gdd-assets"))) {
+            if (!isInsideAssetsDir(assetDir)) {
               set.status = 403;
               return { success: false, path: "", error: "Access denied" };
             }
@@ -462,7 +474,10 @@ export const createAssetRoutes = (
             );
 
             // Save VRM to asset directory
-            const assetDir = path.join(rootDir, "gdd-assets", assetId);
+            const assetDir = safeAssetDir(assetId);
+            if (!isInsideAssetDir(assetId, assetDir)) {
+              throw new Error("Access denied");
+            }
 
             // Create directory if it doesn't exist
             await fs.promises.mkdir(assetDir, { recursive: true });

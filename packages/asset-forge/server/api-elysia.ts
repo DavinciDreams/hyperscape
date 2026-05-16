@@ -66,19 +66,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
+const ASSETS_DIR = path.resolve(
+  process.env.ASSET_FORGE_ASSETS_DIR || path.join(ROOT_DIR, "gdd-assets"),
+);
+const TEMP_IMAGES_DIR = path.resolve(
+  process.env.ASSET_FORGE_TEMP_IMAGES_DIR ||
+    path.join(ROOT_DIR, "temp-images"),
+);
+const TEMP_SHELLS_DIR = path.resolve(
+  process.env.ASSET_FORGE_TEMP_SHELLS_DIR ||
+    path.join(ROOT_DIR, "temp-shells"),
+);
 
 // Ensure temp directories exist
-await fs.promises.mkdir(path.join(ROOT_DIR, "temp-images"), {
-  recursive: true,
-});
-await fs.promises.mkdir(path.join(ROOT_DIR, "temp-shells"), {
-  recursive: true,
-});
+await fs.promises.mkdir(TEMP_IMAGES_DIR, { recursive: true });
+await fs.promises.mkdir(TEMP_SHELLS_DIR, { recursive: true });
+await fs.promises.mkdir(ASSETS_DIR, { recursive: true });
 
 // Initialize services
 const API_PORT =
   process.env.ASSET_FORGE_API_PORT || process.env.API_PORT || 3401;
-const assetService = new AssetService(path.join(ROOT_DIR, "gdd-assets"));
+const assetService = new AssetService(ASSETS_DIR);
 const retextureService = new RetextureService({
   meshyApiKey: process.env.MESHY_API_KEY || "",
   imageServerBaseUrl:
@@ -97,7 +105,7 @@ const procgenPresetService = new ProcgenPresetService();
 // Armor Pipeline services
 const shellTextureService = new ShellTextureService({
   meshyApiKey: process.env.MESHY_API_KEY || "",
-  shellDir: path.join(ROOT_DIR, "temp-shells"),
+  shellDir: TEMP_SHELLS_DIR,
 });
 
 // Tripo service
@@ -270,7 +278,7 @@ const app = new Elysia()
   // Static file serving - generated assets
   .use(
     staticPlugin({
-      assets: path.join(ROOT_DIR, "gdd-assets"),
+      assets: ASSETS_DIR,
       prefix: "/gdd-assets",
     }),
   )
@@ -278,7 +286,7 @@ const app = new Elysia()
   // Static file serving - temp images for Meshy AI (custom handler since plugin is disabled)
   .get("/temp-images/:filename", async ({ params, set }) => {
     const safeName = path.basename(params.filename);
-    const filePath = path.join(ROOT_DIR, "temp-images", safeName);
+    const filePath = path.join(TEMP_IMAGES_DIR, safeName);
 
     try {
       const file = Bun.file(filePath);
@@ -323,7 +331,7 @@ const app = new Elysia()
   // Static file serving - temp shell GLBs (for Meshy AI texturing)
   .get("/temp-shells/:filename", async ({ params, set }) => {
     const safeName = path.basename(params.filename);
-    const filePath = path.join(ROOT_DIR, "temp-shells", safeName);
+    const filePath = path.join(TEMP_SHELLS_DIR, safeName);
     try {
       const file = Bun.file(filePath);
       if (!(await file.exists())) {
@@ -359,7 +367,7 @@ const app = new Elysia()
   .use(healthRoutes)
   .use(promptRoutes)
   .use(aiVisionRoutes)
-  .use(createAssetRoutes(ROOT_DIR, assetService))
+  .use(createAssetRoutes(ASSETS_DIR, assetService))
   .use(createBatchSpritesRoutes(ROOT_DIR))
   .use(createMaterialRoutes(ROOT_DIR))
   .use(createRetextureRoutes(ROOT_DIR, retextureService))
@@ -407,6 +415,7 @@ const app = new Elysia()
 console.log(`🚀 Elysia API Server running on http://localhost:${API_PORT}`);
 console.log(`📊 Health check: http://localhost:${API_PORT}/api/health`);
 console.log(`🖼️  Temp images: http://localhost:${API_PORT}/temp-images/`);
+console.log(`📦 Asset Forge assets dir: ${ASSETS_DIR}`);
 console.log(`✨ Performance: 22x faster than Express!`);
 
 if (!process.env.MESHY_API_KEY) {

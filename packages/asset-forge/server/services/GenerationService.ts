@@ -18,8 +18,20 @@ import type { Static } from "elysia";
 import { MaterialPreset } from "../models";
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
 
 import fetch from "node-fetch";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ROOT_DIR = path.resolve(__dirname, "..", "..");
+const ASSETS_DIR = path.resolve(
+  process.env.ASSET_FORGE_ASSETS_DIR || path.join(ROOT_DIR, "gdd-assets"),
+);
+const TEMP_IMAGES_DIR = path.resolve(
+  process.env.ASSET_FORGE_TEMP_IMAGES_DIR ||
+    path.join(ROOT_DIR, "temp-images"),
+);
 
 // ==================== Type Definitions ====================
 
@@ -525,10 +537,10 @@ export class GenerationService extends EventEmitter {
           const imageData = imageUrl!.split(",")[1];
           const imageBuffer = Buffer.from(imageData, "base64");
           const imagePath = path.join(
-            "temp-images",
+            TEMP_IMAGES_DIR,
             `${pipeline.config.assetId}-concept.png`,
           );
-          await fs.mkdir("temp-images", { recursive: true });
+          await fs.mkdir(TEMP_IMAGES_DIR, { recursive: true });
           await fs.writeFile(imagePath, imageBuffer);
 
           // If we have an image server, use it
@@ -685,7 +697,7 @@ export class GenerationService extends EventEmitter {
           modelBuffer = await this.downloadFile(modelUrl);
         }
 
-        const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+        const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
         await fs.mkdir(outputDir, { recursive: true });
 
         // Save raw model first
@@ -969,7 +981,7 @@ export class GenerationService extends EventEmitter {
 
             // Save variant
             const variantId = `${pipeline.config.assetId}-${preset.id}`;
-            const variantDir = path.join("gdd-assets", variantId);
+            const variantDir = path.join(ASSETS_DIR, variantId);
             await fs.mkdir(variantDir, { recursive: true });
 
             const variantBuffer = await this.downloadFile(
@@ -982,7 +994,7 @@ export class GenerationService extends EventEmitter {
 
             // Copy concept art
             const conceptArtPath = path.join(
-              "gdd-assets",
+              ASSETS_DIR,
               pipeline.config.assetId,
               "concept-art.png",
             );
@@ -1071,7 +1083,7 @@ export class GenerationService extends EventEmitter {
         const successfulVariants = variants.filter((v) => v.success);
         if (successfulVariants.length > 0) {
           const baseMetadataPath = path.join(
-            "gdd-assets",
+            ASSETS_DIR,
             pipeline.config.assetId,
             "metadata.json",
           );
@@ -1151,7 +1163,7 @@ export class GenerationService extends EventEmitter {
           }
 
           // Download rigged model and animations
-          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
           const riggedAssets: Record<string, string> = {};
 
           // IMPORTANT: For rigged avatars, we DON'T replace the main model
@@ -1261,7 +1273,7 @@ export class GenerationService extends EventEmitter {
 
           // Update metadata to indicate rigging failed
           try {
-            const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+            const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
             const metadataPath = path.join(outputDir, "metadata.json");
             const metadata = JSON.parse(
               await fs.readFile(metadataPath, "utf-8"),
@@ -1300,8 +1312,8 @@ export class GenerationService extends EventEmitter {
       pipeline.finalAsset = {
         id: pipeline.config.assetId,
         name: pipeline.config.name,
-        modelUrl: `/assets/${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
-        conceptArtUrl: `/assets/${pipeline.config.assetId}/concept-art.png`,
+        modelUrl: `/api/assets/${pipeline.config.assetId}/model`,
+        conceptArtUrl: `/api/assets/${pipeline.config.assetId}/concept-art.png`,
         variants:
           ((pipeline.results.textureGeneration as Record<string, unknown>)
             ?.variants as FinalAssetVariant[]) || [],
@@ -1851,7 +1863,7 @@ Your task is to enhance the user's description to create better results with ima
     );
     const startedAt = Date.now();
     let job = submitted;
-    const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+    const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
     await fs.mkdir(outputDir, { recursive: true });
     let conceptArtPath: string | undefined;
     let conceptArtUrl: string | undefined;
@@ -2053,8 +2065,8 @@ Your task is to enhance the user's description to create better results with ima
     imageUrl: string,
     assetId: string,
   ): Promise<string> {
-    await fs.mkdir("temp-images", { recursive: true });
-    const imagePath = path.join("temp-images", `${assetId}-concept.png`);
+    await fs.mkdir(TEMP_IMAGES_DIR, { recursive: true });
+    const imagePath = path.join(TEMP_IMAGES_DIR, `${assetId}-concept.png`);
 
     if (imageUrl.startsWith("data:")) {
       const imageData = imageUrl.split(",")[1];

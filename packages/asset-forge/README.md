@@ -114,6 +114,7 @@ NEMOTRON_MODEL=mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4
 NEMOTRON_TEMPERATURE=0.2
 NEMOTRON_MAX_TOKENS=450
 VITE_GENERATION_API_URL=/api
+ASSET_FORGE_ASSETS_DIR=/tank/asset-forge/gdd-assets
 ```
 
 `HILL_API_BASE_URL` should point at the deployed VRM Viewer asset-library
@@ -125,6 +126,12 @@ same for the UI, but the backend submits the job to Hill using the Flux Klein â†
 Bruno Trellis2 `1024` no-cascade path with 2048 textures and LOD generation.
 Before submission, Asset Forge asks the local Nemotron OpenAI-compatible server
 to rewrite the creator request into a safer image-to-3D prompt.
+
+Generated assets are written to `ASSET_FORGE_ASSETS_DIR` when set, otherwise to
+`packages/asset-forge/gdd-assets`. Mount the CDN source to the same directory so
+new models are visible immediately; for local CDN this means setting
+`HYPERSCAPE_ASSETS_DIR` to the same path when running `packages/server`'s
+`docker-compose.yml`.
 
 ## Project Structure
 

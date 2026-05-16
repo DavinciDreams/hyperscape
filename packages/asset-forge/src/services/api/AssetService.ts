@@ -80,7 +80,7 @@ class AssetServiceClass {
   }
 
   getModelUrl(assetId: string): string {
-    return `/assets/${assetId}/${assetId}.glb`;
+    return getAssetFileUrl(assetId, `${assetId}.glb`);
   }
 
   /**
@@ -134,7 +134,7 @@ class AssetServiceClass {
   }
 
   getConceptArtUrl(assetId: string): string {
-    return `/assets/${assetId}/concept-art.png`;
+    return getAssetFileUrl(assetId, "concept-art.png");
   }
 
   /**
@@ -183,7 +183,7 @@ class AssetServiceClass {
       return `/gdd-assets/${assetId}/${assetId}.vrm`;
     }
     // User assets
-    return `/assets/${assetId}/${assetId}.vrm`;
+    return getAssetFileUrl(assetId, `${assetId}.vrm`);
   }
 }
 
