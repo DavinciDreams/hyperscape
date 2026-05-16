@@ -34,6 +34,10 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
         hillDGXUrl: hillDGX.baseUrl || undefined,
         generationProvider:
           process.env.ASSET_FORGE_GENERATION_PROVIDER || undefined,
+        promptProvider:
+          process.env.PROMPT_ENHANCEMENT_PROVIDER ||
+          process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+          undefined,
       },
     };
   },

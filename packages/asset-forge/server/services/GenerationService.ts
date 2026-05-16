@@ -1274,18 +1274,27 @@ export class GenerationService extends EventEmitter {
   }
 
   /**
-   * Enhance prompt with GPT-5 (via Vercel AI Gateway or direct OpenAI)
+   * Enhance prompt with GPT-5, Nemotron, or another OpenAI-compatible model.
    */
   private async enhancePromptWithGPT5(
     config: PipelineConfig,
   ): Promise<PromptEnhancementResult> {
-    // Check for AI Gateway or direct OpenAI API key
-    const useAIGateway = !!process.env.AI_GATEWAY_API_KEY;
-    const useDirectOpenAI = !!process.env.OPENAI_API_KEY;
+    const enhancementProvider = (
+      process.env.PROMPT_ENHANCEMENT_PROVIDER ||
+      process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+      ""
+    ).toLowerCase();
+    const useNemotron =
+      enhancementProvider === "nemotron" ||
+      enhancementProvider === "local" ||
+      !!process.env.NEMOTRON_API_BASE_URL;
+    const useAIGateway = !useNemotron && !!process.env.AI_GATEWAY_API_KEY;
+    const useDirectOpenAI =
+      !useNemotron && !useAIGateway && !!process.env.OPENAI_API_KEY;
 
-    if (!useAIGateway && !useDirectOpenAI) {
+    if (!useNemotron && !useAIGateway && !useDirectOpenAI) {
       throw new Error(
-        "AI_GATEWAY_API_KEY or OPENAI_API_KEY required for GPT-5 enhancement",
+        "NEMOTRON_API_BASE_URL, AI_GATEWAY_API_KEY, or OPENAI_API_KEY required for prompt enhancement",
       );
     }
 
@@ -1384,21 +1393,36 @@ Your task is to enhance the user's description to create better results with ima
       : `Enhance this ${config.type} asset description for 3D generation: "${baseDescription}"`;
 
     try {
-      // Select endpoint and auth based on available API keys
-      const endpoint = useAIGateway
-        ? "https://ai-gateway.vercel.sh/v1/chat/completions"
-        : "https://api.openai.com/v1/chat/completions";
+      const nemotronBaseUrl = (
+        process.env.NEMOTRON_API_BASE_URL || ""
+      ).replace(/\/+$/, "");
+      const endpoint = useNemotron
+        ? `${nemotronBaseUrl}/v1/chat/completions`
+        : useAIGateway
+          ? "https://ai-gateway.vercel.sh/v1/chat/completions"
+          : "https://api.openai.com/v1/chat/completions";
 
-      const apiKey = useAIGateway
-        ? process.env.AI_GATEWAY_API_KEY!
-        : process.env.OPENAI_API_KEY!;
+      const apiKey = useNemotron
+        ? process.env.NEMOTRON_API_KEY || "local"
+        : useAIGateway
+          ? process.env.AI_GATEWAY_API_KEY!
+          : process.env.OPENAI_API_KEY!;
 
-      const modelName = useAIGateway
-        ? "openai/gpt-5" // AI Gateway uses provider/model format
-        : "gpt-5"; // Direct OpenAI uses just the model name
+      const modelName = useNemotron
+        ? process.env.NEMOTRON_MODEL ||
+          "mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4"
+        : useAIGateway
+          ? "openai/gpt-5" // AI Gateway uses provider/model format
+          : "gpt-5"; // Direct OpenAI uses just the model name
 
       console.log(
-        `🤖 Using ${useAIGateway ? "Vercel AI Gateway" : "direct OpenAI API"} for GPT-5 enhancement`,
+        `🤖 Using ${
+          useNemotron
+            ? "local Nemotron"
+            : useAIGateway
+              ? "Vercel AI Gateway"
+              : "direct OpenAI API"
+        } for prompt enhancement`,
       );
 
       const response = await fetch(endpoint, {
@@ -1428,7 +1452,7 @@ Your task is to enhance the user's description to create better results with ima
       return {
         originalPrompt: config.description,
         optimizedPrompt,
-        model: "gpt-5",
+        model: modelName,
         keywords: this.extractKeywords(optimizedPrompt),
       };
     } catch (error) {

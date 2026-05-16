@@ -48,6 +48,7 @@ export const HealthResponse = t.Object({
     hillDGX: t.Optional(t.Boolean()),
     hillDGXUrl: t.Optional(t.String()),
     generationProvider: t.Optional(t.String()),
+    promptProvider: t.Optional(t.String()),
   }),
 });
 
