@@ -1737,14 +1737,32 @@ Your task is to enhance the user's description to create better results with ima
     }
 
     const result = job.result || {};
-    const modelUrl = this.hillFileUrl(result.glb);
-    const conceptArtUrl = this.hillFileUrl(result.ref_image);
-    if (!modelUrl) {
+    const remoteModelUrl = this.hillFileUrl(result.glb);
+    const remoteConceptArtUrl = this.hillFileUrl(result.ref_image);
+    if (!remoteModelUrl) {
       throw new Error("Hill DGX job completed without a GLB result");
     }
 
     const outputDir = path.join("gdd-assets", pipeline.config.assetId);
     await fs.mkdir(outputDir, { recursive: true });
+
+    const modelFilename = `${pipeline.config.assetId}.glb`;
+    const modelPath = path.join(outputDir, modelFilename);
+    const modelBuffer = await this.downloadFile(remoteModelUrl);
+    await fs.writeFile(modelPath, modelBuffer);
+
+    let conceptArtPath: string | undefined;
+    if (remoteConceptArtUrl) {
+      conceptArtPath = path.join(outputDir, "concept-art.png");
+      const conceptBuffer = await this.downloadFile(remoteConceptArtUrl);
+      await fs.writeFile(conceptArtPath, conceptBuffer);
+    }
+
+    const modelUrl = `/api/assets/${pipeline.config.assetId}/model`;
+    const conceptArtUrl = conceptArtPath
+      ? `/api/assets/${pipeline.config.assetId}/concept-art.png`
+      : undefined;
+
     const metadataRecord = {
       id: pipeline.config.assetId,
       name: pipeline.config.name,
@@ -1761,8 +1779,12 @@ Your task is to enhance the user's description to create better results with ima
       hasConceptArt: !!conceptArtUrl,
       modelUrl,
       conceptArtUrl,
-      modelPath: result.glb,
-      conceptArtPath: result.ref_image,
+      modelPath,
+      conceptArtPath,
+      remoteModelUrl,
+      remoteConceptArtUrl,
+      remoteModelPath: result.glb,
+      remoteConceptArtPath: result.ref_image,
       lodDir: result.lod_dir,
       gddCompliant: true,
       workflow: "Hill DGX -> Flux Klein -> Bruno Trellis2 1024 -> LOD",
@@ -1803,7 +1825,9 @@ Your task is to enhance the user's description to create better results with ima
       taskId: job.id,
       modelUrl,
       conceptArtUrl,
-      localPath: result.glb,
+      remoteModelUrl,
+      remoteConceptArtUrl,
+      localPath: modelPath,
       lodDir: result.lod_dir,
       pipelineType: result.pipeline_type,
       wallSeconds: result.wall_s,
