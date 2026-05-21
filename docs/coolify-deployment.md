@@ -62,14 +62,13 @@ to update large assets independently from app deploys.
 ## Runtime Conjure Storage
 
 The static world assets still ship inside the app image and are served from
-`/game-assets`. Fast conjure outputs are different: Asset Forge can copy the GLB
-and concept art returned by the Hill DGX bridge into MinIO, then return the MinIO
-public URL to the in-world conjure flow.
+`/game-assets`. Fast conjure outputs are different: the conjure API can store
+runtime GLBs and concept art in MinIO, then return the MinIO public URL to the
+in-world conjure flow.
 
 In the Asset Forge container, set:
 
 ```env
-ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
 OBJECT_STORAGE_ENABLED=true
 S3_ENDPOINT=http://minio:9000
 S3_REGION=us-east-1
@@ -84,4 +83,4 @@ CONJURE_STORAGE_PREFIX=conjures
 `S3_PUBLIC_BASE_URL` must be a browser-reachable URL for the bucket. Common
 self-hosted options are Caddy or nginx in front of MinIO, or Cloudflare proxying
 that asset domain. Without a public base URL, Asset Forge leaves object storage
-disabled and keeps using the upstream Hill result URLs.
+disabled and the caller should keep using its existing asset URL path.

@@ -19,7 +19,6 @@ import path from "path";
 
 import fetch from "node-fetch";
 import { ComfyUITrellisService } from "./ComfyUITrellisService";
-import { ObjectStorageService, type StoredAsset } from "./ObjectStorageService";
 
 // ==================== Type Definitions ====================
 
@@ -252,7 +251,6 @@ export class GenerationService extends EventEmitter {
   private activePipelines: Map<string, Pipeline>;
   private aiService: AICreationService;
   private imageHostingService: ImageHostingService;
-  private objectStorageService: ObjectStorageService;
 
   constructor() {
     super();
@@ -285,7 +283,6 @@ export class GenerationService extends EventEmitter {
 
     // Initialize image hosting service
     this.imageHostingService = new ImageHostingService();
-    this.objectStorageService = new ObjectStorageService();
   }
 
   /**
@@ -1463,18 +1460,6 @@ export class GenerationService extends EventEmitter {
     return url.toString();
   }
 
-  private fileNameFromResultPath(
-    filePath: string | undefined,
-    fallback: string,
-  ): string {
-    if (!filePath) return fallback;
-    try {
-      return path.basename(new URL(filePath, "http://asset.local/").pathname);
-    } catch {
-      return path.basename(filePath) || fallback;
-    }
-  }
-
   private getHillHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -1597,41 +1582,10 @@ export class GenerationService extends EventEmitter {
     }
 
     const result = job.result || {};
-    let modelUrl = this.hillFileUrl(result.glb);
-    let conceptArtUrl = this.hillFileUrl(result.ref_image);
+    const modelUrl = this.hillFileUrl(result.glb);
+    const conceptArtUrl = this.hillFileUrl(result.ref_image);
     if (!modelUrl) {
       throw new Error("Hill DGX job completed without a GLB result");
-    }
-
-    const storedAssets: { model?: StoredAsset; conceptArt?: StoredAsset } = {};
-    if (this.objectStorageService.enabled) {
-      pipeline.stages.image3D.progress = 90;
-
-      const modelKey = this.objectStorageService.buildConjureKey(
-        pipeline.config.assetId,
-        this.fileNameFromResultPath(result.glb, "model.glb"),
-        { jobId: job.id },
-      );
-      storedAssets.model = await this.objectStorageService.copyRemoteAsset(
-        modelUrl,
-        modelKey,
-        "model/gltf-binary",
-      );
-      modelUrl = storedAssets.model.url;
-
-      if (conceptArtUrl) {
-        const conceptArtKey = this.objectStorageService.buildConjureKey(
-          pipeline.config.assetId,
-          this.fileNameFromResultPath(result.ref_image, "concept-art.png"),
-          { jobId: job.id },
-        );
-        storedAssets.conceptArt =
-          await this.objectStorageService.copyRemoteAsset(
-            conceptArtUrl,
-            conceptArtKey,
-          );
-        conceptArtUrl = storedAssets.conceptArt.url;
-      }
     }
 
     const outputDir = path.join("gdd-assets", pipeline.config.assetId);
@@ -1668,7 +1622,6 @@ export class GenerationService extends EventEmitter {
       reviewNote: result.reviewNote,
       meshMetrics: result.meshMetrics,
       generatedLods: !!result.lod_dir,
-      storage: storedAssets,
       isPublic: true,
       updatedAt: new Date().toISOString(),
     };
@@ -1685,7 +1638,6 @@ export class GenerationService extends EventEmitter {
       imageModel: "flux_klein",
       imageUrl: conceptArtUrl,
       sourcePath: result.ref_image,
-      storage: storedAssets.conceptArt,
     };
     pipeline.results.imageGeneration = pipeline.stages.imageGeneration.result;
 
@@ -1702,7 +1654,6 @@ export class GenerationService extends EventEmitter {
       wallSeconds: result.wall_s,
       elapsedSeconds: result.elapsed_s,
       meshMetrics: result.meshMetrics,
-      storage: storedAssets,
     };
     pipeline.results.image3D = pipeline.stages.image3D.result;
 
