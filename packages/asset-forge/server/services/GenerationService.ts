@@ -1735,9 +1735,7 @@ Your task is to enhance the user's description to create better results with ima
 
   private getHillApiBaseUrl(): string {
     const baseUrl =
-      process.env.HILL_API_BASE_URL ||
-      process.env.HILL_ASSET_LIBRARY_URL ||
-      process.env.VRM_VIEWER_API_URL;
+      process.env.HILL_API_BASE_URL || process.env.HILL_ASSET_LIBRARY_URL;
 
     if (!baseUrl) {
       throw new Error(

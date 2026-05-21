@@ -36,6 +36,14 @@ COPY packages/server/package.json ./packages/server/package.json
 COPY packages/client/public/web/physx-js-webidl.js ./packages/client/public/web/
 COPY packages/client/public/web/physx-js-webidl.wasm ./packages/client/public/web/
 
+RUN mkdir -p \
+    packages/asset-forge/node_modules \
+    packages/physx-js-webidl/node_modules \
+    packages/decimation/node_modules \
+    packages/impostors/node_modules \
+    packages/procgen/node_modules \
+    packages/shared/node_modules
+
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
     cd /app/packages/impostors && node ../../node_modules/typescript/bin/tsc --project tsconfig.build.json && \
@@ -59,12 +67,33 @@ ENV NODE_ENV=production \
 
 COPY --from=builder /app/package.json /app/bun.lock ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/physx-js-webidl/package.json ./packages/physx-js-webidl/
+COPY --from=builder /app/packages/decimation/package.json ./packages/decimation/
+COPY --from=builder /app/packages/impostors/package.json ./packages/impostors/
+COPY --from=builder /app/packages/procgen/package.json ./packages/procgen/
+COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+COPY --from=builder /app/packages/asset-forge/package.json ./packages/asset-forge/
+
+RUN mkdir -p node_modules/@hyperscape && \
+    ln -s ../../packages/physx-js-webidl node_modules/@hyperscape/physx-js-webidl && \
+    ln -s ../../packages/decimation node_modules/@hyperscape/decimation && \
+    ln -s ../../packages/impostors node_modules/@hyperscape/impostor && \
+    ln -s ../../packages/procgen node_modules/@hyperscape/procgen && \
+    ln -s ../../packages/shared node_modules/@hyperscape/shared && \
+    ln -s ../../packages/asset-forge node_modules/@hyperscape/asset-forge
+
 COPY --from=builder /app/packages/physx-js-webidl ./packages/physx-js-webidl
 COPY --from=builder /app/packages/decimation ./packages/decimation
 COPY --from=builder /app/packages/impostors ./packages/impostors
 COPY --from=builder /app/packages/procgen ./packages/procgen
 COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/packages/asset-forge ./packages/asset-forge
+COPY --from=builder /app/packages/asset-forge/node_modules ./packages/asset-forge/node_modules
+COPY --from=builder /app/packages/physx-js-webidl/node_modules ./packages/physx-js-webidl/node_modules
+COPY --from=builder /app/packages/decimation/node_modules ./packages/decimation/node_modules
+COPY --from=builder /app/packages/impostors/node_modules ./packages/impostors/node_modules
+COPY --from=builder /app/packages/procgen/node_modules ./packages/procgen/node_modules
+COPY --from=builder /app/packages/shared/node_modules ./packages/shared/node_modules
 
 RUN mkdir -p /app/packages/asset-forge/temp-images \
     /app/packages/asset-forge/temp-shells \

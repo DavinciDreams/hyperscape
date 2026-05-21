@@ -19,6 +19,7 @@ import { rateLimit } from "elysia-rate-limit";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 
 // Services
 import { AssetService } from "./services/AssetService";
@@ -64,6 +65,14 @@ import { TripoService } from "./services/armor-pipeline/TripoService";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const requireBuiltin = createRequire(import.meta.url);
+
+if (typeof process.getBuiltinModule !== "function") {
+  Object.defineProperty(process, "getBuiltinModule", {
+    value: (id: string) => requireBuiltin(id),
+  });
+}
+
 const ROOT_DIR = path.join(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
 const ASSETS_DIR = path.resolve(
