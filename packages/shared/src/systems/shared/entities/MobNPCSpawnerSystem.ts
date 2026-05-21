@@ -53,6 +53,18 @@ function hostileMobSpawningEnabled(): boolean {
   return value === "true" || value === "1";
 }
 
+function defaultGoblinSpawningEnabled(): boolean {
+  const env =
+    typeof process !== "undefined" && typeof process.env !== "undefined"
+      ? process.env
+      : undefined;
+  const value =
+    env?.DEFAULT_GOBLINS_ENABLED ??
+    env?.TEST_GOBLINS_ENABLED ??
+    env?.SPAWN_TEST_GOBLINS;
+  return value === "true" || value === "1";
+}
+
 export class MobNPCSpawnerSystem extends SystemBase {
   private spawnedMobs = new Map<string, string>(); // mobId -> entityId
   private spawnedMobDetails = new Map<string, SpawnedMobDetail>();
@@ -118,8 +130,12 @@ export class MobNPCSpawnerSystem extends SystemBase {
       await this.spawnAllNPCsFromManifest();
       // Spawn procedural building NPCs inside town buildings
       await this.spawnBuildingNPCs();
-      if (hostileMobSpawningEnabled()) {
+      if (hostileMobSpawningEnabled() && defaultGoblinSpawningEnabled()) {
         await this.spawnDefaultMob();
+      } else if (hostileMobSpawningEnabled()) {
+        console.log(
+          "[MobNPCSpawnerSystem] Default test goblins disabled (set DEFAULT_GOBLINS_ENABLED=true to enable)",
+        );
       } else {
         console.log(
           "[MobNPCSpawnerSystem] Hostile mob spawning disabled (set HOSTILE_MOBS_ENABLED=true to enable)",

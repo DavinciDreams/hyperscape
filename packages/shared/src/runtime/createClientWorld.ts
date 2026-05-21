@@ -314,7 +314,7 @@ export function createClientWorld() {
 
   world.register("towns", TownSystem);
   world.register("pois", POISystem);
-  // world.register("roads", RoadNetworkSystem);
+  world.register("roads", RoadNetworkSystem);
 
   // ============================================================================
   // BUILDING RENDERING SYSTEM
@@ -328,8 +328,7 @@ export function createClientWorld() {
   // ============================================================================
   // Procedural town landmarks (fences, lampposts, wells, signposts)
   // Must be registered after towns and roads as it depends on both
-  // TEMPORARILY DISABLED
-  // world.register("town-landmarks", ProceduralTownLandmarksSystem);
+  world.register("town-landmarks", ProceduralTownLandmarksSystem);
 
   // ============================================================================
   // VISUAL EFFECTS SYSTEMS
@@ -354,17 +353,13 @@ export function createClientWorld() {
   // GRASS SYSTEM
   // ============================================================================
   // GPU Procedural grass with heightmap sampling
-  // TEMPORARILY DISABLED - performance optimization
-  // world.register("grass", ProceduralGrassSystem);
+  world.register("grass", ProceduralGrassSystem);
 
   // ============================================================================
   // FLOWER SYSTEM
   // GPU Procedural flowers using SpriteNodeMaterial
   // Has its own lightweight heightmap fallback when grass system is disabled.
-  // TEMPORARILY DISABLED - investigating spawn blocking issue
-  // if (!isEmbeddedSpectatorMode()) {
-  //   world.register("flowers", ProceduralFlowerSystem);
-  // }
+  world.register("flowers", ProceduralFlowerSystem);
 
   // ============================================================================
   // DOCK SYSTEM
