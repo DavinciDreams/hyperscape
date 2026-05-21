@@ -1,17 +1,21 @@
 # Coolify Deployment
 
 This repo includes `docker-compose.coolify.yml` for a simple Coolify deployment
-with the Hyperscape app container and a Postgres database.
+with the Hyperscape app container, Postgres, and MinIO object storage for
+runtime conjure assets.
 
 ## Services
 
 - `hyperscape`: builds from `Dockerfile.server` and listens on port `5555`.
 - `postgres`: `pgvector/pgvector:pg16` with a persistent named volume.
+- `minio`: S3-compatible object storage with a persistent named volume.
+- `minio-init`: creates the conjure bucket and enables public downloads.
 
 Set at least:
 
 ```env
 POSTGRES_PASSWORD=<strong-password>
+MINIO_ROOT_PASSWORD=<strong-password-at-least-8-chars>
 PUBLIC_API_URL=https://<your-domain>
 PUBLIC_WS_URL=wss://<your-domain>/ws
 PUBLIC_PRIVY_APP_ID=<privy-app-id>
@@ -26,6 +30,7 @@ The compose file sets:
 USE_LOCAL_POSTGRES=false
 DATABASE_URL=postgresql://hyperscape:<password>@postgres:5432/hyperscape
 DEFAULT_GOBLINS_ENABLED=false
+S3_BUCKET_CONJURES=hyperscape-conjures
 ```
 
 Leave `DEFAULT_GOBLINS_ENABLED=false` unless you intentionally want the
@@ -53,3 +58,30 @@ becomes CDN-like when you put Cloudflare or another edge cache in front of it.
 For most Coolify deployments, prefer either same-origin `/game-assets` or
 Cloudflare R2/custom-domain assets. Only add a separate CDN container if you need
 to update large assets independently from app deploys.
+
+## Runtime Conjure Storage
+
+The static world assets still ship inside the app image and are served from
+`/game-assets`. Fast conjure outputs are different: Asset Forge can copy the GLB
+and concept art returned by the Hill DGX bridge into MinIO, then return the MinIO
+public URL to the in-world conjure flow.
+
+In the Asset Forge container, set:
+
+```env
+ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
+OBJECT_STORAGE_ENABLED=true
+S3_ENDPOINT=http://minio:9000
+S3_REGION=us-east-1
+S3_FORCE_PATH_STYLE=true
+S3_ACCESS_KEY_ID=hyperscape
+S3_SECRET_ACCESS_KEY=<same-value-as-MINIO_ROOT_PASSWORD>
+S3_BUCKET_CONJURES=hyperscape-conjures
+S3_PUBLIC_BASE_URL=https://<asset-domain>/hyperscape-conjures
+CONJURE_STORAGE_PREFIX=conjures
+```
+
+`S3_PUBLIC_BASE_URL` must be a browser-reachable URL for the bucket. Common
+self-hosted options are Caddy or nginx in front of MinIO, or Cloudflare proxying
+that asset domain. Without a public base URL, Asset Forge leaves object storage
+disabled and keeps using the upstream Hill result URLs.
