@@ -9,7 +9,7 @@
  *   5. Privy authenticates → LoginScreen calls onAuthenticated()
  *   6. App transitions to UsernameSelection → CharacterSelect → Game
  *
- * For Solana:
+ * For local:
  *   Same flow but select Phantom instead of MetaMask.
  *
  * These helpers interact with the actual Privy UI — no mocks.
@@ -17,7 +17,7 @@
  */
 
 import type { Page } from "@playwright/test";
-import type { HeadlessWeb3Wallet } from "./wallet-fixtures";
+import type { TestAuthIdentity } from "./auth-fixtures";
 
 type FlowStage =
   | "initializing"
@@ -256,15 +256,15 @@ export async function isPrivyReady(page: Page): Promise<boolean> {
  *
  * Flow: Click "Enter" → Privy modal → "Continue with a wallet" → MetaMask
  *
- * The headless-web3-provider is configured with AUTO_PERMIT_ALL, so it
+ * The local auth provider is configured with AUTO_PERMIT_ALL, so it
  * auto-responds to eth_requestAccounts, personal_sign, etc.
  *
  * @param page - Playwright page
- * @param _wallet - HeadlessWeb3Wallet reference (auto-approves, but passed for type safety)
+ * @param _wallet - TestAuthIdentity reference (auto-approves, but passed for type safety)
  */
 export async function connectEvmWalletViaPrivy(
   page: Page,
-  _wallet?: HeadlessWeb3Wallet,
+  _wallet?: TestAuthIdentity,
   _attempt: number = 1,
 ): Promise<void> {
   const initialStage = await waitForFlowStage(
@@ -293,7 +293,7 @@ export async function connectEvmWalletViaPrivy(
   const isPrivyWalletSurfaceVisible = async (): Promise<boolean> =>
     page
       .locator(
-        'button:has-text("Continue with a wallet"), button:has-text("MetaMask"), button:has-text("Headless Web3 Provider"), button:has-text("Retry"), div[role="button"]:has-text("MetaMask"), div[role="button"]:has-text("Headless Web3 Provider"), [role="dialog"]',
+        'button:has-text("Continue with a wallet"), button:has-text("MetaMask"), button:has-text("Local Auth Provider"), button:has-text("Retry"), div[role="button"]:has-text("MetaMask"), div[role="button"]:has-text("Local Auth Provider"), [role="dialog"]',
       )
       .first()
       .isVisible({ timeout: 1000 })
@@ -389,10 +389,10 @@ export async function connectEvmWalletViaPrivy(
   // Step 3: Select wallet provider in Privy.
   // Prefer explicit headless wallet labels first, then MetaMask fallback.
   const walletSelectors = [
-    'button:has-text("Headless Web3 Provider")',
-    'div[role="button"]:has-text("Headless Web3 Provider")',
-    'button:has-text("Headless Web3")',
-    'div[role="button"]:has-text("Headless Web3")',
+    'button:has-text("Local Auth Provider")',
+    'div[role="button"]:has-text("Local Auth Provider")',
+    'button:has-text("Local Auth")',
+    'div[role="button"]:has-text("Local Auth")',
     'button:has-text("MetaMask")',
     'div[role="button"]:has-text("MetaMask")',
     '[data-testid*="metamask"]',
@@ -530,7 +530,7 @@ export async function connectEvmWalletViaPrivy(
 // =============================================================================
 
 /**
- * Connect Solana wallet (Phantom) via Privy in Hyperscape.
+ * Connect local wallet (Phantom) via Privy in Hyperscape.
  *
  * Flow: Click "Enter" → Privy modal → "Continue with a wallet" → Phantom
  *
@@ -539,9 +539,9 @@ export async function connectEvmWalletViaPrivy(
  *
  * @param page - Playwright page
  */
-export async function connectSolanaWalletViaPrivy(page: Page): Promise<void> {
+export async function connectlocalWalletViaPrivy(page: Page): Promise<void> {
   if (await isWalletConnected(page)) {
-    console.log("[connectSolanaWalletViaPrivy] Already connected, skipping");
+    console.log("[connectlocalWalletViaPrivy] Already connected, skipping");
     return;
   }
 
@@ -549,12 +549,12 @@ export async function connectSolanaWalletViaPrivy(page: Page): Promise<void> {
   const enterButton = page.locator(LOGIN_ENTRY_SELECTORS).first();
   if (!(await enterButton.isVisible({ timeout: 8000 }).catch(() => false))) {
     console.log(
-      "[connectSolanaWalletViaPrivy] No Enter button found — may already be past login",
+      "[connectlocalWalletViaPrivy] No Enter button found — may already be past login",
     );
     return;
   }
 
-  console.log("[connectSolanaWalletViaPrivy] Clicking Enter button...");
+  console.log("[connectlocalWalletViaPrivy] Clicking Enter button...");
   await enterButton.click();
   await page.waitForTimeout(2000);
 
@@ -575,13 +575,13 @@ export async function connectSolanaWalletViaPrivy(page: Page): Promise<void> {
     .all();
 
   if (phantomOptions.length >= 2) {
-    // If multiple Phantom entries, the last one is usually the "Solana" variant
+    // If multiple Phantom entries, the last one is usually the "local" variant
     await phantomOptions[phantomOptions.length - 1].click();
   } else if (phantomOptions.length === 1) {
     await phantomOptions[0].click();
   } else {
     console.log(
-      "[connectSolanaWalletViaPrivy] No Phantom option found in Privy modal",
+      "[connectlocalWalletViaPrivy] No Phantom option found in Privy modal",
     );
     return;
   }
@@ -1164,13 +1164,13 @@ export async function isInGame(page: Page): Promise<boolean> {
  *   4. Enter World (confirm view → GameClient)
  *
  * @param page - Playwright page
- * @param wallet - HeadlessWeb3Wallet (optional, for EVM auto-approve)
+ * @param wallet - TestAuthIdentity (optional, for EVM auto-approve)
  * @param options - Configuration for the flow
  * @returns true if successfully entered the game
  */
 export async function completeFullLoginFlow(
   page: Page,
-  wallet?: HeadlessWeb3Wallet,
+  wallet?: TestAuthIdentity,
   options: {
     username?: string;
     characterName?: string;

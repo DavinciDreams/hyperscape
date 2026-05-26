@@ -53,6 +53,7 @@ export interface BaseAssetMetadata extends RiggingMetadata {
 
   // Files
   modelPath: string;
+  lodSourcePath?: string;
   conceptArtPath?: string;
   hasModel: boolean;
   hasConceptArt: boolean;
@@ -80,6 +81,8 @@ export interface BaseAssetMetadata extends RiggingMetadata {
   // Additional properties used in UI
   tier?: string;
   format?: string;
+  category?: string;
+  originalFilename?: string;
   gripDetected?: boolean; // For weapons
   requiresAnimationStrip?: boolean;
 }
@@ -117,6 +120,7 @@ export interface VariantAssetMetadata extends RiggingMetadata {
 
   // Files
   modelPath: string;
+  lodSourcePath?: string;
   conceptArtPath?: string;
   hasModel: boolean;
   hasConceptArt: boolean;
@@ -144,6 +148,8 @@ export interface VariantAssetMetadata extends RiggingMetadata {
   // Additional properties used in UI
   tier?: string;
   format?: string;
+  category?: string;
+  originalFilename?: string;
   gripDetected?: boolean; // For weapons
   requiresAnimationStrip?: boolean;
 }

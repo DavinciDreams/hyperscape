@@ -114,8 +114,8 @@ function CriticalErrorScreen({ error }: { error: string }) {
         {isWebGPUError ? (
           <>
             <p style={{ fontSize: "16px", marginBottom: "24px", opacity: 0.9 }}>
-              Hyperscape requires WebGPU for rendering. Your browser or device
-              does not support WebGPU.
+              Gaia requires WebGPU for rendering. Your browser or device does
+              not support WebGPU.
             </p>
             <div
               style={{

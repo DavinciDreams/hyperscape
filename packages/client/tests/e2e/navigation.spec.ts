@@ -5,14 +5,14 @@ import {
   simulateMovement,
   waitForWorldCondition,
 } from "./utils/testWorld";
-import { evmTest } from "./fixtures/wallet-fixtures";
+import { authTest } from "./fixtures/auth-fixtures";
 import {
   completeFullLoginFlow,
   waitForAppReady,
 } from "./fixtures/privy-helpers";
 import { BASE_URL } from "./fixtures/test-config";
 
-const test = evmTest;
+const test = authTest;
 
 test.describe("Navigation System", () => {
   // Increase test timeout

@@ -1,6 +1,6 @@
 {
   "$schema": "https://typedoc.org/schema.json",
-  "name": "Hyperscape API Documentation",
+  "name": "Gaia API Documentation",
   "entryPointStrategy": "packages",
   "entryPoints": [
     "packages/shared",
@@ -65,4 +65,3 @@
     "Documentation": "https://docs.hyperscape.xyz"
   }
 }
-

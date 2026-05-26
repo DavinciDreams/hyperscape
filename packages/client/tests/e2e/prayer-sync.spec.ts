@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { evmTest } from "./fixtures/wallet-fixtures";
+import { authTest } from "./fixtures/auth-fixtures";
 import {
   completeFullLoginFlow,
   selectFirstCharacter,
@@ -10,7 +10,7 @@ import {
 import { BASE_URL } from "./fixtures/test-config";
 import { openPanel, waitForPlayerSpawn } from "./utils/testWorld";
 
-const test = evmTest;
+const test = authTest;
 
 test.describe("Prayer login sync", () => {
   test.setTimeout(6 * 60 * 1000);

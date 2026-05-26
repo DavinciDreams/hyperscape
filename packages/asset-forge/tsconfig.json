@@ -24,6 +24,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "types": ["vite/client"],
     
     /* Type Checking */
     "strict": true,
@@ -49,4 +50,4 @@
     "**/*.test.ts",
     "src/tests/**/*"
   ]
-} 
+}

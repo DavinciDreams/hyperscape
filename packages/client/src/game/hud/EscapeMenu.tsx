@@ -10,7 +10,6 @@
 import React, { useCallback, useEffect, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useThemeStore } from "@/ui";
-import { usePrivy } from "@privy-io/react-auth";
 import type { ClientWorld } from "../../types";
 import { UI } from "../../constants/ui";
 import { zIndex } from "../../constants/tokens";
@@ -121,7 +120,6 @@ function MenuButton({
 export function EscapeMenu({ world }: EscapeMenuProps) {
   const theme = useThemeStore((s) => s.theme);
   const [isOpen, setIsOpen] = useState(false);
-  const { logout, authenticated } = usePrivy();
 
   // Handle escape key
   useEffect(() => {
@@ -174,14 +172,8 @@ export function EscapeMenu({ world }: EscapeMenuProps) {
     } catch (e) {
       console.warn("Disconnect error:", e);
     }
-    try {
-      await logout();
-    } catch (e) {
-      console.warn("Logout error:", e);
-    } finally {
-      window.location.href = "/";
-    }
-  }, [world, logout]);
+    window.location.href = "/";
+  }, [world]);
 
   // Mute/unmute audio
   const [isMuted, setIsMuted] = useState(false);
@@ -338,15 +330,13 @@ export function EscapeMenu({ world }: EscapeMenuProps) {
               onClick={handleBackToLobby}
             />
 
-            {authenticated && (
-              <MenuButton
-                icon={<LogOut size={20} />}
-                label="Log Out"
-                sublabel="Sign out of your account"
-                onClick={handleLogout}
-                variant="danger"
-              />
-            )}
+            <MenuButton
+              icon={<LogOut size={20} />}
+              label="Reset Session"
+              sublabel="Return to the start screen"
+              onClick={handleLogout}
+              variant="danger"
+            />
           </div>
 
           <p style={hintStyle}>Press ESC to close</p>

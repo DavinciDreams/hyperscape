@@ -109,15 +109,9 @@ export function StreamingOverlay({
   }
 
   const { cycle, leaderboard } = state;
-  const {
-    agent1,
-    agent2,
-    winnerId,
-    winnerName,
-    winReason,
-    timeRemaining,
-    duelId,
-  } = cycle;
+  const { agent1, agent2, winnerId, winnerName, winReason, timeRemaining } =
+    cycle;
+  const duelId = "duelId" in cycle ? String(cycle.duelId ?? "") : null;
 
   // Get winner agent info
   const winnerAgent =
@@ -157,7 +151,7 @@ export function StreamingOverlay({
       default:
         return {
           eyebrow: "Intermission",
-          title: "Hyperscape duels",
+          title: "Gaia duels",
           sub: "",
         };
     }
@@ -339,7 +333,7 @@ export function StreamingOverlay({
 
       <footer className="streaming-lower-third">
         <div className="streaming-lower-third-brand">
-          <span className="streaming-lower-third-mark">Hyperscape</span>
+          <span className="streaming-lower-third-mark">Gaia</span>
           <span className="streaming-lower-third-divider" aria-hidden>
             ·
           </span>
@@ -382,11 +376,11 @@ function publicStreamStatusLine(
       return "Live — round in progress";
     case "RESOLUTION":
       if (betting?.bettingBridgeEnabled && betting?.betUrl) {
-        return "Winner decided — on-chain payouts follow oracle settlement.";
+        return "Winner decided - local match records are settling.";
       }
       return "Winner decided — next bout loading";
     default:
-      return "Hyperscape AI duels";
+      return "Gaia AI duels";
   }
 }
 

@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { evmTest } from "./fixtures/wallet-fixtures";
+import { authTest } from "./fixtures/auth-fixtures";
 import {
   completeFullLoginFlow,
   waitForAppReady,
@@ -8,7 +8,7 @@ import {
 import { BASE_URL } from "./fixtures/test-config";
 import { takeGameScreenshot, waitForPlayerSpawn } from "./utils/testWorld";
 
-const test = evmTest;
+const test = authTest;
 
 test.describe("Graphics Verification (Authenticated)", () => {
   test.setTimeout(600000); // 10 minutes

@@ -25,6 +25,8 @@ import type {
   GeneratedBossConfig,
   BossArchetype,
   BossAbility,
+  PBRTexturePack,
+  TexturePackAssignment,
 } from "../types";
 
 // Serialized format (JSON-safe, Maps converted to Records)
@@ -53,6 +55,8 @@ interface SerializedWorldFoundation {
 interface SerializedWorldLayers {
   biomeOverrides: Record<string, BiomeOverride>;
   townOverrides: Record<string, TownOverride>;
+  texturePacks: Record<string, PBRTexturePack>;
+  textureAssignments: TexturePackAssignment[];
   npcs: PlacedNPC[];
   quests: PlacedQuest[];
   bosses: PlacedBoss[];
@@ -83,6 +87,8 @@ export function serializeWorld(world: WorldData): SerializedWorldData {
     layers: {
       biomeOverrides: Object.fromEntries(world.layers.biomeOverrides),
       townOverrides: Object.fromEntries(world.layers.townOverrides),
+      texturePacks: Object.fromEntries(world.layers.texturePacks),
+      textureAssignments: world.layers.textureAssignments,
       npcs: world.layers.npcs,
       quests: world.layers.quests,
       bosses: world.layers.bosses,
@@ -116,6 +122,8 @@ export function deserializeWorld(data: SerializedWorldData): WorldData {
     layers: {
       biomeOverrides: new Map(Object.entries(data.layers.biomeOverrides || {})),
       townOverrides: new Map(Object.entries(data.layers.townOverrides || {})),
+      texturePacks: new Map(Object.entries(data.layers.texturePacks || {})),
+      textureAssignments: data.layers.textureAssignments || [],
       npcs: data.layers.npcs || [],
       quests: data.layers.quests || [],
       bosses: data.layers.bosses || [],
@@ -222,6 +230,9 @@ export function validateWorldData(data: unknown): data is SerializedWorldData {
   if (!arrays.every(Array.isArray)) return false;
   if (!l.biomeOverrides || typeof l.biomeOverrides !== "object") return false;
   if (!l.townOverrides || typeof l.townOverrides !== "object") return false;
+  if (l.texturePacks && typeof l.texturePacks !== "object") return false;
+  if (l.textureAssignments && !Array.isArray(l.textureAssignments))
+    return false;
 
   return true;
 }
@@ -254,6 +265,8 @@ export function migrateWorldData(
   migrated.layers = {
     biomeOverrides: data.layers?.biomeOverrides ?? {},
     townOverrides: data.layers?.townOverrides ?? {},
+    texturePacks: data.layers?.texturePacks ?? {},
+    textureAssignments: data.layers?.textureAssignments ?? [],
     npcs: data.layers?.npcs ?? [],
     quests: data.layers?.quests ?? [],
     bosses: data.layers?.bosses ?? [],
@@ -323,6 +336,8 @@ export function createNewWorld(
     layers: {
       biomeOverrides: new Map(),
       townOverrides: new Map(),
+      texturePacks: new Map(),
+      textureAssignments: [],
       npcs: [],
       quests: [],
       bosses: [],

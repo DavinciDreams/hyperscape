@@ -1,5 +1,5 @@
-import { Activity, Edit3, Layers } from "lucide-react";
-import React, { useRef, useCallback } from "react";
+import { Activity, Edit3, Layers, Upload } from "lucide-react";
+import React, { useRef, useCallback, useState } from "react";
 
 import { API_ENDPOINTS } from "../constants";
 import { useAssetsStore } from "../store";
@@ -17,11 +17,14 @@ import { TransitionOverlay } from "@/components/Assets/TransitionOverlay";
 import ViewerControls from "@/components/Assets/ViewerControls";
 import { AnimationPlayer } from "@/components/shared/AnimationPlayer";
 import ThreeViewer, { ThreeViewerRef } from "@/components/shared/ThreeViewer";
+import { useApp } from "@/contexts/AppContext";
 import { useAssetActions } from "@/hooks";
 import { useAssets } from "@/hooks";
+import { AssetService } from "@/services/api/AssetService";
 
 export const AssetsPage: React.FC = () => {
   const { assets, loading, reloadAssets, forceReload } = useAssets();
+  const { showNotification } = useApp();
 
   // Get state and actions from store
   const {
@@ -43,12 +46,15 @@ export const AssetsPage: React.FC = () => {
     setShowEditModal,
     setShowSpriteModal,
     setModelInfo,
+    setSelectedAsset,
     toggleDetailsPanel,
     toggleAnimationView,
     getFilteredAssets,
   } = useAssetsStore();
 
   const viewerRef = useRef<ThreeViewerRef>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importingAsset, setImportingAsset] = useState(false);
 
   // Use the asset actions hook
   const {
@@ -78,6 +84,41 @@ export const AssetsPage: React.FC = () => {
     [setModelInfo],
   );
 
+  const handleImportAsset = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+
+      if (!file) return;
+
+      setImportingAsset(true);
+      try {
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        const result = await AssetService.importAsset({
+          file,
+          type: extension === "vrm" ? "character" : "prop",
+          category: extension === "vrm" ? "character" : "prop",
+        });
+
+        await reloadAssets();
+
+        if (result.asset) {
+          setSelectedAsset(result.asset);
+        }
+
+        showNotification(result.message || "Asset imported", "success");
+      } catch (err) {
+        showNotification(
+          err instanceof Error ? err.message : "Asset import failed",
+          "error",
+        );
+      } finally {
+        setImportingAsset(false);
+      }
+    },
+    [reloadAssets, setSelectedAsset, showNotification],
+  );
+
   if (loading) {
     return <LoadingState />;
   }
@@ -92,6 +133,24 @@ export const AssetsPage: React.FC = () => {
             totalAssets={assets.length}
             filteredCount={filteredAssets.length}
           />
+
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".glb,.vrm,model/gltf-binary"
+            className="hidden"
+            onChange={handleImportAsset}
+          />
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importingAsset}
+            className="flex items-center justify-center gap-2 rounded-lg border border-border-primary bg-bg-secondary px-3 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-60"
+            title="Import GLB or VRM"
+          >
+            <Upload size={16} />
+            <span>{importingAsset ? "Importing..." : "Import"}</span>
+          </button>
 
           {/* Asset List */}
           <AssetList assets={filteredAssets} />

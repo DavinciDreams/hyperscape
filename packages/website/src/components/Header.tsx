@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import Image from "next/image";
 import { links } from "@/lib/links";
 import { Button } from "./ui/Button";
 
@@ -55,14 +54,9 @@ export function Header() {
         <div className="flex items-center justify-between h-16 md:h-20">
           {/* Logo */}
           <a href="/" className="flex items-center gap-2">
-            <Image
-              src="/images/wordmark.png"
-              alt="Hyperscape"
-              width={160}
-              height={32}
-              className="h-6 md:h-8 w-auto"
-              priority
-            />
+            <span className="font-display text-2xl md:text-3xl font-bold text-[var(--gold-essence)]">
+              Gaia
+            </span>
           </a>
 
           {/* Desktop Navigation */}

@@ -238,6 +238,8 @@ export const PipelineConfig = t.Object({
     t.Object({
       characterHeight: t.Optional(t.Number()),
       useGPT5Enhancement: t.Optional(t.Boolean()),
+      provider: t.Optional(t.String()),
+      pixel3DApiName: t.Optional(t.String()),
     }),
   ),
   // User-provided reference image (skips AI image generation when provided)

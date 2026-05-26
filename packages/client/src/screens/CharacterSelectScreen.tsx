@@ -3,24 +3,8 @@
  *
  * UI for selecting or creating a character before entering the world.
  *
- * ## Wallet Architecture (Privy HD Wallets)
- *
- * This screen uses Privy's Hierarchical Deterministic (HD) wallet system.
- * Each user has ONE seed phrase that derives multiple wallets:
- *
- * - HD Index 0: User's main wallet (created automatically on first login via Privy config)
- * - HD Index 1: First character's wallet
- * - HD Index 2: Second character's wallet
- * - HD Index N: Nth character's wallet
- *
- * All wallets are:
- * - Derived from the same BIP-44 seed: m/44'/60'/0'/0/{index}
- * - Backed up automatically by Privy
- * - Recoverable from the user's main wallet
- * - Managed by Privy (no manual private key handling)
- *
- * This means users authenticate ONCE, then all character wallets are
- * created seamlessly without additional signatures or prompts.
+ * Wallet auth support has been removed. Characters are local game identities;
+ * paid creator features will be wired through credits/Stripe separately.
  */
 
 import {
@@ -31,7 +15,6 @@ import {
 } from "@hyperscape/shared";
 import React from "react";
 import { CharacterPreview } from "../game/character/CharacterPreview";
-import { usePrivy, useCreateWallet } from "@privy-io/react-auth";
 import { useThemeStore } from "@/ui";
 import { ELIZAOS_API, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
 import { apiClient } from "@/lib/api-client";
@@ -312,9 +295,16 @@ export function CharacterSelectScreen({
     React.useState<CharacterTemplate | null>(null);
   const [loadingTemplates, setLoadingTemplates] = React.useState(false);
 
-  // Privy hooks
-  const { user, ready, authenticated } = usePrivy();
-  const { createWallet } = useCreateWallet();
+  const localUserId = React.useMemo(() => {
+    const existing = localStorage.getItem("hyperscape_player_id");
+    if (existing) return existing;
+    const next = crypto.randomUUID();
+    localStorage.setItem("hyperscape_player_id", next);
+    return next;
+  }, []);
+  const user = React.useMemo(() => ({ id: localUserId }), [localUserId]);
+  const ready = true;
+  const authenticated = true;
 
   // Refs for message handler state (prevents stale closures)
   const characterTypeRef = React.useRef(characterType);
@@ -432,24 +422,16 @@ export function CharacterSelectScreen({
   // Use primitive states instead of object to prevent unnecessary re-renders
   // Initialize from PrivyAuthManager with localStorage fallback
   const [authToken, setAuthToken] = React.useState(
-    privyAuthManager.getToken() ||
-      localStorage.getItem("privy_auth_token") ||
-      "",
+    privyAuthManager.getToken() || "",
   );
   const [privyUserId, setPrivyUserId] = React.useState(
-    privyAuthManager.getUserId() || localStorage.getItem("privy_user_id") || "",
+    privyAuthManager.getUserId() || localUserId,
   );
 
   const syncPrivyAuthState = React.useCallback(() => {
-    const nextToken =
-      privyAuthManager.getToken() ||
-      localStorage.getItem("privy_auth_token") ||
-      "";
+    const nextToken = privyAuthManager.getToken() || "";
     const nextUserId =
-      privyAuthManager.getUserId() ||
-      userRef.current?.id ||
-      localStorage.getItem("privy_user_id") ||
-      "";
+      privyAuthManager.getUserId() || userRef.current?.id || localUserId || "";
 
     if (nextToken && nextToken !== authToken) {
       setAuthToken(nextToken);
@@ -457,7 +439,7 @@ export function CharacterSelectScreen({
     if (nextUserId && nextUserId !== privyUserId) {
       setPrivyUserId(nextUserId);
     }
-  }, [authToken, privyUserId]);
+  }, [authToken, privyUserId, localUserId]);
 
   // Subscribe to PrivyAuthManager state changes
   React.useEffect(() => {
@@ -469,22 +451,6 @@ export function CharacterSelectScreen({
     });
     return unsubscribe;
   }, [authToken, privyUserId]);
-
-  // Watch for Privy auth being written to localStorage as fallback
-  React.useEffect(() => {
-    const onStorage = (e: Event) => {
-      const storageEvent = e as { key?: string | null };
-      if (!storageEvent.key) return;
-      if (storageEvent.key === "privy_auth_token") {
-        syncPrivyAuthState();
-      }
-      if (storageEvent.key === "privy_user_id") {
-        syncPrivyAuthState();
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [syncPrivyAuthState]);
 
   React.useEffect(() => {
     if (!ready || !authenticated) return;
@@ -517,11 +483,11 @@ export function CharacterSelectScreen({
       setPrivyUserId(currentUser.id);
     }
 
-    if (!authToken || !privyUserId) {
+    if (!privyUserId) {
       syncPrivyAuthState();
       setWsReady(false);
       setConnectionState("disconnected");
-      return; // Don't create websocket without auth
+      return;
     }
 
     // Extra validation: ensure localStorage privyUserId matches Privy hook user.id
@@ -548,11 +514,6 @@ export function CharacterSelectScreen({
       // Don't connect if intentionally disconnected
       if (intentionalDisconnectRef.current) return;
 
-      // AUTHENTICATION: Include authToken in URL for reliable authentication
-      // The server supports both URL-based auth and first-message auth.
-      // Using URL-based auth for reliability - it works consistently across all environments.
-      // While URL params can appear in logs, the authToken is a short-lived JWT,
-      // and the server properly validates it before granting access.
       let urlWithAuth = wsUrl;
       if (authToken) {
         const queryParts = [`authToken=${encodeURIComponent(authToken)}`];
@@ -1176,131 +1137,6 @@ export function CharacterSelectScreen({
     setErrorMessage(null);
 
     try {
-      // Create HD wallet for character using Privy's native HD wallet system
-      let walletAddress: string | undefined;
-
-      if (user) {
-        // Privy's HD wallet system creates additional wallets sequentially
-        // The first call creates wallet at index 0, subsequent calls create wallets at indices 1, 2, 3, etc.
-        // All wallets use Privy's BIP-44 derivation path: m/44'/60'/0'/0/{index}
-
-        // Helper to clear corrupted Privy state from localStorage
-        const clearPrivyState = () => {
-          console.log(
-            "[CharacterSelect] 🧹 Clearing potentially corrupted Privy wallet state...",
-          );
-          const keysToRemove: string[] = [];
-
-          // Find all Privy wallet-related keys
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (
-              key &&
-              (key.startsWith("privy:wallets") ||
-                key.startsWith("privy:embedded_wallets") ||
-                key.includes("wallet_state"))
-            ) {
-              keysToRemove.push(key);
-            }
-          }
-
-          // Remove them
-          keysToRemove.forEach((key) => {
-            console.log(`[CharacterSelect] Removing corrupted key: ${key}`);
-            localStorage.removeItem(key);
-          });
-
-          console.log(
-            `[CharacterSelect] ✅ Cleared ${keysToRemove.length} corrupted Privy keys`,
-          );
-        };
-
-        // Attempt wallet creation with retry logic
-        const MAX_RETRIES = 2;
-        let retryCount = 0;
-        let lastError: Error | null = null;
-
-        while (!walletAddress && retryCount < MAX_RETRIES) {
-          try {
-            console.log(
-              `[CharacterSelect] 🔑 Attempt ${retryCount + 1}/${MAX_RETRIES}: Creating HD wallet for character "${name}"`,
-            );
-
-            // Create an additional HD wallet in the sequence
-            // Privy manages the index internally - we just request a new wallet
-            const characterWallet = await createWallet({
-              createAdditional: true,
-            });
-
-            walletAddress = characterWallet.address;
-            console.log(
-              `[CharacterSelect] ✅ HD wallet created:`,
-              walletAddress,
-            );
-            break; // Success! Exit retry loop
-          } catch (walletError) {
-            lastError = walletError as Error;
-            const errorStr = String(walletError);
-            const errorMsg = lastError.message || errorStr;
-
-            console.error(
-              `[CharacterSelect] ❌ Wallet creation attempt ${retryCount + 1} failed:`,
-              walletError,
-            );
-
-            // Check if this is a Privy state corruption error (JSON parse error)
-            const isCorruptionError =
-              errorStr.includes("SyntaxError") ||
-              errorStr.includes("JSON") ||
-              errorStr.includes("setImmedia") ||
-              errorMsg.includes("JSON") ||
-              errorMsg.includes("parse");
-
-            if (isCorruptionError && retryCount < MAX_RETRIES - 1) {
-              console.log(
-                "[CharacterSelect] 🔧 Detected Privy state corruption, clearing and retrying...",
-              );
-              clearPrivyState();
-              retryCount++;
-
-              // Wait 500ms before retry to let Privy settle
-              await new Promise((resolve) => setTimeout(resolve, 500));
-            } else {
-              // Either not a corruption error, or we've exhausted retries
-              retryCount = MAX_RETRIES; // Force exit
-            }
-          }
-        }
-
-        // If wallet creation failed after all retries
-        if (!walletAddress) {
-          console.error(
-            "[CharacterSelect] ❌ Failed to create HD wallet after all retries",
-          );
-
-          const errorMsg = lastError?.message || String(lastError);
-          const isCorruptionError =
-            errorMsg.includes("JSON") ||
-            errorMsg.includes("SyntaxError") ||
-            errorMsg.includes("setImmedia");
-
-          setErrorMessage(
-            isCorruptionError
-              ? "Wallet creation failed due to corrupted browser data. Please refresh the page and try again."
-              : `Failed to create wallet: ${errorMsg}`,
-          );
-          setCreatingCharacter(false);
-          return;
-        }
-      } else {
-        console.warn(
-          "[CharacterSelect] ⚠️ No user authenticated, character will have no wallet",
-        );
-        setErrorMessage("You must be logged in to create a character.");
-        setCreatingCharacter(false);
-        return;
-      }
-
       const ws = preWsRef.current;
 
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1314,7 +1150,6 @@ export function CharacterSelectScreen({
 
       const packet = writePacket("characterCreate", {
         name,
-        wallet: walletAddress,
         avatar: AVATAR_OPTIONS[selectedAvatarIndex].url,
         isAgent: characterType === "agent",
       });
@@ -1333,7 +1168,6 @@ export function CharacterSelectScreen({
     user,
     characters.length,
     selectedAvatarIndex,
-    createWallet,
     characterType,
     elizaOSAvailable,
   ]);
@@ -1403,11 +1237,9 @@ export function CharacterSelectScreen({
         <div className="w-full max-w-2xl mx-auto p-6">
           <div className="relative">
             <div className="mx-auto mt-20 md:mt-0 mb-2 w-full max-w-2xl flex items-center justify-center">
-              <img
-                src="/images/hyperscape_wordmark.png"
-                alt="Hyperscape"
-                className="h-20 md:h-36 object-contain"
-              />
+              <h1 className="text-6xl md:text-8xl font-black tracking-wide text-[#f2d08a] drop-shadow-[0_0_28px_rgba(242,208,138,0.45)]">
+                Gaia
+              </h1>
             </div>
           </div>
 

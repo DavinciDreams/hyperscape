@@ -51,9 +51,9 @@ import { registerTemplateRoutes } from "./routes/template-routes.js";
 import { registerAdminRoutes } from "./routes/admin-routes.js";
 import { registerLayoutRoutes } from "./routes/layout-routes.js";
 import { registerDataRoutes } from "./routes/data-routes.js";
-import { registerProxyRoutes } from "../routes/proxy-routes.js";
+import { registerAgentRuntimeProxyRoutes } from "./routes/agent-runtime-proxy-routes.js";
+import { registerSafierRoutes } from "./routes/safier-routes.js";
 import { registerStreamingRoutes } from "../routes/streaming.js";
-import { registerDuelOracleRoutes } from "./routes/duel-oracle-routes.js";
 
 /**
  * Register all API routes
@@ -72,9 +72,6 @@ export function registerApiRoutes(
   config: ServerConfig,
 ): void {
   console.log("[API] Registering API routes...");
-
-  // Proxy API keys
-  registerProxyRoutes(fastify);
 
   // Health and status endpoints
   registerHealthRoutes(fastify, world, config);
@@ -115,11 +112,16 @@ export function registerApiRoutes(
   // Static game data endpoints
   registerDataRoutes(fastify);
 
+  // Optional proxy to external Hyades/SafierSemantics/compatible agent runtime
+  registerAgentRuntimeProxyRoutes(fastify);
+
+  // Hyades/SafierSemantics plugin integration metadata
+  registerSafierRoutes(fastify, world);
+
   // Streaming mode state and leaderboard
   registerStreamingRoutes(fastify, world);
 
   // Duel arena oracle metadata and inspection
-  registerDuelOracleRoutes(fastify, world);
 
   console.log("[API] ✅ API routes registered");
 }

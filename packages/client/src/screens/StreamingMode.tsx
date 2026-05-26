@@ -1026,7 +1026,7 @@ export function StreamingMode() {
   const showLoading = !loadingDismissed && !clientInitError;
 
   const loadingHeadline = !connected
-    ? "Connecting to Hyperscape..."
+    ? "Connecting to Gaia..."
     : !worldReady
       ? "Initializing world systems..."
       : !terrainReady

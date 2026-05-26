@@ -55,6 +55,11 @@ const LODTab: React.FC<{
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<number>(0);
+  const bakeAssetPath =
+    asset.metadata.lodSourcePath ||
+    (asset.modelFile
+      ? `packages/asset-forge/gdd-assets/${asset.id}/${asset.modelFile}`
+      : `packages/asset-forge/gdd-assets/${asset.id}/${asset.id}.glb`);
 
   // Fetch LOD bundle for this asset
   const fetchBundle = useCallback(async () => {
@@ -126,7 +131,7 @@ const LODTab: React.FC<{
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            assetPaths: [`assets/vegetation/${asset.id}/${asset.id}.glb`],
+            assetPaths: [bakeAssetPath],
             levels: [level],
           }),
         });
@@ -151,7 +156,7 @@ const LODTab: React.FC<{
         setBakingLevel(null);
       }
     },
-    [asset.id],
+    [bakeAssetPath],
   );
 
   const getLODStatusColor = (level: LODLevel): string => {
@@ -383,7 +388,7 @@ const LODTab: React.FC<{
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                assetPaths: [`assets/vegetation/${asset.id}/${asset.id}.glb`],
+                assetPaths: [bakeAssetPath],
                 levels: ["lod1", "lod2"],
               }),
             });

@@ -3,8 +3,11 @@
  * Handles Privy authentication state and token management for Hyperscape
  */
 
-import type { User } from "@privy-io/react-auth";
 import { clearCsrfToken } from "../lib/api-client";
+
+export type LocalAuthUser = {
+  id: string;
+};
 
 /**
  * Privy authentication state
@@ -21,14 +24,14 @@ export interface PrivyAuthState {
   /** Whether the user is currently authenticated */
   isAuthenticated: boolean;
 
-  /** Privy user ID (unique identifier from Privy) */
+  /** Legacy user ID retained for compatibility while wallet auth is removed */
   privyUserId: string | null;
 
-  /** Privy access token for API calls */
+  /** Legacy access token retained for compatibility while wallet auth is removed */
   privyToken: string | null;
 
-  /** Full Privy user object with profile data */
-  user: User | null;
+  /** Local user object placeholder */
+  user: LocalAuthUser | null;
 
   /** Farcaster FID if the user has linked their Farcaster account */
   farcasterFid: string | null;
@@ -184,29 +187,22 @@ export class PrivyAuthManager {
   }
 
   /**
-   * Sets the authenticated user from Privy
+   * Sets the authenticated user.
    *
-   * Called after successful Privy authentication. Stores the user object,
-   * access token, and Farcaster FID (if linked) in state and localStorage.
+   * Kept for compatibility with older screens while external wallet auth is removed.
    *
-   * @param user - Privy user object with profile data
-   * @param token - Privy access token for API calls
+   * @param user - Local user object
+   * @param token - Access token for API calls
    *
    * @public
    */
-  setAuthenticatedUser(user: User, token: string): void {
-    // Extract Farcaster FID if available
-    const farcasterAccount = user.farcaster;
-    const farcasterFid = farcasterAccount?.fid
-      ? String(farcasterAccount.fid)
-      : null;
-
+  setAuthenticatedUser(user: LocalAuthUser, token: string): void {
     this.updateState({
       isAuthenticated: true,
       privyUserId: user.id,
       privyToken: token,
       user,
-      farcasterFid,
+      farcasterFid: null,
     });
 
     // Store token for persistence using configured storage type
@@ -215,9 +211,6 @@ export class PrivyAuthManager {
       try {
         storage.setItem("privy_auth_token", token);
         storage.setItem("privy_user_id", user.id);
-        if (farcasterFid) {
-          storage.setItem("farcaster_fid", farcasterFid);
-        }
       } catch (error) {
         // Storage may be unavailable (private browsing, quota exceeded, etc.)
         console.warn("[PrivyAuthManager] Failed to store auth token:", error);

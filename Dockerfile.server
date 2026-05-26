@@ -42,7 +42,6 @@ COPY packages/impostors/package.json       ./packages/impostors/
 COPY packages/procgen/package.json         ./packages/procgen/
 COPY packages/shared/package.json          ./packages/shared/
 COPY packages/plugin-hyperscape/package.json ./packages/plugin-hyperscape/
-COPY packages/web3/package.json            ./packages/web3/
 COPY packages/server/package.json          ./packages/server/
 COPY packages/client/package.json          ./packages/client/
 
@@ -58,7 +57,6 @@ COPY packages/impostors          ./packages/impostors
 COPY packages/procgen            ./packages/procgen
 COPY packages/shared             ./packages/shared
 COPY packages/plugin-hyperscape  ./packages/plugin-hyperscape
-COPY packages/web3               ./packages/web3
 COPY packages/server             ./packages/server
 COPY packages/client             ./packages/client
 
@@ -85,7 +83,6 @@ RUN mkdir -p \
     packages/procgen/node_modules \
     packages/impostors/node_modules \
     packages/plugin-hyperscape/node_modules \
-    packages/web3/node_modules \
     packages/client/node_modules
 
 # Download game asset manifests (bypass CDN reliance on boot).
@@ -99,7 +96,6 @@ RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/procgen && (bun run build || true) && \
     cd /app/packages/shared && bun run build && \
     cd /app/packages/plugin-hyperscape && bun run build && \
-    cd /app/packages/web3 && bun run build && \
     cd /app/packages/server && bun run build && \
     cd /app/packages/client && NODE_OPTIONS='--max-old-space-size=4096' \
     node ../../node_modules/vite/bin/vite.js build
@@ -133,7 +129,6 @@ COPY --from=builder /app/packages/impostors/package.json       ./packages/impost
 COPY --from=builder /app/packages/procgen/package.json         ./packages/procgen/
 COPY --from=builder /app/packages/shared/package.json          ./packages/shared/
 COPY --from=builder /app/packages/plugin-hyperscape/package.json ./packages/plugin-hyperscape/
-COPY --from=builder /app/packages/web3/package.json            ./packages/web3/
 COPY --from=builder /app/packages/server/package.json          ./packages/server/
 COPY --from=builder /app/packages/client/package.json          ./packages/client/
 
@@ -152,7 +147,6 @@ RUN mkdir -p node_modules/@hyperscape && \
     ln -s ../../packages/procgen            node_modules/@hyperscape/procgen && \
     ln -s ../../packages/shared             node_modules/@hyperscape/shared && \
     ln -s ../../packages/plugin-hyperscape  node_modules/@hyperscape/plugin-hyperscape && \
-    ln -s ../../packages/web3              node_modules/@hyperscape/web3 && \
     ln -s ../../packages/server            node_modules/@hyperscape/server && \
     ln -s ../../packages/client            node_modules/@hyperscape/client
 
@@ -161,7 +155,6 @@ COPY --from=builder /app/packages/shared/node_modules            ./packages/shar
 COPY --from=builder /app/packages/procgen/node_modules           ./packages/procgen/node_modules
 COPY --from=builder /app/packages/impostors/node_modules         ./packages/impostors/node_modules
 COPY --from=builder /app/packages/plugin-hyperscape/node_modules ./packages/plugin-hyperscape/node_modules
-COPY --from=builder /app/packages/web3/node_modules              ./packages/web3/node_modules
 COPY --from=builder /app/packages/client/node_modules            ./packages/client/node_modules
 
 # ── Build artifacts ──
@@ -171,7 +164,6 @@ COPY --from=builder /app/packages/impostors/dist        ./packages/impostors/dis
 COPY --from=builder /app/packages/procgen/dist          ./packages/procgen/dist
 COPY --from=builder /app/packages/shared/build          ./packages/shared/build
 COPY --from=builder /app/packages/plugin-hyperscape/dist ./packages/plugin-hyperscape/dist
-COPY --from=builder /app/packages/web3/dist             ./packages/web3/dist
 COPY --from=builder /app/packages/server/dist           ./packages/server/dist
 COPY --from=builder /app/packages/server/scripts        ./packages/server/scripts
 COPY --from=builder /app/packages/server/src            ./packages/server/src

@@ -1040,8 +1040,8 @@ const PluginsTab: React.FC<{
     <div className="space-y-6">
       <div className="bg-[#1a1005] border border-[#f2d08a]/20 rounded-lg p-4">
         <p className="text-sm text-[#f2d08a]/60">
-          The Hyperscape plugin is required and pre-selected. You can add
-          additional ElizaOS plugins if needed.
+          The Gaia plugin is required and pre-selected. You can add additional
+          ElizaOS plugins if needed.
         </p>
       </div>
 
@@ -1153,7 +1153,7 @@ const SecretsTab: React.FC<{
 
       <div className="space-y-2">
         <label className="block text-sm font-medium text-[#f2d08a]/80">
-          Hyperscape Auth Token (JWT)
+          Gaia Auth Token (JWT)
         </label>
         <div className="relative">
           <input
@@ -1198,7 +1198,7 @@ const SecretsTab: React.FC<{
 
       <div className="space-y-2">
         <label className="block text-sm font-medium text-[#f2d08a]/80">
-          Hyperscape Character ID
+          Gaia Character ID
         </label>
         <input
           type="text"
@@ -1225,7 +1225,7 @@ const SecretsTab: React.FC<{
 
       <div className="space-y-2">
         <label className="block text-sm font-medium text-[#f2d08a]/80">
-          Hyperscape Server URL
+          Gaia Server URL
         </label>
         <input
           type="text"

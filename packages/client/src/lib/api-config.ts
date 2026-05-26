@@ -17,6 +17,9 @@
  */
 
 type PublicRuntimeEnv = {
+  PUBLIC_AGENT_RUNTIME_URL?: string;
+  PUBLIC_HYADES_URL?: string;
+  PUBLIC_SAFIER_URL?: string;
   PUBLIC_ELIZAOS_URL?: string;
   PUBLIC_API_URL?: string;
   PUBLIC_WS_URL?: string;
@@ -29,11 +32,12 @@ type WindowWithRuntimeEnv = Window & {
   __ASSETS_URL?: string;
 };
 
-const LOCAL_DEV_ELIZAOS_URL = "http://localhost:5555";
+const LOCAL_DEV_AGENT_RUNTIME_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_API_URL = "http://localhost:5555";
 const LOCAL_DEV_GAME_WS_URL = "ws://localhost:5556/ws";
 const LOCAL_DEV_CDN_URL = "http://localhost:5555/game-assets";
-const PRODUCTION_ELIZAOS_URL = "https://hyperscape-production.up.railway.app";
+const PRODUCTION_AGENT_RUNTIME_URL =
+  "https://hyperscape-production.up.railway.app";
 const PRODUCTION_GAME_API_URL = "https://hyperscape-production.up.railway.app";
 const PRODUCTION_GAME_WS_URL = "wss://hyperscape-production.up.railway.app/ws";
 const PRODUCTION_CDN_URL = "https://assets.hyperscape.club";
@@ -127,6 +131,7 @@ export function resolveApiConfig({
   buildEnv,
   prod,
 }: ApiConfigResolutionInput): {
+  agentRuntimeUrl: string;
   cdnUrl: string;
   elizaOsUrl: string;
   gameApiUrl: string;
@@ -136,9 +141,9 @@ export function resolveApiConfig({
     normalizeLoopbackUrlForBrowser(value, browserHref, browserHostname);
 
   const isProd = prod ?? false;
-  const defaultElizaOsUrl = isProd
-    ? PRODUCTION_ELIZAOS_URL
-    : LOCAL_DEV_ELIZAOS_URL;
+  const defaultAgentRuntimeUrl = isProd
+    ? PRODUCTION_AGENT_RUNTIME_URL
+    : LOCAL_DEV_AGENT_RUNTIME_URL;
   const defaultGameApiUrl = isProd
     ? PRODUCTION_GAME_API_URL
     : LOCAL_DEV_GAME_API_URL;
@@ -151,12 +156,18 @@ export function resolveApiConfig({
     normalize(runtimeEnv?.PUBLIC_API_URL) ??
     normalize(buildEnv?.PUBLIC_API_URL) ??
     defaultGameApiUrl;
-  const resolvedElizaOsUrl =
+  const resolvedAgentRuntimeUrl =
+    normalize(runtimeEnv?.PUBLIC_AGENT_RUNTIME_URL) ??
+    normalize(runtimeEnv?.PUBLIC_HYADES_URL) ??
+    normalize(runtimeEnv?.PUBLIC_SAFIER_URL) ??
     normalize(runtimeEnv?.PUBLIC_ELIZAOS_URL) ??
     normalize(runtimeEnv?.PUBLIC_API_URL) ??
+    normalize(buildEnv?.PUBLIC_AGENT_RUNTIME_URL) ??
+    normalize(buildEnv?.PUBLIC_HYADES_URL) ??
+    normalize(buildEnv?.PUBLIC_SAFIER_URL) ??
     normalize(buildEnv?.PUBLIC_ELIZAOS_URL) ??
     normalize(buildEnv?.PUBLIC_API_URL) ??
-    defaultElizaOsUrl;
+    defaultAgentRuntimeUrl;
   const resolvedGameWsUrl =
     normalize(runtimeEnv?.PUBLIC_WS_URL) ??
     normalize(buildEnv?.PUBLIC_WS_URL) ??
@@ -167,14 +178,16 @@ export function resolveApiConfig({
     defaultCdnUrl;
 
   return {
+    agentRuntimeUrl: resolvedAgentRuntimeUrl,
     cdnUrl: resolvedCdnUrl,
-    elizaOsUrl: resolvedElizaOsUrl,
+    elizaOsUrl: resolvedAgentRuntimeUrl,
     gameApiUrl: resolvedGameApiUrl,
     gameWsUrl: resolvedGameWsUrl,
   };
 }
 
 function getCurrentResolvedApiConfig(): {
+  agentRuntimeUrl: string;
   cdnUrl: string;
   elizaOsUrl: string;
   gameApiUrl: string;
@@ -190,6 +203,9 @@ function getCurrentResolvedApiConfig(): {
         ? (window as WindowWithRuntimeEnv).env
         : undefined,
     buildEnv: {
+      PUBLIC_AGENT_RUNTIME_URL: import.meta.env.PUBLIC_AGENT_RUNTIME_URL,
+      PUBLIC_HYADES_URL: import.meta.env.PUBLIC_HYADES_URL,
+      PUBLIC_SAFIER_URL: import.meta.env.PUBLIC_SAFIER_URL,
       PUBLIC_ELIZAOS_URL: import.meta.env.PUBLIC_ELIZAOS_URL,
       PUBLIC_API_URL: import.meta.env.PUBLIC_API_URL,
       PUBLIC_WS_URL: import.meta.env.PUBLIC_WS_URL,
@@ -228,16 +244,21 @@ export function resolveRuntimeAssetUrl(assetPath: string): string {
 }
 
 // =============================================================================
-// ElizaOS AI Agent Server (embedded in Hyperscape server)
+// Agent Runtime Server (Hyades, SafierSemantics, or legacy embedded ElizaOS)
 // =============================================================================
-// ElizaOS agent routes are now served directly from the Hyperscape game server.
-// No separate ElizaOS process needed - routes are at /api/agents, /api/agents/:id, etc.
+// Agent runtime routes are served from /api/agents in legacy flows. Hyades can
+// provide OpenAI-compatible /v1 and A2A /a2a surfaces through the same base URL.
+// The ELIZAOS_* exports remain as compatibility aliases for existing screens.
 
 let resolvedApiConfig = getCurrentResolvedApiConfig();
 
-export let ELIZAOS_URL: string = resolvedApiConfig.elizaOsUrl;
+export let AGENT_RUNTIME_URL: string = resolvedApiConfig.agentRuntimeUrl;
 
-export let ELIZAOS_API: string = `${ELIZAOS_URL}/api`;
+export let AGENT_RUNTIME_API: string = `${AGENT_RUNTIME_URL}/api`;
+
+export let ELIZAOS_URL: string = AGENT_RUNTIME_URL;
+
+export let ELIZAOS_API: string = AGENT_RUNTIME_API;
 
 // =============================================================================
 // Hyperscape Game Server
@@ -255,14 +276,17 @@ export let GAME_WS_URL: string = resolvedApiConfig.gameWsUrl;
 export let CDN_URL: string = resolvedApiConfig.cdnUrl;
 
 export function refreshApiConfig(): {
+  agentRuntimeUrl: string;
   cdnUrl: string;
   elizaOsUrl: string;
   gameApiUrl: string;
   gameWsUrl: string;
 } {
   resolvedApiConfig = getCurrentResolvedApiConfig();
-  ELIZAOS_URL = resolvedApiConfig.elizaOsUrl;
-  ELIZAOS_API = `${ELIZAOS_URL}/api`;
+  AGENT_RUNTIME_URL = resolvedApiConfig.agentRuntimeUrl;
+  AGENT_RUNTIME_API = `${AGENT_RUNTIME_URL}/api`;
+  ELIZAOS_URL = AGENT_RUNTIME_URL;
+  ELIZAOS_API = AGENT_RUNTIME_API;
   GAME_API_URL = resolvedApiConfig.gameApiUrl;
   GAME_WS_URL = resolvedApiConfig.gameWsUrl;
   CDN_URL = resolvedApiConfig.cdnUrl;

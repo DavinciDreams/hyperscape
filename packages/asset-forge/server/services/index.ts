@@ -15,3 +15,4 @@ export * from "./GLBDecimationService";
 export * from "./VertexColorService";
 export * from "./ImpostorBakingService";
 export * from "./ProcgenPresetService";
+export * from "./ObjectStorageService";

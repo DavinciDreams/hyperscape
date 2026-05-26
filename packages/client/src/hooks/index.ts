@@ -61,5 +61,4 @@ export {
 } from "./useFocusTrap";
 export { useDebounce, useDebouncedValue } from "./useDebounce";
 export { useEventListener, useKeyboardShortcut } from "./useEventListener";
-export { useSolanaWallet, isAndroid, isSolanaMobile } from "./useSolanaWallet";
 export { useThreeCleanup, useThreeMemoryMonitor } from "./useThreeCleanup";

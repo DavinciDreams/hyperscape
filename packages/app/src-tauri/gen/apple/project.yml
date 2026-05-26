@@ -10,7 +10,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: Hyperscape
+      PRODUCT_NAME: Gaia
       PRODUCT_BUNDLE_IDENTIFIER: com.hyperscape.game
 targetTemplates:
   app:

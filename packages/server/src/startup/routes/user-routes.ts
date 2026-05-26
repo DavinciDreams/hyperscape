@@ -82,10 +82,6 @@ function checkUserCheckRateLimit(ip: string): boolean {
   return true;
 }
 
-/**
- * Verify Privy token and return user ID.
- * Returns null if verification fails.
- */
 async function verifyAuth(request: FastifyRequest): Promise<string | null> {
   const authHeader = request.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -98,10 +94,9 @@ async function verifyAuth(request: FastifyRequest): Promise<string | null> {
   }
 
   try {
-    const { verifyPrivyToken } =
-      await import("../../infrastructure/auth/privy-auth.js");
-    const privyInfo = await verifyPrivyToken(token);
-    return privyInfo?.privyUserId ?? null;
+    const { verifyJWT } = await import("../../shared/utils.js");
+    const payload = await verifyJWT(token);
+    return typeof payload?.userId === "string" ? payload.userId : null;
   } catch {
     return null;
   }

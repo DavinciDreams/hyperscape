@@ -39,6 +39,8 @@ import type {
   PlacedLore,
   DifficultyZone,
   CustomPlacement,
+  PBRTexturePack,
+  TexturePackAssignment,
   CreationModeState,
   HierarchyNode,
 } from "./types";
@@ -90,6 +92,12 @@ const UNDOABLE_ACTIONS = new Set([
   "ADD_TOWN_OVERRIDE",
   "UPDATE_TOWN_OVERRIDE",
   "REMOVE_TOWN_OVERRIDE",
+  "ADD_TEXTURE_PACK",
+  "UPDATE_TEXTURE_PACK",
+  "REMOVE_TEXTURE_PACK",
+  "ADD_TEXTURE_ASSIGNMENT",
+  "UPDATE_TEXTURE_ASSIGNMENT",
+  "REMOVE_TEXTURE_ASSIGNMENT",
   "ADD_NPC",
   "UPDATE_NPC",
   "REMOVE_NPC",
@@ -505,6 +513,154 @@ function coreReducer(
             layers: {
               ...state.editing.world.layers,
               townOverrides: newOverrides,
+            },
+            modifiedAt: Date.now(),
+          },
+          hasUnsavedChanges: true,
+        },
+      };
+    }
+
+    case "ADD_TEXTURE_PACK": {
+      if (!state.editing.world) return state;
+      const texturePacks = new Map(state.editing.world.layers.texturePacks);
+      texturePacks.set(action.pack.id, action.pack);
+      return {
+        ...state,
+        editing: {
+          ...state.editing,
+          world: {
+            ...state.editing.world,
+            layers: {
+              ...state.editing.world.layers,
+              texturePacks,
+            },
+            modifiedAt: Date.now(),
+          },
+          hasUnsavedChanges: true,
+        },
+      };
+    }
+
+    case "UPDATE_TEXTURE_PACK": {
+      if (!state.editing.world) return state;
+      const existing = state.editing.world.layers.texturePacks.get(
+        action.packId,
+      );
+      if (!existing) return state;
+      const texturePacks = new Map(state.editing.world.layers.texturePacks);
+      texturePacks.set(action.packId, {
+        ...existing,
+        ...action.updates,
+        updatedAt: Date.now(),
+      });
+      return {
+        ...state,
+        editing: {
+          ...state.editing,
+          world: {
+            ...state.editing.world,
+            layers: {
+              ...state.editing.world.layers,
+              texturePacks,
+            },
+            modifiedAt: Date.now(),
+          },
+          hasUnsavedChanges: true,
+        },
+      };
+    }
+
+    case "REMOVE_TEXTURE_PACK": {
+      if (!state.editing.world) return state;
+      const texturePacks = new Map(state.editing.world.layers.texturePacks);
+      texturePacks.delete(action.packId);
+      return {
+        ...state,
+        editing: {
+          ...state.editing,
+          world: {
+            ...state.editing.world,
+            layers: {
+              ...state.editing.world.layers,
+              texturePacks,
+              textureAssignments:
+                state.editing.world.layers.textureAssignments.filter(
+                  (assignment) => assignment.texturePackId !== action.packId,
+                ),
+            },
+            modifiedAt: Date.now(),
+          },
+          hasUnsavedChanges: true,
+        },
+      };
+    }
+
+    case "ADD_TEXTURE_ASSIGNMENT": {
+      if (!state.editing.world) return state;
+      return {
+        ...state,
+        editing: {
+          ...state.editing,
+          world: {
+            ...state.editing.world,
+            layers: {
+              ...state.editing.world.layers,
+              textureAssignments: [
+                ...state.editing.world.layers.textureAssignments,
+                action.assignment,
+              ],
+            },
+            modifiedAt: Date.now(),
+          },
+          hasUnsavedChanges: true,
+        },
+      };
+    }
+
+    case "UPDATE_TEXTURE_ASSIGNMENT": {
+      if (!state.editing.world) return state;
+      return {
+        ...state,
+        editing: {
+          ...state.editing,
+          world: {
+            ...state.editing.world,
+            layers: {
+              ...state.editing.world.layers,
+              textureAssignments:
+                state.editing.world.layers.textureAssignments.map(
+                  (assignment) =>
+                    assignment.id === action.assignmentId
+                      ? {
+                          ...assignment,
+                          ...action.updates,
+                          updatedAt: Date.now(),
+                        }
+                      : assignment,
+                ),
+            },
+            modifiedAt: Date.now(),
+          },
+          hasUnsavedChanges: true,
+        },
+      };
+    }
+
+    case "REMOVE_TEXTURE_ASSIGNMENT": {
+      if (!state.editing.world) return state;
+      return {
+        ...state,
+        editing: {
+          ...state.editing,
+          world: {
+            ...state.editing.world,
+            layers: {
+              ...state.editing.world.layers,
+              textureAssignments:
+                state.editing.world.layers.textureAssignments.filter(
+                  (assignment) => assignment.id !== action.assignmentId,
+                ),
             },
             modifiedAt: Date.now(),
           },
@@ -1199,6 +1355,18 @@ interface WorldBuilderContextValue {
       override: Partial<TownOverride>,
     ) => void;
     removeTownOverride: (townId: string) => void;
+    addTexturePack: (pack: PBRTexturePack) => void;
+    updateTexturePack: (
+      packId: string,
+      updates: Partial<PBRTexturePack>,
+    ) => void;
+    removeTexturePack: (packId: string) => void;
+    addTextureAssignment: (assignment: TexturePackAssignment) => void;
+    updateTextureAssignment: (
+      assignmentId: string,
+      updates: Partial<TexturePackAssignment>,
+    ) => void;
+    removeTextureAssignment: (assignmentId: string) => void;
     addNPC: (npc: PlacedNPC) => void;
     updateNPC: (npcId: string, updates: Partial<PlacedNPC>) => void;
     removeNPC: (npcId: string) => void;
@@ -1351,6 +1519,25 @@ export function WorldBuilderProvider({
         dispatch({ type: "UPDATE_TOWN_OVERRIDE", townId, override }),
       removeTownOverride: (townId: string) =>
         dispatch({ type: "REMOVE_TOWN_OVERRIDE", townId }),
+      addTexturePack: (pack: PBRTexturePack) =>
+        dispatch({ type: "ADD_TEXTURE_PACK", pack }),
+      updateTexturePack: (packId: string, updates: Partial<PBRTexturePack>) =>
+        dispatch({ type: "UPDATE_TEXTURE_PACK", packId, updates }),
+      removeTexturePack: (packId: string) =>
+        dispatch({ type: "REMOVE_TEXTURE_PACK", packId }),
+      addTextureAssignment: (assignment: TexturePackAssignment) =>
+        dispatch({ type: "ADD_TEXTURE_ASSIGNMENT", assignment }),
+      updateTextureAssignment: (
+        assignmentId: string,
+        updates: Partial<TexturePackAssignment>,
+      ) =>
+        dispatch({
+          type: "UPDATE_TEXTURE_ASSIGNMENT",
+          assignmentId,
+          updates,
+        }),
+      removeTextureAssignment: (assignmentId: string) =>
+        dispatch({ type: "REMOVE_TEXTURE_ASSIGNMENT", assignmentId }),
       addNPC: (npc: PlacedNPC) => dispatch({ type: "ADD_NPC", npc }),
       updateNPC: (npcId: string, updates: Partial<PlacedNPC>) =>
         dispatch({ type: "UPDATE_NPC", npcId, updates }),
