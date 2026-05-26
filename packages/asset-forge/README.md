@@ -90,6 +90,12 @@ MESHY_API_KEY=your-meshy-api-key
 # Optional:
 TRIPO_API_KEY=your-tripo-api-key
 AI_GATEWAY_API_KEY=your-vercel-ai-gateway-key
+
+# Optional Pixel3D Gradio provider:
+# GENERATION_3D_PROVIDER=pixel3d-gradio
+# PIXEL3D_GRADIO_BASE_URL=http://127.0.0.1:7860
+# PIXEL3D_GRADIO_API_NAME=/generate_3d
+# PIXEL3D_RESOLUTION=1024
 ```
 
 ### Running the Application
@@ -133,6 +139,23 @@ same for the UI, but the backend submits the job to Hill using the Flux Klein â†
 Bruno Trellis2 `1024` no-cascade path with 2048 textures and LOD generation.
 Before submission, Asset Forge asks the local Nemotron OpenAI-compatible server
 to rewrite the creator request into a safer image-to-3D prompt.
+
+### Pixel3D Gradio Provider
+
+Pixel3D can be used as the image-to-3D stage behind the existing Asset Forge
+pipeline endpoint:
+
+```bash
+GENERATION_3D_PROVIDER=pixel3d-gradio
+PIXEL3D_GRADIO_BASE_URL=http://127.0.0.1:7860
+PIXEL3D_GRADIO_API_NAME=/generate_3d
+PIXEL3D_RESOLUTION=1024
+```
+
+The built-in adapter defaults to the Pixel3D `/generate_3d` signature. For a
+custom Gradio app, `PIXEL3D_GRADIO_INPUTS` can override the ordered inputs sent
+to the API. A single request can also select this provider with
+`metadata.provider: "pixel3d-gradio"`.
 
 ## Project Structure
 

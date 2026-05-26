@@ -1,4 +1,4 @@
-//! Hyperscape Desktop Entry Point
+//! Gaia Desktop Entry Point
 //!
 //! Main entry point for desktop platforms (Windows, macOS, Linux).
 //! Mobile platforms use lib.rs via the mobile_entry_point attribute.

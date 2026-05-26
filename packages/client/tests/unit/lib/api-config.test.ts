@@ -83,6 +83,20 @@ describe("resolveApiConfig", () => {
     expect(result.cdnUrl).toBe("https://cdn.runtime.example");
   });
 
+  it("accepts Hyades as an agent runtime alias", () => {
+    const result = resolveApiConfig({
+      prod: false,
+      runtimeEnv: {
+        PUBLIC_HYADES_URL: "https://hyades.example",
+        PUBLIC_SAFIER_URL: "https://safier.example",
+      },
+      buildEnv: {},
+    });
+
+    expect(result.agentRuntimeUrl).toBe("https://hyades.example");
+    expect(result.elizaOsUrl).toBe("https://hyades.example");
+  });
+
   it("refreshes live API bindings from runtime env", () => {
     (
       window as Window & {

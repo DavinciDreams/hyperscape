@@ -664,7 +664,10 @@ export class LODBakingService {
   }
 
   /**
-   * Start a LOD baking job
+   * Start a LOD baking job using the built-in TypeScript decimator.
+   *
+   * The old Blender implementation is kept below as an explicit legacy path,
+   * but the default API should not depend on external scripts being present.
    */
   async startBakeJob(
     assetPaths?: string[],
@@ -672,44 +675,7 @@ export class LODBakingService {
     dryRun = false,
     levels: LODLevel[] = ["lod1"],
   ): Promise<LODBakeJob> {
-    const jobId = crypto.randomUUID();
-    const assets = await this.findAssets(assetPaths, categories);
-
-    if (assets.length === 0) {
-      const job: InternalLODBakeJob = {
-        jobId,
-        status: "failed",
-        progress: 0,
-        totalAssets: 0,
-        processedAssets: 0,
-        results: [],
-        error: "No assets found to process",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-      };
-      this.jobs.set(jobId, job);
-      return this.sanitizeJob(job);
-    }
-
-    // Calculate total operations (assets * levels)
-    const totalOps = assets.length * levels.filter((l) => l !== "lod0").length;
-
-    const job: InternalLODBakeJob = {
-      jobId,
-      status: "queued",
-      progress: 0,
-      totalAssets: totalOps,
-      processedAssets: 0,
-      results: [],
-      startedAt: new Date().toISOString(),
-    };
-
-    this.jobs.set(jobId, job);
-
-    // Start baking in background
-    this.runBakeProcess(job, assets, dryRun, levels);
-
-    return this.sanitizeJob(job);
+    return this.startTypeScriptBakeJob(assetPaths, categories, dryRun, levels);
   }
 
   /**
@@ -729,7 +695,12 @@ export class LODBakingService {
       });
     }
 
-    return this.startBakeJob(assetPaths, categories, dryRun ?? false, levels);
+    return this.startTypeScriptBakeJob(
+      assetPaths,
+      categories,
+      dryRun ?? false,
+      levels,
+    );
   }
 
   /**
@@ -780,6 +751,75 @@ export class LODBakingService {
 
     // Start TypeScript-based baking in background
     this.runTypeScriptBakeProcess(job, assets, dryRun, levels);
+
+    return this.sanitizeJob(job);
+  }
+
+  /**
+   * Legacy Blender bake path.
+   *
+   * Prefer startBakeJob/startTypeScriptBakeJob. This exists only for local
+   * experimentation when scripts/bake-lod.py is restored.
+   */
+  async startBlenderBakeJob(
+    assetPaths?: string[],
+    categories?: string[],
+    dryRun = false,
+    levels: LODLevel[] = ["lod1"],
+  ): Promise<LODBakeJob> {
+    const scriptPath = path.join(this.scriptsDir, "bake-lod.py");
+    if (!(await Bun.file(scriptPath).exists())) {
+      const job: InternalLODBakeJob = {
+        jobId: crypto.randomUUID(),
+        status: "failed",
+        progress: 0,
+        totalAssets: 0,
+        processedAssets: 0,
+        results: [],
+        error:
+          "Blender LOD baking is unavailable: scripts/bake-lod.py is missing. Use the TypeScript LOD baker instead.",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      this.jobs.set(job.jobId, job);
+      return this.sanitizeJob(job);
+    }
+
+    const jobId = crypto.randomUUID();
+    const assets = await this.findAssets(assetPaths, categories);
+
+    if (assets.length === 0) {
+      const job: InternalLODBakeJob = {
+        jobId,
+        status: "failed",
+        progress: 0,
+        totalAssets: 0,
+        processedAssets: 0,
+        results: [],
+        error: "No assets found to process",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      this.jobs.set(jobId, job);
+      return this.sanitizeJob(job);
+    }
+
+    const totalOps =
+      assets.length *
+      levels.filter((l) => l !== "lod0" && l !== "imposter").length;
+
+    const job: InternalLODBakeJob = {
+      jobId,
+      status: "queued",
+      progress: 0,
+      totalAssets: totalOps,
+      processedAssets: 0,
+      results: [],
+      startedAt: new Date().toISOString(),
+    };
+
+    this.jobs.set(jobId, job);
+    this.runBakeProcess(job, assets, dryRun, levels);
 
     return this.sanitizeJob(job);
   }
@@ -1199,31 +1239,85 @@ export class LODBakingService {
   }
 
   /**
-   * Update manifests with LOD1 paths
+   * Update manifests with generated LOD paths.
+   *
+   * Currently this updates the vegetation manifest directly. Other bundle
+   * consumers can read assets/manifests/lod-bundles.json.
    */
   private async updateManifests(): Promise<void> {
-    // Run the manifest update script
-    const updateScript = path.join(this.scriptsDir, "update-lod-manifests.mjs");
+    const vegetationManifestPath = path.join(
+      this.projectRoot,
+      "packages/server/world/assets/manifests/vegetation.json",
+    );
+    const vegetationFile = Bun.file(vegetationManifestPath);
 
-    if (!(await Bun.file(updateScript).exists())) {
-      console.warn(
-        "[LODBaking] update-lod-manifests.mjs not found, skipping manifest update",
-      );
+    if (!(await vegetationFile.exists())) {
       return;
     }
 
-    const process = spawn("node", [updateScript], {
-      cwd: this.projectRoot,
-      stdio: "pipe",
-    });
+    const manifest = (await vegetationFile.json()) as {
+      assets?: Array<{
+        id: string;
+        model?: string;
+        lod1Model?: string;
+        lod2Model?: string;
+      }>;
+    };
 
-    process.on("close", (code: number | null) => {
-      if (code === 0) {
-        console.log("[LODBaking] Manifests updated successfully");
-      } else {
-        console.error(`[LODBaking] Manifest update failed with code ${code}`);
+    if (!Array.isArray(manifest.assets)) {
+      return;
+    }
+
+    const bundles = await this.getAllBundles();
+    const bundleByAssetId = new Map(
+      bundles.map((bundle) => [bundle.assetId, bundle]),
+    );
+    const worldAssetsRoot = path.join(
+      this.projectRoot,
+      "packages/server/world/assets",
+    );
+    let changed = false;
+
+    const toManifestModelPath = (modelPath: string): string => {
+      const fullPath = path.isAbsolute(modelPath)
+        ? modelPath
+        : path.join(this.projectRoot, modelPath);
+      return path.relative(worldAssetsRoot, fullPath);
+    };
+
+    for (const asset of manifest.assets) {
+      const bundle = bundleByAssetId.get(asset.id);
+      if (!bundle) {
+        continue;
       }
-    });
+
+      const lod1 = bundle.variants.find((variant) => variant.level === "lod1");
+      const lod2 = bundle.variants.find((variant) => variant.level === "lod2");
+
+      if (lod1) {
+        const nextPath = toManifestModelPath(lod1.modelPath);
+        if (asset.lod1Model !== nextPath) {
+          asset.lod1Model = nextPath;
+          changed = true;
+        }
+      }
+
+      if (lod2) {
+        const nextPath = toManifestModelPath(lod2.modelPath);
+        if (asset.lod2Model !== nextPath) {
+          asset.lod2Model = nextPath;
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      await Bun.write(
+        vegetationManifestPath,
+        JSON.stringify(manifest, null, 2),
+      );
+      console.log("[LODBaking] Vegetation manifest updated with LOD paths");
+    }
   }
 
   /**

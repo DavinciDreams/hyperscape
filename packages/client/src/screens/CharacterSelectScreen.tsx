@@ -1237,11 +1237,9 @@ export function CharacterSelectScreen({
         <div className="w-full max-w-2xl mx-auto p-6">
           <div className="relative">
             <div className="mx-auto mt-20 md:mt-0 mb-2 w-full max-w-2xl flex items-center justify-center">
-              <img
-                src="/images/hyperscape_wordmark.png"
-                alt="Hyperscape"
-                className="h-20 md:h-36 object-contain"
-              />
+              <h1 className="text-6xl md:text-8xl font-black tracking-wide text-[#f2d08a] drop-shadow-[0_0_28px_rgba(242,208,138,0.45)]">
+                Gaia
+              </h1>
             </div>
           </div>
 

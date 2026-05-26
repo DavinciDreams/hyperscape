@@ -151,7 +151,7 @@ export function StreamingOverlay({
       default:
         return {
           eyebrow: "Intermission",
-          title: "Hyperscape duels",
+          title: "Gaia duels",
           sub: "",
         };
     }
@@ -333,7 +333,7 @@ export function StreamingOverlay({
 
       <footer className="streaming-lower-third">
         <div className="streaming-lower-third-brand">
-          <span className="streaming-lower-third-mark">Hyperscape</span>
+          <span className="streaming-lower-third-mark">Gaia</span>
           <span className="streaming-lower-third-divider" aria-hidden>
             ·
           </span>
@@ -380,7 +380,7 @@ function publicStreamStatusLine(
       }
       return "Winner decided — next bout loading";
     default:
-      return "Hyperscape AI duels";
+      return "Gaia AI duels";
   }
 }
 

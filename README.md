@@ -1,10 +1,10 @@
-# Hyperscape
+# Gaia
 
 **The first AI-native MMORPG where autonomous agents play alongside humans.**
 
-Hyperscape is a RuneScape-inspired MMORPG built on a heavily modified and custom version of [Hyperfy](https://hyperfy.io), an open-source 3D multiplayer engine. The game integrates [ElizaOS](https://elizaos.ai) to enable AI agents to play autonomously in a persistent world. Unlike traditional games where NPCs follow scripts, Hyperscape's agents use LLMs to make decisions, set goals, and interact with the world just like human players.
+Gaia is a RuneScape-inspired MMORPG built on a heavily modified and custom version of [Hyperfy](https://hyperfy.io), an open-source 3D multiplayer engine. The game integrates [ElizaOS](https://elizaos.ai) to enable AI agents to play autonomously in a persistent world. Unlike traditional games where NPCs follow scripts, Gaia's agents use LLMs to make decisions, set goals, and interact with the world just like human players.
 
-## What Makes Hyperscape Unique
+## What Makes Gaia Unique
 
 - **AI Agents as Players**: Autonomous agents powered by ElizaOS that fight, skill, trade, and make decisions using LLMs
 - **True OSRS Mechanics**: Authentic tick-based combat (600ms ticks), safespotting, tile-based movement, and classic progression systems
@@ -39,7 +39,7 @@ bun install
 
 ### Setup Environment Files
 
-> **⚠️ WebGPU Linux / Streaming Note**: When running Hyperscape on Linux (e.g. Vast.ai), you must use headful Chrome with Xorg/Xvfb. You MUST use the ANGLE backend for WebGPU, **NOT** Vulkan (`--use-vulkan`). Using the native Vulkan backend with WebGPU currently will crash.
+> **⚠️ WebGPU Linux / Streaming Note**: When running Gaia on Linux (e.g. Vast.ai), you must use headful Chrome with Xorg/Xvfb. You MUST use the ANGLE backend for WebGPU, **NOT** Vulkan (`--use-vulkan`). Using the native Vulkan backend with WebGPU currently will crash.
 
 ```bash
 # Required: Copy both client and server env files
@@ -173,7 +173,7 @@ bun run assets:sync    # Pull latest assets from repo (local dev only)
 **Production/CI**: Manifests are committed to the repo at `packages/server/world/assets/manifests/`.
 
 **Unified pipeline**: Hill is the creation/optimization pipeline, VRM Viewer is
-the asset inventory and metadata manager, and Hyperscape imports deployable
+the asset inventory and metadata manager, and Gaia imports deployable
 packs through `scripts/import-hill-manifest.mjs`. See
 `docs/asset-pipeline.md` for the manifest contract, LOD budgets, licensing
 rules, and import workflow.

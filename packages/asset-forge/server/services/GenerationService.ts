@@ -19,6 +19,7 @@ import path from "path";
 
 import fetch from "node-fetch";
 import { ComfyUITrellisService } from "./ComfyUITrellisService";
+import { Pixel3DGradioService } from "./Pixel3DGradioService";
 
 // ==================== Type Definitions ====================
 
@@ -541,7 +542,7 @@ export class GenerationService extends EventEmitter {
       pipeline.stages.image3D.status = "processing";
 
       try {
-        const modelProvider = this.getModelProvider();
+        const modelProvider = this.getModelProvider(pipeline.config);
 
         if (modelProvider === "comfyui-trellis") {
           console.log("🧊 Starting ComfyUI Trellis image-to-3D generation...");
@@ -643,6 +644,117 @@ export class GenerationService extends EventEmitter {
             taskId: trellisResult.promptId,
             provider: "comfyui-trellis",
             modelUrl: trellisResult.modelUrl,
+            localPath: baseModelPath,
+          };
+          pipeline.results.image3D = pipeline.stages.image3D.result;
+          pipeline.progress = 50;
+        } else if (modelProvider === "pixel3d-gradio") {
+          console.log("🧊 Starting Pixel3D Gradio image-to-3D generation...");
+          const pixel3DMetadata = pipeline.config.metadata as
+            | Record<string, unknown>
+            | undefined;
+          const pixel3DService = new Pixel3DGradioService({
+            apiName:
+              typeof pixel3DMetadata?.pixel3DApiName === "string"
+                ? pixel3DMetadata.pixel3DApiName
+                : undefined,
+          });
+          const pixel3DResult = await pixel3DService.generateModel({
+            assetId: pipeline.config.assetId,
+            prompt: enhancedPrompt,
+            imageUrl: imageUrl!,
+            quality: pipeline.config.quality,
+            onProgress: (progress) => {
+              pipeline.stages.image3D.progress = progress;
+            },
+          });
+
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          await fs.mkdir(outputDir, { recursive: true });
+
+          const rawModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}_raw.glb`,
+          );
+          await fs.writeFile(rawModelPath, pixel3DResult.modelBuffer);
+
+          const normalizedModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}.glb`,
+          );
+          await fs.copyFile(rawModelPath, normalizedModelPath);
+          baseModelPath = normalizedModelPath;
+
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            await fs.writeFile(
+              path.join(outputDir, "concept-art.png"),
+              imageBuffer,
+            );
+          }
+
+          const metadata = {
+            id: pipeline.config.assetId,
+            name: pipeline.config.name,
+            gameId: pipeline.config.assetId,
+            type: pipeline.config.type,
+            subtype: pipeline.config.subtype,
+            description: pipeline.config.description,
+            detailedPrompt: enhancedPrompt,
+            generatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            isBaseModel: true,
+            materialVariants: pipeline.config.materialPresets
+              ? pipeline.config.materialPresets.map((preset) => preset.id)
+              : [],
+            isPlaceholder: false,
+            hasModel: true,
+            hasConceptArt: true,
+            modelPath: baseModelPath,
+            conceptArtUrl: "./concept-art.png",
+            gddCompliant: true,
+            workflow: "GPT-5 → GPT-Image-1 → Pixel3D Gradio Image-to-3D",
+            generationProvider: "pixel3d-gradio",
+            pixel3DJobId: pixel3DResult.jobId,
+            pixel3DModelUrl: pixel3DResult.modelUrl,
+            variants: [],
+            variantCount: 0,
+            lastVariantGenerated: null,
+            updatedAt: new Date().toISOString(),
+            normalized: false,
+            createdBy: pipeline.config.user?.privyId || null,
+            walletAddress: pipeline.config.user?.walletAddress || null,
+            isPublic: true,
+          };
+
+          await fs.writeFile(
+            path.join(outputDir, "metadata.json"),
+            JSON.stringify(metadata, null, 2),
+          );
+
+          if (pipeline.config.user?.privyId) {
+            try {
+              await assetDatabaseService.createAssetRecord(
+                pipeline.config.assetId,
+                metadata as AssetMetadataType,
+                pipeline.config.user.privyId,
+                `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+              );
+            } catch (error) {
+              console.error(
+                "[GenerationService] Failed to create database record for asset:",
+                error,
+              );
+            }
+          }
+
+          pipeline.stages.image3D.status = "completed";
+          pipeline.stages.image3D.progress = 100;
+          pipeline.stages.image3D.result = {
+            taskId: pixel3DResult.jobId,
+            provider: "pixel3d-gradio",
+            modelUrl: pixel3DResult.modelUrl,
             localPath: baseModelPath,
           };
           pipeline.results.image3D = pipeline.stages.image3D.result;
@@ -979,7 +1091,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 4: Material Variant Generation (Retexturing)
       if (
-        this.getModelProvider() === "meshy" &&
+        this.getModelProvider(pipeline.config) === "meshy" &&
         pipeline.config.enableRetexturing &&
         pipeline.config.materialPresets?.length! > 0
       ) {
@@ -1175,7 +1287,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 5: Auto-Rigging (for avatars only)
       if (
-        this.getModelProvider() === "meshy" &&
+        this.getModelProvider(pipeline.config) === "meshy" &&
         pipeline.config.generationType === "avatar" &&
         pipeline.config.enableRigging &&
         meshyTaskId
@@ -1393,12 +1505,26 @@ export class GenerationService extends EventEmitter {
     }
   }
 
-  private getModelProvider(): "meshy" | "comfyui-trellis" {
+  private getModelProvider(
+    config?: PipelineConfig,
+  ): "meshy" | "comfyui-trellis" | "pixel3d-gradio" {
+    const metadata = config?.metadata as Record<string, unknown> | undefined;
+    const requestedProvider =
+      typeof metadata?.provider === "string" ? metadata.provider : undefined;
     const provider = (
+      requestedProvider ||
       process.env.GENERATION_3D_PROVIDER ||
       process.env.ASSET_FORGE_3D_PROVIDER ||
       ""
     ).toLowerCase();
+
+    if (
+      provider === "pixel3d-gradio" ||
+      provider === "pixel3d" ||
+      provider === "pixel-3d"
+    ) {
+      return "pixel3d-gradio";
+    }
 
     if (
       provider === "comfyui-trellis" ||
@@ -1413,6 +1539,10 @@ export class GenerationService extends EventEmitter {
       !process.env.MESHY_API_KEY
     ) {
       return "comfyui-trellis";
+    }
+
+    if (process.env.PIXEL3D_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
+      return "pixel3d-gradio";
     }
 
     return "meshy";

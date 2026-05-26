@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Hyperscape - AI-powered virtual world with RPG elements",
+  "description": "Gaia - AI-powered virtual world with RPG elements",
   "keywords": [
     "hyperscape",
     "virtual-worlds",
@@ -11,7 +11,7 @@
     "3d",
     "metaverse"
   ],
-  "author": "Hyperscape Team",
+  "author": "Gaia Team",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0",

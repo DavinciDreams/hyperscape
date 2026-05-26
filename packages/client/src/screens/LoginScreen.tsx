@@ -203,11 +203,7 @@ export function LoginScreen() {
         `}</style>
         <div className="login-content">
           <div>
-            <img
-              src="/images/logo.png"
-              alt="Hyperscape"
-              className="login-logo"
-            />
+            <img src="/images/logo.png" alt="Gaia" className="login-logo" />
             <div className="login-tagline">A 3D multiplayer RPG adventure</div>
           </div>
           <div className="login-bottom">
@@ -279,7 +275,7 @@ export function LoginScreen() {
         }
       `}</style>
       <div className="login-content">
-        <img src="/images/logo.png" alt="Hyperscape" className="login-logo" />
+        <img src="/images/logo.png" alt="Gaia" className="login-logo" />
         <div className="login-bottom">
           <div className="login-subtitle">Entering the world...</div>
           <div className="loading-spinner"></div>

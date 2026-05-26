@@ -149,7 +149,7 @@ export function Features() {
             className="label-upper mb-3"
             style={{ color: "var(--gold-essence)" }}
           >
-            Why Hyperscape
+            Why Gaia
           </p>
           <h2 className="heading-section text-shimmer-gold mb-4">
             A New Kind of World

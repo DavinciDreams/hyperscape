@@ -318,6 +318,9 @@ declare global {
     readonly PUBLIC_APP_URL?: string;
     readonly PUBLIC_EMBED_ALLOWED_ORIGINS?: string;
     readonly PUBLIC_API_URL?: string;
+    readonly PUBLIC_AGENT_RUNTIME_URL?: string;
+    readonly PUBLIC_HYADES_URL?: string;
+    readonly PUBLIC_SAFIER_URL?: string;
     readonly PUBLIC_ELIZAOS_URL?: string;
   }
 }

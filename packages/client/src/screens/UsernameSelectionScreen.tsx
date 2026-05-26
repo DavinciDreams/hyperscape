@@ -116,11 +116,9 @@ export function UsernameSelectionScreen({
           {/* Logo */}
           <div className="relative">
             <div className="mx-auto mb-8 w-full flex items-center justify-center">
-              <img
-                src="/images/hyperscape_wordmark.png"
-                alt="Hyperscape"
-                className="h-20 md:h-32 object-contain"
-              />
+              <h1 className="text-5xl md:text-7xl font-black tracking-wide text-[#f2d08a] drop-shadow-[0_0_28px_rgba(242,208,138,0.45)]">
+                Gaia
+              </h1>
             </div>
           </div>
 
@@ -130,7 +128,7 @@ export function UsernameSelectionScreen({
               className="text-2xl font-bold mb-2"
               style={{ color: theme.colors.text.accent }}
             >
-              Welcome to Hyperscape!
+              Welcome to Gaia!
             </h2>
             <p
               className="text-sm"

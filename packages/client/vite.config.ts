@@ -62,11 +62,22 @@ export default defineConfig(({ mode }) => {
     : process.env.PUBLIC_APP_URL ||
       env.PUBLIC_APP_URL ||
       "http://127.0.0.1:3333";
-  const resolvedPublicElizaUrl = isProductionBuild
+  const resolvedPublicAgentRuntimeUrl = isProductionBuild
     ? productionPublicApiUrl
-    : process.env.PUBLIC_ELIZAOS_URL ||
+    : process.env.PUBLIC_AGENT_RUNTIME_URL ||
+      env.PUBLIC_AGENT_RUNTIME_URL ||
+      process.env.PUBLIC_HYADES_URL ||
+      env.PUBLIC_HYADES_URL ||
+      process.env.PUBLIC_SAFIER_URL ||
+      env.PUBLIC_SAFIER_URL ||
+      process.env.PUBLIC_ELIZAOS_URL ||
       env.PUBLIC_ELIZAOS_URL ||
       resolvedPublicApiUrl;
+  const resolvedPublicElizaUrl = isProductionBuild
+    ? resolvedPublicAgentRuntimeUrl
+    : process.env.PUBLIC_ELIZAOS_URL ||
+      env.PUBLIC_ELIZAOS_URL ||
+      resolvedPublicAgentRuntimeUrl;
   const resolvedPublicEmbedAllowedOrigins =
     process.env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
     env.PUBLIC_EMBED_ALLOWED_ORIGINS ||
@@ -448,6 +459,15 @@ export default defineConfig(({ mode }) => {
       ),
       "import.meta.env.PUBLIC_ELIZAOS_URL": JSON.stringify(
         resolvedPublicElizaUrl,
+      ),
+      "import.meta.env.PUBLIC_AGENT_RUNTIME_URL": JSON.stringify(
+        resolvedPublicAgentRuntimeUrl,
+      ),
+      "import.meta.env.PUBLIC_HYADES_URL": JSON.stringify(
+        process.env.PUBLIC_HYADES_URL || env.PUBLIC_HYADES_URL || "",
+      ),
+      "import.meta.env.PUBLIC_SAFIER_URL": JSON.stringify(
+        process.env.PUBLIC_SAFIER_URL || env.PUBLIC_SAFIER_URL || "",
       ),
       "import.meta.env.PUBLIC_PRIVY_APP_ID": JSON.stringify(
         env.PUBLIC_PRIVY_APP_ID || "",
