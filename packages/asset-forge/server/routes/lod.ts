@@ -150,7 +150,7 @@ export const createLODRoutes = (
           },
         )
 
-        // Start a LOD baking job
+        // Start a TypeScript LOD baking job
         .post(
           "/bake",
           async ({ body }) => {
@@ -173,14 +173,14 @@ export const createLODRoutes = (
             response: Models.LODBakeResponse,
             detail: {
               tags: ["LOD Pipeline"],
-              summary: "Start LOD baking job",
+              summary: "Start TypeScript LOD baking job",
               description:
-                "Starts a background job to bake LOD models for specified assets or categories. Supports multiple LOD levels (lod1, lod2, imposter). Returns a job ID to track progress.",
+                "Starts a background job using the built-in TypeScript decimation engine. Supports mesh LOD levels (lod1, lod2). Imposters are handled by the imposter endpoints. Returns a job ID to track progress.",
             },
           },
         )
 
-        // Bake all LODs
+        // Bake all mesh LODs
         .post(
           "/bake-all",
           async ({ query }) => {
@@ -204,9 +204,9 @@ export const createLODRoutes = (
             response: Models.LODBakeResponse,
             detail: {
               tags: ["LOD Pipeline"],
-              summary: "Bake all LODs",
+              summary: "Bake all mesh LODs",
               description:
-                "Starts a background job to bake LOD1 models for all vegetation and resource assets.",
+                "Starts a TypeScript decimation job to bake mesh LODs for all vegetation and resource assets.",
             },
           },
         )
@@ -298,7 +298,7 @@ export const createLODRoutes = (
           },
         )
 
-        // TypeScript-based baking (no Blender required)
+        // TypeScript-based baking alias (no Blender required)
         .post(
           "/bake-ts",
           async ({ body }) => {
@@ -323,7 +323,7 @@ export const createLODRoutes = (
               tags: ["LOD Pipeline"],
               summary: "Start TypeScript-based LOD baking job",
               description:
-                "Starts a background job using the built-in TypeScript decimation engine. No external tools required. Supports seam-aware UV preservation.",
+                "Alias for /api/lod/bake. Starts a background job using the built-in TypeScript decimation engine. No external tools required. Supports seam-aware UV preservation.",
             },
           },
         )

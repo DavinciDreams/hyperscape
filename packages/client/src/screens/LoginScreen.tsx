@@ -3,10 +3,7 @@
  * Shown before world loads to authenticate users
  */
 
-import React, { useEffect, useState } from "react";
-import { usePrivy } from "@privy-io/react-auth";
-import { useLoginToMiniApp } from "@privy-io/react-auth/farcaster";
-import miniappSdk from "@farcaster/miniapp-sdk";
+import React from "react";
 import { useThemeStore } from "@/ui";
 
 export function LoginScreen() {
@@ -14,123 +11,11 @@ export function LoginScreen() {
   const loginGold = "#d4b06a";
   const loginGoldBright = "#f0d59a";
   const loginGoldSoft = "#b89354";
-  const { ready, authenticated, login } = usePrivy();
-  const { initLoginToMiniApp, loginToMiniApp } = useLoginToMiniApp();
-  const [isFarcasterContext, setIsFarcasterContext] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-
-  // Check if we're in a Farcaster mini-app context
-  useEffect(() => {
-    const checkFarcasterContext = async () => {
-      // Try to access Farcaster SDK
-      const context = await miniappSdk.context;
-      if (context) {
-        setIsFarcasterContext(true);
-        // Signal ready to Farcaster
-        miniappSdk.actions.ready();
-      }
-    };
-
-    checkFarcasterContext();
-  }, []);
-
-  // Auto-login for Farcaster mini-app
-  useEffect(() => {
-    if (ready && !authenticated && isFarcasterContext && !isLoggingIn) {
-      const autoLogin = async () => {
-        setIsLoggingIn(true);
-        try {
-          // Initialize a new login attempt to get a nonce
-          const { nonce } = await initLoginToMiniApp();
-          // Request a signature from Farcaster
-          const result = await miniappSdk.actions.signIn({ nonce });
-          // Send the signature to Privy for authentication
-          await loginToMiniApp({
-            message: result.message,
-            signature: result.signature,
-          });
-        } catch (err: unknown) {
-          console.error("[LoginScreen] Farcaster auto-login failed:", err);
-          setIsLoggingIn(false);
-        }
-      };
-
-      autoLogin();
-    }
-  }, [
-    ready,
-    authenticated,
-    isFarcasterContext,
-    isLoggingIn,
-    initLoginToMiniApp,
-    loginToMiniApp,
-  ]);
-
-  // Show loading state while Privy initializes
-  if (!ready) {
-    return (
-      <div className="login-screen">
-        <style>{`
-          .login-screen {
-            position: fixed;
-            inset: 0;
-            background: linear-gradient(${theme.colors.background.overlay}, ${theme.colors.background.overlay}),
-                        url('/images/app_background.png') center/cover no-repeat;
-            background-color: ${theme.colors.background.primary};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: ${theme.colors.text.primary};
-            font-family: 'Cinzel', serif, system-ui, -apple-system, sans-serif;
-          }
-          .login-content {
-            text-align: center;
-            max-width: 600px;
-            padding: 2rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            min-height: 80vh;
-          }
-          .login-logo {
-            width: 350px;
-            height: auto;
-            margin: 2rem auto 0;
-            filter: drop-shadow(0 0 30px ${loginGold}99)
-                    drop-shadow(0 0 60px ${loginGold}66);
-          }
-          .login-bottom {
-            margin-bottom: 4rem;
-          }
-          .login-subtitle {
-            font-size: 1.1rem;
-            color: ${theme.colors.text.secondary};
-            margin-bottom: 2rem;
-            letter-spacing: 0.05em;
-          }
-          .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid ${loginGold}33;
-            border-top-color: ${loginGold};
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-        <div className="login-content">
-          <img src="/images/logo.png" alt="Hyperscape" className="login-logo" />
-          <div className="login-bottom">
-            <div className="login-subtitle">Loading...</div>
-            <div className="loading-spinner"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const authenticated = false;
+  const isLoggingIn = false;
+  const enterWorld = () => {
+    window.dispatchEvent(new CustomEvent("hyperscape:local-auth-ready"));
+  };
 
   // Show login UI if not authenticated and not auto-logging in
   if (!authenticated && !isLoggingIn) {
@@ -318,29 +203,15 @@ export function LoginScreen() {
         `}</style>
         <div className="login-content">
           <div>
-            <img
-              src="/images/logo.png"
-              alt="Hyperscape"
-              className="login-logo"
-            />
-            {!isFarcasterContext && (
-              <div className="login-tagline">
-                A 3D multiplayer RPG adventure
-              </div>
-            )}
+            <img src="/images/logo.png" alt="Gaia" className="login-logo" />
+            <div className="login-tagline">A 3D multiplayer RPG adventure</div>
           </div>
           <div className="login-bottom">
-            {isFarcasterContext && (
-              <div className="login-subtitle">
-                <div className="farcaster-badge">🎭 Farcaster Frame</div>
-                <div>Welcome! Please sign in to continue.</div>
-              </div>
-            )}
             <div className="login-button-wrapper">
               <div className="login-button-ornament"></div>
               <div className="login-button-highlight"></div>
-              <button className="login-button" onClick={() => login()}>
-                {isFarcasterContext ? "Sign in with Farcaster" : "Enter"}
+              <button className="login-button" onClick={enterWorld}>
+                Enter
               </button>
             </div>
           </div>
@@ -404,13 +275,9 @@ export function LoginScreen() {
         }
       `}</style>
       <div className="login-content">
-        <img src="/images/logo.png" alt="Hyperscape" className="login-logo" />
+        <img src="/images/logo.png" alt="Gaia" className="login-logo" />
         <div className="login-bottom">
-          <div className="login-subtitle">
-            {isFarcasterContext
-              ? "Authenticating with Farcaster..."
-              : "Entering the world..."}
-          </div>
+          <div className="login-subtitle">Entering the world...</div>
           <div className="loading-spinner"></div>
         </div>
       </div>

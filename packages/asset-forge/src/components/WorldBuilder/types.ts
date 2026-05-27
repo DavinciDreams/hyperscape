@@ -305,6 +305,96 @@ export interface BiomeMaterialConfig {
 }
 
 /**
+ * Reference to a single texture map in a PBR pack.
+ *
+ * Stores durable references instead of embedding image bytes in world saves.
+ */
+export interface TextureMapRef {
+  /** Stable texture URI or asset-relative path */
+  uri: string;
+  /** Optional Asset Forge asset ID that owns this texture */
+  assetId?: string;
+  /** Original filename, useful for re-linking imported packs */
+  fileName?: string;
+  /** Correct sampling space for the map */
+  colorSpace: "srgb" | "linear";
+  /** Optional packed channel for ORM-style maps */
+  channel?: "r" | "g" | "b" | "a" | "rgb";
+}
+
+/**
+ * PBR texture pack stored in the world material library.
+ */
+export interface PBRTexturePack {
+  /** Stable pack ID */
+  id: string;
+  /** Display name */
+  name: string;
+  /** Optional description */
+  description?: string;
+  /** Where this pack came from */
+  source: "asset-forge" | "vrm-viewer" | "tank" | "external" | "local";
+  /** Texture maps in the pack */
+  maps: {
+    baseColor?: TextureMapRef;
+    normal?: TextureMapRef;
+    roughness?: TextureMapRef;
+    metalness?: TextureMapRef;
+    ao?: TextureMapRef;
+    emissive?: TextureMapRef;
+    height?: TextureMapRef;
+    opacity?: TextureMapRef;
+  };
+  /** Default material parameters used when previewing/applying this pack */
+  material: {
+    roughness?: number;
+    metalness?: number;
+    normalScale?: number;
+    aoIntensity?: number;
+    colorTint?: string;
+  };
+  /** Default UV transform */
+  tiling: {
+    scale: number;
+    offsetU?: number;
+    offsetV?: number;
+    rotation?: number;
+  };
+  /** Search/filter tags */
+  tags?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Assignment of a PBR texture pack to a world target.
+ */
+export interface TexturePackAssignment {
+  /** Stable assignment ID */
+  id: string;
+  /** Texture pack ID from WorldLayers.texturePacks */
+  texturePackId: string;
+  /** Target to receive the pack */
+  target:
+    | { type: "terrain" }
+    | { type: "biome"; biomeId: string }
+    | { type: "building"; buildingId: string; surface?: string }
+    | { type: "buildingType"; buildingType: string; surface?: string }
+    | { type: "town"; townId: string; surface?: string }
+    | { type: "customPlacement"; placementId: string; surface?: string };
+  /** Enable/disable without deleting */
+  enabled: boolean;
+  /** Per-assignment UV scale override */
+  uvScale?: number;
+  /** Optional blend mode for terrain/biome use */
+  blendMode?: "replace" | "multiply" | "overlay" | "height" | "slope" | "noise";
+  /** Human note for why/where this pack is used */
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
  * Height configuration for a biome
  */
 export interface BiomeHeightConfig {
@@ -687,6 +777,10 @@ export interface WorldLayers {
   biomeOverrides: Map<string, BiomeOverride>;
   /** Town property overrides */
   townOverrides: Map<string, TownOverride>;
+  /** PBR texture packs available to this world */
+  texturePacks: Map<string, PBRTexturePack>;
+  /** Assignments of texture packs to terrain, biomes, buildings, and placements */
+  textureAssignments: TexturePackAssignment[];
   /** Placed NPCs */
   npcs: PlacedNPC[];
   /** Placed quests */
@@ -1018,6 +1112,20 @@ export type WorldBuilderAction =
       override: Partial<TownOverride>;
     }
   | { type: "REMOVE_TOWN_OVERRIDE"; townId: string }
+  | { type: "ADD_TEXTURE_PACK"; pack: PBRTexturePack }
+  | {
+      type: "UPDATE_TEXTURE_PACK";
+      packId: string;
+      updates: Partial<PBRTexturePack>;
+    }
+  | { type: "REMOVE_TEXTURE_PACK"; packId: string }
+  | { type: "ADD_TEXTURE_ASSIGNMENT"; assignment: TexturePackAssignment }
+  | {
+      type: "UPDATE_TEXTURE_ASSIGNMENT";
+      assignmentId: string;
+      updates: Partial<TexturePackAssignment>;
+    }
+  | { type: "REMOVE_TEXTURE_ASSIGNMENT"; assignmentId: string }
   | { type: "ADD_NPC"; npc: PlacedNPC }
   | { type: "UPDATE_NPC"; npcId: string; updates: Partial<PlacedNPC> }
   | { type: "REMOVE_NPC"; npcId: string }
@@ -1222,6 +1330,8 @@ export const DEFAULT_CREATION_CONFIG: WorldCreationConfig = {
 export const EMPTY_WORLD_LAYERS: WorldLayers = {
   biomeOverrides: new Map(),
   townOverrides: new Map(),
+  texturePacks: new Map(),
+  textureAssignments: [],
   npcs: [],
   quests: [],
   bosses: [],

@@ -1,8 +1,8 @@
 [package]
 name = "hyperscape"
 version = "0.13.0"
-description = "Hyperscape - 3D Multiplayer Game"
-authors = ["Hyperscape Team"]
+description = "Gaia - 3D Multiplayer Game"
+authors = ["Gaia Team"]
 license = "GPL-3.0"
 repository = "https://github.com/HyperscapeAI/hyperscape"
 edition = "2021"

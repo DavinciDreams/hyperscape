@@ -1,12 +1,21 @@
 # 3D Asset Forge
 
-A comprehensive React/Vite application for AI-powered 3D asset generation, rigging, and fitting. Built for the Hyperscape RPG, this system combines language and image models, Meshy.ai, Tripo, and local processing tools to create game-ready 3D models from text descriptions.
+A React/Vite application for reviewing, generating, rigging, fitting, and
+organizing game-ready 3D assets for Hyperscape.
+
+The current asset strategy is documented in
+[`../../docs/asset-pipeline.md`](../../docs/asset-pipeline.md). Hill is the
+preferred creation and optimization pipeline, VRM Viewer owns asset inventory
+metadata, and Hyperscape imports deployable packs through
+`scripts/import-hill-manifest.mjs`. The older OpenAI/Meshy flow remains a
+legacy provider path, not the default production direction.
 
 ## Features
 
 ### 🎨 **AI-Powered Asset Generation**
-- Generate 3D models from text descriptions using AI prompt/image services and Meshy.ai
-- Optional image generation through OpenAI or Vercel AI Gateway configuration
+- Generate 3D models from text descriptions using pluggable provider pipelines
+- Preferred local provider path: Nemotron prompt optimization, Flux Klein image generation, Trellis2 mesh generation, repair, Draco compression, LODs, and optional sprites or impostors
+- Legacy cloud provider path: OpenAI/Vercel AI Gateway image and prompt services with Meshy/Tripo model generation
 - Support for various asset types: weapons, armor, characters, items
 - Material variant generation (bronze, steel, mithril, etc.)
 - Batch generation capabilities
@@ -14,7 +23,7 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 ### 🎮 **3D Asset Management**
 - Interactive 3D viewer with Three.js
 - Asset library with categorization and filtering
-- Metadata management and asset organization
+- Metadata management and asset organization, including descriptions, keywords, tags, visibility, and licensing
 - GLB/GLTF format support
 
 ### 🤖 **Advanced Rigging & Fitting**
@@ -34,7 +43,7 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 - **Frontend**: React 19, TypeScript, Vite
 - **3D Graphics**: Three.js, React Three Fiber, Drei
 - **State Management**: Zustand, Immer
-- **AI Integration**: OpenAI API, Vercel AI Gateway, Meshy.ai API, Tripo API
+- **AI Integration**: Local DGX provider adapter target, OpenAI API, Vercel AI Gateway, Meshy.ai API, Tripo API
 - **ML/Computer Vision**: TensorFlow.js, MediaPipe (hand detection)
 - **Backend**: Elysia, Bun
 - **Styling**: Tailwind CSS
@@ -44,7 +53,8 @@ A comprehensive React/Vite application for AI-powered 3D asset generation, riggi
 
 ### Prerequisites
 - Node.js 18+ or Bun runtime
-- API keys for OpenAI and Meshy.ai
+- For local generation: access to the Hill/DGX provider service
+- For legacy cloud generation: API keys for OpenAI, Meshy.ai, or Tripo
 
 ### Installation
 
@@ -64,18 +74,14 @@ bun install
 cp .env.example .env
 ```
 
-4. Add your API keys to `.env`
+4. Add provider configuration to `.env`
 ```
-# Standalone deployment default.
-ASSET_FORGE_GENERATION_PROVIDER=meshy
-
-# Optional: route generation through a separate Hill API.
-# ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
-# HILL_API_BASE_URL=https://your-hill-api.example.com
-# HILL_GENERATION_MODE=create
-# HILL_EXPORT_TARGET=library
-PROMPT_ENHANCEMENT_PROVIDER=nemotron
-NEMOTRON_API_BASE_URL=http://monumentals-mac-studio.local:12345
+# Preferred local provider: Asset Forge calls the DGX Hill/VRM bridge.
+ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
+HILL_API_BASE_URL=https://vrmviewer.flobots.xyz
+HILL_GENERATION_MODE=create
+HILL_EXPORT_TARGET=library
+NEMOTRON_BASE_URL=http://monumentals-mac-studio.local:12345
 NEMOTRON_MODEL=mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4
 
 # Legacy cloud provider keys:
@@ -84,6 +90,12 @@ MESHY_API_KEY=your-meshy-api-key
 # Optional:
 TRIPO_API_KEY=your-tripo-api-key
 AI_GATEWAY_API_KEY=your-vercel-ai-gateway-key
+
+# Optional Pixel3D Gradio provider:
+# GENERATION_3D_PROVIDER=pixel3d-gradio
+# PIXEL3D_GRADIO_BASE_URL=http://127.0.0.1:7860
+# PIXEL3D_GRADIO_API_NAME=/generate_3d
+# PIXEL3D_RESOLUTION=1024
 ```
 
 ### Running the Application
@@ -100,25 +112,50 @@ bun run dev:backend   # Terminal 2: API only, default port 3401
 
 The app will be available at `http://localhost:3400`, with the API on `http://localhost:3401`.
 
-### Coolify Deployment
+### Coolify + DGX Hill Provider
 
 For the deployed Asset Forge, set these Coolify environment variables:
 
 ```bash
-ASSET_FORGE_GENERATION_PROVIDER=meshy
+ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
+HILL_API_BASE_URL=https://vrmviewer.flobots.xyz
+HILL_GENERATION_MODE=create
+HILL_EXPORT_TARGET=library
+HILL_API_POLL_INTERVAL_MS=3000
+HILL_API_TIMEOUT_MS=1800000
+NEMOTRON_BASE_URL=http://monumentals-mac-studio.local:12345
+NEMOTRON_MODEL=mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4
+NEMOTRON_TEMPERATURE=0.2
+NEMOTRON_MAX_TOKENS=450
 VITE_GENERATION_API_URL=/api
-ASSET_FORGE_ASSETS_DIR=/tank/asset-forge/gdd-assets
 ```
 
-To use a separate Hill DGX service, set `ASSET_FORGE_GENERATION_PROVIDER=hill_dgx`
-and point `HILL_API_BASE_URL` at that service. Asset Forge no longer falls back
-to any viewer-hosted API implicitly.
+`HILL_API_BASE_URL` should point at the deployed VRM Viewer asset-library
+server. It must expose `/api/hill/conjure-jobs` and `/api/hill/file`, and the
+container must either mount the same `/tank` asset paths or proxy those file
+requests back to the DGX. With the provider set to
+`hill_dgx`, the existing `POST /api/generation/pipeline` endpoint stays the
+same for the UI, but the backend submits the job to Hill using the Flux Klein →
+Bruno Trellis2 `1024` no-cascade path with 2048 textures and LOD generation.
+Before submission, Asset Forge asks the local Nemotron OpenAI-compatible server
+to rewrite the creator request into a safer image-to-3D prompt.
 
-Generated assets are written to `ASSET_FORGE_ASSETS_DIR` when set, otherwise to
-`packages/asset-forge/gdd-assets`. Mount the CDN source to the same directory so
-new models are visible immediately; for local CDN this means setting
-`HYPERSCAPE_ASSETS_DIR` to the same path when running `packages/server`'s
-`docker-compose.yml`.
+### Pixel3D Gradio Provider
+
+Pixel3D can be used as the image-to-3D stage behind the existing Asset Forge
+pipeline endpoint:
+
+```bash
+GENERATION_3D_PROVIDER=pixel3d-gradio
+PIXEL3D_GRADIO_BASE_URL=http://127.0.0.1:7860
+PIXEL3D_GRADIO_API_NAME=/generate_3d
+PIXEL3D_RESOLUTION=1024
+```
+
+The built-in adapter defaults to the Pixel3D `/generate_3d` signature. For a
+custom Gradio app, `PIXEL3D_GRADIO_INPUTS` can override the ordered inputs sent
+to the API. A single request can also select this provider with
+`metadata.provider: "pixel3d-gradio"`.
 
 ## Project Structure
 
@@ -145,10 +182,26 @@ asset-forge/
 
 ### 1. Asset Generation (`/generation`)
 - Text-to-3D model pipeline
-- Prompt enhancement with GPT-4
+- Prompt enhancement with local Nemotron or legacy cloud models
 - Concept art generation
-- 3D model creation via Meshy.ai
+- 3D model creation via local Trellis2 or legacy Meshy/Tripo providers
 - Material variant generation
+
+### Unified Manifest Import
+
+Hill-generated packs should produce a `unified_manifest.json` that preserves the
+creator-facing metadata needed by VRM Viewer and the runtime metadata needed by
+Hyperscape. Import a pack from the Hyperscape repo root:
+
+```bash
+bun scripts/import-hill-manifest.mjs \
+  --manifest /path/to/hill/output/unified_manifest.json \
+  --assets-root packages/server/world/assets \
+  --biomes plains,forest
+```
+
+Use `--dry-run` first to verify copied GLBs, thumbnails, vegetation patches, and
+biome updates before writing files.
 
 ### 2. Asset Library (`/assets`)
 - Browse and manage generated assets
@@ -215,5 +268,5 @@ This project is licensed under the MIT License.
 ## Acknowledgments
 
 - Built for the Hyperscape RPG project
-- Powered by OpenAI and Meshy.ai APIs
+- Designed to support local DGX generation through Hill, with legacy cloud providers available where configured
 - Uses Three.js for 3D visualization

@@ -16,14 +16,17 @@
   const env = typeof window.env === "object" && window.env ? window.env : {};
   const currentPort = window.location.port;
   const isLocalDevServer =
-    currentPort === "3333" || currentPort === "4173" || currentPort === "5173";
+    currentPort === "3333" ||
+    currentPort === "3343" ||
+    currentPort === "4173" ||
+    currentPort === "5173";
 
   if (isLocalDevServer) {
     const host = window.location.hostname || "127.0.0.1";
     const isHttps = window.location.protocol === "https:";
     env.PUBLIC_API_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5558" : "5555"}`;
     env.PUBLIC_WS_URL ||= `${isHttps ? "wss" : "ws"}://${host}:${isHttps ? currentPort || "3333" : "5556"}/ws`;
-    env.PUBLIC_CDN_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5559" : "8080"}`;
+    env.PUBLIC_CDN_URL ||= `${isHttps ? "https" : "http"}://${host}:${isHttps ? "5559" : "5555/game-assets"}`;
   }
 
   window.env = env;

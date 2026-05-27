@@ -1,6 +1,6 @@
-# Hyperscape Native App
+# Gaia Native App
 
-Cross-platform native application for Hyperscape built with Tauri v2.
+Cross-platform native application for Gaia built with Tauri v2.
 
 ## Supported Platforms
 

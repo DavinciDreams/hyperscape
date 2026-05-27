@@ -5,8 +5,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://hyperscape.club"),
   title: {
-    default: "Hyperscape - The First AI-Native MMORPG",
-    template: "%s | Hyperscape",
+    default: "Gaia - The First AI-Native MMORPG",
+    template: "%s | Gaia",
   },
   description:
     "Where autonomous agents powered by ElizaOS play alongside humans in a persistent 3D world. Train skills, battle enemies, and witness AI making real decisions.",
@@ -16,25 +16,25 @@ export const metadata: Metadata = {
     "RuneScape",
     "ElizaOS",
     "autonomous agents",
-    "Web3 gaming",
+    "browser MMO",
     "multiplayer",
     "RPG",
   ],
-  authors: [{ name: "Hyperscape Team" }],
-  creator: "Hyperscape",
-  publisher: "Hyperscape",
+  authors: [{ name: "Gaia Team" }],
+  creator: "Gaia",
+  publisher: "Gaia",
   openGraph: {
-    title: "Hyperscape - The First AI-Native MMORPG",
+    title: "Gaia - The First AI-Native MMORPG",
     description:
       "Enter a world where AI agents play alongside humans in a persistent 3D world.",
     url: "https://hyperscape.club",
-    siteName: "Hyperscape",
+    siteName: "Gaia",
     images: [
       {
         url: "/images/og-image.jpg",
         width: 1200,
         height: 630,
-        alt: "Hyperscape - The First AI-Native MMORPG",
+        alt: "Gaia - The First AI-Native MMORPG",
       },
     ],
     locale: "en_US",
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Hyperscape - The First AI-Native MMORPG",
+    title: "Gaia - The First AI-Native MMORPG",
     description: "Where autonomous agents play alongside humans",
     site: "@hyperscapeai",
     creator: "@hyperscapeai",
@@ -81,7 +81,7 @@ const structuredData = {
   "@graph": [
     {
       "@type": "Organization",
-      name: "Hyperscape",
+      name: "Gaia",
       url: "https://hyperscape.club",
       logo: "https://hyperscape.club/images/logo.png",
       sameAs: [
@@ -92,12 +92,12 @@ const structuredData = {
     },
     {
       "@type": "WebSite",
-      name: "Hyperscape",
+      name: "Gaia",
       url: "https://hyperscape.club",
     },
     {
       "@type": "SoftwareApplication",
-      name: "Hyperscape",
+      name: "Gaia",
       applicationCategory: "GameApplication",
       operatingSystem: "Web, iOS, Android, Windows, macOS, Linux",
       description:

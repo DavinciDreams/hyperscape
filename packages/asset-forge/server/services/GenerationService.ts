@@ -6,8 +6,6 @@
 import EventEmitter from "events";
 import type { UserContextType, AssetMetadataType } from "../models";
 import { AICreationService } from "./AICreationService";
-import { ComfyUIService } from "./ComfyUIService";
-import { HillDGXService } from "./HillDGXService";
 import { ImageHostingService } from "./ImageHostingService";
 import { assetDatabaseService } from "./AssetDatabaseService";
 import {
@@ -18,20 +16,10 @@ import type { Static } from "elysia";
 import { MaterialPreset } from "../models";
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath } from "url";
 
 import fetch from "node-fetch";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT_DIR = path.resolve(__dirname, "..", "..");
-const ASSETS_DIR = path.resolve(
-  process.env.ASSET_FORGE_ASSETS_DIR || path.join(ROOT_DIR, "gdd-assets"),
-);
-const TEMP_IMAGES_DIR = path.resolve(
-  process.env.ASSET_FORGE_TEMP_IMAGES_DIR ||
-    path.join(ROOT_DIR, "temp-images"),
-);
+import { ComfyUITrellisService } from "./ComfyUITrellisService";
+import { Pixel3DGradioService } from "./Pixel3DGradioService";
 
 // ==================== Type Definitions ====================
 
@@ -263,8 +251,6 @@ interface HillConjureJob {
 export class GenerationService extends EventEmitter {
   private activePipelines: Map<string, Pipeline>;
   private aiService: AICreationService;
-  private comfyService: ComfyUIService;
-  private hillDGXService: HillDGXService;
   private imageHostingService: ImageHostingService;
 
   constructor() {
@@ -295,9 +281,6 @@ export class GenerationService extends EventEmitter {
         baseUrl: "https://api.meshy.ai",
       },
     });
-
-    this.comfyService = new ComfyUIService();
-    this.hillDGXService = new HillDGXService();
 
     // Initialize image hosting service
     this.imageHostingService = new ImageHostingService();
@@ -389,7 +372,10 @@ export class GenerationService extends EventEmitter {
       const useHillDgx = this.shouldUseHillDgxProvider(pipeline.config);
 
       // Stage 1: GPT-5 Prompt Enhancement (honor toggle; skip if explicitly disabled)
-      if (pipeline.config.metadata?.useGPT5Enhancement !== false) {
+      if (
+        !useHillDgx &&
+        pipeline.config.metadata?.useGPT5Enhancement !== false
+      ) {
         pipeline.stages.promptOptimization.status = "processing";
 
         try {
@@ -416,6 +402,33 @@ export class GenerationService extends EventEmitter {
           };
         }
 
+        pipeline.progress = 10;
+      } else if (useHillDgx) {
+        pipeline.stages.promptOptimization.status = "processing";
+        try {
+          const optimizationResult = await this.enhancePromptWithLocalNemotron(
+            pipeline.config,
+          );
+          enhancedPrompt = optimizationResult.optimizedPrompt;
+          pipeline.stages.promptOptimization.result = {
+            ...optimizationResult,
+          };
+        } catch (error) {
+          console.warn(
+            "Local Nemotron enhancement failed, using original prompt:",
+            error,
+          );
+          pipeline.stages.promptOptimization.result = {
+            originalPrompt: pipeline.config.description,
+            optimizedPrompt: pipeline.config.description,
+            provider: "local_nemotron",
+            error: (error as Error).message,
+          };
+        }
+        pipeline.stages.promptOptimization.status = "completed";
+        pipeline.stages.promptOptimization.progress = 100;
+        pipeline.results.promptOptimization =
+          pipeline.stages.promptOptimization.result;
         pipeline.progress = 10;
       } else {
         pipeline.stages.promptOptimization.status = "skipped";
@@ -506,11 +519,9 @@ export class GenerationService extends EventEmitter {
             }
           }
 
-          const imageResult = this.shouldUseComfyImage()
-            ? await this.generateImageWithComfy(imagePrompt)
-            : await this.aiService
-                .getImageService()
-                .generateImage(imagePrompt, pipeline.config.type, effectiveStyle);
+          const imageResult = await this.aiService
+            .getImageService()
+            .generateImage(imagePrompt, pipeline.config.type, effectiveStyle);
 
           imageUrl = imageResult.imageUrl;
 
@@ -527,51 +538,251 @@ export class GenerationService extends EventEmitter {
         }
       }
 
-      // Stage 3: Image to 3D with Meshy AI
+      // Stage 3: Image to 3D with the configured provider
       pipeline.stages.image3D.status = "processing";
 
       try {
-        // Save image to disk first if it's a data URL
-        let imageUrlForMeshy = imageUrl!;
-        if (imageUrl!.startsWith("data:")) {
-          const imageData = imageUrl!.split(",")[1];
-          const imageBuffer = Buffer.from(imageData, "base64");
-          const imagePath = path.join(
-            TEMP_IMAGES_DIR,
-            `${pipeline.config.assetId}-concept.png`,
-          );
-          await fs.mkdir(TEMP_IMAGES_DIR, { recursive: true });
-          await fs.writeFile(imagePath, imageBuffer);
+        const modelProvider = this.getModelProvider(pipeline.config);
 
-          // If we have an image server, use it
-          if (process.env.IMAGE_SERVER_URL) {
-            imageUrlForMeshy = `${process.env.IMAGE_SERVER_URL}/temp-images/${path.basename(imagePath)}`;
-          } else {
-            // Need to upload to a public URL for Meshy
-            console.warn(
-              "No IMAGE_SERVER_URL configured, Meshy needs a public URL",
+        if (modelProvider === "comfyui-trellis") {
+          console.log("🧊 Starting ComfyUI Trellis image-to-3D generation...");
+          const trellisService = new ComfyUITrellisService();
+          const trellisResult = await trellisService.generateModel({
+            assetId: pipeline.config.assetId,
+            prompt: enhancedPrompt,
+            imageUrl: imageUrl!,
+            quality: pipeline.config.quality,
+            onProgress: (progress) => {
+              pipeline.stages.image3D.progress = progress;
+            },
+          });
+
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          await fs.mkdir(outputDir, { recursive: true });
+
+          const rawModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}_raw.glb`,
+          );
+          await fs.writeFile(rawModelPath, trellisResult.modelBuffer);
+
+          const normalizedModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}.glb`,
+          );
+          await fs.copyFile(rawModelPath, normalizedModelPath);
+          baseModelPath = normalizedModelPath;
+
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            await fs.writeFile(
+              path.join(outputDir, "concept-art.png"),
+              imageBuffer,
             );
           }
-        }
 
-        let modelBuffer: Buffer;
-        let modelUrl = "";
-        let modelPolycount: number | undefined;
+          const metadata = {
+            id: pipeline.config.assetId,
+            name: pipeline.config.assetId,
+            gameId: pipeline.config.assetId,
+            type: pipeline.config.type,
+            subtype: pipeline.config.subtype,
+            description: pipeline.config.description,
+            detailedPrompt: enhancedPrompt,
+            generatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            isBaseModel: true,
+            materialVariants: pipeline.config.materialPresets
+              ? pipeline.config.materialPresets.map((preset) => preset.id)
+              : [],
+            isPlaceholder: false,
+            hasModel: true,
+            hasConceptArt: true,
+            modelPath: baseModelPath,
+            conceptArtUrl: "./concept-art.png",
+            gddCompliant: true,
+            workflow:
+              "GPT-5 → GPT-Image-1 → ComfyUI Trellis Image-to-3D (Base Model)",
+            generationProvider: "comfyui-trellis",
+            comfyPromptId: trellisResult.promptId,
+            comfyOutputFile: trellisResult.outputFile,
+            variants: [],
+            variantCount: 0,
+            lastVariantGenerated: null,
+            updatedAt: new Date().toISOString(),
+            normalized: false,
+            createdBy: pipeline.config.user?.privyId || null,
+            walletAddress: pipeline.config.user?.walletAddress || null,
+            isPublic: true,
+          };
 
-        if (this.shouldUseComfy3D()) {
-          const imagePath = await this.writeImageToTempFile(
-            imageUrl!,
-            pipeline.config.assetId,
+          await fs.writeFile(
+            path.join(outputDir, "metadata.json"),
+            JSON.stringify(metadata, null, 2),
           );
-          const comfyResult = await this.comfyService.generateModelFromImage(
-            imagePath,
-            enhancedPrompt,
-          );
-          meshyTaskId = `comfy:${comfyResult.promptId}`;
-          modelBuffer = comfyResult.buffer;
-          modelUrl = comfyResult.url;
+
+          if (pipeline.config.user?.privyId) {
+            try {
+              await assetDatabaseService.createAssetRecord(
+                pipeline.config.assetId,
+                metadata as AssetMetadataType,
+                pipeline.config.user.privyId,
+                `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+              );
+            } catch (error) {
+              console.error(
+                "[GenerationService] Failed to create database record for asset:",
+                error,
+              );
+            }
+          }
+
+          pipeline.stages.image3D.status = "completed";
           pipeline.stages.image3D.progress = 100;
+          pipeline.stages.image3D.result = {
+            taskId: trellisResult.promptId,
+            provider: "comfyui-trellis",
+            modelUrl: trellisResult.modelUrl,
+            localPath: baseModelPath,
+          };
+          pipeline.results.image3D = pipeline.stages.image3D.result;
+          pipeline.progress = 50;
+        } else if (modelProvider === "pixel3d-gradio") {
+          console.log("🧊 Starting Pixel3D Gradio image-to-3D generation...");
+          const pixel3DMetadata = pipeline.config.metadata as
+            | Record<string, unknown>
+            | undefined;
+          const pixel3DService = new Pixel3DGradioService({
+            apiName:
+              typeof pixel3DMetadata?.pixel3DApiName === "string"
+                ? pixel3DMetadata.pixel3DApiName
+                : undefined,
+          });
+          const pixel3DResult = await pixel3DService.generateModel({
+            assetId: pipeline.config.assetId,
+            prompt: enhancedPrompt,
+            imageUrl: imageUrl!,
+            quality: pipeline.config.quality,
+            onProgress: (progress) => {
+              pipeline.stages.image3D.progress = progress;
+            },
+          });
+
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          await fs.mkdir(outputDir, { recursive: true });
+
+          const rawModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}_raw.glb`,
+          );
+          await fs.writeFile(rawModelPath, pixel3DResult.modelBuffer);
+
+          const normalizedModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}.glb`,
+          );
+          await fs.copyFile(rawModelPath, normalizedModelPath);
+          baseModelPath = normalizedModelPath;
+
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            await fs.writeFile(
+              path.join(outputDir, "concept-art.png"),
+              imageBuffer,
+            );
+          }
+
+          const metadata = {
+            id: pipeline.config.assetId,
+            name: pipeline.config.name,
+            gameId: pipeline.config.assetId,
+            type: pipeline.config.type,
+            subtype: pipeline.config.subtype,
+            description: pipeline.config.description,
+            detailedPrompt: enhancedPrompt,
+            generatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            isBaseModel: true,
+            materialVariants: pipeline.config.materialPresets
+              ? pipeline.config.materialPresets.map((preset) => preset.id)
+              : [],
+            isPlaceholder: false,
+            hasModel: true,
+            hasConceptArt: true,
+            modelPath: baseModelPath,
+            conceptArtUrl: "./concept-art.png",
+            gddCompliant: true,
+            workflow: "GPT-5 → GPT-Image-1 → Pixel3D Gradio Image-to-3D",
+            generationProvider: "pixel3d-gradio",
+            pixel3DJobId: pixel3DResult.jobId,
+            pixel3DModelUrl: pixel3DResult.modelUrl,
+            variants: [],
+            variantCount: 0,
+            lastVariantGenerated: null,
+            updatedAt: new Date().toISOString(),
+            normalized: false,
+            createdBy: pipeline.config.user?.privyId || null,
+            walletAddress: pipeline.config.user?.walletAddress || null,
+            isPublic: true,
+          };
+
+          await fs.writeFile(
+            path.join(outputDir, "metadata.json"),
+            JSON.stringify(metadata, null, 2),
+          );
+
+          if (pipeline.config.user?.privyId) {
+            try {
+              await assetDatabaseService.createAssetRecord(
+                pipeline.config.assetId,
+                metadata as AssetMetadataType,
+                pipeline.config.user.privyId,
+                `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+              );
+            } catch (error) {
+              console.error(
+                "[GenerationService] Failed to create database record for asset:",
+                error,
+              );
+            }
+          }
+
+          pipeline.stages.image3D.status = "completed";
+          pipeline.stages.image3D.progress = 100;
+          pipeline.stages.image3D.result = {
+            taskId: pixel3DResult.jobId,
+            provider: "pixel3d-gradio",
+            modelUrl: pixel3DResult.modelUrl,
+            localPath: baseModelPath,
+          };
+          pipeline.results.image3D = pipeline.stages.image3D.result;
+          pipeline.progress = 50;
         } else {
+          // Save image to disk first if it's a data URL
+          let imageUrlForMeshy = imageUrl!;
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            const imagePath = path.join(
+              "temp-images",
+              `${pipeline.config.assetId}-concept.png`,
+            );
+            await fs.mkdir("temp-images", { recursive: true });
+            await fs.writeFile(imagePath, imageBuffer);
+
+            // If we have an image server, use it
+            if (process.env.IMAGE_SERVER_URL) {
+              imageUrlForMeshy = `${process.env.IMAGE_SERVER_URL}/temp-images/${path.basename(imagePath)}`;
+            } else {
+              // Need to upload to a public URL for Meshy
+              console.warn(
+                "No IMAGE_SERVER_URL configured, Meshy needs a public URL",
+              );
+            }
+          }
+
           // Ensure we have a publicly accessible URL for Meshy
           console.log("📸 Initial image URL:", imageUrlForMeshy);
 
@@ -659,7 +870,10 @@ export class GenerationService extends EventEmitter {
               "300000",
             10,
           );
-          const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollIntervalMs));
+          const maxAttempts = Math.max(
+            1,
+            Math.ceil(timeoutMs / pollIntervalMs),
+          );
 
           console.log(
             `⏳ Meshy polling configured: quality=${quality}, model=${aiModel}, interval=${pollIntervalMs}ms, timeout=${timeoutMs}ms, maxAttempts=${maxAttempts}`,
@@ -692,218 +906,182 @@ export class GenerationService extends EventEmitter {
             throw new Error("Meshy conversion timed out");
           }
 
-          modelUrl = meshyResult.model_urls.glb;
-          modelPolycount = meshyResult.polycount;
-          modelBuffer = await this.downloadFile(modelUrl);
-        }
-
-        const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
-        await fs.mkdir(outputDir, { recursive: true });
-
-        // Save raw model first
-        const rawModelPath = path.join(
-          outputDir,
-          `${pipeline.config.assetId}_raw.glb`,
-        );
-        await fs.writeFile(rawModelPath, modelBuffer);
-
-        // Normalize the model based on type
-        let normalizedModelPath = path.join(
-          outputDir,
-          `${pipeline.config.assetId}.glb`,
-        );
-
-        if (pipeline.config.type === "character") {
-          // Normalize character height
-          console.log("🔧 Normalizing character model...");
-          try {
-            const { AssetNormalizationService } =
-              await import("../../src/services/processing/AssetNormalizationService.js");
-            const normalizer = new AssetNormalizationService();
-
-            const targetHeight =
-              pipeline.config.metadata?.characterHeight ||
-              pipeline.config.riggingOptions?.heightMeters ||
-              1.83;
-
-            const normalized = await normalizer.normalizeCharacter(
-              rawModelPath,
-              targetHeight,
-            );
-            await fs.writeFile(
-              normalizedModelPath,
-              Buffer.from(normalized.glb),
-            );
-
-            console.log(`✅ Character normalized to ${targetHeight}m height`);
-
-            // Update with normalized dimensions
-            pipeline.stages.image3D.normalized = true;
-            pipeline.stages.image3D.dimensions = normalized.metadata.dimensions;
-          } catch (error) {
-            console.warn(
-              "⚠️ Normalization failed, using raw model:",
-              (error as Error).message,
-            );
-            await fs.copyFile(rawModelPath, normalizedModelPath);
-          }
-        } else if (pipeline.config.type === "weapon") {
-          // Normalize weapon with grip at origin
-          console.log("🔧 Normalizing weapon model...");
-          try {
-            const { WeaponHandleDetector } =
-              await import("../../src/services/processing/WeaponHandleDetector.js");
-            const detector = new WeaponHandleDetector();
-
-            const result = await detector.exportNormalizedWeapon(
-              rawModelPath,
-              normalizedModelPath,
-            );
-
-            console.log(`✅ Weapon normalized with grip at origin`);
-
-            // Update with normalized dimensions
-            pipeline.stages.image3D.normalized = true;
-            pipeline.stages.image3D.dimensions = {
-              width: result.dimensions.width,
-              height: result.dimensions.height,
-              depth: result.dimensions.length,
-            };
-          } catch (error) {
-            console.warn(
-              "⚠️ Weapon normalization failed, using raw model:",
-              (error as Error).message,
-            );
-            await fs.copyFile(rawModelPath, normalizedModelPath);
-          }
-        } else {
-          // For other types, just copy for now
-          await fs.copyFile(rawModelPath, normalizedModelPath);
-        }
-
-        baseModelPath = normalizedModelPath;
-
-        let hillLibraryAsset: Record<string, unknown> | undefined;
-        if (this.shouldExportToHillDGX()) {
-          try {
-            const normalizedBuffer = await fs.readFile(normalizedModelPath);
-            const hillAsset = await this.hillDGXService.publishModel(
-              normalizedBuffer,
-              {
-                assetId: pipeline.config.assetId,
-                name: pipeline.config.name || pipeline.config.assetId,
-                description: pipeline.config.description,
-                type: pipeline.config.type,
-                subtype: pipeline.config.subtype,
-                prompt: enhancedPrompt,
-              },
-            );
-            hillLibraryAsset = hillAsset as Record<string, unknown>;
-            console.log(
-              `[GenerationService] Exported ${pipeline.config.assetId} to Hill library`,
-              hillAsset.uuid || hillAsset.id || hillAsset.name || "",
-            );
-          } catch (error) {
-            console.error(
-              "[GenerationService] Hill DGX library export failed:",
-              error,
-            );
-            throw error;
-          }
-        }
-
-        // Save concept art
-        if (imageUrl!.startsWith("data:")) {
-          const imageData = imageUrl!.split(",")[1];
-          const imageBuffer = Buffer.from(imageData, "base64");
-          await fs.writeFile(
-            path.join(outputDir, "concept-art.png"),
-            imageBuffer,
+          // Download and save the model
+          const modelBuffer = await this.downloadFile(
+            meshyResult.model_urls.glb,
           );
-        }
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+          await fs.mkdir(outputDir, { recursive: true });
 
-        // Save metadata - EXACT structure from arrows-base reference
-        const metadata = {
-          id: pipeline.config.assetId,
-          name: pipeline.config.assetId,
-          gameId: pipeline.config.assetId,
-          type: pipeline.config.type,
-          subtype: pipeline.config.subtype,
-          description: pipeline.config.description,
-          detailedPrompt: enhancedPrompt,
-          generatedAt: new Date().toISOString(),
-          completedAt: new Date().toISOString(),
-          isBaseModel: true,
-          materialVariants: pipeline.config.materialPresets
-            ? pipeline.config.materialPresets.map((preset) => preset.id)
-            : [],
-          isPlaceholder: false,
-          hasModel: true,
-          hasConceptArt: true,
-          modelPath: baseModelPath,
-          conceptArtUrl: "./concept-art.png",
-          gddCompliant: true,
-          workflow: this.shouldUseComfy3D()
-            ? "GPT-5 → ComfyUI Flux/Klein → ComfyUI Trellis (Base Model)"
-            : this.shouldExportToHillDGX()
-              ? "GPT-5 → GPT-Image-1 → Meshy Image-to-3D → Hill DGX Library (Base Model)"
-              : "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
-          meshyTaskId: meshyTaskId,
-          meshyStatus: "completed",
-          hillDGXAssetId:
-            (hillLibraryAsset?.uuid as string | undefined) ||
-            (hillLibraryAsset?.id as string | undefined),
-          hillDGXSourcePath: hillLibraryAsset?.sourcePath as string | undefined,
-          variants: [], // Will be populated as variants are generated
-          variantCount: 0,
-          lastVariantGenerated: null,
-          updatedAt: new Date().toISOString(),
-          // Normalization info
-          normalized: pipeline.stages.image3D.normalized || false,
-          normalizationDate: pipeline.stages.image3D.normalized
-            ? new Date().toISOString()
-            : undefined,
-          dimensions: pipeline.stages.image3D.dimensions || undefined,
-          // Ownership tracking (Phase 1)
-          createdBy: pipeline.config.user?.privyId || null,
-          walletAddress: pipeline.config.user?.walletAddress || null,
-          isPublic: true, // Default to public for Phase 1
-        };
+          // Save raw model first
+          const rawModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}_raw.glb`,
+          );
+          await fs.writeFile(rawModelPath, modelBuffer);
 
-        await fs.writeFile(
-          path.join(outputDir, "metadata.json"),
-          JSON.stringify(metadata, null, 2),
-        );
+          // Normalize the model based on type
+          let normalizedModelPath = path.join(
+            outputDir,
+            `${pipeline.config.assetId}.glb`,
+          );
 
-        // Create database record for the asset
-        if (pipeline.config.user?.privyId) {
-          try {
-            await assetDatabaseService.createAssetRecord(
-              pipeline.config.assetId,
-              metadata as AssetMetadataType,
-              pipeline.config.user.privyId,
-              `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
-            );
-          } catch (error) {
-            console.error(
-              "[GenerationService] Failed to create database record for asset:",
-              error,
-            );
-            // Continue - don't fail pipeline if DB creation fails
+          if (pipeline.config.type === "character") {
+            // Normalize character height
+            console.log("🔧 Normalizing character model...");
+            try {
+              const { AssetNormalizationService } =
+                await import("../../src/services/processing/AssetNormalizationService.js");
+              const normalizer = new AssetNormalizationService();
+
+              const targetHeight =
+                pipeline.config.metadata?.characterHeight ||
+                pipeline.config.riggingOptions?.heightMeters ||
+                1.83;
+
+              const normalized = await normalizer.normalizeCharacter(
+                rawModelPath,
+                targetHeight,
+              );
+              await fs.writeFile(
+                normalizedModelPath,
+                Buffer.from(normalized.glb),
+              );
+
+              console.log(`✅ Character normalized to ${targetHeight}m height`);
+
+              // Update with normalized dimensions
+              pipeline.stages.image3D.normalized = true;
+              pipeline.stages.image3D.dimensions =
+                normalized.metadata.dimensions;
+            } catch (error) {
+              console.warn(
+                "⚠️ Normalization failed, using raw model:",
+                (error as Error).message,
+              );
+              await fs.copyFile(rawModelPath, normalizedModelPath);
+            }
+          } else if (pipeline.config.type === "weapon") {
+            // Normalize weapon with grip at origin
+            console.log("🔧 Normalizing weapon model...");
+            try {
+              const { WeaponHandleDetector } =
+                await import("../../src/services/processing/WeaponHandleDetector.js");
+              const detector = new WeaponHandleDetector();
+
+              const result = await detector.exportNormalizedWeapon(
+                rawModelPath,
+                normalizedModelPath,
+              );
+
+              console.log(`✅ Weapon normalized with grip at origin`);
+
+              // Update with normalized dimensions
+              pipeline.stages.image3D.normalized = true;
+              pipeline.stages.image3D.dimensions = {
+                width: result.dimensions.width,
+                height: result.dimensions.height,
+                depth: result.dimensions.length,
+              };
+            } catch (error) {
+              console.warn(
+                "⚠️ Weapon normalization failed, using raw model:",
+                (error as Error).message,
+              );
+              await fs.copyFile(rawModelPath, normalizedModelPath);
+            }
+          } else {
+            // For other types, just copy for now
+            await fs.copyFile(rawModelPath, normalizedModelPath);
           }
-        }
 
-        pipeline.stages.image3D.status = "completed";
-        pipeline.stages.image3D.progress = 100;
-        pipeline.stages.image3D.result = {
-          taskId: meshyTaskId,
-          modelUrl,
-          polycount: modelPolycount,
-          localPath: baseModelPath,
-          hillDGX: hillLibraryAsset,
-        };
-        pipeline.results.image3D = pipeline.stages.image3D.result;
-        pipeline.progress = 50;
+          baseModelPath = normalizedModelPath;
+
+          // Save concept art
+          if (imageUrl!.startsWith("data:")) {
+            const imageData = imageUrl!.split(",")[1];
+            const imageBuffer = Buffer.from(imageData, "base64");
+            await fs.writeFile(
+              path.join(outputDir, "concept-art.png"),
+              imageBuffer,
+            );
+          }
+
+          // Save metadata - EXACT structure from arrows-base reference
+          const metadata = {
+            id: pipeline.config.assetId,
+            name: pipeline.config.assetId,
+            gameId: pipeline.config.assetId,
+            type: pipeline.config.type,
+            subtype: pipeline.config.subtype,
+            description: pipeline.config.description,
+            detailedPrompt: enhancedPrompt,
+            generatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            isBaseModel: true,
+            materialVariants: pipeline.config.materialPresets
+              ? pipeline.config.materialPresets.map((preset) => preset.id)
+              : [],
+            isPlaceholder: false,
+            hasModel: true,
+            hasConceptArt: true,
+            modelPath: baseModelPath,
+            conceptArtUrl: "./concept-art.png",
+            gddCompliant: true,
+            workflow: "GPT-5 → GPT-Image-1 → Meshy Image-to-3D (Base Model)",
+            meshyTaskId: meshyTaskId,
+            meshyStatus: "completed",
+            variants: [], // Will be populated as variants are generated
+            variantCount: 0,
+            lastVariantGenerated: null,
+            updatedAt: new Date().toISOString(),
+            // Normalization info
+            normalized: pipeline.stages.image3D.normalized || false,
+            normalizationDate: pipeline.stages.image3D.normalized
+              ? new Date().toISOString()
+              : undefined,
+            dimensions: pipeline.stages.image3D.dimensions || undefined,
+            // Ownership tracking (Phase 1)
+            createdBy: pipeline.config.user?.privyId || null,
+            walletAddress: pipeline.config.user?.walletAddress || null,
+            isPublic: true, // Default to public for Phase 1
+          };
+
+          await fs.writeFile(
+            path.join(outputDir, "metadata.json"),
+            JSON.stringify(metadata, null, 2),
+          );
+
+          // Create database record for the asset
+          if (pipeline.config.user?.privyId) {
+            try {
+              await assetDatabaseService.createAssetRecord(
+                pipeline.config.assetId,
+                metadata as AssetMetadataType,
+                pipeline.config.user.privyId,
+                `${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+              );
+            } catch (error) {
+              console.error(
+                "[GenerationService] Failed to create database record for asset:",
+                error,
+              );
+              // Continue - don't fail pipeline if DB creation fails
+            }
+          }
+
+          pipeline.stages.image3D.status = "completed";
+          pipeline.stages.image3D.progress = 100;
+          pipeline.stages.image3D.result = {
+            taskId: meshyTaskId,
+            provider: "meshy",
+            modelUrl: meshyResult.model_urls.glb,
+            polycount: meshyResult.polycount,
+            localPath: baseModelPath,
+          };
+          pipeline.results.image3D = pipeline.stages.image3D.result;
+          pipeline.progress = 50;
+        }
       } catch (error) {
         console.error("Image to 3D conversion failed:", error);
         pipeline.stages.image3D.status = "failed";
@@ -913,6 +1091,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 4: Material Variant Generation (Retexturing)
       if (
+        this.getModelProvider(pipeline.config) === "meshy" &&
         pipeline.config.enableRetexturing &&
         pipeline.config.materialPresets?.length! > 0
       ) {
@@ -981,7 +1160,7 @@ export class GenerationService extends EventEmitter {
 
             // Save variant
             const variantId = `${pipeline.config.assetId}-${preset.id}`;
-            const variantDir = path.join(ASSETS_DIR, variantId);
+            const variantDir = path.join("gdd-assets", variantId);
             await fs.mkdir(variantDir, { recursive: true });
 
             const variantBuffer = await this.downloadFile(
@@ -994,7 +1173,7 @@ export class GenerationService extends EventEmitter {
 
             // Copy concept art
             const conceptArtPath = path.join(
-              ASSETS_DIR,
+              "gdd-assets",
               pipeline.config.assetId,
               "concept-art.png",
             );
@@ -1083,7 +1262,7 @@ export class GenerationService extends EventEmitter {
         const successfulVariants = variants.filter((v) => v.success);
         if (successfulVariants.length > 0) {
           const baseMetadataPath = path.join(
-            ASSETS_DIR,
+            "gdd-assets",
             pipeline.config.assetId,
             "metadata.json",
           );
@@ -1108,6 +1287,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 5: Auto-Rigging (for avatars only)
       if (
+        this.getModelProvider(pipeline.config) === "meshy" &&
         pipeline.config.generationType === "avatar" &&
         pipeline.config.enableRigging &&
         meshyTaskId
@@ -1163,7 +1343,7 @@ export class GenerationService extends EventEmitter {
           }
 
           // Download rigged model and animations
-          const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
+          const outputDir = path.join("gdd-assets", pipeline.config.assetId);
           const riggedAssets: Record<string, string> = {};
 
           // IMPORTANT: For rigged avatars, we DON'T replace the main model
@@ -1273,7 +1453,7 @@ export class GenerationService extends EventEmitter {
 
           // Update metadata to indicate rigging failed
           try {
-            const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
+            const outputDir = path.join("gdd-assets", pipeline.config.assetId);
             const metadataPath = path.join(outputDir, "metadata.json");
             const metadata = JSON.parse(
               await fs.readFile(metadataPath, "utf-8"),
@@ -1312,8 +1492,8 @@ export class GenerationService extends EventEmitter {
       pipeline.finalAsset = {
         id: pipeline.config.assetId,
         name: pipeline.config.name,
-        modelUrl: `/api/assets/${pipeline.config.assetId}/model`,
-        conceptArtUrl: `/api/assets/${pipeline.config.assetId}/concept-art.png`,
+        modelUrl: `/assets/${pipeline.config.assetId}/${pipeline.config.assetId}.glb`,
+        conceptArtUrl: `/assets/${pipeline.config.assetId}/concept-art.png`,
         variants:
           ((pipeline.results.textureGeneration as Record<string, unknown>)
             ?.variants as FinalAssetVariant[]) || [],
@@ -1325,405 +1505,56 @@ export class GenerationService extends EventEmitter {
     }
   }
 
-  /**
-   * Enhance prompt with GPT-5, Nemotron, or another OpenAI-compatible model.
-   */
-  private hasWeaponIntent(text: string): boolean {
-    const normalized = text.toLowerCase().replace(/[_-]+/g, " ");
-    return [
-      "weapon",
-      "sword",
-      "blade",
-      "dagger",
-      "axe",
-      "mace",
-      "staff",
-      "spear",
-      "bow",
-      "crossbow",
-      "wand",
-      "club",
-      "hammer",
-      "halberd",
-      "scythe",
-      "shield",
-      "gun",
-      "rifle",
-      "pistol",
-    ].some((term) => new RegExp(`\\b${term}\\b`, "i").test(normalized));
-  }
-
-  private inferPromptSubjectType(config: PipelineConfig): string {
-    const requestedType = (config.type || "asset").toLowerCase();
-    const description = `${config.name ?? ""} ${config.description ?? ""}`
-      .toLowerCase()
-      .replace(/[_-]+/g, " ");
-
-    const hasAny = (terms: string[]) =>
-      terms.some((term) => new RegExp(`\\b${term}\\b`, "i").test(description));
-
-    const hasWeaponIntent = this.hasWeaponIntent(description);
-
-    if (requestedType === "weapon" && !hasWeaponIntent) {
-      if (
-        hasAny([
-          "dog",
-          "doberman",
-          "pinscher",
-          "cat",
-          "horse",
-          "wolf",
-          "bear",
-          "boar",
-          "deer",
-          "fox",
-          "bird",
-          "fish",
-          "creature",
-          "animal",
-          "beast",
-          "monster",
-          "pet",
-          "npc",
-          "character",
-        ])
-      ) {
-        return "creature";
-      }
-      if (
-        hasAny([
-          "house",
-          "hut",
-          "cabin",
-          "cottage",
-          "tower",
-          "building",
-          "shop",
-          "inn",
-          "temple",
-        ])
-      ) {
-        return "building";
-      }
-      if (hasAny(["tree", "plant", "flower", "bush", "mushroom", "log"])) {
-        return "natural prop";
-      }
-      return "prop";
-    }
-
-    return requestedType;
-  }
-
-  private sanitizeEnhancedPrompt(
-    prompt: string,
-    config: PipelineConfig,
-    promptSubjectType: string,
-  ): string {
-    const baseText = `${config.name ?? ""} ${config.description ?? ""}`;
-    const originalHadWeaponIntent = this.hasWeaponIntent(baseText);
-    const enhancedHasWeaponIntent = this.hasWeaponIntent(prompt);
-    if (!originalHadWeaponIntent && enhancedHasWeaponIntent) {
-      console.warn(
-        `[PromptEnhancement] Discarding weapon-contaminated prompt for ${promptSubjectType}: ${prompt}`,
-      );
-      return [
-        config.description,
-        `${config.style || "game-ready"} style`,
-        `faithful ${promptSubjectType} subject`,
-        "single centered subject, full form visible",
-        "clean silhouette, neutral studio lighting",
-        "no weapons, no blade, no handle, no held items",
-      ].join(", ");
-    }
-
-    return prompt
-      .replace(/^["'`]+|["'`]+$/g, "")
-      .replace(/\*\*/g, "")
-      .replace(/^#+\s*/gm, "")
-      .trim();
-  }
-
-  private async enhancePromptWithGPT5(
-    config: PipelineConfig,
-  ): Promise<PromptEnhancementResult> {
-    const enhancementProvider = (
-      process.env.PROMPT_ENHANCEMENT_PROVIDER ||
-      process.env.ASSET_FORGE_PROMPT_PROVIDER ||
-      ""
-    ).toLowerCase();
-    const useNemotron =
-      enhancementProvider === "nemotron" ||
-      enhancementProvider === "local" ||
-      !!process.env.NEMOTRON_API_BASE_URL;
-    const useAIGateway = !useNemotron && !!process.env.AI_GATEWAY_API_KEY;
-    const useDirectOpenAI =
-      !useNemotron && !useAIGateway && !!process.env.OPENAI_API_KEY;
-
-    if (!useNemotron && !useAIGateway && !useDirectOpenAI) {
-      throw new Error(
-        "NEMOTRON_API_BASE_URL, AI_GATEWAY_API_KEY, or OPENAI_API_KEY required for prompt enhancement",
-      );
-    }
-
-    // Load GPT-5 enhancement prompts
-    const gpt5Prompts = await getGPT5EnhancementPrompts();
-
-    const promptSubjectType = this.inferPromptSubjectType(config);
-    const requestedType = (config.type || "").toLowerCase();
-    const typeWasInferred = promptSubjectType !== requestedType;
-    const isAvatar =
-      config.generationType === "avatar" || promptSubjectType === "character";
-    const isArmor = promptSubjectType === "armor";
-    const isChestArmor =
-      isArmor &&
-      (config.subtype?.toLowerCase().includes("chest") ||
-        config.subtype?.toLowerCase().includes("body"));
-
-    // Build system prompt from loaded prompts
-    let systemPrompt =
-      gpt5Prompts?.systemPrompt?.base ||
-      `You are an expert at optimizing prompts for 3D asset generation.
-Your task is to enhance the user's description to create better results with image generation and 3D conversion.`;
-
-    if (isAvatar) {
-      systemPrompt +=
-        "\n" +
-        (gpt5Prompts?.typeSpecific?.avatar?.critical ||
-          `CRITICAL for characters: The character MUST be in a T-pose (arms stretched out horizontally, legs slightly apart) for proper rigging. The character must have EMPTY HANDS - no weapons, tools, or held items. Always add "standing in T-pose with empty hands" to the description.`);
-    }
-
-    if (isArmor) {
-      systemPrompt +=
-        "\n" +
-        (gpt5Prompts?.typeSpecific?.armor?.base ||
-          `CRITICAL for armor pieces: The armor must be shown ALONE without any armor stand, mannequin, or body inside.`);
-      if (isChestArmor) {
-        systemPrompt +=
-          " " +
-          (gpt5Prompts?.typeSpecific?.armor?.chest ||
-            "EXTRA IMPORTANT for chest/body armor: This MUST be shaped for a SCARECROW POSE (T-POSE) - imagine a scarecrow with arms sticking STRAIGHT OUT SIDEWAYS...");
-      }
-      systemPrompt +=
-        " " +
-        (gpt5Prompts?.typeSpecific?.armor?.positioning ||
-          "The armor MUST be positioned and SHAPED for a SCARECROW/T-POSE body...");
-    }
-
-    systemPrompt +=
-      "\nSubject fidelity rules:\n" +
-      "- Preserve the user's requested subject exactly; do not turn animals, characters, buildings, or props into weapons unless the user explicitly asked for a weapon.\n" +
-      "- Do not add blades, handles, grips, barrels, guards, or weapon parts unless they are present in the user's description.\n" +
-      "- Output only the final image-to-3D prompt as plain text; no markdown, headings, explanations, or bullet lists.";
-
-    if (typeWasInferred) {
-      systemPrompt += `\nThe UI category was "${config.type}", but the description reads as a ${promptSubjectType}. Treat it as a ${promptSubjectType}, not as a ${config.type}.`;
-    }
-
-    // Add focus points
-    const focusPoints = gpt5Prompts?.systemPrompt?.focusPoints || [
-      "Clear, specific visual details",
-      "Material and texture descriptions",
-      "Geometric shape and form",
-      `Style consistency (especially for ${config.style || "low-poly RuneScape"} style)`,
-    ];
-
-    systemPrompt +=
-      "\nFocus on:\n" +
-      focusPoints
-        .map(
-          (point) =>
-            "- " +
-            point.replace(
-              "${config.style || 'low-poly RuneScape'}",
-              config.style || "low-poly RuneScape",
-            ),
-        )
-        .join("\n");
-
-    if (isAvatar) {
-      systemPrompt +=
-        "\n" +
-        (gpt5Prompts?.typeSpecific?.avatar?.focus ||
-          "- T-pose stance with empty hands for rigging compatibility");
-    }
-
-    if (isArmor) {
-      const armorFocus = gpt5Prompts?.typeSpecific?.armor?.focus || [
-        "- Armor SHAPED for T-pose body (shoulder openings pointing straight sideways, not down)",
-        '- Chest armor should form a "T" or cross shape when viewed from above',
-        "- Shoulder openings at 180° angle to each other (straight line across)",
-      ];
-      systemPrompt += "\n" + armorFocus.join("\n");
-    }
-
-    systemPrompt +=
-      "\n" +
-      (gpt5Prompts?.systemPrompt?.closingInstruction ||
-        "Keep the enhanced prompt concise but detailed.");
-
-    // Include custom game style text (if present) ahead of the description for better style adherence
-    const stylePrefix = config.customPrompts?.gameStyle
-      ? `${config.customPrompts.gameStyle} — `
-      : "";
-    const baseDescription = `${stylePrefix}${config.description}`;
-    const userPrompt = isArmor
-      ? (gpt5Prompts?.typeSpecific?.armor?.enhancementPrefix ||
-          `Enhance this armor piece description for 3D generation. CRITICAL: The armor must be SHAPED FOR A T-POSE BODY - shoulder openings must point STRAIGHT SIDEWAYS at 90 degrees (like a scarecrow), NOT angled downward! Should look like a wide "T" shape. Ends at shoulders (no arm extensions), hollow openings, no armor stand: `) +
-        `"${baseDescription}"`
-      : `Enhance this ${promptSubjectType} description for image-to-3D asset generation: "${baseDescription}"`;
-
-    try {
-      const nemotronBaseUrl = (
-        process.env.NEMOTRON_API_BASE_URL || ""
-      ).replace(/\/+$/, "");
-      const endpoint = useNemotron
-        ? `${nemotronBaseUrl}/v1/chat/completions`
-        : useAIGateway
-          ? "https://ai-gateway.vercel.sh/v1/chat/completions"
-          : "https://api.openai.com/v1/chat/completions";
-
-      const apiKey = useNemotron
-        ? process.env.NEMOTRON_API_KEY || "local"
-        : useAIGateway
-          ? process.env.AI_GATEWAY_API_KEY!
-          : process.env.OPENAI_API_KEY!;
-
-      const modelName = useNemotron
-        ? process.env.NEMOTRON_MODEL ||
-          "mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4"
-        : useAIGateway
-          ? "openai/gpt-5" // AI Gateway uses provider/model format
-          : "gpt-5"; // Direct OpenAI uses just the model name
-
-      console.log(
-        `🤖 Using ${
-          useNemotron
-            ? "local Nemotron"
-            : useAIGateway
-              ? "Vercel AI Gateway"
-              : "direct OpenAI API"
-        } for prompt enhancement`,
-      );
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: Number(process.env.NEMOTRON_TEMPERATURE || "0.2"),
-          max_tokens: 200,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`GPT-5 API error: ${response.status}`);
-      }
-
-      const data = (await response.json()) as GPT5ChatResponse;
-      const optimizedPrompt = this.sanitizeEnhancedPrompt(
-        data.choices[0].message.content.trim(),
-        config,
-        promptSubjectType,
-      );
-
-      return {
-        originalPrompt: config.description,
-        optimizedPrompt,
-        model: modelName,
-        keywords: this.extractKeywords(optimizedPrompt),
-      };
-    } catch (error) {
-      console.error("GPT-5 enhancement failed:", error);
-      // Load generation prompts for fallback
-      const generationPrompts = await getGenerationPrompts();
-      const fallbackTemplate =
-        generationPrompts?.imageGeneration?.fallbackEnhancement ||
-        '${config.description}. ${config.style || "game-ready"} style, clean geometry, game-ready 3D asset.';
-
-      // Replace template variables
-      const fallbackPrompt = fallbackTemplate
-        .replace("${config.description}", config.description)
-        .replace(
-          '${config.style || "game-ready"}',
-          config.style || "game-ready",
-        );
-
-      return {
-        originalPrompt: config.description,
-        optimizedPrompt: fallbackPrompt,
-        error: (error as Error).message,
-      };
-    }
-  }
-
-  /**
-   * Extract keywords from prompt
-   */
-  private extractKeywords(prompt: string): string[] {
-    const keywords: string[] = [];
-    const patterns = [
-      /\b(bronze|steel|iron|mithril|adamant|rune)\b/gi,
-      /\b(sword|shield|bow|staff|armor|helmet)\b/gi,
-      /\b(leather|metal|wood|crystal|bone)\b/gi,
-      /\b(low-poly|high-poly|realistic|stylized)\b/gi,
-    ];
-
-    patterns.forEach((pattern) => {
-      const matches = prompt.match(pattern);
-      if (matches) {
-        keywords.push(...matches.map((m) => m.toLowerCase()));
-      }
-    });
-
-    return [...new Set(keywords)];
-  }
-
-  private shouldUseComfyImage(): boolean {
-    const provider =
-      process.env.ASSET_FORGE_IMAGE_PROVIDER ||
-      process.env.LOCAL_IMAGE_PROVIDER ||
-      "";
-    return provider.toLowerCase() === "comfy";
-  }
-
-  private shouldUseComfy3D(): boolean {
-    const provider =
-      process.env.ASSET_FORGE_3D_PROVIDER ||
-      process.env.LOCAL_3D_PROVIDER ||
-      "";
-    return ["comfy", "trellis"].includes(provider.toLowerCase());
-  }
-
-  private shouldExportToHillDGX(): boolean {
+  private getModelProvider(
+    config?: PipelineConfig,
+  ): "meshy" | "comfyui-trellis" | "pixel3d-gradio" {
+    const metadata = config?.metadata as Record<string, unknown> | undefined;
+    const requestedProvider =
+      typeof metadata?.provider === "string" ? metadata.provider : undefined;
     const provider = (
-      process.env.ASSET_FORGE_GENERATION_PROVIDER ||
+      requestedProvider ||
+      process.env.GENERATION_3D_PROVIDER ||
       process.env.ASSET_FORGE_3D_PROVIDER ||
-      process.env.LOCAL_3D_PROVIDER ||
       ""
     ).toLowerCase();
-    const exportTarget = (process.env.HILL_EXPORT_TARGET || "").toLowerCase();
-    return (
-      this.hillDGXService.isConfigured &&
-      (provider === "hill_dgx" || exportTarget === "library")
-    );
+
+    if (
+      provider === "pixel3d-gradio" ||
+      provider === "pixel3d" ||
+      provider === "pixel-3d"
+    ) {
+      return "pixel3d-gradio";
+    }
+
+    if (
+      provider === "comfyui-trellis" ||
+      provider === "trellis" ||
+      provider === "comfyui"
+    ) {
+      return "comfyui-trellis";
+    }
+
+    if (
+      process.env.COMFYUI_TRELLIS_WORKFLOW_PATH &&
+      !process.env.MESHY_API_KEY
+    ) {
+      return "comfyui-trellis";
+    }
+
+    if (process.env.PIXEL3D_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
+      return "pixel3d-gradio";
+    }
+
+    return "meshy";
   }
 
   private shouldUseHillDgxProvider(config: PipelineConfig): boolean {
     const metadata = config.metadata as Record<string, unknown> | undefined;
     const requestedProvider =
       typeof metadata?.provider === "string" ? metadata.provider : undefined;
-    const envProvider = (
+    const envProvider =
       process.env.ASSET_FORGE_GENERATION_PROVIDER ||
-      process.env.GENERATION_PROVIDER ||
-      ""
-    ).toLowerCase();
+      process.env.GENERATION_PROVIDER;
 
     return (
       requestedProvider === "hill_dgx" ||
@@ -1735,7 +1566,9 @@ Your task is to enhance the user's description to create better results with ima
 
   private getHillApiBaseUrl(): string {
     const baseUrl =
-      process.env.HILL_API_BASE_URL || process.env.HILL_ASSET_LIBRARY_URL;
+      process.env.HILL_API_BASE_URL ||
+      process.env.HILL_ASSET_LIBRARY_URL ||
+      process.env.VRM_VIEWER_API_URL;
 
     if (!baseUrl) {
       throw new Error(
@@ -1861,48 +1694,9 @@ Your task is to enhance the user's description to create better results with ima
     );
     const startedAt = Date.now();
     let job = submitted;
-    const outputDir = path.join(ASSETS_DIR, pipeline.config.assetId);
-    await fs.mkdir(outputDir, { recursive: true });
-    let conceptArtPath: string | undefined;
-    let conceptArtUrl: string | undefined;
-    let remoteConceptArtUrl: string | undefined;
 
     while (Date.now() - startedAt < timeoutMs) {
       job = await this.getHillConjureJob(submitted.id);
-
-      if (
-        pipeline.stages.imageGeneration.status !== "completed" &&
-        job.result?.ref_image
-      ) {
-        remoteConceptArtUrl = this.hillFileUrl(job.result.ref_image);
-        if (remoteConceptArtUrl) {
-          try {
-            conceptArtPath = path.join(outputDir, "concept-art.png");
-            const conceptBuffer = await this.downloadFile(remoteConceptArtUrl);
-            await fs.writeFile(conceptArtPath, conceptBuffer);
-            conceptArtUrl = `/api/assets/${pipeline.config.assetId}/concept-art.png`;
-
-            pipeline.stages.imageGeneration.status = "completed";
-            pipeline.stages.imageGeneration.progress = 100;
-            pipeline.stages.imageGeneration.result = {
-              provider: "hill_dgx",
-              imageModel: "flux_klein",
-              imageUrl: conceptArtUrl,
-              remoteImageUrl: remoteConceptArtUrl,
-              sourcePath: job.result.ref_image,
-            };
-            pipeline.results.imageGeneration =
-              pipeline.stages.imageGeneration.result;
-            pipeline.progress = Math.max(pipeline.progress, 45);
-          } catch (error) {
-            console.warn(
-              `[HillDGX] Reference image announced but not readable yet for ${submitted.id}:`,
-              error instanceof Error ? error.message : error,
-            );
-            conceptArtPath = undefined;
-          }
-        }
-      }
 
       if (job.status === "completed") break;
       if (job.status === "failed") {
@@ -1918,31 +1712,14 @@ Your task is to enhance the user's description to create better results with ima
     }
 
     const result = job.result || {};
-    const remoteModelUrl = this.hillFileUrl(result.glb);
-    remoteConceptArtUrl =
-      remoteConceptArtUrl || this.hillFileUrl(result.ref_image);
-    if (!remoteModelUrl) {
+    const modelUrl = this.hillFileUrl(result.glb);
+    const conceptArtUrl = this.hillFileUrl(result.ref_image);
+    if (!modelUrl) {
       throw new Error("Hill DGX job completed without a GLB result");
     }
 
-    const modelFilename = `${pipeline.config.assetId}.glb`;
-    const modelPath = path.join(outputDir, modelFilename);
-    const modelBuffer = await this.downloadFile(remoteModelUrl);
-    await fs.writeFile(modelPath, modelBuffer);
-
-    if (remoteConceptArtUrl && !conceptArtPath) {
-      conceptArtPath = path.join(outputDir, "concept-art.png");
-      const conceptBuffer = await this.downloadFile(remoteConceptArtUrl);
-      await fs.writeFile(conceptArtPath, conceptBuffer);
-    }
-
-    const modelUrl = `/api/assets/${pipeline.config.assetId}/model`;
-    conceptArtUrl =
-      conceptArtUrl ||
-      (conceptArtPath
-        ? `/api/assets/${pipeline.config.assetId}/concept-art.png`
-        : undefined);
-
+    const outputDir = path.join("gdd-assets", pipeline.config.assetId);
+    await fs.mkdir(outputDir, { recursive: true });
     const metadataRecord = {
       id: pipeline.config.assetId,
       name: pipeline.config.name,
@@ -1959,15 +1736,11 @@ Your task is to enhance the user's description to create better results with ima
       hasConceptArt: !!conceptArtUrl,
       modelUrl,
       conceptArtUrl,
-      modelPath,
-      conceptArtPath,
-      remoteModelUrl,
-      remoteConceptArtUrl,
-      remoteModelPath: result.glb,
-      remoteConceptArtPath: result.ref_image,
+      modelPath: result.glb,
+      conceptArtPath: result.ref_image,
       lodDir: result.lod_dir,
       gddCompliant: true,
-      workflow: "Hill DGX -> Flux Klein -> Bruno Trellis2 1024 -> LOD",
+      workflow: "Hill DGX → Flux Klein → Bruno Trellis2 1024 → LOD",
       provider: "hill_dgx",
       hillJobId: job.id,
       hillAssetId: job.assetId,
@@ -1994,7 +1767,6 @@ Your task is to enhance the user's description to create better results with ima
       provider: "hill_dgx",
       imageModel: "flux_klein",
       imageUrl: conceptArtUrl,
-      remoteImageUrl: remoteConceptArtUrl,
       sourcePath: result.ref_image,
     };
     pipeline.results.imageGeneration = pipeline.stages.imageGeneration.result;
@@ -2006,9 +1778,7 @@ Your task is to enhance the user's description to create better results with ima
       taskId: job.id,
       modelUrl,
       conceptArtUrl,
-      remoteModelUrl,
-      remoteConceptArtUrl,
-      localPath: modelPath,
+      localPath: result.glb,
       lodDir: result.lod_dir,
       pipelineType: result.pipeline_type,
       wallSeconds: result.wall_s,
@@ -2035,46 +1805,283 @@ Your task is to enhance the user's description to create better results with ima
     };
   }
 
-  private async generateImageWithComfy(
-    prompt: string,
-  ): Promise<ImageGenerationResult> {
-    const result = await this.comfyService.generateImage(prompt);
-    const extension = path.extname(result.file.filename).toLowerCase();
-    const mimeType =
-      extension === ".jpg" || extension === ".jpeg"
-        ? "image/jpeg"
-        : extension === ".webp"
-          ? "image/webp"
-          : "image/png";
+  private async enhancePromptWithLocalNemotron(
+    config: PipelineConfig,
+  ): Promise<PromptEnhancementResult> {
+    const baseUrl = (
+      process.env.NEMOTRON_BASE_URL ||
+      process.env.LOCAL_PROMPT_MODEL_BASE_URL ||
+      "http://monumentals-mac-studio.local:12345"
+    ).replace(/\/+$/, "");
+    const model =
+      process.env.NEMOTRON_MODEL ||
+      process.env.LOCAL_PROMPT_MODEL ||
+      "mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4";
+    const systemPrompt =
+      "You rewrite short creator requests into strong image-to-3D reference prompts for game assets. " +
+      "Return only the improved prompt, no markdown. Preserve the user's subject and style. " +
+      "Make the prompt describe one complete isolated asset on a clean neutral background, with full silhouette visible, " +
+      "PBR material detail, readable shape, and no cropped edges. For buildings, insist on a complete enclosed exterior, " +
+      "visible footprint, roof, doors, windows, and no single-corner/facade/cutaway failure. For trees, insist on full trunk, roots, and canopy.";
+
+    const userPrompt = [
+      `Name: ${config.name}`,
+      `Type: ${config.type}`,
+      `Subtype: ${config.subtype}`,
+      `Style: ${config.style || "game-ready"}`,
+      `Prompt: ${config.description}`,
+    ].join("\n");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (process.env.NEMOTRON_API_KEY) {
+      headers.Authorization = `Bearer ${process.env.NEMOTRON_API_KEY}`;
+    }
+
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: Number(process.env.NEMOTRON_TEMPERATURE || "0.2"),
+        max_tokens: Number(process.env.NEMOTRON_MAX_TOKENS || "450"),
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Nemotron prompt enhancement failed with ${response.status}: ${text.slice(0, 500)}`,
+      );
+    }
+
+    const data = (await response.json()) as GPT5ChatResponse;
+    const optimizedPrompt = data.choices?.[0]?.message?.content?.trim();
+    if (!optimizedPrompt) {
+      throw new Error("Nemotron returned an empty prompt");
+    }
 
     return {
-      imageUrl: `data:${mimeType};base64,${result.buffer.toString("base64")}`,
-      prompt,
-      metadata: {
-        model: "comfyui",
-        resolution: "workflow",
-        quality: "workflow",
-        timestamp: new Date().toISOString(),
-      },
+      originalPrompt: config.description,
+      optimizedPrompt,
+      model,
+      keywords: [
+        config.type,
+        config.subtype,
+        "game-ready",
+        "pbr",
+        "complete-asset",
+      ].filter(Boolean),
     };
   }
 
-  private async writeImageToTempFile(
-    imageUrl: string,
-    assetId: string,
-  ): Promise<string> {
-    await fs.mkdir(TEMP_IMAGES_DIR, { recursive: true });
-    const imagePath = path.join(TEMP_IMAGES_DIR, `${assetId}-concept.png`);
+  /**
+   * Enhance prompt with GPT-5 (via Vercel AI Gateway or direct OpenAI)
+   */
+  private async enhancePromptWithGPT5(
+    config: PipelineConfig,
+  ): Promise<PromptEnhancementResult> {
+    // Check for AI Gateway or direct OpenAI API key
+    const useAIGateway = !!process.env.AI_GATEWAY_API_KEY;
+    const useDirectOpenAI = !!process.env.OPENAI_API_KEY;
 
-    if (imageUrl.startsWith("data:")) {
-      const imageData = imageUrl.split(",")[1];
-      await fs.writeFile(imagePath, Buffer.from(imageData, "base64"));
-      return imagePath;
+    if (!useAIGateway && !useDirectOpenAI) {
+      throw new Error(
+        "AI_GATEWAY_API_KEY or OPENAI_API_KEY required for GPT-5 enhancement",
+      );
     }
 
-    const buffer = await this.downloadFile(imageUrl);
-    await fs.writeFile(imagePath, buffer);
-    return imagePath;
+    // Load GPT-5 enhancement prompts
+    const gpt5Prompts = await getGPT5EnhancementPrompts();
+
+    const isAvatar =
+      config.generationType === "avatar" || config.type === "character";
+    const isArmor = config.type === "armor";
+    const isChestArmor =
+      isArmor &&
+      (config.subtype?.toLowerCase().includes("chest") ||
+        config.subtype?.toLowerCase().includes("body"));
+
+    // Build system prompt from loaded prompts
+    let systemPrompt =
+      gpt5Prompts?.systemPrompt?.base ||
+      `You are an expert at optimizing prompts for 3D asset generation.
+Your task is to enhance the user's description to create better results with image generation and 3D conversion.`;
+
+    if (isAvatar) {
+      systemPrompt +=
+        "\n" +
+        (gpt5Prompts?.typeSpecific?.avatar?.critical ||
+          `CRITICAL for characters: The character MUST be in a T-pose (arms stretched out horizontally, legs slightly apart) for proper rigging. The character must have EMPTY HANDS - no weapons, tools, or held items. Always add "standing in T-pose with empty hands" to the description.`);
+    }
+
+    if (isArmor) {
+      systemPrompt +=
+        "\n" +
+        (gpt5Prompts?.typeSpecific?.armor?.base ||
+          `CRITICAL for armor pieces: The armor must be shown ALONE without any armor stand, mannequin, or body inside.`);
+      if (isChestArmor) {
+        systemPrompt +=
+          " " +
+          (gpt5Prompts?.typeSpecific?.armor?.chest ||
+            "EXTRA IMPORTANT for chest/body armor: This MUST be shaped for a SCARECROW POSE (T-POSE) - imagine a scarecrow with arms sticking STRAIGHT OUT SIDEWAYS...");
+      }
+      systemPrompt +=
+        " " +
+        (gpt5Prompts?.typeSpecific?.armor?.positioning ||
+          "The armor MUST be positioned and SHAPED for a SCARECROW/T-POSE body...");
+    }
+
+    // Add focus points
+    const focusPoints = gpt5Prompts?.systemPrompt?.focusPoints || [
+      "Clear, specific visual details",
+      "Material and texture descriptions",
+      "Geometric shape and form",
+      `Style consistency (especially for ${config.style || "low-poly RuneScape"} style)`,
+    ];
+
+    systemPrompt +=
+      "\nFocus on:\n" +
+      focusPoints
+        .map(
+          (point) =>
+            "- " +
+            point.replace(
+              "${config.style || 'low-poly RuneScape'}",
+              config.style || "low-poly RuneScape",
+            ),
+        )
+        .join("\n");
+
+    if (isAvatar) {
+      systemPrompt +=
+        "\n" +
+        (gpt5Prompts?.typeSpecific?.avatar?.focus ||
+          "- T-pose stance with empty hands for rigging compatibility");
+    }
+
+    if (isArmor) {
+      const armorFocus = gpt5Prompts?.typeSpecific?.armor?.focus || [
+        "- Armor SHAPED for T-pose body (shoulder openings pointing straight sideways, not down)",
+        '- Chest armor should form a "T" or cross shape when viewed from above',
+        "- Shoulder openings at 180° angle to each other (straight line across)",
+      ];
+      systemPrompt += "\n" + armorFocus.join("\n");
+    }
+
+    systemPrompt +=
+      "\n" +
+      (gpt5Prompts?.systemPrompt?.closingInstruction ||
+        "Keep the enhanced prompt concise but detailed.");
+
+    // Include custom game style text (if present) ahead of the description for better style adherence
+    const stylePrefix = config.customPrompts?.gameStyle
+      ? `${config.customPrompts.gameStyle} — `
+      : "";
+    const baseDescription = `${stylePrefix}${config.description}`;
+    const userPrompt = isArmor
+      ? (gpt5Prompts?.typeSpecific?.armor?.enhancementPrefix ||
+          `Enhance this armor piece description for 3D generation. CRITICAL: The armor must be SHAPED FOR A T-POSE BODY - shoulder openings must point STRAIGHT SIDEWAYS at 90 degrees (like a scarecrow), NOT angled downward! Should look like a wide "T" shape. Ends at shoulders (no arm extensions), hollow openings, no armor stand: `) +
+        `"${baseDescription}"`
+      : `Enhance this ${config.type} asset description for 3D generation: "${baseDescription}"`;
+
+    try {
+      // Select endpoint and auth based on available API keys
+      const endpoint = useAIGateway
+        ? "https://ai-gateway.vercel.sh/v1/chat/completions"
+        : "https://api.openai.com/v1/chat/completions";
+
+      const apiKey = useAIGateway
+        ? process.env.AI_GATEWAY_API_KEY!
+        : process.env.OPENAI_API_KEY!;
+
+      const modelName = useAIGateway
+        ? "openai/gpt-5" // AI Gateway uses provider/model format
+        : "gpt-5"; // Direct OpenAI uses just the model name
+
+      console.log(
+        `🤖 Using ${useAIGateway ? "Vercel AI Gateway" : "direct OpenAI API"} for GPT-5 enhancement`,
+      );
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 200,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`GPT-5 API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as GPT5ChatResponse;
+      const optimizedPrompt = data.choices[0].message.content.trim();
+
+      return {
+        originalPrompt: config.description,
+        optimizedPrompt,
+        model: "gpt-5",
+        keywords: this.extractKeywords(optimizedPrompt),
+      };
+    } catch (error) {
+      console.error("GPT-5 enhancement failed:", error);
+      // Load generation prompts for fallback
+      const generationPrompts = await getGenerationPrompts();
+      const fallbackTemplate =
+        generationPrompts?.imageGeneration?.fallbackEnhancement ||
+        '${config.description}. ${config.style || "game-ready"} style, clean geometry, game-ready 3D asset.';
+
+      // Replace template variables
+      const fallbackPrompt = fallbackTemplate
+        .replace("${config.description}", config.description)
+        .replace(
+          '${config.style || "game-ready"}',
+          config.style || "game-ready",
+        );
+
+      return {
+        originalPrompt: config.description,
+        optimizedPrompt: fallbackPrompt,
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  /**
+   * Extract keywords from prompt
+   */
+  private extractKeywords(prompt: string): string[] {
+    const keywords: string[] = [];
+    const patterns = [
+      /\b(bronze|steel|iron|mithril|adamant|rune)\b/gi,
+      /\b(sword|shield|bow|staff|armor|helmet)\b/gi,
+      /\b(leather|metal|wood|crystal|bone)\b/gi,
+      /\b(low-poly|high-poly|realistic|stylized)\b/gi,
+    ];
+
+    patterns.forEach((pattern) => {
+      const matches = prompt.match(pattern);
+      if (matches) {
+        keywords.push(...matches.map((m) => m.toLowerCase()));
+      }
+    });
+
+    return [...new Set(keywords)];
   }
 
   /**

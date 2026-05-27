@@ -41,6 +41,53 @@ export class AssetService {
     this.assetsDir = assetsDir;
   }
 
+  private async getMetadataModelFile(
+    assetPath: string,
+    metadata: AssetMetadataType,
+  ): Promise<string | undefined> {
+    if (!metadata.modelPath) {
+      return undefined;
+    }
+
+    const modelFile = path.basename(metadata.modelPath);
+    try {
+      await fs.access(path.join(assetPath, modelFile));
+      return modelFile;
+    } catch {
+      console.warn(
+        `Metadata modelPath not found for ${path.basename(assetPath)}: ${metadata.modelPath}`,
+      );
+      return undefined;
+    }
+  }
+
+  private selectFallbackModelFile(
+    files: string[],
+    preferVRM: boolean,
+  ): string | undefined {
+    if (preferVRM) {
+      const vrmFile = files.find((file) => file.endsWith(".vrm"));
+      if (vrmFile) {
+        return vrmFile;
+      }
+    }
+
+    return (
+      files.find(
+        (file) => file.endsWith(".glb") && !/_lod\d+\.glb$/i.test(file),
+      ) ||
+      files.find((file) => file.endsWith(".glb")) ||
+      files.find((file) => file.endsWith(".vrm"))
+    );
+  }
+
+  private getModelFormat(modelFile?: string): "glb" | "vrm" | undefined {
+    if (!modelFile) {
+      return undefined;
+    }
+    return modelFile.toLowerCase().endsWith(".vrm") ? "vrm" : "glb";
+  }
+
   async listAssets(): Promise<Asset[]> {
     try {
       const assetDirs = await fs.readdir(this.assetsDir);
@@ -77,23 +124,10 @@ export class AssetService {
           }
 
           const files = await fs.readdir(assetPath);
-          const glbFile = files.find((f) => f.endsWith(".glb"));
-          const vrmFile = files.find((f) => f.endsWith(".vrm"));
-
-          // Determine model format (prefer VRM for characters)
-          let modelFormat: "glb" | "vrm" | undefined;
-          let modelFile: string | undefined;
-
-          if (metadata.type === "character" && vrmFile) {
-            modelFormat = "vrm";
-            modelFile = vrmFile;
-          } else if (glbFile) {
-            modelFormat = "glb";
-            modelFile = glbFile;
-          } else if (vrmFile) {
-            modelFormat = "vrm";
-            modelFile = vrmFile;
-          }
+          const modelFile =
+            (await this.getMetadataModelFile(assetPath, metadata)) ||
+            this.selectFallbackModelFile(files, metadata.type === "character");
+          const modelFormat = this.getModelFormat(modelFile);
 
           const assetData = {
             id: assetDir,
@@ -173,29 +207,27 @@ export class AssetService {
       );
     }
 
-    // Get all files in the asset directory
-    const files = await fs.readdir(assetPath);
-
-    // For characters/avatars, prefer VRM files over GLB files
-    const isCharacter = metadata?.type === "character";
-
-    if (isCharacter) {
-      // Look for VRM file first for characters
-      const vrmFile = files.find((f) => f.endsWith(".vrm"));
-      if (vrmFile) {
-        console.log(`Returning VRM model for character ${assetId}: ${vrmFile}`);
-        return path.join(assetPath, vrmFile);
+    if (metadata) {
+      const metadataModelFile = await this.getMetadataModelFile(
+        assetPath,
+        metadata,
+      );
+      if (metadataModelFile) {
+        return path.join(assetPath, metadataModelFile);
       }
     }
 
-    // Fall back to GLB file
-    const glbFile = files.find((f) => f.endsWith(".glb"));
+    const files = await fs.readdir(assetPath);
+    const modelFile = this.selectFallbackModelFile(
+      files,
+      metadata?.type === "character",
+    );
 
-    if (!glbFile) {
+    if (!modelFile) {
       throw new Error("Model file not found");
     }
 
-    return path.join(assetPath, glbFile);
+    return path.join(assetPath, modelFile);
   }
 
   async getAssetMetadata(assetId: string): Promise<AssetMetadataType> {
@@ -220,23 +252,10 @@ export class AssetService {
       ) as AssetMetadataType;
 
       const files = await fs.readdir(assetPath);
-      const glbFile = files.find((f) => f.endsWith(".glb"));
-      const vrmFile = files.find((f) => f.endsWith(".vrm"));
-
-      // Determine model format (prefer VRM for characters)
-      let modelFormat: "glb" | "vrm" | undefined;
-      let modelFile: string | undefined;
-
-      if (metadata.type === "character" && vrmFile) {
-        modelFormat = "vrm";
-        modelFile = vrmFile;
-      } else if (glbFile) {
-        modelFormat = "glb";
-        modelFile = glbFile;
-      } else if (vrmFile) {
-        modelFormat = "vrm";
-        modelFile = vrmFile;
-      }
+      const modelFile =
+        (await this.getMetadataModelFile(assetPath, metadata)) ||
+        this.selectFallbackModelFile(files, metadata.type === "character");
+      const modelFormat = this.getModelFormat(modelFile);
 
       return {
         id: assetId,

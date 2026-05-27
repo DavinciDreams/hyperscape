@@ -7,29 +7,37 @@ import { Elysia, t } from "elysia";
 import path from "path";
 import fs from "fs";
 import type { AssetService } from "../services/AssetService";
+import type { LODBakingService } from "../services/LODBakingService";
 import * as Models from "../models";
 
 export const createAssetRoutes = (
-  assetsDir: string,
+  rootDir: string,
   assetService: AssetService,
+  lodService?: LODBakingService,
 ) => {
-  const safeAssetDir = (assetId: string) => path.join(assetsDir, assetId);
-  const isInsideAssetsDir = (candidatePath: string) => {
-    const normalizedCandidate = path.resolve(candidatePath);
-    const normalizedRoot = path.resolve(assetsDir);
-    return (
-      normalizedCandidate === normalizedRoot ||
-      normalizedCandidate.startsWith(`${normalizedRoot}${path.sep}`)
-    );
+  const assetsRoot = path.join(rootDir, "gdd-assets");
+  const projectRoot = path.resolve(rootDir, "../..");
+
+  const slugifyAssetId = (value: string): string => {
+    const slug = value
+      .toLowerCase()
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    return slug || `asset-${Date.now()}`;
   };
-  const isInsideAssetDir = (assetId: string, candidatePath: string) => {
-    const normalizedCandidate = path.resolve(candidatePath);
-    const normalizedAssetDir = path.resolve(safeAssetDir(assetId));
-    return (
-      isInsideAssetsDir(candidatePath) &&
-      (normalizedCandidate === normalizedAssetDir ||
-        normalizedCandidate.startsWith(`${normalizedAssetDir}${path.sep}`))
-    );
+
+  const getUniqueAssetId = async (baseId: string): Promise<string> => {
+    let assetId = baseId;
+    let suffix = 2;
+
+    while (await Bun.file(path.join(assetsRoot, assetId)).exists()) {
+      assetId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
+    return assetId;
   };
 
   return new Elysia({ prefix: "/api/assets", name: "assets" }).guard(
@@ -95,10 +103,13 @@ export const createAssetRoutes = (
           const assetId = params.id;
           const filePath = params["*"]; // Everything after the asset ID
 
-          const fullPath = path.join(safeAssetDir(assetId), filePath);
+          const fullPath = path.join(rootDir, "gdd-assets", assetId, filePath);
 
           // Security check to prevent directory traversal
-          if (!isInsideAssetDir(assetId, fullPath)) {
+          const normalizedPath = path.normalize(fullPath);
+          const assetDir = path.join(rootDir, "gdd-assets", assetId);
+
+          if (!normalizedPath.startsWith(assetDir)) {
             set.status = 403;
             return { error: "Access denied" };
           }
@@ -119,10 +130,13 @@ export const createAssetRoutes = (
           const assetId = params.id;
           const filePath = params["*"]; // Everything after the asset ID
 
-          const fullPath = path.join(safeAssetDir(assetId), filePath);
+          const fullPath = path.join(rootDir, "gdd-assets", assetId, filePath);
 
           // Security check to prevent directory traversal
-          if (!isInsideAssetDir(assetId, fullPath)) {
+          const normalizedPath = path.normalize(fullPath);
+          const assetDir = path.join(rootDir, "gdd-assets", assetId);
+
+          if (!normalizedPath.startsWith(assetDir)) {
             set.status = 403;
             return new Response(null, { status: 403 });
           }
@@ -232,10 +246,7 @@ export const createAssetRoutes = (
             );
 
             // Create sprites directory
-            const assetDir = safeAssetDir(id);
-            if (!isInsideAssetDir(id, assetDir)) {
-              throw new Error("Access denied");
-            }
+            const assetDir = path.join(rootDir, "gdd-assets", id);
             const spritesDir = path.join(assetDir, "sprites");
 
             console.log(`[Sprites] Creating directory: ${spritesDir}`);
@@ -336,11 +347,14 @@ export const createAssetRoutes = (
 
             for (const assetId of assetIds) {
               try {
-                const assetDir = safeAssetDir(assetId);
+                const assetDir = path.join(rootDir, "gdd-assets", assetId);
                 const metadataPath = path.join(assetDir, "metadata.json");
 
                 // Security check
-                if (!isInsideAssetsDir(metadataPath)) {
+                const normalizedPath = path.normalize(metadataPath);
+                if (
+                  !normalizedPath.startsWith(path.join(rootDir, "gdd-assets"))
+                ) {
                   console.warn(
                     `[Batch Fitting] Skipping ${assetId}: path traversal`,
                   );
@@ -399,10 +413,11 @@ export const createAssetRoutes = (
               `[Save Aligned] Saving aligned GLB for asset: ${id} (${(file.size / 1024).toFixed(1)} KB)`,
             );
 
-            const assetDir = safeAssetDir(id);
+            const assetDir = path.join(rootDir, "gdd-assets", id);
 
             // Security check
-            if (!isInsideAssetsDir(assetDir)) {
+            const normalizedPath = path.normalize(assetDir);
+            if (!normalizedPath.startsWith(path.join(rootDir, "gdd-assets"))) {
               set.status = 403;
               return { success: false, path: "", error: "Access denied" };
             }
@@ -457,6 +472,116 @@ export const createAssetRoutes = (
           },
         )
 
+        // Import a GLB/VRM as a first-class Asset Forge asset and register its LOD bundle
+        .post(
+          "/import",
+          async ({ body, set }) => {
+            const formData = body as {
+              file?: File;
+              name?: string;
+              type?: string;
+              category?: string;
+              description?: string;
+            };
+            const file = formData.file;
+
+            if (!file) {
+              set.status = 400;
+              return { error: "No file provided" };
+            }
+
+            const originalName = path.basename(file.name);
+            const ext = path.extname(originalName).toLowerCase();
+            const supportedExtensions = new Set([".glb", ".vrm"]);
+
+            if (!supportedExtensions.has(ext)) {
+              set.status = 400;
+              return { error: "Only .glb and .vrm files can be imported" };
+            }
+
+            const baseName = formData.name?.trim() || originalName;
+            const assetId = await getUniqueAssetId(slugifyAssetId(baseName));
+            const assetType =
+              formData.type?.trim() || (ext === ".vrm" ? "character" : "prop");
+            const category = formData.category?.trim() || assetType;
+            const assetDir = path.join(assetsRoot, assetId);
+            const modelFilename = `${assetId}${ext}`;
+            const modelPath = path.join(assetDir, modelFilename);
+
+            await fs.promises.mkdir(assetDir, { recursive: true });
+            await Bun.write(modelPath, file);
+
+            const now = new Date().toISOString();
+            const relativeModelPath = path.relative(projectRoot, modelPath);
+            const metadata = {
+              id: assetId,
+              gameId: assetId,
+              name: baseName.replace(/\.[^.]+$/, ""),
+              description:
+                formData.description?.trim() ||
+                `Imported ${ext.slice(1).toUpperCase()} asset`,
+              type: assetType,
+              subtype: category,
+              category,
+              isBaseModel: true,
+              isVariant: false,
+              meshyTaskId: "manual-import",
+              generationMethod: "manual",
+              variants: [],
+              variantCount: 0,
+              modelPath: modelFilename,
+              lodSourcePath: relativeModelPath,
+              hasModel: true,
+              hasConceptArt: false,
+              workflow: "manual-import",
+              gddCompliant: false,
+              isPlaceholder: false,
+              format: ext.slice(1).toUpperCase(),
+              createdAt: now,
+              updatedAt: now,
+              generatedAt: now,
+              importedAt: now,
+              originalFilename: originalName,
+            };
+
+            const metadataPath = path.join(assetDir, "metadata.json");
+            await Bun.write(metadataPath, JSON.stringify(metadata, null, 2));
+
+            if (lodService) {
+              await lodService.createOrUpdateBundle(
+                assetId,
+                metadata.name,
+                category,
+                relativeModelPath,
+              );
+            }
+
+            const asset = await assetService.loadAsset(assetId);
+
+            return {
+              success: true,
+              assetId,
+              asset,
+              message: `Imported ${metadata.name}`,
+            };
+          },
+          {
+            body: t.Object({
+              file: t.File({ maxSize: "200m" }),
+              name: t.Optional(t.String()),
+              type: t.Optional(t.String()),
+              category: t.Optional(t.String()),
+              description: t.Optional(t.String()),
+            }),
+            detail: {
+              tags: ["Assets"],
+              summary: "Import GLB or VRM asset",
+              description:
+                "Imports a local GLB or VRM file into Asset Forge and creates its initial LOD bundle.",
+            },
+          },
+        )
+
         // Upload VRM file
         .post(
           "/upload-vrm",
@@ -474,10 +599,7 @@ export const createAssetRoutes = (
             );
 
             // Save VRM to asset directory
-            const assetDir = safeAssetDir(assetId);
-            if (!isInsideAssetDir(assetId, assetDir)) {
-              throw new Error("Access denied");
-            }
+            const assetDir = path.join(rootDir, "gdd-assets", assetId);
 
             // Create directory if it doesn't exist
             await fs.promises.mkdir(assetDir, { recursive: true });

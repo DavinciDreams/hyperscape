@@ -16,6 +16,8 @@ export {
   GAME_API_URL,
   GAME_WS_URL,
   CDN_URL,
+  AGENT_RUNTIME_URL,
+  AGENT_RUNTIME_API,
   ELIZAOS_URL,
   ELIZAOS_API,
 } from "./api-config";

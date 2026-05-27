@@ -34,6 +34,21 @@ export interface RetextureResponse {
   asset?: Asset;
 }
 
+export interface ImportAssetRequest {
+  file: File;
+  name?: string;
+  type?: string;
+  category?: string;
+  description?: string;
+}
+
+export interface ImportAssetResponse {
+  success: boolean;
+  assetId: string;
+  message: string;
+  asset?: Asset;
+}
+
 class AssetServiceClass {
   private baseUrl = "/api";
 
@@ -74,6 +89,33 @@ class AssetServiceClass {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error?.message || "Retexturing failed");
+    }
+
+    return response.json();
+  }
+
+  async importAsset(request: ImportAssetRequest): Promise<ImportAssetResponse> {
+    const formData = new FormData();
+    formData.append("file", request.file);
+
+    if (request.name) formData.append("name", request.name);
+    if (request.type) formData.append("type", request.type);
+    if (request.category) formData.append("category", request.category);
+    if (request.description) {
+      formData.append("description", request.description);
+    }
+
+    const response = await apiFetch(`${this.baseUrl}/assets/import`, {
+      method: "POST",
+      body: formData,
+      timeoutMs: 120000,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({
+        error: "Asset import failed",
+      }));
+      throw new Error(error.error || error.message || "Asset import failed");
     }
 
     return response.json();

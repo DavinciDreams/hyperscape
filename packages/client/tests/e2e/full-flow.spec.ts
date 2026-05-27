@@ -6,7 +6,7 @@
  */
 
 import { expect } from "@playwright/test";
-import { evmTest } from "./fixtures/wallet-fixtures";
+import { authTest } from "./fixtures/auth-fixtures";
 import {
   completeFullLoginFlow,
   selectFirstCharacter,
@@ -16,7 +16,7 @@ import {
 } from "./fixtures/privy-helpers";
 import { BASE_URL } from "./fixtures/test-config";
 
-const test = evmTest;
+const test = authTest;
 
 test.describe("Full Login-to-Game Flow (Strict)", () => {
   test.setTimeout(6 * 60 * 1000);

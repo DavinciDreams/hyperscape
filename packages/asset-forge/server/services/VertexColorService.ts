@@ -255,9 +255,11 @@ export class VertexColorService {
     let originalBinary = Buffer.alloc(0);
     if (buffer.length > binaryChunkOffset + 8) {
       const binaryLength = buffer.readUInt32LE(binaryChunkOffset);
-      originalBinary = buffer.subarray(
-        binaryChunkOffset + 8,
-        binaryChunkOffset + 8 + binaryLength,
+      originalBinary = Buffer.from(
+        buffer.subarray(
+          binaryChunkOffset + 8,
+          binaryChunkOffset + 8 + binaryLength,
+        ),
       );
     }
 

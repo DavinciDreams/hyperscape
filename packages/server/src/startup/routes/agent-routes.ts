@@ -5,7 +5,7 @@
  * Agents need long-lived tokens to connect autonomously without user intervention.
  *
  * Security Model:
- * - Only Privy-authenticated users can create agent credentials
+ * - Only auth-authenticated users can create agent credentials
  * - Credentials are tied to specific characterId + userId pairs
  * - JWTs are server-signed and cryptographically secure
  * - Agents are clearly marked with isAgent flag
@@ -118,21 +118,6 @@ export function registerAgentRoutes(
 
     const token = authHeader.slice(7);
     const { verifyJWT } = await import("../../shared/utils.js");
-    const { verifyPrivyToken, isPrivyEnabled } =
-      await import("../../infrastructure/auth/privy-auth.js");
-
-    // Try Privy token verification first (if enabled)
-    if (isPrivyEnabled()) {
-      try {
-        const privyInfo = await verifyPrivyToken(token);
-        if (privyInfo?.privyUserId) {
-          return privyInfo.privyUserId;
-        }
-      } catch {
-        // Fall through to JWT verification
-      }
-    }
-
     const jwtPayload = await verifyJWT(token);
     if (jwtPayload && jwtPayload.userId) {
       return String(jwtPayload.userId);
@@ -503,228 +488,6 @@ export function registerAgentRoutes(
           error instanceof Error
             ? error.message
             : "Failed to generate credentials",
-      });
-    }
-  });
-
-  /**
-   * POST /api/agents/wallet-auth
-   *
-   * Wallet-based authentication for AI agents.
-   * Uses the wallet address as identity - no Privy/social auth required.
-   * Auto-creates user account and character if they don't exist.
-   * If agentId is provided, also creates agent mapping for dashboard spectating.
-   *
-   * Request body:
-   * {
-   *   walletAddress: "0x..." or "base58...",
-   *   walletType: "evm" | "solana",
-   *   agentName?: "optional name",
-   *   agentId?: "eliza-agent-uuid" (for dashboard spectating)
-   * }
-   *
-   * Response:
-   * {
-   *   success: true,
-   *   authToken: "7-day-jwt",
-   *   characterId: "character-uuid",
-   *   accountId: "wallet-address",
-   *   serverUrl: "ws://..."
-   * }
-   */
-  fastify.post("/api/agents/wallet-auth", async (request, reply) => {
-    try {
-      const body = request.body as {
-        walletAddress: string;
-        walletType?: "evm" | "solana";
-        agentName?: string;
-        agentId?: string;
-      };
-
-      if (!body.walletAddress) {
-        return reply.status(400).send({
-          success: false,
-          error: "Missing required field: walletAddress",
-        });
-      }
-
-      const walletAddress = body.walletAddress.trim();
-      const walletType = body.walletType || "evm";
-      const agentName =
-        body.agentName?.trim() || `Agent ${walletAddress.slice(0, 8)}`;
-      const agentId = body.agentId?.trim();
-
-      console.log("[AgentRoutes] Wallet auth request:", {
-        walletAddress: walletAddress.slice(0, 10) + "...",
-        walletType,
-        agentName,
-        agentId: agentId ? `${agentId.slice(0, 8)}...` : "not provided",
-      });
-
-      // Use wallet address as account ID (prefixed for clarity)
-      const accountId = `wallet:${walletType}:${walletAddress}`;
-
-      // Get database access
-      const databaseSystem = world.getSystem("database") as
-        | {
-            db: {
-              select: (fields?: unknown) => {
-                from: (table: unknown) => {
-                  where: (condition: unknown) => Promise<unknown[]>;
-                };
-              };
-              insert: (table: unknown) => {
-                values: (values: Record<string, unknown>) => {
-                  onConflictDoUpdate: (config: {
-                    target: unknown;
-                    set: unknown;
-                  }) => Promise<unknown>;
-                } & Promise<unknown>;
-              };
-              query: {
-                characters: {
-                  findFirst: (opts: {
-                    where: (
-                      chars: { accountId: unknown },
-                      ops: { eq: (a: unknown, b: string) => unknown },
-                    ) => unknown;
-                  }) => Promise<{ id: string; name: string } | null>;
-                };
-              };
-            };
-          }
-        | undefined;
-
-      if (!databaseSystem?.db) {
-        return reply.status(500).send({
-          success: false,
-          error: "Database not available",
-        });
-      }
-
-      const { users, characters, agentMappings } =
-        await import("../../database/schema.js");
-      const { eq } = await import("drizzle-orm");
-
-      // Check if user exists, create if not
-      const existingUsers = (await databaseSystem.db
-        .select()
-        .from(users)
-        .where(eq(users.id, accountId))) as Array<{ id: string }>;
-
-      if (existingUsers.length === 0) {
-        console.log(`[AgentRoutes] Creating new wallet user: ${accountId}`);
-        await databaseSystem.db.insert(users).values({
-          id: accountId,
-          name: agentName,
-          roles: "player",
-          createdAt: new Date().toISOString(),
-        });
-      }
-
-      // Check if character exists for this wallet, create if not
-      let character = await databaseSystem.db.query.characters.findFirst({
-        where: (chars, ops) => ops.eq(chars.accountId, accountId),
-      });
-
-      if (!character) {
-        const characterId = `char-${walletAddress.slice(0, 16)}-${Date.now()}`;
-        console.log(`[AgentRoutes] Creating new character: ${characterId}`);
-
-        await databaseSystem.db.insert(characters).values({
-          id: characterId,
-          accountId: accountId,
-          name: agentName,
-          isAgent: 1,
-          wallet: walletAddress,
-          createdAt: Date.now(),
-        });
-
-        character = { id: characterId, name: agentName };
-      }
-
-      // Generate 7-day JWT
-      const authToken = await createJWT({
-        userId: accountId,
-        characterId: character.id,
-        walletAddress,
-        walletType,
-        isAgent: true,
-      });
-
-      const serverUrl =
-        process.env.HYPERSCAPE_SERVER_URL ||
-        process.env.PUBLIC_WS_URL ||
-        getDefaultPublicWsUrl();
-
-      // If agentId was provided, create/update agent mapping for dashboard spectating
-      if (agentId) {
-        try {
-          const existingMapping = await getAgentMappingById(
-            databaseSystem.db as AgentRouteDb,
-            agentId,
-            true,
-          );
-          await databaseSystem.db
-            .insert(agentMappings)
-            .values({
-              agentId,
-              accountId,
-              characterId: character.id,
-              agentName,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: agentMappings.agentId,
-              set: {
-                accountId,
-                characterId: character.id,
-                agentName,
-                updatedAt: new Date(),
-              },
-            });
-          invalidateAgentMappingCache(
-            agentId,
-            existingMapping?.accountId,
-            accountId,
-          );
-          primeAgentMappingCache({
-            agentId,
-            accountId,
-            characterId: character.id,
-            agentName,
-          });
-          console.log(
-            `[AgentRoutes] ✅ Agent mapping created for dashboard spectating: ${agentId}`,
-          );
-        } catch (mappingError) {
-          // Log but don't fail auth if mapping fails
-          console.warn(
-            `[AgentRoutes] ⚠️ Failed to create agent mapping (non-fatal): ${mappingError}`,
-          );
-        }
-      }
-
-      console.log(
-        `[AgentRoutes] ✅ Wallet auth successful: ${agentName} (${character.id})`,
-      );
-
-      return reply.send({
-        success: true,
-        authToken,
-        characterId: character.id,
-        accountId,
-        walletAddress,
-        serverUrl,
-        agentId: agentId || undefined,
-        message: `Authenticated as ${agentName} (expires in 7 days)`,
-      });
-    } catch (error) {
-      console.error("[AgentRoutes] ❌ Wallet auth failed:", error);
-      return reply.status(500).send({
-        success: false,
-        error: error instanceof Error ? error.message : "Wallet auth failed",
       });
     }
   });
@@ -1204,7 +967,7 @@ export function registerAgentRoutes(
    *
    * Operator → agent chat: scripted intent (if matched) or LLM reply only.
    * Does not return synthetic “posted to chat” text — start the agent and fix model config instead.
-   * SECURITY: User must own the agent (Bearer Privy or Hyperscape JWT).
+   * SECURITY: User must own the agent (Bearer auth or Hyperscape JWT).
    */
   fastify.post("/api/agents/:agentId/message", async (request, reply) => {
     try {
@@ -1524,16 +1287,16 @@ export function registerAgentRoutes(
   /**
    * POST /api/spectator/token
    *
-   * Exchange a Privy token for a 7-day spectator JWT.
-   * This solves the issue where Privy tokens expire after ~1 hour,
+   * Exchange a auth token for a 7-day spectator JWT.
+   * This solves the issue where auth tokens expire after ~1 hour,
    * causing spectator mode to lose authentication.
    *
-   * SECURITY: Verifies Privy token and checks agent ownership before issuing JWT.
+   * SECURITY: Verifies auth token and checks agent ownership before issuing JWT.
    *
    * Request body:
    * {
    *   agentId: "agent-uuid",
-   *   privyToken: "privy-access-token"
+   *   authToken: "privy-access-token"
    * }
    *
    * Response:
@@ -1548,39 +1311,28 @@ export function registerAgentRoutes(
     try {
       const body = request.body as {
         agentId: string;
-        privyToken: string;
+        authToken: string;
       };
 
-      const { agentId, privyToken } = body;
+      const { agentId, authToken } = body;
 
-      if (!agentId || !privyToken) {
+      if (!agentId || !authToken) {
         return reply.status(400).send({
           success: false,
-          error: "Missing required fields: agentId, privyToken",
-        });
-      }
-
-      // Verify the Privy token
-      const { verifyPrivyToken, isPrivyEnabled } =
-        await import("../../infrastructure/auth/privy-auth.js");
-
-      if (!isPrivyEnabled()) {
-        return reply.status(503).send({
-          success: false,
-          error: "Privy authentication is not configured on this server",
+          error: "Missing required fields: agentId, authToken",
         });
       }
 
       let verifiedUserId: string | null = null;
 
       try {
-        const privyInfo = await verifyPrivyToken(privyToken);
-        if (privyInfo) {
-          verifiedUserId = privyInfo.privyUserId;
-        }
+        const { verifyJWT } = await import("../../shared/utils.js");
+        const jwtPayload = await verifyJWT(authToken);
+        verifiedUserId =
+          typeof jwtPayload?.userId === "string" ? jwtPayload.userId : null;
       } catch (err) {
         console.warn(
-          "[AgentRoutes] Privy token verification failed:",
+          "[AgentRoutes] auth token verification failed:",
           err instanceof Error ? err.message : String(err),
         );
       }
@@ -1588,7 +1340,7 @@ export function registerAgentRoutes(
       if (!verifiedUserId) {
         return reply.status(401).send({
           success: false,
-          error: "Invalid or expired Privy token. Please log in again.",
+          error: "Invalid or expired auth token. Please log in again.",
         });
       }
 

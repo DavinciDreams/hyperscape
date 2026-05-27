@@ -20,7 +20,6 @@ import ReactDOM from "react-dom/client";
 import { ErrorBoundary } from "./lib/ErrorBoundary";
 import "./index.css";
 import { PrivyAuthProvider } from "./auth/PrivyAuthProvider";
-import { SolanaWalletProvider } from "./auth/SolanaWalletProvider";
 import { playerTokenManager } from "./auth/PlayerTokenManager";
 import { privyAuthManager } from "./auth/PrivyAuthManager";
 import { injectFarcasterMetaTags } from "./lib/farcaster-frame-config";
@@ -319,6 +318,9 @@ declare global {
     readonly PUBLIC_APP_URL?: string;
     readonly PUBLIC_EMBED_ALLOWED_ORIGINS?: string;
     readonly PUBLIC_API_URL?: string;
+    readonly PUBLIC_AGENT_RUNTIME_URL?: string;
+    readonly PUBLIC_HYADES_URL?: string;
+    readonly PUBLIC_SAFIER_URL?: string;
     readonly PUBLIC_ELIZAOS_URL?: string;
   }
 }
@@ -816,26 +818,22 @@ async function mountApp() {
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
-          <SolanaWalletProvider>
-            <PrivyAuthProvider>
-              <React.Suspense fallback={<ScreenLoadingFallback />}>
-                <DashboardScreen />
-              </React.Suspense>
-            </PrivyAuthProvider>
-          </SolanaWalletProvider>
+          <PrivyAuthProvider>
+            <React.Suspense fallback={<ScreenLoadingFallback />}>
+              <DashboardScreen />
+            </React.Suspense>
+          </PrivyAuthProvider>
         </ErrorBoundary>,
       );
     } else if (page === "character-editor") {
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
-          <SolanaWalletProvider>
-            <PrivyAuthProvider>
-              <React.Suspense fallback={<ScreenLoadingFallback />}>
-                <CharacterEditorScreen />
-              </React.Suspense>
-            </PrivyAuthProvider>
-          </SolanaWalletProvider>
+          <PrivyAuthProvider>
+            <React.Suspense fallback={<ScreenLoadingFallback />}>
+              <CharacterEditorScreen />
+            </React.Suspense>
+          </PrivyAuthProvider>
         </ErrorBoundary>,
       );
     } else if (page === "admin") {
@@ -879,11 +877,9 @@ async function mountApp() {
       root.render(
         <ErrorBoundary>
           <MaintenanceBanner />
-          <SolanaWalletProvider>
-            <PrivyAuthProvider>
-              <App />
-            </PrivyAuthProvider>
-          </SolanaWalletProvider>
+          <PrivyAuthProvider>
+            <App />
+          </PrivyAuthProvider>
         </ErrorBoundary>,
       );
     }

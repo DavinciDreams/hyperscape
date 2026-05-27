@@ -38,12 +38,12 @@ delete process.env.NO_COLOR;
  * Uses visual testing with colored cube proxies per project rules.
  *
  * Supports two test categories:
- *   1. Web3 Login tests (web3-login.spec.ts) — headless wallet injection via
- *      headless-web3-provider + Phantom mock. No browser extensions needed.
+ *   1. Wallet login tests (web3-login.spec.ts) — headless wallet injection
+ *      where needed. No browser extensions needed.
  *   2. Game E2E tests (auth.spec.ts, combat.spec.ts, etc.) — full game testing.
  *
  * Run all:       bunx playwright test
- * Run web3:      bunx playwright test tests/e2e/web3-login.spec.ts
+ * Run wallet:    bunx playwright test tests/e2e/web3-login.spec.ts
  * Run auth:      bunx playwright test tests/e2e/auth.spec.ts
  */
 export default defineConfig({

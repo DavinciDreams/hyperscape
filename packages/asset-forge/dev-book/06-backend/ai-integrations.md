@@ -1,5 +1,10 @@
 # AI Integrations
 
+> Current direction: this page documents the legacy cloud-provider integration
+> details. The canonical unified pipeline is Hill/local DGX creation, VRM Viewer
+> inventory management, and Hyperscape deployment through the Hill manifest
+> importer. See [`../../../../docs/asset-pipeline.md`](../../../../docs/asset-pipeline.md).
+
 Asset Forge integrates with multiple AI services to power the end-to-end 3D asset generation pipeline. This document covers OpenAI GPT-4, GPT-Image-1, GPT-4o-mini Vision, and Meshy AI's Image-to-3D, Retexture, and Rigging APIs.
 
 ## Table of Contents

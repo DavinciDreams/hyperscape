@@ -779,8 +779,8 @@ export class ProceduralTownLandmarksSystem extends System {
    */
   getDependencies(): SystemDependencies {
     return {
-      required: ["town"],
-      optional: ["roadNetwork"], // Roads are optional - towns work without roads
+      required: ["towns"],
+      optional: ["roads"], // Roads are optional - towns work without roads
     };
   }
 

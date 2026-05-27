@@ -18,10 +18,10 @@ import {
   getPlayerStats,
   takeGameScreenshot,
 } from "./utils/testWorld";
-import { evmTest, type HeadlessWeb3Wallet } from "./fixtures/wallet-fixtures";
+import { authTest, type TestAuthIdentity } from "./fixtures/auth-fixtures";
 import { BASE_URL } from "./fixtures/test-config";
 
-const test = evmTest;
+const test = authTest;
 const describeCombat = test.describe;
 
 /**
@@ -238,7 +238,7 @@ async function isDeathScreenVisible(
 
 async function loginAndSpawn(
   page: Page,
-  _wallet?: HeadlessWeb3Wallet,
+  _wallet?: TestAuthIdentity,
 ): Promise<boolean> {
   const SPAWN_TIMEOUT_MS = 30_000;
   const MAX_ATTEMPTS = 3;

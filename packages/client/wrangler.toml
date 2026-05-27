@@ -40,5 +40,8 @@ vars = { }
 #   PUBLIC_EMBED_ALLOWED_ORIGINS - Optional comma-separated iframe parent allowlist.
 #
 # Optional:
-#   PUBLIC_ELIZAOS_URL      - ElizaOS API for AI dashboard
+#   PUBLIC_AGENT_RUNTIME_URL - Hyades, SafierSemantics, or compatible agent runtime
+#   PUBLIC_HYADES_URL       - Hyades runtime alias
+#   PUBLIC_SAFIER_URL       - SafierSemantics runtime alias
+#   PUBLIC_ELIZAOS_URL      - Legacy ElizaOS API alias for AI dashboard
 #   PUBLIC_ENABLE_FARCASTER - Enable Farcaster mini-app features

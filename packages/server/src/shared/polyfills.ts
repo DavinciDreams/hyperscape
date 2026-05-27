@@ -151,7 +151,7 @@ if (!globalWithPolyfills.URL) {
 }
 
 // NOTE: We intentionally do NOT set `window` globally because libraries like
-// @privy-io/server-auth check `typeof window !== 'undefined'` to detect browsers.
+// Some server-side auth libraries check `typeof window !== 'undefined'` to detect browsers.
 // Three.js uses `self` for most feature detection, which we already set above.
 
 // Add location object needed by PhysX loader (on self, not window)

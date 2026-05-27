@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { links, navigation } from "@/lib/links";
 import { DiscordIcon, TwitterIcon, GitHubIcon } from "./icons";
 
@@ -55,13 +54,9 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12 mb-8">
           {/* Brand */}
           <div className="md:col-span-1">
-            <Image
-              src="/images/wordmark.png"
-              alt="Hyperscape"
-              width={140}
-              height={28}
-              className="h-6 w-auto mb-4"
-            />
+            <div className="mb-4 font-display text-2xl font-bold text-[var(--gold-essence)]">
+              Gaia
+            </div>
             <p
               className="text-sm font-body leading-relaxed"
               style={{ color: "var(--text-muted)" }}
@@ -194,7 +189,7 @@ export function Footer() {
           className="text-sm font-body text-center"
           style={{ color: "var(--text-muted)" }}
         >
-          &copy; {new Date().getFullYear()} Hyperscape. All rights reserved.
+          &copy; {new Date().getFullYear()} Gaia. All rights reserved.
         </p>
       </div>
     </footer>

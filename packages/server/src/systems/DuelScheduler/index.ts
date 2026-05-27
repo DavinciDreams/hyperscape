@@ -729,8 +729,5 @@ export class DuelScheduler {
 export type AgentStats = AgentDuelStats;
 export type { ScheduledDuel };
 
-// Export DuelBettingBridge for external use
-export { DuelBettingBridge } from "./DuelBettingBridge";
-
 // Export for use in server initialization
 export default DuelScheduler;
