@@ -33,7 +33,10 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
         hillDGX: hillDGX.isConfigured ? await hillDGX.health() : false,
         hillDGXUrl: hillDGX.baseUrl || undefined,
         generationProvider:
-          process.env.ASSET_FORGE_GENERATION_PROVIDER || undefined,
+          process.env.GENERATION_3D_PROVIDER ||
+          process.env.ASSET_FORGE_3D_PROVIDER ||
+          process.env.ASSET_FORGE_GENERATION_PROVIDER ||
+          undefined,
         promptProvider:
           process.env.PROMPT_ENHANCEMENT_PROVIDER ||
           process.env.ASSET_FORGE_PROMPT_PROVIDER ||

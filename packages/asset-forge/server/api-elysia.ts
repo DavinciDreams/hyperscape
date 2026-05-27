@@ -65,6 +65,7 @@ import { TripoService } from "./services/armor-pipeline/TripoService";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, "..");
+const DIST_DIR = path.join(ROOT_DIR, "dist");
 
 // Ensure temp directories exist
 await fs.promises.mkdir(path.join(ROOT_DIR, "temp-images"), {
@@ -326,6 +327,17 @@ const app = new Elysia()
       prefix: "/",
     }),
   )
+
+  // Static file serving - built frontend
+  .use(
+    staticPlugin({
+      assets: DIST_DIR,
+      prefix: "/",
+    }),
+  )
+  .get("/", () => Bun.file(path.join(DIST_DIR, "index.html")))
+  .get("/generate", () => Bun.file(path.join(DIST_DIR, "index.html")))
+  .get("/generate/", () => Bun.file(path.join(DIST_DIR, "index.html")))
 
   // Routes
   .use(healthRoutes)
