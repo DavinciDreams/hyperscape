@@ -31,19 +31,39 @@ export function registerEnvRoutes(
   fastify: FastifyInstance,
   config: ServerConfig,
 ): void {
-  const publicEnvs = getPublicEnvs();
+  fastify.get("/env.js", async (req: FastifyRequest, reply: FastifyReply) => {
+    const publicEnvs = getPublicEnvs();
+    const forwardedProto = req.headers["x-forwarded-proto"];
+    const protoHeader = Array.isArray(forwardedProto)
+      ? forwardedProto[0]
+      : forwardedProto;
+    const protocol =
+      typeof protoHeader === "string" && protoHeader.trim()
+        ? protoHeader.split(",")[0]?.trim()
+        : req.protocol;
+    const host = req.headers.host;
 
-  // Expose plugin paths to client for systems loading
-  if (config.systemsPath) {
-    publicEnvs["PLUGIN_PATH"] = config.systemsPath;
-  }
+    if (host) {
+      const origin = `${protocol}://${host}`;
+      publicEnvs["PUBLIC_API_URL"] ||= origin;
+      publicEnvs["PUBLIC_WS_URL"] ||=
+        `${protocol === "https" ? "wss" : "ws"}://${host}/ws`;
+      publicEnvs["PUBLIC_CDN_URL"] ||= `${origin}/game-assets`;
+    }
 
-  const envsCode = `
+    // Expose plugin paths to client for systems loading
+    if (config.systemsPath) {
+      publicEnvs["PLUGIN_PATH"] = config.systemsPath;
+    }
+
+    const envsCode = `
   if (!globalThis.env) globalThis.env = {}
   globalThis.env = ${JSON.stringify(publicEnvs)}
 `;
 
-  fastify.get("/env.js", async (_req: FastifyRequest, reply: FastifyReply) => {
-    reply.type("application/javascript").send(envsCode);
+    reply
+      .type("application/javascript")
+      .header("Cache-Control", "no-cache, no-store, must-revalidate")
+      .send(envsCode);
   });
 }

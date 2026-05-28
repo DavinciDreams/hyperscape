@@ -16,13 +16,23 @@ Set at least:
 ```env
 POSTGRES_PASSWORD=<strong-password>
 MINIO_ROOT_PASSWORD=<strong-password-at-least-8-chars>
-PUBLIC_API_URL=https://<your-domain>
-PUBLIC_WS_URL=wss://<your-domain>/ws
 PUBLIC_PRIVY_APP_ID=<privy-app-id>
 PRIVY_APP_SECRET=<privy-app-secret>
 JWT_SECRET=<random-32-byte-secret>
 ADMIN_CODE=<private-admin-code>
 ```
+
+`PUBLIC_API_URL`, `PUBLIC_WS_URL`, and `PUBLIC_CDN_URL` may be left unset for a
+simple same-origin Coolify deployment. The server-generated `/env.js` will infer:
+
+```env
+PUBLIC_API_URL=https://<your-domain>
+PUBLIC_WS_URL=wss://<your-domain>/ws
+PUBLIC_CDN_URL=https://<your-domain>/game-assets
+```
+
+Set them explicitly only when the browser must use a different public API,
+WebSocket, or asset domain.
 
 The compose file sets:
 
