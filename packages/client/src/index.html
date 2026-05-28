@@ -63,6 +63,70 @@
       display: none;
     }
   </style>
+  <script>
+    // Run before Vite-injected module scripts so stale service-worker caches
+    // cannot serve old hashed chunks during startup.
+    (() => {
+      const productionHosts = [
+        'hyperscape.club',
+        'www.hyperscape.club',
+        'hyperscape.gg',
+        'www.hyperscape.gg',
+        'hyperscape.flobots.xyz',
+        'hyperscape-production.up.railway.app',
+      ];
+      const isLoopbackHost = ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(
+        window.location.hostname,
+      );
+      const storageKey = '__hyperscape_prod_sw_reset_20260516__';
+      const shouldResetProductionCaches =
+        productionHosts.includes(window.location.hostname) &&
+        !localStorage.getItem(storageKey);
+      if (!isLoopbackHost && !shouldResetProductionCaches) return;
+
+      const reloadMarker = '__hyperscape_sw_reset__';
+      void (async () => {
+        let shouldReload = false;
+
+        if ('serviceWorker' in navigator) {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            if (registrations.length > 0) {
+              await Promise.all(registrations.map(r => r.unregister()));
+              shouldReload = true;
+            }
+          } catch (e) {
+            console.warn('[Bootstrap] Failed to unregister service workers:', e);
+          }
+        }
+
+        if ('caches' in window) {
+          try {
+            const cacheKeys = await caches.keys();
+            const staleKeys = cacheKeys.filter(
+              k => k.startsWith('workbox') || k.startsWith('hyperscape'),
+            );
+            if (staleKeys.length > 0) {
+              await Promise.all(staleKeys.map(k => caches.delete(k)));
+              shouldReload = true;
+            }
+          } catch (e) {
+            console.warn('[Bootstrap] Failed to clear caches:', e);
+          }
+        }
+
+        if (shouldResetProductionCaches) {
+          localStorage.setItem(storageKey, '1');
+        }
+        if (shouldReload && !sessionStorage.getItem(reloadMarker)) {
+          sessionStorage.setItem(reloadMarker, '1');
+          window.location.reload();
+          return;
+        }
+        sessionStorage.removeItem(reloadMarker);
+      })();
+    })();
+  </script>
 </head>
 
 <body>
@@ -82,6 +146,7 @@
         'www.hyperscape.club',
         'hyperscape.gg',
         'www.hyperscape.gg',
+        'hyperscape.flobots.xyz',
         'hyperscape-production.up.railway.app',
       ];
       const isLoopbackHost = ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(
@@ -89,10 +154,10 @@
       );
       const shouldResetProductionCaches =
         productionHosts.includes(window.location.hostname) &&
-        !localStorage.getItem('__hyperscape_prod_sw_reset_20260407__');
+        !localStorage.getItem('__hyperscape_prod_sw_reset_20260516__');
       if (!isLoopbackHost && !shouldResetProductionCaches) return;
 
-      const storageKey = '__hyperscape_prod_sw_reset_20260407__';
+      const storageKey = '__hyperscape_prod_sw_reset_20260516__';
       const reloadMarker = '__hyperscape_sw_reset__';
 
       void (async () => {

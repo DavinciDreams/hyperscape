@@ -3395,6 +3395,14 @@ const ThreeViewer = forwardRef(
       ambientLight.name = "ambientLight";
       scene.add(ambientLight);
 
+      const hemisphereLight = new THREE.HemisphereLight(
+        0xffffff,
+        0x30343a,
+        0.9,
+      );
+      hemisphereLight.name = "hemisphereLight";
+      scene.add(hemisphereLight);
+
       // Key light
       const keyLight = new THREE.DirectionalLight(0xffffff, 1);
       keyLight.name = "keyLight";
@@ -3932,7 +3940,7 @@ const ThreeViewer = forwardRef(
 
       // Adjust renderer exposure for light mode
       if (rendererRef.current) {
-        rendererRef.current.toneMappingExposure = isLightBackground ? 0.7 : 1;
+        rendererRef.current.toneMappingExposure = isLightBackground ? 0.8 : 1.35;
       }
     }, [isLightBackground, currentEnvironment]);
 
@@ -3942,8 +3950,7 @@ const ThreeViewer = forwardRef(
 
       const env = ENVIRONMENTS[currentEnvironment];
 
-      // Reduce intensity in light mode
-      const lightModeFactor = isLightBackground ? 0.6 : 1;
+      const lightModeFactor = isLightBackground ? 0.75 : 1;
 
       // Update ambient light
       const ambientLight = sceneRef.current.getObjectByName(
@@ -3954,13 +3961,22 @@ const ThreeViewer = forwardRef(
         ambientLight.intensity = env.ambientIntensity * lightModeFactor;
       }
 
+      const hemisphereLight = sceneRef.current.getObjectByName(
+        "hemisphereLight",
+      ) as THREE.HemisphereLight;
+      if (hemisphereLight) {
+        hemisphereLight.color = new THREE.Color(env.ambientColor);
+        hemisphereLight.groundColor = new THREE.Color(env.bgColor);
+        hemisphereLight.intensity = env.ambientIntensity * lightModeFactor * 0.65;
+      }
+
       // Update key light
       const keyLight = sceneRef.current.getObjectByName(
         "keyLight",
       ) as THREE.DirectionalLight;
       if (keyLight) {
         keyLight.color = new THREE.Color(env.keyLightColor);
-        keyLight.intensity = env.keyLightIntensity * lightModeFactor * 0.8;
+        keyLight.intensity = env.keyLightIntensity * lightModeFactor;
       }
 
       // Update fill light
@@ -3969,7 +3985,7 @@ const ThreeViewer = forwardRef(
       ) as THREE.DirectionalLight;
       if (fillLight) {
         fillLight.color = new THREE.Color(env.fillLightColor);
-        fillLight.intensity = env.fillLightIntensity * lightModeFactor * 0.7;
+        fillLight.intensity = env.fillLightIntensity * lightModeFactor;
       }
 
       // Update rim light
@@ -3978,7 +3994,7 @@ const ThreeViewer = forwardRef(
       ) as THREE.DirectionalLight;
       if (rimLight) {
         rimLight.color = new THREE.Color(env.rimLightColor);
-        rimLight.intensity = env.rimLightIntensity * lightModeFactor * 0.6;
+        rimLight.intensity = env.rimLightIntensity * lightModeFactor;
       }
 
       // Update SSAO intensity for light mode

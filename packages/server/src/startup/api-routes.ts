@@ -8,7 +8,6 @@
  * **Modular Architecture**:
  * This file coordinates between specialized route modules:
  * - routes/health-routes.ts - Health check and server status
- * - routes/env-routes.ts - Public environment variables
  * - routes/upload-routes.ts - File upload handling
  * - routes/player-routes.ts - Player management
  * - routes/action-routes.ts - Action registry API
@@ -18,7 +17,6 @@
  * Endpoints provided:
  * - GET /health - Health check
  * - GET /status - Server status with connected players
- * - GET /env.js - Public environment variables
  * - POST /api/upload - File upload
  * - GET /api/upload-check - File existence check
  * - POST /api/player/disconnect - Player disconnect beacon
@@ -39,7 +37,6 @@ import type { ServerConfig } from "./config.js";
 
 // Import route modules
 import { registerHealthRoutes } from "./routes/health-routes.js";
-import { registerEnvRoutes } from "./routes/env-routes.js";
 import { registerUploadRoutes } from "./routes/upload-routes.js";
 import { registerPlayerRoutes } from "./routes/player-routes.js";
 import { registerActionRoutes } from "./routes/action-routes.js";
@@ -75,9 +72,6 @@ export function registerApiRoutes(
 
   // Health and status endpoints
   registerHealthRoutes(fastify, world, config);
-
-  // Environment variables endpoint
-  registerEnvRoutes(fastify, config);
 
   // Upload endpoints
   registerUploadRoutes(fastify, config);

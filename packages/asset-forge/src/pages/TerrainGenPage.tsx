@@ -35,7 +35,7 @@ import type { TerrainPreset } from "@/types/ProcgenPresets";
 import { notify } from "@/utils/notify";
 
 // API base
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Get available terrain presets
 const TERRAIN_PRESETS = TerrainGen.listPresetIds();

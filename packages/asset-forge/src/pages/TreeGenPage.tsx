@@ -74,7 +74,7 @@ import {
 } from "@/utils/webgpu-renderer";
 
 // API base
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Tree shape options for dropdown
 const TREE_SHAPE_OPTIONS: { value: TreeShapeType; label: string }[] = [

@@ -1,0 +1,61 @@
+services:
+  asset-forge:
+    build:
+      context: .
+      dockerfile: Dockerfile.coolify-asset-forge
+    environment:
+      ASSET_FORGE_API_PORT: "3401"
+      ASSET_FORGE_ASSETS_DIR: /app/packages/asset-forge/gdd-assets
+      ASSET_FORGE_3D_PROVIDER: ${ASSET_FORGE_3D_PROVIDER:-}
+      ASSET_FORGE_GENERATION_PROVIDER: ${ASSET_FORGE_GENERATION_PROVIDER:-meshy}
+      GENERATION_3D_PROVIDER: ${GENERATION_3D_PROVIDER:-}
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      FRONTEND_URL: ${COOLIFY_URL:-}
+      HILL_API_BASE_URL: ${HILL_API_BASE_URL:-}
+      HILL_API_POLL_INTERVAL_MS: ${HILL_API_POLL_INTERVAL_MS:-3000}
+      HILL_API_TIMEOUT_MS: ${HILL_API_TIMEOUT_MS:-1800000}
+      HILL_API_TOKEN: ${HILL_API_TOKEN:-}
+      HILL_EXPORT_TARGET: ${HILL_EXPORT_TARGET:-}
+      HILL_GENERATION_MODE: ${HILL_GENERATION_MODE:-}
+      IMAGE_SERVER_URL: ${COOLIFY_URL:-}
+      MESHY_API_KEY: ${MESHY_API_KEY:-}
+      NEMOTRON_API_BASE_URL: ${NEMOTRON_API_BASE_URL:-}
+      NEMOTRON_MAX_TOKENS: ${NEMOTRON_MAX_TOKENS:-450}
+      NEMOTRON_MODEL: ${NEMOTRON_MODEL:-}
+      NEMOTRON_TEMPERATURE: ${NEMOTRON_TEMPERATURE:-0.2}
+      NODE_ENV: production
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PIXEL3D_GRADIO_API_NAME: ${PIXEL3D_GRADIO_API_NAME:-/generate_3d}
+      PIXEL3D_GRADIO_BASE_URL: ${PIXEL3D_GRADIO_BASE_URL:-}
+      PIXEL3D_GRADIO_INPUTS: ${PIXEL3D_GRADIO_INPUTS:-}
+      PIXEL3D_RESOLUTION: ${PIXEL3D_RESOLUTION:-1024}
+      PROMPT_ENHANCEMENT_PROVIDER: ${PROMPT_ENHANCEMENT_PROVIDER:-}
+      PUBLIC_URL: ${COOLIFY_URL:-}
+      TRIPO_API_KEY: ${TRIPO_API_KEY:-}
+      VITE_GENERATION_API_URL: /api
+    ports:
+      - "3401"
+    volumes:
+      - asset-forge-assets:/app/packages/asset-forge/gdd-assets
+      - asset-forge-temp-images:/app/packages/asset-forge/temp-images
+      - asset-forge-temp-shells:/app/packages/asset-forge/temp-shells
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-fsS",
+          "http://localhost:3401/api/health"
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  asset-forge-assets:
+  asset-forge-temp-images:
+  asset-forge-temp-shells:

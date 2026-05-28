@@ -47,6 +47,7 @@ import {
   registerCsrfProtection,
   enforceSameSiteCookies,
 } from "../middleware/csrf.js";
+import { registerEnvRoutes } from "./routes/env-routes.js";
 
 /**
  * SECURITY: Validate Origin header for state-changing requests.
@@ -75,6 +76,22 @@ type PublicRootInfo = {
   source: "server-public" | "client-dist";
 };
 
+async function hasUsableClientRoot(
+  indexPath: string,
+  assetsPath: string,
+): Promise<boolean> {
+  if (!(await fs.pathExists(indexPath)) || !(await fs.pathExists(assetsPath))) {
+    return false;
+  }
+
+  try {
+    const entries = await fs.readdir(assetsPath);
+    return entries.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function resolvePublicRoot(
   config: ServerConfig,
 ): Promise<PublicRootInfo> {
@@ -86,7 +103,7 @@ async function resolvePublicRoot(
   const clientDistIndex = path.join(clientDistRoot, "index.html");
   const clientDistAssets = path.join(clientDistRoot, "assets");
 
-  if (await fs.pathExists(serverAssetsPath)) {
+  if (await hasUsableClientRoot(serverIndexPath, serverAssetsPath)) {
     return {
       root: serverPublicRoot,
       indexPath: serverIndexPath,
@@ -95,7 +112,7 @@ async function resolvePublicRoot(
     };
   }
 
-  if (await fs.pathExists(clientDistIndex)) {
+  if (await hasUsableClientRoot(clientDistIndex, clientDistAssets)) {
     return {
       root: clientDistRoot,
       indexPath: clientDistIndex,
@@ -157,6 +174,7 @@ export async function createHttpServer(
     "https://www.bsc.hyperbet.win",
     "https://hyperscape.gg",
     "https://www.hyperscape.gg",
+    "https://hyperscape.flobots.xyz",
     "https://hyperscape.club",
     "https://www.hyperscape.club",
     "https://hyperscape.pages.dev",
@@ -184,6 +202,7 @@ export async function createHttpServer(
     /^https?:\/\/.+\.hyperbet-bsc\.pages\.dev$/, // Hyperbet BSC preview deployments
     /^https?:\/\/(www\.)?hyperscape\.gg$/, // hyperscape.gg apex and www
     /^https?:\/\/.+\.hyperscape\.gg$/, // hyperscape.gg subdomains
+    /^https?:\/\/.+\.flobots\.xyz$/, // flobots.xyz subdomains
     /^https?:\/\/.+\.hyperscape\.pages\.dev$/, // Cloudflare Pages preview deployments
     /^https:\/\/.+\.farcaster\.xyz$/,
     /^https:\/\/.+\.warpcast\.com$/,
@@ -283,7 +302,7 @@ export async function createHttpServer(
   if (isRateLimitEnabled()) {
     await fastify.register(rateLimit, getGlobalRateLimit());
     console.log(
-      "[HTTP] ✅ Rate limiting enabled (100 requests/min per IP globally)",
+      "[HTTP] ✅ Rate limiting enabled (global API limit, static assets allowlisted)",
     );
   } else {
     console.log("[HTTP] ⚠️  Rate limiting disabled (development mode)");
@@ -312,6 +331,10 @@ export async function createHttpServer(
       "[HTTP] ✅ Dev CSRF token stub registered (validation still off unless CSRF_ENABLED=true)",
     );
   }
+
+  // Runtime public env must be registered before static files so the generated
+  // same-origin Coolify config wins over the placeholder client/public/env.js.
+  registerEnvRoutes(fastify, config);
 
   // Serve index.html for root path (SPA routing)
   await registerIndexHtmlRoute(fastify, config);
