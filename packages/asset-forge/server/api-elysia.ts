@@ -43,7 +43,6 @@ import { createBatchSpritesRoutes } from "./routes/batch-sprites";
 import { promptRoutes } from "./routes/prompts";
 import { playtesterSwarmRoutes } from "./routes/playtester-swarm";
 import { voiceGenerationRoutes } from "./routes/voice-generation";
-import { musicRoutes } from "./routes/music";
 import { soundEffectsRoutes } from "./routes/sound-effects";
 import { contentGenerationRoutes } from "./routes/content-generation";
 import { createManifestRoutes } from "./routes/manifests";
@@ -268,10 +267,6 @@ const app = new Elysia()
             description: "ElevenLabs text-to-speech for NPC dialogue",
           },
           {
-            name: "Music Generation",
-            description: "ElevenLabs AI music generation for game soundtracks",
-          },
-          {
             name: "Sound Effects",
             description: "ElevenLabs text-to-sound-effects for game audio",
           },
@@ -436,7 +431,6 @@ const app = new Elysia()
   .use(createGenerationRoutes(generationService))
   .use(playtesterSwarmRoutes)
   .use(voiceGenerationRoutes)
-  .use(musicRoutes)
   .use(soundEffectsRoutes)
   .use(contentGenerationRoutes)
   // World building routes
@@ -492,7 +486,7 @@ if (!process.env.AI_GATEWAY_API_KEY && !process.env.OPENAI_API_KEY) {
 }
 if (!process.env.ELEVENLABS_API_KEY) {
   console.warn(
-    "⚠️  ELEVENLABS_API_KEY not found - voice, music, and sound effects generation will fail",
+    "⚠️  ELEVENLABS_API_KEY not found - voice and sound effects generation will fail",
   );
 }
 
