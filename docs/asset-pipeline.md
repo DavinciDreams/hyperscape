@@ -8,7 +8,8 @@ separate stages with one manifest contract between them.
 | System | Role | Notes |
 | --- | --- | --- |
 | Hill | Create and optimize assets | Runs the local DGX pipeline: Nemotron prompt optimization, Flux Klein image generation, Trellis2 mesh generation, mesh repair, Draco compression, LODs, and optional sprites or impostors. |
-| VRM Viewer | Manage asset inventory | Stores product descriptions, keywords, tags, license metadata, thumbnails, previews, model summaries, and viewer/editor state. It should be able to preview Draco-compressed GLB assets. |
+| Asset Forge | Review and orchestrate generated assets | Stores or uploads generated GLB assets, previews them, and exposes the creator workflow. Hosted previews must not depend on VRM Viewer routes. |
+| VRM Viewer | Optional catalog/inspection surface | Can mirror product descriptions, keywords, tags, license metadata, thumbnails, previews, model summaries, and viewer/editor state. It should be able to preview Draco-compressed GLB assets, but it is not required for Asset Forge production routing. |
 | Hyperscape | Deploy assets into the MMO | Imports Hill manifests into `packages/server/world/assets`, serves them through the local asset CDN, and patches runtime manifests used by terrain, vegetation, towns, mobs, NPCs, and item placement. |
 
 Asset Forge remains useful as an orchestration and review shell, but the default
@@ -22,7 +23,8 @@ flowchart LR
     Prompt["Creator prompt"] --> Hill["Hill generation"]
     Hill --> Optimize["Repair, Draco, LODs, sprites, impostors"]
     Optimize --> Manifest["unified_manifest.json"]
-    Manifest --> Viewer["VRM Viewer inventory"]
+    Manifest --> Forge["Asset Forge review"]
+    Manifest --> Viewer["Optional VRM Viewer catalog"]
     Manifest --> Importer["Hyperscape importer"]
     Importer --> Assets["packages/server/world/assets"]
     Assets --> CDN["/game-assets CDN"]
@@ -72,9 +74,10 @@ exports.hyperscape.manifestPatches.vegetation
 
 ## Unified Manifest Contract
 
-The manifest should preserve the creator-facing metadata needed by VRM Viewer and
-the runtime metadata needed by Hyperscape. The importer only consumes part of
-this today, but new producers should keep the full shape stable.
+The manifest should preserve the creator-facing metadata needed by Asset Forge
+or an optional catalog and the runtime metadata needed by Hyperscape. The
+importer only consumes part of this today, but new producers should keep the
+full shape stable.
 
 ```json
 {
@@ -190,7 +193,7 @@ tree GLBs are large enough to hurt boot time, network transfer, and memory.
 
 Every imported vegetation asset should have:
 
-- A thumbnail for VRM Viewer and Asset Forge library browsing.
+- A thumbnail for Asset Forge library browsing and any optional catalog.
 - At least `lod0`, `lod1`, and `lod2` GLBs.
 - Draco-compressed geometry where possible.
 - Product description, keywords, tags, visibility, and license fields.
@@ -204,7 +207,7 @@ Before an asset pack is treated as deployable:
 - `bun scripts/import-hill-manifest.mjs --manifest <file> --dry-run` succeeds.
 - The manifest copy appears under `packages/server/world/assets/manifests/hill/`.
 - Copied model paths resolve through the asset CDN at `/game-assets/...`.
-- Draco-compressed GLBs load in VRM Viewer and in Hyperscape.
+- Draco-compressed GLBs load in Asset Forge and in Hyperscape.
 - Vegetation entries include reasonable LOD distances and biome coverage.
 - The asset stays inside category budgets for triangles, texture size, and file size.
 - Free-tier assets use `public_cc0`; paid/private assets preserve creator licensing metadata.
