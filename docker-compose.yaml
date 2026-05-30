@@ -1,11 +1,40 @@
 services:
+  asset-forge-postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${ASSET_FORGE_POSTGRES_USER:-assetforge}
+      POSTGRES_PASSWORD: ${ASSET_FORGE_POSTGRES_PASSWORD:?set ASSET_FORGE_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${ASSET_FORGE_POSTGRES_DB:-assetforge}
+    volumes:
+      - asset-forge-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${ASSET_FORGE_POSTGRES_USER:-assetforge} -d ${ASSET_FORGE_POSTGRES_DB:-assetforge}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - default
+
   asset-forge:
     build:
       context: .
       dockerfile: Dockerfile.coolify-asset-forge
+    depends_on:
+      asset-forge-postgres:
+        condition: service_healthy
     environment:
       ASSET_FORGE_API_PORT: "3401"
       ASSET_FORGE_ASSETS_DIR: /app/packages/asset-forge/gdd-assets
+      ASSET_FORGE_POSTGRES_HOST: asset-forge-postgres
+      ASSET_FORGE_POSTGRES_PORT: "5432"
+      ASSET_FORGE_POSTGRES_USER: ${ASSET_FORGE_POSTGRES_USER:-assetforge}
+      ASSET_FORGE_POSTGRES_PASSWORD: ${ASSET_FORGE_POSTGRES_PASSWORD:?set ASSET_FORGE_POSTGRES_PASSWORD}
+      ASSET_FORGE_POSTGRES_DB: ${ASSET_FORGE_POSTGRES_DB:-assetforge}
       ASSET_FORGE_3D_PROVIDER: ${ASSET_FORGE_3D_PROVIDER:-}
       ASSET_FORGE_GENERATION_PROVIDER: ${ASSET_FORGE_GENERATION_PROVIDER:-meshy}
       GENERATION_3D_PROVIDER: ${GENERATION_3D_PROVIDER:-}
@@ -62,12 +91,15 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 5
+    labels:
+      - "traefik.docker.network=${COOLIFY_RESOURCE_UUID:-hfwzc37pioj6o7v35o47mp8u}"
     restart: unless-stopped
     networks:
       - default
       - hyperscape-runtime
 
 volumes:
+  asset-forge-postgres-data:
   asset-forge-assets:
   asset-forge-temp-images:
   asset-forge-temp-shells:
