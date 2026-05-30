@@ -848,7 +848,6 @@ function registerConjureAssetProxyRoute(fastify: FastifyInstance): void {
   };
 
   fastify.get("/conjure-assets/*", proxy);
-  fastify.head("/conjure-assets/*", proxy);
   console.log(
     `[HTTP] ✅ Registered /conjure-assets/ proxy → ${endpoint}/${bucket}`,
   );
