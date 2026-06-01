@@ -4,6 +4,7 @@ export type ConjureStartInput = {
   type?: string;
   subtype?: string;
   quality?: string;
+  referenceImageUrl?: string;
 };
 
 export type ConjureStartResult = {
@@ -199,7 +200,7 @@ export class ConjureService {
     const subtype = input.subtype?.trim() || "conjured";
     const quality = input.quality?.trim() || "high";
 
-    return {
+    const config: Record<string, unknown> = {
       description: prompt,
       assetId,
       name: prompt.slice(0, 80),
@@ -221,5 +222,15 @@ export class ConjureService {
           "game-ready 3D prop, clean topology, strong silhouette, PBR textures, grounded scale",
       },
     };
+
+    const referenceImageUrl = input.referenceImageUrl?.trim();
+    if (referenceImageUrl) {
+      config.referenceImage = {
+        source: "url",
+        url: referenceImageUrl,
+      };
+    }
+
+    return config;
   }
 }

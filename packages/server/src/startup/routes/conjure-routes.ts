@@ -15,6 +15,7 @@ type ConjureRequestBody = {
   type?: string;
   subtype?: string;
   quality?: string;
+  uploadedImageFilename?: string;
 };
 
 type ConjurePlacementRequestBody = {
@@ -55,6 +56,41 @@ function parsePlacementPosition(
   return { x: position.x, y: position.y, z: position.z };
 }
 
+function sanitizeUploadedImageFilename(filename: string | undefined): string {
+  const clean = filename?.trim();
+  if (!clean) return "";
+  if (!/^[a-f0-9]+\.(png|jpe?g|webp)$/i.test(clean)) {
+    throw new ConjureServiceError("Invalid conjure image upload", 400);
+  }
+  return clean;
+}
+
+function getRequestOrigin(request: FastifyRequest): string {
+  const forwardedProto = request.headers["x-forwarded-proto"];
+  const protoHeader = Array.isArray(forwardedProto)
+    ? forwardedProto[0]
+    : forwardedProto;
+  const protocol =
+    typeof protoHeader === "string" && protoHeader.trim()
+      ? protoHeader.split(",")[0]?.trim()
+      : request.protocol;
+  const host = request.headers.host;
+  if (!host) {
+    throw new ConjureServiceError("Request host is required", 400);
+  }
+  return `${protocol}://${host}`;
+}
+
+function getReferenceImageUrl(
+  request: FastifyRequest<{ Body: ConjureRequestBody }>,
+): string | undefined {
+  const filename = sanitizeUploadedImageFilename(
+    request.body?.uploadedImageFilename,
+  );
+  if (!filename) return undefined;
+  return `${getRequestOrigin(request)}/assets/world/${filename}`;
+}
+
 function isCompletedStatus(status: string): boolean {
   return ["completed", "complete", "succeeded", "success"].includes(
     status.toLowerCase(),
@@ -92,6 +128,7 @@ export function registerConjureRoutes(
           type: request.body?.type,
           subtype: request.body?.subtype,
           quality: request.body?.quality,
+          referenceImageUrl: getReferenceImageUrl(request),
         });
         return reply.send(result);
       } catch (error) {

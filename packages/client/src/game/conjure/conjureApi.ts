@@ -6,6 +6,7 @@ export type ConjureStartRequest = {
   type?: string;
   subtype?: string;
   quality?: string;
+  uploadedImageFilename?: string;
 };
 
 export type ConjureStartResponse = {
