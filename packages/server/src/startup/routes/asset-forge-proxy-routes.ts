@@ -127,6 +127,12 @@ function copyResponseHeaders(response: Response, reply: FastifyReply): void {
   });
 }
 
+function responseHasJsonContent(response: Response): boolean {
+  return (response.headers.get("content-type") || "").includes(
+    "application/json",
+  );
+}
+
 export function registerAssetForgeProxyRoutes(fastify: FastifyInstance): void {
   console.log("[AssetForgeProxy] Registering Asset Forge proxy routes...");
 
@@ -160,6 +166,16 @@ export function registerAssetForgeProxyRoutes(fastify: FastifyInstance): void {
             : (buildProxyBody(request) as FetchRequestBody | undefined),
         redirect: "manual",
       });
+
+      if (!response.ok && !responseHasJsonContent(response)) {
+        const upstreamBody = await response.text();
+        return reply.code(response.status).send({
+          error: "Asset Forge upstream request failed",
+          message: upstreamBody.trim() || response.statusText,
+          statusCode: response.status,
+        });
+      }
+
       copyResponseHeaders(response, reply);
       const arrayBuffer = await response.arrayBuffer();
       return reply.code(response.status).send(Buffer.from(arrayBuffer));

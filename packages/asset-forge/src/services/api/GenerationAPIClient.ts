@@ -74,6 +74,41 @@ export interface GenerationAPIEvents {
 // Type helper to extract event arguments
 type EventArgs<T extends keyof GenerationAPIEvents> = GenerationAPIEvents[T];
 
+async function readErrorMessage(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      const body = (await response.json()) as {
+        error?: unknown;
+        message?: unknown;
+      };
+      if (typeof body.error === "string" && body.error.trim().length > 0) {
+        return body.error;
+      }
+      if (typeof body.message === "string" && body.message.trim().length > 0) {
+        return body.message;
+      }
+    } catch {
+      // Fall through to text/status fallback below.
+    }
+  }
+
+  try {
+    const text = await response.text();
+    if (text.trim().length > 0) {
+      return text.trim();
+    }
+  } catch {
+    // Fall through to status fallback below.
+  }
+
+  return `${fallback} (${response.status} ${response.statusText})`.trim();
+}
+
 export class GenerationAPIClient extends TypedEventEmitter<GenerationAPIEvents> {
   private apiUrl: string;
   private pollInterval: number = 2000; // Poll every 2 seconds
@@ -103,8 +138,9 @@ export class GenerationAPIClient extends TypedEventEmitter<GenerationAPIEvents> 
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to start pipeline");
+      throw new Error(
+        await readErrorMessage(response, "Failed to start pipeline"),
+      );
     }
 
     const result = await response.json();
@@ -147,8 +183,9 @@ export class GenerationAPIClient extends TypedEventEmitter<GenerationAPIEvents> 
     );
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Failed to get pipeline status");
+      throw new Error(
+        await readErrorMessage(response, "Failed to get pipeline status"),
+      );
     }
 
     const status = await response.json();
