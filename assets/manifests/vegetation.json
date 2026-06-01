@@ -15,10 +15,8 @@
       "yOffset": 0
     },
     {
-      "id": "cherry-tree-lod-test",
-      "model": "vegetation/cherry-trees/cherry-tree-lod-test.glb",
-      "lod1Model": "vegetation/cherry-trees/cherry-tree-lod-test_lod1.glb",
-      "lod2Model": "vegetation/cherry-trees/cherry-tree-lod-test_lod2.glb",
+      "id": "tree1",
+      "model": "trees/tree1.glb",
       "category": "tree",
       "baseScale": 1.0,
       "scaleVariation": [0.9, 1.15],

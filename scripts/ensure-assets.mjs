@@ -7,6 +7,7 @@
  *
  * Behavior:
  * - CI/Production: Shallow clone without LFS (manifests only, ~fast)
+ * - HYPERSCAPE_ASSETS_MODE=full: force a full LFS asset download
  * - Development: Full clone with LFS pull (~200MB binary assets)
  *
  * The assets directory is gitignored — this script is the sole mechanism
@@ -78,6 +79,10 @@ Note: In CI/production, manifests are committed to the repo.
 }
 
 function isCI() {
+  if (process.env.HYPERSCAPE_ASSETS_MODE === "full") {
+    return false;
+  }
+
   // Check for common CI/deployment environment variables
   return !!(
     process.env.CI ||
