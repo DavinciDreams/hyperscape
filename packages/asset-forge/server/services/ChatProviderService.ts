@@ -204,6 +204,7 @@ class ChatProviderService {
       const endpointBaseUrl =
         process.env.HYADES_LLM_ENDPOINT ||
         process.env.SAFIER_LLM_ENDPOINT ||
+        process.env.NEMOTRON_API_BASE_URL ||
         process.env.NEMOTRON_BASE_URL ||
         process.env.LOCAL_PROMPT_MODEL_BASE_URL ||
         "http://monumentals-mac-studio.local:12345";

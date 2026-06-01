@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Mic, MicOff, Sparkles, X } from "lucide-react";
+import { ImagePlus, Mic, MicOff, Sparkles, X } from "lucide-react";
 import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import {
@@ -14,7 +14,7 @@ import {
   startConjure,
   type ConjureStatusResponse,
 } from "./conjureApi";
-import { ConjureGalaxy } from "./ConjureGalaxy";
+import { ConjureWorldEffect } from "./ConjureWorldEffect";
 import "./conjure.css";
 
 type SpeechRecognitionAlternative = {
@@ -66,6 +66,14 @@ type ConjurePhase =
   | "complete"
   | "failed";
 
+const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+type WorldPosition = {
+  x: number;
+  y: number;
+  z: number;
+};
+
 function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
   if (typeof window === "undefined") return null;
   const speechWindow = window as WindowWithSpeechRecognition;
@@ -88,11 +96,7 @@ function isFailed(status: string): boolean {
   );
 }
 
-function getPlacementPosition(world: ClientWorld): {
-  x: number;
-  y: number;
-  z: number;
-} | null {
+function getPlacementPosition(world: ClientWorld): WorldPosition | null {
   const player = world.getPlayer?.();
   const position = player?.getPosition?.() ?? player?.position;
   if (!position) return null;
@@ -104,14 +108,26 @@ function getPlacementPosition(world: ClientWorld): {
   };
 }
 
+function createImagePrompt(prompt: string, imageFile: File | null): string {
+  const cleanPrompt = prompt.trim();
+  if (cleanPrompt) return cleanPrompt;
+  if (!imageFile) return "";
+  return "A game-ready 3D asset based on the uploaded image";
+}
+
 export function ConjurePanel({ world }: { world: ClientWorld }) {
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [phase, setPhase] = useState<ConjurePhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [conjureId, setConjureId] = useState<string | null>(null);
   const [assetId, setAssetId] = useState<string | null>(null);
   const [status, setStatus] = useState<ConjureStatusResponse | null>(null);
+  const [placementPosition, setPlacementPosition] =
+    useState<WorldPosition | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const pollTimeoutRef = useRef<number | null>(null);
 
@@ -165,8 +181,45 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
     setPhase("listening");
   }, []);
 
+  const clearImage = useCallback(() => {
+    setImageFile(null);
+    setImagePreviewUrl((currentUrl) => {
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      return null;
+    });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+  const selectImage = useCallback((file: File | null) => {
+    if (!file) return;
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+      setError("Choose a PNG, JPG, or WebP image.");
+      return;
+    }
+
+    setError(null);
+    setImageFile(file);
+    setImagePreviewUrl((currentUrl) => {
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      return URL.createObjectURL(file);
+    });
+  }, []);
+
+  const uploadImage = useCallback(async (): Promise<string | undefined> => {
+    if (!imageFile) return undefined;
+    const networkWithUpload = world.network as {
+      upload?: (file: File) => Promise<string>;
+    };
+    if (!networkWithUpload.upload) {
+      throw new Error("Image upload is not available in this world.");
+    }
+    return networkWithUpload.upload(imageFile);
+  }, [imageFile, world.network]);
+
   const submitConjure = useCallback(async () => {
-    const cleanPrompt = prompt.trim();
+    const cleanPrompt = createImagePrompt(prompt, imageFile);
     if (!cleanPrompt || phase === "starting" || phase === "processing") return;
 
     stopListening();
@@ -175,15 +228,24 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
     setStatus(null);
     setConjureId(null);
     setAssetId(null);
+    const nextPlacementPosition = getPlacementPosition(world);
+    if (!nextPlacementPosition) {
+      setError("Player position is not ready for conjure placement.");
+      setPhase("failed");
+      return;
+    }
+    setPlacementPosition(nextPlacementPosition);
     setPhase("starting");
 
     try {
+      const uploadedImageFilename = await uploadImage();
       const response = await startConjure({
         prompt: cleanPrompt,
-        speechTranscript: cleanPrompt,
+        speechTranscript: prompt.trim() || undefined,
         type: "prop",
         subtype: "spoken-conjure",
         quality: "high",
+        uploadedImageFilename,
       });
       setConjureId(response.conjureId || null);
       setAssetId(response.assetId);
@@ -198,7 +260,15 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
       setError(message);
       setPhase("failed");
     }
-  }, [phase, prompt, resetPolling, stopListening, world]);
+  }, [
+    imageFile,
+    phase,
+    prompt,
+    resetPolling,
+    stopListening,
+    uploadImage,
+    world,
+  ]);
 
   useEffect(() => {
     if (!conjureId || phase !== "processing") return undefined;
@@ -211,7 +281,6 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
         setStatus(next);
 
         if (isFinished(next.status)) {
-          const placementPosition = getPlacementPosition(world);
           if (!placementPosition) {
             setError("Player position is not ready for placement.");
             setPhase("failed");
@@ -267,14 +336,23 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
       cancelled = true;
       resetPolling();
     };
-  }, [assetId, conjureId, phase, prompt, resetPolling, world]);
+  }, [
+    assetId,
+    conjureId,
+    phase,
+    placementPosition,
+    prompt,
+    resetPolling,
+    world,
+  ]);
 
   useEffect(() => {
     return () => {
       stopListening();
       resetPolling();
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     };
-  }, [resetPolling, stopListening]);
+  }, [imagePreviewUrl, resetPolling, stopListening]);
 
   const busy =
     phase === "starting" || phase === "processing" || phase === "placing";
@@ -330,8 +408,6 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
             </button>
           </div>
 
-          {busy && <ConjureGalaxy active={busy} />}
-
           <div className="conjure-input-row">
             <button
               type="button"
@@ -353,6 +429,45 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
             />
           </div>
 
+          <div className="conjure-image-row">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) =>
+                selectImage(event.currentTarget.files?.item(0) || null)
+              }
+              disabled={busy}
+            />
+            <button
+              type="button"
+              className="conjure-image-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy}
+            >
+              <ImagePlus size={16} />
+              <span>{imageFile ? "Change image" : "Upload image"}</span>
+            </button>
+            {imageFile && (
+              <button
+                type="button"
+                className="conjure-icon-button"
+                onClick={clearImage}
+                disabled={busy}
+                aria-label="Remove uploaded image"
+              >
+                <X size={16} />
+              </button>
+            )}
+            {imagePreviewUrl && (
+              <img
+                className="conjure-image-preview"
+                src={imagePreviewUrl}
+                alt=""
+              />
+            )}
+          </div>
+
           <div
             className="conjure-progress"
             aria-hidden={phase !== "processing"}
@@ -370,7 +485,7 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
               type="button"
               className="conjure-submit"
               onClick={submitConjure}
-              disabled={!prompt.trim() || busy}
+              disabled={!createImagePrompt(prompt, imageFile) || busy}
             >
               <Sparkles size={16} />
               <span>{busy ? "Conjuring" : "Conjure"}</span>
@@ -378,6 +493,12 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
           </div>
         </section>
       )}
+
+      <ConjureWorldEffect
+        active={busy}
+        position={placementPosition}
+        world={world}
+      />
     </>
   );
 }

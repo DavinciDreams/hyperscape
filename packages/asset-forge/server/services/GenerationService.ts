@@ -250,6 +250,22 @@ interface HillConjureJob {
   result?: HillConjureResult;
 }
 
+function getPromptEnhancementProvider(): string {
+  return (
+    process.env.PROMPT_ENHANCEMENT_PROVIDER ||
+    process.env.ASSET_FORGE_CHAT_PROVIDER ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function shouldUseLocalNemotronEnhancement(): boolean {
+  return ["nemotron", "nemo", "local-nemotron"].includes(
+    getPromptEnhancementProvider(),
+  );
+}
+
 // ==================== Service Class ====================
 
 export class GenerationService extends EventEmitter {
@@ -377,6 +393,37 @@ export class GenerationService extends EventEmitter {
 
       // Stage 1: GPT-5 Prompt Enhancement (honor toggle; skip if explicitly disabled)
       if (
+        !useHillDgx &&
+        shouldUseLocalNemotronEnhancement() &&
+        pipeline.config.metadata?.useGPT5Enhancement !== false
+      ) {
+        pipeline.stages.promptOptimization.status = "processing";
+        try {
+          const optimizationResult = await this.enhancePromptWithLocalNemotron(
+            pipeline.config,
+          );
+          enhancedPrompt = optimizationResult.optimizedPrompt;
+          pipeline.stages.promptOptimization.result = {
+            ...optimizationResult,
+          };
+        } catch (error) {
+          console.warn(
+            "Local Nemotron enhancement failed, using original prompt:",
+            error,
+          );
+          pipeline.stages.promptOptimization.result = {
+            originalPrompt: pipeline.config.description,
+            optimizedPrompt: pipeline.config.description,
+            provider: "local_nemotron",
+            error: (error as Error).message,
+          };
+        }
+        pipeline.stages.promptOptimization.status = "completed";
+        pipeline.stages.promptOptimization.progress = 100;
+        pipeline.results.promptOptimization =
+          pipeline.stages.promptOptimization.result;
+        pipeline.progress = 10;
+      } else if (
         !useHillDgx &&
         pipeline.config.metadata?.useGPT5Enhancement !== false
       ) {
@@ -1862,6 +1909,7 @@ export class GenerationService extends EventEmitter {
     config: PipelineConfig,
   ): Promise<PromptEnhancementResult> {
     const baseUrl = (
+      process.env.NEMOTRON_API_BASE_URL ||
       process.env.NEMOTRON_BASE_URL ||
       process.env.LOCAL_PROMPT_MODEL_BASE_URL ||
       "http://monumentals-mac-studio.local:12345"
