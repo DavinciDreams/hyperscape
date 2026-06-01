@@ -237,6 +237,69 @@ function parseOptionalInt(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function getNestedErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const errorRecord = error as { code?: unknown; cause?: unknown };
+  if (typeof errorRecord.code === "string") return errorRecord.code;
+  return getNestedErrorCode(errorRecord.cause);
+}
+
+function isTransientDatabaseStartupError(error: unknown): boolean {
+  const code = getNestedErrorCode(error);
+  return (
+    code === "ECONNREFUSED" ||
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "ENOTFOUND" ||
+    code === "EAI_AGAIN" ||
+    code === "57P03"
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithTransientDatabaseRetry<T>(
+  label: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const timeoutMs =
+    parseOptionalInt(process.env.DB_STARTUP_TIMEOUT_MS) ?? 180_000;
+  const intervalMs =
+    parseOptionalInt(process.env.DB_STARTUP_RETRY_INTERVAL_MS) ?? 2_000;
+  const startedAt = Date.now();
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    attempt++;
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDatabaseStartupError(error)) {
+        throw error;
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      const remainingMs = timeoutMs - elapsedMs;
+      if (remainingMs <= 0) break;
+
+      const waitMs = Math.min(intervalMs, remainingMs);
+      console.warn(
+        `[DB] ${label} attempt ${attempt} failed while database is starting (${getMigrationErrorMessage(error)}). Retrying in ${waitMs}ms...`,
+      );
+      await sleep(waitMs);
+    }
+  }
+
+  console.error(
+    `[DB] ${label} did not succeed within ${timeoutMs}ms startup window`,
+  );
+  throw lastError;
+}
+
 /**
  * Initialize the database and run migrations
  *
@@ -344,29 +407,17 @@ export async function initializeDatabase(connectionString: string) {
     }
   });
 
-  // Test connection with retry
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  // Test connection with retry. In container orchestrators Postgres can exist
+  // but still refuse TCP connections for a short window during startup.
+  await runWithTransientDatabaseRetry("Connection test", async () => {
+    const client = await pool.connect();
     try {
-      const client = await pool.connect();
       await client.query("SELECT NOW()");
+    } finally {
       client.release();
-      console.log("[DB] ✓ Connection test successful");
-      break;
-    } catch (error) {
-      console.error(
-        `[DB] ❌ Connection attempt ${attempt}/${maxRetries} failed:`,
-        error instanceof Error ? error.message : error,
-      );
-      if (attempt === maxRetries) {
-        throw error;
-      }
-      // Wait before retrying (exponential backoff)
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.pow(2, attempt) * 500),
-      );
     }
-  }
+  });
+  console.log("[DB] ✓ Connection test successful");
 
   // Create Drizzle instance
   // Supavisor (Supabase connection pooler) doesn't support prepared statements,
@@ -389,7 +440,9 @@ export async function initializeDatabase(connectionString: string) {
   } else {
     try {
       console.log("[DB] Running migrations...");
-      await migrate(db, { migrationsFolder });
+      await runWithTransientDatabaseRetry("Migration", () =>
+        migrate(db, { migrationsFolder }),
+      );
       console.log("[DB] ✓ Migrations complete");
     } catch (error) {
       if (isMigrationExistingObjectError(error)) {
@@ -422,7 +475,9 @@ export async function initializeDatabase(connectionString: string) {
       }
 
       try {
-        await migrate(db, { migrationsFolder });
+        await runWithTransientDatabaseRetry("Recovery migration", () =>
+          migrate(db, { migrationsFolder }),
+        );
         console.log("[DB] ✓ Recovery migration pass complete");
       } catch (recoveryError) {
         if (isMigrationExistingObjectError(recoveryError)) {
