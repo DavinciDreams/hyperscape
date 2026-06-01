@@ -151,6 +151,22 @@ The Hyperscape-owned deployment wrapper for the upstream Pixal3D Gradio service
 lives in [`../pixal3d-service`](../pixal3d-service). It tracks Docker/Coolify
 orchestration and API checks only; model weights, caches, temporary files, and
 generated GLBs stay out of git.
+
+### InstantMesh Gradio Provider
+
+Use InstantMesh for fast in-game conjure jobs where speed matters more than
+the high-quality Pixel path:
+
+```bash
+GENERATION_3D_PROVIDER=instantmesh-gradio
+INSTANTMESH_GRADIO_BASE_URL=http://127.0.0.1:43839
+PIXEL3D_SAMPLE_STEPS=30
+PIXEL3D_REMOVE_BACKGROUND=true
+```
+
+The InstantMesh profile submits image, remove-background, sample-steps, and
+seed inputs, then autosaves the returned processed image, multiview sprite
+sheet, preview video, OBJ, and GLB into the asset folder.
 ### Hosted Preview Rendering
 
 Browser-facing Asset Forge routes must be WebGL-safe. Shared procgen systems can
