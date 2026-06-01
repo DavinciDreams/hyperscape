@@ -60,6 +60,10 @@ COPY packages/plugin-hyperscape  ./packages/plugin-hyperscape
 COPY packages/server             ./packages/server
 COPY packages/client             ./packages/client
 
+# Server runtime serves manifests from packages/server/world/assets/manifests.
+# Keep that cache populated from the tracked root manifest source.
+COPY assets/manifests            ./packages/server/world/assets/manifests
+
 # better-sqlite3's node-gyp build segfaults under QEMU cross-compilation.
 # The project uses bun:sqlite / PostgreSQL, so it's safe to remove.
 RUN bun -e " \
