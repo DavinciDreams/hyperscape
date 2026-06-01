@@ -5423,8 +5423,16 @@ export class ClientNetwork extends SystemBase {
     const formData = new FormData();
     formData.append("file", file, file.name);
 
+    const csrfToken = await this.getCsrfToken(apiUrl);
+    const headers: Record<string, string> = {};
+    if (csrfToken) {
+      headers["X-CSRF-Token"] = csrfToken;
+    }
+
     const response = await fetch(`${apiUrl.replace(/\/$/, "")}/api/upload`, {
       method: "POST",
+      credentials: "include",
+      headers,
       body: formData,
     });
 
@@ -5442,6 +5450,29 @@ export class ClientNetwork extends SystemBase {
     }
 
     return payload.filename;
+  }
+
+  private async getCsrfToken(apiUrl: string): Promise<string | null> {
+    try {
+      const response = await fetch(
+        `${apiUrl.replace(/\/$/, "")}/api/csrf-token`,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        },
+      );
+
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as {
+        csrfToken?: string;
+        token?: string;
+      };
+      return payload.csrfToken || payload.token || null;
+    } catch {
+      return null;
+    }
   }
 
   // --- Streaming Mode packet handlers ---

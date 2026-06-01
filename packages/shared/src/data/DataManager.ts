@@ -540,44 +540,27 @@ export class DataManager {
 
         // World config
         (async () => {
-          try {
-            const worldConfigData =
-              await fetchOptionalJson<WorldConfigManifest>(
-                `${baseUrl}/world-config.json`,
-                "world-config.json",
-              );
-            if (worldConfigData) {
-              DataManager.worldConfig = worldConfigData;
-            }
-          } catch {
-            warnOptionalData(
-              "[DataManager] world-config.json not found, using default world generation parameters",
-            );
-          }
+          const worldConfigData = await fetchRequiredJson<WorldConfigManifest>(
+            `${baseUrl}/world-config.json`,
+            "world-config.json",
+          );
+          DataManager.worldConfig = worldConfigData;
         })(),
 
         // Buildings
         (async () => {
           DataManager.buildingsManifest = null;
-          try {
-            const buildingsData = await fetchOptionalJson<unknown>(
-              `${baseUrl}/buildings.json`,
-              "buildings.json",
-            );
-            if (buildingsData) {
-              if (!isBuildingsManifest(buildingsData)) {
-                throw new Error("Invalid buildings manifest shape");
-              }
-              DataManager.buildingsManifest = buildingsData;
-              console.log(
-                `[DataManager] Loaded buildings manifest: ${buildingsData.towns?.length ?? 0} pre-defined towns`,
-              );
-            }
-          } catch (error) {
-            warnOptionalData(
-              `[DataManager] buildings.json missing or invalid, skipping pre-defined towns (${error instanceof Error ? error.message : "unknown error"})`,
-            );
+          const buildingsData = await fetchRequiredJson<unknown>(
+            `${baseUrl}/buildings.json`,
+            "buildings.json",
+          );
+          if (!isBuildingsManifest(buildingsData)) {
+            throw new Error("Invalid buildings manifest shape");
           }
+          DataManager.buildingsManifest = buildingsData;
+          console.log(
+            `[DataManager] Loaded buildings manifest: ${buildingsData.towns?.length ?? 0} pre-defined towns`,
+          );
         })(),
 
         // Stores
@@ -825,36 +808,24 @@ export class DataManager {
 
       // Load world config manifest for terrain/town/road generation
       const worldConfigPath = path.join(manifestsDir, "world-config.json");
-      try {
-        const worldConfigData = await fs.readFile(worldConfigPath, "utf-8");
-        const worldConfigManifest = JSON.parse(
-          worldConfigData,
-        ) as WorldConfigManifest;
-        DataManager.worldConfig = worldConfigManifest;
-      } catch {
-        warnOptionalData(
-          "[DataManager] world-config.json not found, using default world generation parameters",
-        );
-      }
+      const worldConfigData = await fs.readFile(worldConfigPath, "utf-8");
+      const worldConfigManifest = JSON.parse(
+        worldConfigData,
+      ) as WorldConfigManifest;
+      DataManager.worldConfig = worldConfigManifest;
 
       // Load buildings manifest for pre-defined towns
       const buildingsPath = path.join(manifestsDir, "buildings.json");
       DataManager.buildingsManifest = null;
-      try {
-        const buildingsData = await fs.readFile(buildingsPath, "utf-8");
-        const buildingsManifest = JSON.parse(buildingsData) as unknown;
-        if (!isBuildingsManifest(buildingsManifest)) {
-          throw new Error("Invalid buildings manifest shape");
-        }
-        DataManager.buildingsManifest = buildingsManifest;
-        console.log(
-          `[DataManager] Loaded buildings manifest: ${buildingsManifest.towns?.length ?? 0} pre-defined towns`,
-        );
-      } catch (error) {
-        warnOptionalData(
-          `[DataManager] buildings.json missing or invalid, skipping pre-defined towns (${error instanceof Error ? error.message : "unknown error"})`,
-        );
+      const buildingsData = await fs.readFile(buildingsPath, "utf-8");
+      const buildingsManifest = JSON.parse(buildingsData) as unknown;
+      if (!isBuildingsManifest(buildingsManifest)) {
+        throw new Error("Invalid buildings manifest shape");
       }
+      DataManager.buildingsManifest = buildingsManifest;
+      console.log(
+        `[DataManager] Loaded buildings manifest: ${buildingsManifest.towns?.length ?? 0} pre-defined towns`,
+      );
 
       // Load stores
       const storesPath = path.join(manifestsDir, "stores.json");

@@ -1603,6 +1603,7 @@ export class GenerationService extends EventEmitter {
       requestedProvider ||
       process.env.GENERATION_3D_PROVIDER ||
       process.env.ASSET_FORGE_3D_PROVIDER ||
+      process.env.ASSET_FORGE_GENERATION_PROVIDER ||
       ""
     ).toLowerCase();
 

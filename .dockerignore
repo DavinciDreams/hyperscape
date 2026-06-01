@@ -44,7 +44,13 @@ node_modules
 packages/server/world/assets/*
 !packages/server/world/assets/manifests/
 !packages/server/world/assets/manifests/**
+!packages/server/world/assets/textures/
+!packages/server/world/assets/textures/terrain-biomes/
+!packages/server/world/assets/textures/terrain-biomes/**
 assets/
+!assets/
+!assets/manifests/
+!assets/manifests/**
 
 # Other packages not needed for server
 packages/asset-forge

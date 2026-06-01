@@ -60,6 +60,10 @@ COPY packages/plugin-hyperscape  ./packages/plugin-hyperscape
 COPY packages/server             ./packages/server
 COPY packages/client             ./packages/client
 
+# Server runtime serves manifests from packages/server/world/assets/manifests.
+# Keep that cache populated from the tracked root manifest source.
+COPY assets/manifests            ./packages/server/world/assets/manifests
+
 # better-sqlite3's node-gyp build segfaults under QEMU cross-compilation.
 # The project uses bun:sqlite / PostgreSQL, so it's safe to remove.
 RUN bun -e " \
@@ -87,6 +91,11 @@ RUN mkdir -p \
 
 # Download game asset manifests (bypass CDN reliance on boot).
 RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
+
+# Overlay small in-repo runtime assets that are not present in the manifests-only
+# production asset clone.
+COPY assets/manifests ./packages/server/world/assets/manifests
+COPY packages/server/runtime-assets/textures/terrain-biomes ./packages/server/world/assets/textures/terrain-biomes
 
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \

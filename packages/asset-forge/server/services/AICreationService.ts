@@ -126,12 +126,85 @@ interface AIGatewayImageResponse {
   choices: Array<{
     message: {
       images?: Array<{
-        image_url: {
-          url: string;
-        };
+        image_url: string | { url?: string };
       }>;
+      content?: unknown;
     };
   }>;
+}
+
+function isConfiguredSecret(value: string | undefined): value is string {
+  if (!value) return false;
+
+  const normalized = value.trim();
+  if (!normalized) return false;
+
+  return ![
+    "your_vercel_api_key_here",
+    "your_openai_api_key_here",
+    "your_openai_api_key",
+    "your_meshy_api_key",
+    "your_tripo_api_key",
+  ].includes(normalized.toLowerCase());
+}
+
+function readImageUrl(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const imageUrl = record.image_url;
+
+  if (typeof imageUrl === "string" && imageUrl.length > 0) {
+    return imageUrl;
+  }
+
+  if (imageUrl && typeof imageUrl === "object") {
+    const url = (imageUrl as Record<string, unknown>).url;
+    if (typeof url === "string" && url.length > 0) {
+      return url;
+    }
+  }
+
+  const url = record.url;
+  if (typeof url === "string" && url.length > 0) {
+    return url;
+  }
+
+  const b64Json = record.b64_json;
+  if (typeof b64Json === "string" && b64Json.length > 0) {
+    return `data:image/png;base64,${b64Json}`;
+  }
+
+  return null;
+}
+
+function extractGatewayImageUrl(data: AIGatewayImageResponse): string | null {
+  const message = data.choices?.[0]?.message;
+  if (!message) return null;
+
+  const imageFromImages = message.images
+    ?.map((image) => readImageUrl(image))
+    .find((url): url is string => !!url);
+
+  if (imageFromImages) {
+    return imageFromImages;
+  }
+
+  if (Array.isArray(message.content)) {
+    return (
+      message.content
+        .map((part) => readImageUrl(part))
+        .find((url): url is string => !!url) || null
+    );
+  }
+
+  return readImageUrl(message.content);
 }
 
 // ==================== Generation Prompts Interface ====================
@@ -191,13 +264,14 @@ class ImageGenerationService {
     assetType: string,
     style?: string,
   ): Promise<ImageGenerationResult> {
-    // Check for Vercel AI Gateway or direct OpenAI API
-    const useAIGateway = !!process.env.AI_GATEWAY_API_KEY;
-    const useDirectOpenAI = !!process.env.OPENAI_API_KEY;
+    const gatewayApiKey = process.env.AI_GATEWAY_API_KEY;
+    const openaiApiKey = process.env.OPENAI_API_KEY || this.apiKey;
+    const useAIGateway = isConfiguredSecret(gatewayApiKey);
+    const useDirectOpenAI = isConfiguredSecret(openaiApiKey);
 
     if (!useAIGateway && !useDirectOpenAI) {
       throw new Error(
-        "AI_GATEWAY_API_KEY or OPENAI_API_KEY required for image generation",
+        "A real AI_GATEWAY_API_KEY or OPENAI_API_KEY is required for image generation",
       );
     }
 
@@ -214,97 +288,163 @@ class ImageGenerationService {
       .replace('${style || "game-ready"}', style || "game-ready")
       .replace("${assetType}", assetType);
 
-    // AI Gateway uses chat completions for image generation (gpt-5-nano, gemini-2.5-flash-image)
-    // Direct OpenAI uses images/generations endpoint (dall-e, gpt-image-1)
-    const endpoint = useAIGateway
-      ? "https://ai-gateway.vercel.sh/v1/chat/completions"
-      : "https://api.openai.com/v1/images/generations";
+    if (useAIGateway && !useDirectOpenAI) {
+      const gatewayResult = await this.generateImageWithGateway(
+        gatewayApiKey,
+        prompt,
+      );
+      return {
+        imageUrl: gatewayResult.imageUrl,
+        prompt,
+        metadata: {
+          model: gatewayResult.model,
+          resolution: "1024x1024",
+          quality: "high",
+          timestamp: new Date().toISOString(),
+        },
+      };
+    }
 
-    const apiKey = useAIGateway
-      ? process.env.AI_GATEWAY_API_KEY!
-      : process.env.OPENAI_API_KEY!;
+    if (useAIGateway && useDirectOpenAI) {
+      try {
+        const gatewayResult = await this.generateImageWithGateway(
+          gatewayApiKey,
+          prompt,
+        );
+        return {
+          imageUrl: gatewayResult.imageUrl,
+          prompt,
+          metadata: {
+            model: gatewayResult.model,
+            resolution: "1024x1024",
+            quality: "high",
+            timestamp: new Date().toISOString(),
+          },
+        };
+      } catch (error) {
+        const gatewayError =
+          error instanceof Error ? error : new Error(String(error));
+        console.warn(
+          "AI Gateway image generation failed, falling back to direct OpenAI:",
+          gatewayError.message,
+        );
+      }
+    }
 
-    // Use google/gemini-2.5-flash-image for AI Gateway, gpt-image-1 for direct OpenAI
-    const modelName = useAIGateway
-      ? "google/gemini-2.5-flash-image"
-      : this.model;
-
-    console.log(
-      `🎨 Using ${useAIGateway ? "Vercel AI Gateway" : "direct OpenAI API"} for image generation (model: ${modelName})`,
+    const openaiResult = await this.generateImageWithOpenAI(
+      openaiApiKey,
+      prompt,
     );
 
-    // Build request body based on endpoint type
-    const requestBody = useAIGateway
-      ? {
-          model: modelName,
+    return {
+      imageUrl: openaiResult.imageUrl,
+      prompt,
+      metadata: {
+        model: openaiResult.model,
+        resolution: "1024x1024",
+        quality: "high",
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
+
+  private async generateImageWithGateway(
+    apiKey: string | undefined,
+    prompt: string,
+  ): Promise<{ imageUrl: string; model: string }> {
+    if (!isConfiguredSecret(apiKey)) {
+      throw new Error("AI_GATEWAY_API_KEY is missing or still a placeholder");
+    }
+
+    const model = "google/gemini-2.5-flash-image";
+    console.log(
+      `🎨 Using Vercel AI Gateway for image generation (model: ${model})`,
+    );
+
+    const response = await this.fetchFn(
+      "https://ai-gateway.vercel.sh/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
           messages: [
             {
               role: "user",
               content: `Generate an image: ${prompt}`,
             },
           ],
-        }
-      : {
-          model: modelName,
-          prompt: prompt,
-          size: "1024x1024",
-          quality: "high",
-        };
-
-    const response = await this.fetchFn(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        }),
       },
-      body: JSON.stringify(requestBody),
-    });
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(
-        `Image generation API error: ${response.status} - ${error}`,
-      );
+      throw new Error(`AI Gateway error: ${response.status} - ${error}`);
     }
 
-    let imageUrl: string;
-
-    if (useAIGateway) {
-      const data = (await response.json()) as AIGatewayImageResponse;
-      // Log the full response to debug
-      console.log("AI Gateway response:", JSON.stringify(data, null, 2));
-
-      // AI Gateway returns images in choices[0].message.images array
-      const images = data.choices?.[0]?.message?.images;
-      if (images && images.length > 0) {
-        imageUrl = images[0].image_url.url;
-      } else {
-        console.error("No images found in response. Full data:", data);
-        throw new Error("No image data returned from AI Gateway");
-      }
-    } else {
-      const data = (await response.json()) as OpenAIImageResponse;
-      // Direct OpenAI returns images in data array
-      const imageData = data.data?.[0];
-      if (imageData?.b64_json) {
-        imageUrl = `data:image/png;base64,${imageData.b64_json}`;
-      } else if (imageData?.url) {
-        imageUrl = imageData.url;
-      } else {
-        throw new Error("No image data returned from OpenAI API");
-      }
+    const data = (await response.json()) as AIGatewayImageResponse;
+    const imageUrl = extractGatewayImageUrl(data);
+    if (!imageUrl) {
+      console.error("No image found in AI Gateway response:", data);
+      throw new Error("No image data returned from AI Gateway");
     }
 
-    return {
-      imageUrl: imageUrl,
-      prompt: prompt,
-      metadata: {
-        model: modelName,
-        resolution: "1024x1024",
-        quality: "high",
-        timestamp: new Date().toISOString(),
+    return { imageUrl, model };
+  }
+
+  private async generateImageWithOpenAI(
+    apiKey: string | undefined,
+    prompt: string,
+  ): Promise<{ imageUrl: string; model: string }> {
+    if (!isConfiguredSecret(apiKey)) {
+      throw new Error("OPENAI_API_KEY is missing or still a placeholder");
+    }
+
+    const model = this.model;
+    console.log(
+      `🎨 Using direct OpenAI API for image generation (model: ${model})`,
+    );
+
+    const response = await this.fetchFn(
+      "https://api.openai.com/v1/images/generations",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          size: "1024x1024",
+          quality: "high",
+        }),
       },
-    };
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI image API error: ${response.status} - ${error}`);
+    }
+
+    const data = (await response.json()) as OpenAIImageResponse;
+    const imageData = data.data?.[0];
+    if (imageData?.b64_json) {
+      return {
+        imageUrl: `data:image/png;base64,${imageData.b64_json}`,
+        model,
+      };
+    }
+
+    if (imageData?.url) {
+      return { imageUrl: imageData.url, model };
+    }
+
+    throw new Error("No image data returned from OpenAI API");
   }
 }
 

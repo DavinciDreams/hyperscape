@@ -249,13 +249,14 @@ class FlowerSsbo {
 
   computeInit = Fn(() => {
     const data = this.buffer.element(instanceIndex);
+    const instanceIndexFloat = float(instanceIndex);
 
     // Position XZ in grid
-    const row = floor(float(instanceIndex).div(config.FLOWERS_PER_SIDE));
-    const col = float(instanceIndex).mod(config.FLOWERS_PER_SIDE);
+    const row = floor(instanceIndexFloat.div(config.FLOWERS_PER_SIDE));
+    const col = instanceIndexFloat.mod(config.FLOWERS_PER_SIDE);
 
-    const randX = hash(instanceIndex.add(4321));
-    const randZ = hash(instanceIndex.add(1234));
+    const randX = hash(instanceIndexFloat.add(4321));
+    const randZ = hash(instanceIndexFloat.add(1234));
     const offsetX = col
       .mul(config.SPACING)
       .sub(config.TILE_HALF_SIZE)
@@ -275,16 +276,16 @@ class FlowerSsbo {
     // Use hash as fallback since it's always available
     const noiseR = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).r
-      : hash(instanceIndex.mul(0.73));
+      : hash(instanceIndexFloat.mul(0.73));
     const noiseG = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).g
-      : hash(instanceIndex.mul(1.27));
+      : hash(instanceIndexFloat.mul(1.27));
     const noiseB = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).b
-      : hash(instanceIndex.mul(0.91));
+      : hash(instanceIndexFloat.mul(0.91));
     const noiseA = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).a
-      : hash(instanceIndex.mul(1.53));
+      : hash(instanceIndexFloat.mul(1.53));
 
     const noiseVec = vec4(noiseR, noiseG, noiseB, noiseA);
     data.assign(this.setNoise(data, noiseVec));
@@ -578,9 +579,10 @@ class FlowerMaterial extends SpriteNodeMaterial {
     const x = data.x;
     const y = this.ssbo.getYOffset(data);
     const z = data.y;
+    const instanceIndexFloat = float(instanceIndex);
 
-    const rand1 = hash(instanceIndex.add(9234));
-    const rand2 = hash(instanceIndex.add(33.87));
+    const rand1 = hash(instanceIndexFloat.add(9234));
+    const rand2 = hash(instanceIndexFloat.add(33.87));
 
     // === DISTANCE-BASED CULLING - FLOWER-SPECIFIC (SHORTER than grass) ===
     // Flowers fade closer than grass to reduce visual noise and popping at distance
@@ -919,31 +921,9 @@ export class ProceduralFlowerSystem extends System {
       console.log("[ProceduralFlowers] Loaded noise texture");
     }
 
-    // Try to load flower atlas (optional)
-    const atlasPromise = new Promise<THREE.Texture>((resolve, reject) => {
-      loader.load(
-        "/textures/edelweiss.png",
-        (tex) => {
-          tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-          resolve(tex);
-        },
-        undefined,
-        () => reject(new Error("Failed to load flower atlas")),
-      );
-    }).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn("[ProceduralFlowers] Atlas texture load failed:", message);
-      return null;
-    });
-
-    const atlas = await atlasPromise;
-    if (atlas) {
-      this.atlasTexture = atlas;
-      flowerAtlasTexture = atlas;
-      console.log("[ProceduralFlowers] Loaded flower atlas texture");
-    } else {
-      console.log("[ProceduralFlowers] Using procedural flower colors");
-    }
+    this.atlasTexture = null;
+    flowerAtlasTexture = null;
+    console.log("[ProceduralFlowers] Using procedural flower colors");
 
     // Load terrain noise texture - SHARED with TerrainShader and ProceduralGrass
     // This ensures flowers respect the EXACT same dirt patches as grass and terrain
