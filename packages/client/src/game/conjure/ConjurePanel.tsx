@@ -14,7 +14,7 @@ import {
   startConjure,
   type ConjureStatusResponse,
 } from "./conjureApi";
-import { ConjureGalaxy } from "./ConjureGalaxy";
+import { ConjureWorldEffect } from "./ConjureWorldEffect";
 import "./conjure.css";
 
 type SpeechRecognitionAlternative = {
@@ -68,6 +68,12 @@ type ConjurePhase =
 
 const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+type WorldPosition = {
+  x: number;
+  y: number;
+  z: number;
+};
+
 function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
   if (typeof window === "undefined") return null;
   const speechWindow = window as WindowWithSpeechRecognition;
@@ -90,11 +96,7 @@ function isFailed(status: string): boolean {
   );
 }
 
-function getPlacementPosition(world: ClientWorld): {
-  x: number;
-  y: number;
-  z: number;
-} | null {
+function getPlacementPosition(world: ClientWorld): WorldPosition | null {
   const player = world.getPlayer?.();
   const position = player?.getPosition?.() ?? player?.position;
   if (!position) return null;
@@ -123,6 +125,8 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
   const [conjureId, setConjureId] = useState<string | null>(null);
   const [assetId, setAssetId] = useState<string | null>(null);
   const [status, setStatus] = useState<ConjureStatusResponse | null>(null);
+  const [placementPosition, setPlacementPosition] =
+    useState<WorldPosition | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const pollTimeoutRef = useRef<number | null>(null);
@@ -224,6 +228,13 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
     setStatus(null);
     setConjureId(null);
     setAssetId(null);
+    const nextPlacementPosition = getPlacementPosition(world);
+    if (!nextPlacementPosition) {
+      setError("Player position is not ready for conjure placement.");
+      setPhase("failed");
+      return;
+    }
+    setPlacementPosition(nextPlacementPosition);
     setPhase("starting");
 
     try {
@@ -270,7 +281,6 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
         setStatus(next);
 
         if (isFinished(next.status)) {
-          const placementPosition = getPlacementPosition(world);
           if (!placementPosition) {
             setError("Player position is not ready for placement.");
             setPhase("failed");
@@ -326,7 +336,15 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
       cancelled = true;
       resetPolling();
     };
-  }, [assetId, conjureId, phase, prompt, resetPolling, world]);
+  }, [
+    assetId,
+    conjureId,
+    phase,
+    placementPosition,
+    prompt,
+    resetPolling,
+    world,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -389,8 +407,6 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
               <X size={18} />
             </button>
           </div>
-
-          {busy && <ConjureGalaxy active={busy} />}
 
           <div className="conjure-input-row">
             <button
@@ -477,6 +493,12 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
           </div>
         </section>
       )}
+
+      <ConjureWorldEffect
+        active={busy}
+        position={placementPosition}
+        world={world}
+      />
     </>
   );
 }
