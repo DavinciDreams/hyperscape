@@ -40,6 +40,14 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
       services: {
         meshy: !!process.env.MESHY_API_KEY,
         openai: !!process.env.OPENAI_API_KEY,
+        chatProvider:
+          process.env.ASSET_FORGE_CHAT_PROVIDER ||
+          process.env.CHAT_PROVIDER ||
+          (process.env.AI_GATEWAY_API_KEY
+            ? "ai-gateway"
+            : process.env.OPENAI_API_KEY
+              ? "openai"
+              : undefined),
         database,
         comfy: comfyEnabled ? await comfy.health() : false,
         comfyUrl: comfy.baseUrl,
@@ -53,6 +61,7 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
         promptProvider:
           process.env.PROMPT_ENHANCEMENT_PROVIDER ||
           process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+          process.env.ASSET_FORGE_CHAT_PROVIDER ||
           undefined,
       },
     };

@@ -1255,11 +1255,13 @@ export async function pickBehaviorActionWithLlm(
     const direct = await Promise.race([
       callDirectChatCompletion({
         characterSecrets: instance.config.characterConfig?.settings?.secrets,
+        consumer: "hyperscape-npc",
         maxTokens: 400,
         model: instance.config.model,
         preferredProvider: instance.config.modelProvider,
         prompt,
         temperature: 0.4,
+        threadId: `hyperscape:npc:${instance.config.characterId}`,
       }),
       new Promise<never>((_, reject) =>
         setTimeout(

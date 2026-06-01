@@ -10,7 +10,9 @@ export type AssetType =
   | "armor"
   | "tool"
   | "resource"
-  | "ammunition"
+  | "creature"
+  | "mount"
+  | "building"
   | "character"
   | "misc";
 
