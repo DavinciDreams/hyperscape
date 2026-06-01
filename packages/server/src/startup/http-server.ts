@@ -35,6 +35,7 @@ import Fastify, {
 import fs from "fs-extra";
 import path from "path";
 import { Readable } from "stream";
+import type { ReadableStream as NodeReadableStream } from "stream/web";
 import type { ServerConfig } from "./config.js";
 import {
   getDefaultElizaOsApiUrl,
@@ -844,7 +845,11 @@ function registerConjureAssetProxyRoute(fastify: FastifyInstance): void {
       return reply.send();
     }
 
-    return reply.send(Readable.fromWeb(response.body));
+    return reply.send(
+      Readable.fromWeb(
+        response.body as unknown as NodeReadableStream<Uint8Array>,
+      ),
+    );
   };
 
   fastify.get("/conjure-assets/*", proxy);
