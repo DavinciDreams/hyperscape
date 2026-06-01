@@ -44,7 +44,13 @@ export const DEFAULT_CATEGORIES: RibbonCategory[] = [
     id: "adventures",
     icon: "📜",
     label: "Adventures",
-    panels: ["quests", "challenges", "content_hub"],
+    panels: ["quests", "challenges"],
+  },
+  {
+    id: "creator",
+    icon: "🤖",
+    label: "Creator",
+    panels: ["content_hub"],
   },
   {
     id: "community",
