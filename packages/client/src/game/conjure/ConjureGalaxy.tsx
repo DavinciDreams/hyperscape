@@ -19,6 +19,18 @@ type ConjureGalaxyProps = {
   active: boolean;
 };
 
+function safeDisposeMaterial(material: THREE.Material | null): void {
+  if (!material) return;
+  try {
+    material.dispose();
+  } catch (error) {
+    if (error instanceof TypeError && String(error).includes("usedTimes")) {
+      return;
+    }
+    console.warn("[ConjureGalaxy] Material disposal failed", error);
+  }
+}
+
 export function ConjureGalaxy({ active }: ConjureGalaxyProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -112,10 +124,10 @@ export function ConjureGalaxy({ active }: ConjureGalaxyProps) {
       disposed = true;
       resizeObserver?.disconnect();
       renderer?.setAnimationLoop(null);
-      renderer?.dispose();
       if (mesh) scene.remove(mesh);
       geometry?.dispose();
-      material?.dispose();
+      safeDisposeMaterial(material);
+      renderer?.dispose();
     };
   }, [active]);
 
