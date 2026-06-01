@@ -236,6 +236,9 @@ export class Pixel3DGradioService {
   ): Promise<unknown> {
     switch (input) {
       case "image":
+        if (this.profile === "instantmesh") {
+          return this.instantMeshImageInput(options.imageUrl);
+        }
         return this.imageInput(options.imageUrl, options.assetId);
       case "prompt":
         return options.prompt;
@@ -316,6 +319,24 @@ export class Pixel3DGradioService {
     }
 
     return imageUrl;
+  }
+
+  private async instantMeshImageInput(imageUrl: string): Promise<string> {
+    if (imageUrl.startsWith("data:")) {
+      return imageUrl;
+    }
+
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(
+        `InstantMesh image download failed: ${response.status} ${await response.text()}`,
+      );
+    }
+
+    const contentType =
+      response.headers.get("content-type") || "application/octet-stream";
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return `data:${contentType};base64,${buffer.toString("base64")}`;
   }
 
   private async uploadDataUrl(
@@ -637,12 +658,20 @@ export class Pixel3DGradioService {
       return candidate;
     }
 
+    if (candidate.startsWith("/tmp/") || candidate.startsWith("/var/")) {
+      return this.fileUrl(candidate);
+    }
+
     if (candidate.startsWith("/")) {
       return new URL(candidate, `${this.baseUrl}/`).toString();
     }
 
+    return this.fileUrl(candidate);
+  }
+
+  private fileUrl(pathname: string): string {
     const fileUrl = new URL("/file=", `${this.baseUrl}/`);
-    fileUrl.pathname = `/file=${candidate}`;
+    fileUrl.pathname = `/file=${pathname}`;
     return fileUrl.toString();
   }
 
