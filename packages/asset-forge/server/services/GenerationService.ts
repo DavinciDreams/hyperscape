@@ -20,6 +20,7 @@ import path from "path";
 import fetch from "node-fetch";
 import { ComfyUITrellisService } from "./ComfyUITrellisService";
 import { Pixel3DGradioService } from "./Pixel3DGradioService";
+import { chatProviderService } from "./ChatProviderService";
 
 // ==================== Type Definitions ====================
 
@@ -1886,13 +1887,9 @@ export class GenerationService extends EventEmitter {
   private async enhancePromptWithGPT5(
     config: PipelineConfig,
   ): Promise<PromptEnhancementResult> {
-    // Check for AI Gateway or direct OpenAI API key
-    const useAIGateway = !!process.env.AI_GATEWAY_API_KEY;
-    const useDirectOpenAI = !!process.env.OPENAI_API_KEY;
-
-    if (!useAIGateway && !useDirectOpenAI) {
+    if (!chatProviderService.isEnabled) {
       throw new Error(
-        "AI_GATEWAY_API_KEY or OPENAI_API_KEY required for GPT-5 enhancement",
+        "ASSET_FORGE_CHAT_PROVIDER=hyades, AI_GATEWAY_API_KEY, or OPENAI_API_KEY required for prompt enhancement",
       );
     }
 
@@ -1991,51 +1988,26 @@ Your task is to enhance the user's description to create better results with ima
       : `Enhance this ${config.type} asset description for 3D generation: "${baseDescription}"`;
 
     try {
-      // Select endpoint and auth based on available API keys
-      const endpoint = useAIGateway
-        ? "https://ai-gateway.vercel.sh/v1/chat/completions"
-        : "https://api.openai.com/v1/chat/completions";
-
-      const apiKey = useAIGateway
-        ? process.env.AI_GATEWAY_API_KEY!
-        : process.env.OPENAI_API_KEY!;
-
-      const modelName = useAIGateway
-        ? "openai/gpt-5" // AI Gateway uses provider/model format
-        : "gpt-5"; // Direct OpenAI uses just the model name
-
       console.log(
-        `🤖 Using ${useAIGateway ? "Vercel AI Gateway" : "direct OpenAI API"} for GPT-5 enhancement`,
+        `🤖 Using ${chatProviderService.providerName || "chat provider"} for prompt enhancement`,
       );
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 200,
-        }),
+      const result = await chatProviderService.complete({
+        consumer: "asset-forge",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: Number(process.env.NEMOTRON_TEMPERATURE || "0.7"),
+        maxTokens: Number(process.env.NEMOTRON_MAX_TOKENS || "200"),
+        threadId: `asset-forge:prompt:${config.assetId || config.name}`,
       });
-
-      if (!response.ok) {
-        throw new Error(`GPT-5 API error: ${response.status}`);
-      }
-
-      const data = (await response.json()) as GPT5ChatResponse;
-      const optimizedPrompt = data.choices[0].message.content.trim();
+      const optimizedPrompt = result.text.trim();
 
       return {
         originalPrompt: config.description,
         optimizedPrompt,
-        model: "gpt-5",
+        model: result.model,
         keywords: this.extractKeywords(optimizedPrompt),
       };
     } catch (error) {

@@ -68,12 +68,10 @@ const ASSETS_DIR = path.resolve(
   process.env.ASSET_FORGE_ASSETS_DIR || path.join(ROOT_DIR, "gdd-assets"),
 );
 const TEMP_IMAGES_DIR = path.resolve(
-  process.env.ASSET_FORGE_TEMP_IMAGES_DIR ||
-    path.join(ROOT_DIR, "temp-images"),
+  process.env.ASSET_FORGE_TEMP_IMAGES_DIR || path.join(ROOT_DIR, "temp-images"),
 );
 const TEMP_SHELLS_DIR = path.resolve(
-  process.env.ASSET_FORGE_TEMP_SHELLS_DIR ||
-    path.join(ROOT_DIR, "temp-shells"),
+  process.env.ASSET_FORGE_TEMP_SHELLS_DIR || path.join(ROOT_DIR, "temp-shells"),
 );
 
 // Ensure temp directories exist
@@ -331,16 +329,14 @@ const app = new Elysia()
   .use(loggingMiddleware)
 
   // Static file serving - generated assets
-  .get(
-    "/gdd-assets/*",
-    async ({ request, set }) =>
-      serveFromDirectory(
-        ASSETS_DIR,
-        "/gdd-assets",
-        new URL(request.url).pathname,
-        set,
-        "Asset not found",
-      ),
+  .get("/gdd-assets/*", async ({ request, set }) =>
+    serveFromDirectory(
+      ASSETS_DIR,
+      "/gdd-assets",
+      new URL(request.url).pathname,
+      set,
+      "Asset not found",
+    ),
   )
 
   // Static file serving - temp images for Meshy AI (custom handler since plugin is disabled)
@@ -408,16 +404,14 @@ const app = new Elysia()
   })
 
   // Static file serving - game model assets (for batch sprite generation)
-  .get(
-    "/game-models/*",
-    async ({ request, set }) =>
-      serveFromDirectory(
-        path.resolve(ROOT_DIR, "../server/world/assets/models"),
-        "/game-models",
-        new URL(request.url).pathname,
-        set,
-        "Game model not found",
-      ),
+  .get("/game-models/*", async ({ request, set }) =>
+    serveFromDirectory(
+      path.resolve(ROOT_DIR, "../server/world/assets/models"),
+      "/game-models",
+      new URL(request.url).pathname,
+      set,
+      "Game model not found",
+    ),
   )
 
   // Routes
@@ -479,9 +473,13 @@ if (!process.env.MESHY_API_KEY) {
 if (!process.env.TRIPO_API_KEY) {
   console.warn("⚠️  TRIPO_API_KEY not found - Tripo pipeline will fail");
 }
-if (!process.env.AI_GATEWAY_API_KEY && !process.env.OPENAI_API_KEY) {
+if (
+  process.env.ASSET_FORGE_CHAT_PROVIDER !== "nemotron" &&
+  !process.env.AI_GATEWAY_API_KEY &&
+  !process.env.OPENAI_API_KEY
+) {
   console.warn(
-    "⚠️  AI_GATEWAY_API_KEY or OPENAI_API_KEY required - image generation and prompt enhancement will fail",
+    "⚠️  ASSET_FORGE_CHAT_PROVIDER=hyades, AI_GATEWAY_API_KEY, or OPENAI_API_KEY required - chat-backed prompt/content generation will fail",
   );
 }
 if (!process.env.ELEVENLABS_API_KEY) {

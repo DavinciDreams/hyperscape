@@ -81,8 +81,11 @@ ASSET_FORGE_GENERATION_PROVIDER=hill_dgx
 HILL_API_BASE_URL=https://hill.example.internal
 HILL_GENERATION_MODE=create
 HILL_EXPORT_TARGET=library
-NEMOTRON_BASE_URL=http://monumentals-mac-studio.local:12345
-NEMOTRON_MODEL=mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4
+ASSET_FORGE_CHAT_PROVIDER=hyades
+HYADES_RUNTIME_URL=http://hyades.internal
+HYADES_LLM_MODEL=nemotron3-omni
+HYADES_LLM_SMALL_MODEL=nemotron3-omni
+HYADES_LLM_API_KEY=your-hyades-key
 
 # Legacy cloud provider keys:
 OPENAI_API_KEY=your-openai-api-key
@@ -183,7 +186,8 @@ asset-forge/
 
 ### 1. Asset Generation (`/generation`)
 - Text-to-3D model pipeline
-- Prompt enhancement with local Nemotron or legacy cloud models
+- Prompt and content generation through the configured chat provider
+  (`ASSET_FORGE_CHAT_PROVIDER=hyades`, direct Nemotron, AI Gateway, or OpenAI)
 - Concept art generation
 - 3D model creation via local Trellis2 or legacy Meshy/Tripo providers
 - Material variant generation

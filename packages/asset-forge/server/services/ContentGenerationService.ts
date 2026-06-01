@@ -3,7 +3,10 @@
  * AI-powered content generation for NPCs, quests, dialogue, and lore
  */
 
-import { generateText } from "ai";
+import {
+  chatProviderService,
+  type ChatProviderQuality,
+} from "./ChatProviderService";
 
 export interface DialogueNode {
   id: string;
@@ -77,14 +80,15 @@ export class ContentGenerationService {
   public readonly isEnabled: boolean;
 
   constructor() {
-    // Check if AI Gateway API key is configured
-    this.isEnabled = !!process.env.AI_GATEWAY_API_KEY;
+    this.isEnabled = chatProviderService.isEnabled;
 
     if (this.isEnabled) {
-      console.log("[ContentGenerationService] Initialized with AI Gateway");
+      console.log(
+        `[ContentGenerationService] Initialized with ${chatProviderService.providerName}`,
+      );
     } else {
       console.log(
-        "[ContentGenerationService] No API key found - content generation disabled",
+        "[ContentGenerationService] No chat provider found - content generation disabled",
       );
     }
   }
@@ -92,23 +96,34 @@ export class ContentGenerationService {
   private checkEnabled(): void {
     if (!this.isEnabled) {
       throw new Error(
-        "AI_GATEWAY_API_KEY required for Content Generation Service",
+        "ASSET_FORGE_CHAT_PROVIDER=hyades, AI_GATEWAY_API_KEY, or OPENAI_API_KEY required for Content Generation Service",
       );
     }
   }
 
   /**
-   * Get model string for quality level
-   * Returns model in 'creator/model-name' format which automatically uses AI Gateway
+   * Get model string for quality level.
    */
-  private getModel(quality: "quality" | "speed" | "balanced"): string {
-    const modelMap = {
-      quality: "openai/gpt-5",
-      speed: "openai/gpt-5-mini",
-      balanced: "openai/gpt-5",
-    };
+  private getModel(quality: ChatProviderQuality): string {
+    return chatProviderService.getModelName(quality);
+  }
 
-    return modelMap[quality];
+  private async generateText(params: {
+    prompt: string;
+    quality: ChatProviderQuality;
+    temperature: number;
+    threadId: string;
+  }): Promise<string> {
+    const result = await chatProviderService.complete(
+      {
+        consumer: "hyperscape-content",
+        messages: [{ role: "user", content: params.prompt }],
+        temperature: params.temperature,
+        threadId: params.threadId,
+      },
+      params.quality,
+    );
+    return result.text;
   }
 
   /**
@@ -134,8 +149,6 @@ export class ContentGenerationService {
       quality = "speed",
     } = params;
 
-    const model = this.getModel(quality);
-
     const prompt = this.buildDialoguePrompt(
       npcName,
       npcPersonality,
@@ -145,19 +158,20 @@ export class ContentGenerationService {
 
     console.log(`[ContentGeneration] Generating dialogue for NPC: ${npcName}`);
 
-    const result = await generateText({
-      model,
+    const text = await this.generateText({
+      quality,
       prompt,
       temperature: 0.8,
+      threadId: `hyperscape:dialogue:${npcName}`,
     });
 
-    const nodes = this.parseDialogueResponse(result.text);
+    const nodes = this.parseDialogueResponse(text);
 
     console.log(`[ContentGeneration] Generated ${nodes.length} dialogue nodes`);
 
     return {
       nodes,
-      rawResponse: result.text,
+      rawResponse: text,
     };
   }
 
@@ -190,20 +204,22 @@ export class ContentGenerationService {
       `[ContentGeneration] Generating NPC with archetype: ${archetype}`,
     );
 
-    const result = await generateText({
-      model,
+    const text = await this.generateText({
+      quality,
       prompt: aiPrompt,
       temperature: 0.8,
+      threadId: `hyperscape:npc:${archetype}:${userPrompt.slice(0, 48)}`,
     });
 
-    const npcData = this.parseNPCResponse(result.text);
+    const npcData = this.parseNPCResponse(text);
 
     const completeNPC = {
       id: `npc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       ...npcData,
       metadata: {
         generatedBy: "AI",
-        model: quality,
+        model,
+        provider: chatProviderService.providerName,
         timestamp: new Date().toISOString(),
         archetype,
       },
@@ -213,7 +229,7 @@ export class ContentGenerationService {
 
     return {
       npc: completeNPC,
-      rawResponse: result.text,
+      rawResponse: text,
     };
   }
 
@@ -258,13 +274,14 @@ export class ContentGenerationService {
       `[ContentGeneration] Generating ${difficulty} ${questType} quest`,
     );
 
-    const result = await generateText({
-      model,
+    const text = await this.generateText({
+      quality,
       prompt: aiPrompt,
       temperature: 0.7,
+      threadId: `hyperscape:quest:${questType}:${theme || difficulty}`,
     });
 
-    const questData = this.parseQuestResponse(result.text);
+    const questData = this.parseQuestResponse(text);
 
     const completeQuest = {
       id: `quest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -273,7 +290,8 @@ export class ContentGenerationService {
       questType,
       metadata: {
         generatedBy: "AI",
-        model: quality,
+        model,
+        provider: chatProviderService.providerName,
         timestamp: new Date().toISOString(),
       },
     };
@@ -282,7 +300,7 @@ export class ContentGenerationService {
 
     return {
       quest: completeQuest,
-      rawResponse: result.text,
+      rawResponse: text,
     };
   }
 
@@ -310,20 +328,22 @@ export class ContentGenerationService {
       `[ContentGeneration] Generating lore for: ${category} - ${topic}`,
     );
 
-    const result = await generateText({
-      model,
+    const text = await this.generateText({
+      quality,
       prompt: aiPrompt,
       temperature: 0.7,
+      threadId: `hyperscape:lore:${category}:${topic}`,
     });
 
-    const loreData = this.parseLoreResponse(result.text);
+    const loreData = this.parseLoreResponse(text);
 
     const completeLore = {
       id: `lore_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       ...loreData,
       metadata: {
         generatedBy: "AI",
-        model: quality,
+        model,
+        provider: chatProviderService.providerName,
         timestamp: new Date().toISOString(),
       },
     };
@@ -332,7 +352,7 @@ export class ContentGenerationService {
 
     return {
       lore: completeLore,
-      rawResponse: result.text,
+      rawResponse: text,
     };
   }
 

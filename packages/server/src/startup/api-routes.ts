@@ -48,6 +48,7 @@ import { registerTemplateRoutes } from "./routes/template-routes.js";
 import { registerAdminRoutes } from "./routes/admin-routes.js";
 import { registerLayoutRoutes } from "./routes/layout-routes.js";
 import { registerDataRoutes } from "./routes/data-routes.js";
+import { registerAssetForgeProxyRoutes } from "./routes/asset-forge-proxy-routes.js";
 import { registerDirectProviderRoutes } from "./routes/direct-provider-routes.js";
 import { registerAgentRuntimeProxyRoutes } from "./routes/agent-runtime-proxy-routes.js";
 import { registerSafierRoutes } from "./routes/safier-routes.js";
@@ -107,6 +108,9 @@ export function registerApiRoutes(
 
   // Static game data endpoints
   registerDataRoutes(fastify);
+
+  // In-game content authoring proxy to Asset Forge
+  registerAssetForgeProxyRoutes(fastify);
 
   // In-game speech/text asset conjuring
   registerConjureRoutes(fastify, world);

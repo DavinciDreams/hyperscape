@@ -4,11 +4,13 @@ type ProviderSecrets = Record<string, string | undefined> | undefined;
 
 export type DirectChatOptions = {
   characterSecrets?: ProviderSecrets;
+  consumer?: string;
   maxTokens?: number;
   model?: string | null;
   preferredProvider?: string | null;
   prompt: string;
   temperature?: number;
+  threadId?: string;
 };
 
 export type DirectChatResult = {
@@ -262,6 +264,12 @@ export async function callDirectChatCompletion(
   };
   if (provider.apiKey) {
     headers.authorization = `Bearer ${provider.apiKey}`;
+  }
+  if (options.threadId) {
+    headers["X-Hyades-Thread"] = options.threadId;
+  }
+  if (options.consumer) {
+    headers["X-Hyades-Consumer"] = options.consumer;
   }
 
   const response = await fetch(withPath(provider.baseUrl, provider.chatPath), {
