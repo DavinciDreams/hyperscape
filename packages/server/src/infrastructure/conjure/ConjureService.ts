@@ -213,7 +213,7 @@ export class ConjureService {
       enableRetexturing: false,
       enableSprites: false,
       metadata: {
-        provider: "pixel3d-gradio",
+        provider: "instantmesh-gradio",
         useGPT5Enhancement: true,
       },
       customPrompts: {
