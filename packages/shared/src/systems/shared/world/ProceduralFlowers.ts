@@ -249,13 +249,14 @@ class FlowerSsbo {
 
   computeInit = Fn(() => {
     const data = this.buffer.element(instanceIndex);
+    const instanceIndexFloat = float(instanceIndex);
 
     // Position XZ in grid
-    const row = floor(float(instanceIndex).div(config.FLOWERS_PER_SIDE));
-    const col = float(instanceIndex).mod(config.FLOWERS_PER_SIDE);
+    const row = floor(instanceIndexFloat.div(config.FLOWERS_PER_SIDE));
+    const col = instanceIndexFloat.mod(config.FLOWERS_PER_SIDE);
 
-    const randX = hash(instanceIndex.add(4321));
-    const randZ = hash(instanceIndex.add(1234));
+    const randX = hash(instanceIndexFloat.add(4321));
+    const randZ = hash(instanceIndexFloat.add(1234));
     const offsetX = col
       .mul(config.SPACING)
       .sub(config.TILE_HALF_SIZE)
@@ -275,16 +276,16 @@ class FlowerSsbo {
     // Use hash as fallback since it's always available
     const noiseR = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).r
-      : hash(instanceIndex.mul(0.73));
+      : hash(instanceIndexFloat.mul(0.73));
     const noiseG = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).g
-      : hash(instanceIndex.mul(1.27));
+      : hash(instanceIndexFloat.mul(1.27));
     const noiseB = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).b
-      : hash(instanceIndex.mul(0.91));
+      : hash(instanceIndexFloat.mul(0.91));
     const noiseA = flowerNoiseTexture
       ? texture(flowerNoiseTexture, _uv).a
-      : hash(instanceIndex.mul(1.53));
+      : hash(instanceIndexFloat.mul(1.53));
 
     const noiseVec = vec4(noiseR, noiseG, noiseB, noiseA);
     data.assign(this.setNoise(data, noiseVec));
@@ -578,9 +579,10 @@ class FlowerMaterial extends SpriteNodeMaterial {
     const x = data.x;
     const y = this.ssbo.getYOffset(data);
     const z = data.y;
+    const instanceIndexFloat = float(instanceIndex);
 
-    const rand1 = hash(instanceIndex.add(9234));
-    const rand2 = hash(instanceIndex.add(33.87));
+    const rand1 = hash(instanceIndexFloat.add(9234));
+    const rand2 = hash(instanceIndexFloat.add(33.87));
 
     // === DISTANCE-BASED CULLING - FLOWER-SPECIFIC (SHORTER than grass) ===
     // Flowers fade closer than grass to reduce visual noise and popping at distance

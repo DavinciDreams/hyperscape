@@ -8,6 +8,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 const PROXY_PREFIX = "/api/asset-forge";
+const COMPAT_PROXY_PREFIXES = [
+  "/api/generation",
+  "/api/assets",
+  "/api/prompts",
+] as const;
 
 type ProxyBody = string | Buffer | ArrayBuffer | ArrayBufferView;
 type FetchRequestBody = NonNullable<Parameters<typeof fetch>[1]>["body"];
@@ -46,9 +51,19 @@ function joinTargetPath(basePath: string, proxyPath: string): string {
 
 function buildTargetUrl(requestUrl: string, baseUrl: URL): string {
   const incoming = new URL(requestUrl, "http://hyperscape.local");
-  const proxyPath = incoming.pathname.startsWith(PROXY_PREFIX)
-    ? incoming.pathname.slice(PROXY_PREFIX.length) || "/"
-    : "/";
+  let proxyPath = "/";
+
+  if (incoming.pathname.startsWith(PROXY_PREFIX)) {
+    proxyPath = incoming.pathname.slice(PROXY_PREFIX.length) || "/";
+  } else {
+    const compatPrefix = COMPAT_PROXY_PREFIXES.find((prefix) =>
+      incoming.pathname.startsWith(prefix),
+    );
+    if (compatPrefix) {
+      proxyPath = incoming.pathname;
+    }
+  }
+
   const target = new URL(baseUrl.toString());
   target.pathname = joinTargetPath(baseUrl.pathname, proxyPath);
   target.search = incoming.search;
@@ -115,43 +130,49 @@ function copyResponseHeaders(response: Response, reply: FastifyReply): void {
 export function registerAssetForgeProxyRoutes(fastify: FastifyInstance): void {
   console.log("[AssetForgeProxy] Registering Asset Forge proxy routes...");
 
-  fastify.all(
+  const proxyPatterns = [
     `${PROXY_PREFIX}/*`,
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const baseUrl = normalizeAssetForgeUrl(
-        process.env.ASSET_FORGE_API_URL ||
-          process.env.ASSET_FORGE_URL ||
-          process.env.PUBLIC_ASSET_FORGE_URL,
-      );
+    ...COMPAT_PROXY_PREFIXES.map((prefix) => `${prefix}/*`),
+  ];
 
-      if (!baseUrl) {
-        return reply.code(503).send({
-          error: "Asset Forge proxy is not configured",
-          message:
-            "Set ASSET_FORGE_API_URL or ASSET_FORGE_URL on the Hyperscape server.",
-        });
-      }
+  const proxyHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    const baseUrl = normalizeAssetForgeUrl(
+      process.env.ASSET_FORGE_API_URL ||
+        process.env.ASSET_FORGE_URL ||
+        process.env.PUBLIC_ASSET_FORGE_URL,
+    );
 
-      try {
-        const response = await fetch(buildTargetUrl(request.url, baseUrl), {
-          method: request.method,
-          headers: buildProxyHeaders(request),
-          body:
-            request.method === "GET" || request.method === "HEAD"
-              ? undefined
-              : (buildProxyBody(request) as FetchRequestBody | undefined),
-          redirect: "manual",
-        });
-        copyResponseHeaders(response, reply);
-        const arrayBuffer = await response.arrayBuffer();
-        return reply.code(response.status).send(Buffer.from(arrayBuffer));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return reply.code(502).send({
-          error: "Asset Forge proxy request failed",
-          message,
-        });
-      }
-    },
-  );
+    if (!baseUrl) {
+      return reply.code(503).send({
+        error: "Asset Forge proxy is not configured",
+        message:
+          "Set ASSET_FORGE_API_URL or ASSET_FORGE_URL on the Hyperscape server.",
+      });
+    }
+
+    try {
+      const response = await fetch(buildTargetUrl(request.url, baseUrl), {
+        method: request.method,
+        headers: buildProxyHeaders(request),
+        body:
+          request.method === "GET" || request.method === "HEAD"
+            ? undefined
+            : (buildProxyBody(request) as FetchRequestBody | undefined),
+        redirect: "manual",
+      });
+      copyResponseHeaders(response, reply);
+      const arrayBuffer = await response.arrayBuffer();
+      return reply.code(response.status).send(Buffer.from(arrayBuffer));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(502).send({
+        error: "Asset Forge proxy request failed",
+        message,
+      });
+    }
+  };
+
+  for (const pattern of proxyPatterns) {
+    fastify.all(pattern, proxyHandler);
+  }
 }

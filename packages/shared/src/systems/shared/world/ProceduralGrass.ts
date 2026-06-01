@@ -974,7 +974,7 @@ function createGpuDrivenTileMaterial(
   // GPU-driven position computation in vertex shader
   // Includes heightmap sampling, road exclusion, frustum culling, LOD fading, and Bayer dithering
   material.positionNode = Fn(() => {
-    const idx = instanceIndex;
+    const idx = float(instanceIndex);
     const gridSize = tileUniforms.uTileGridSize;
     const spacing = tileUniforms.uTileSpacing;
     const camPos = tileUniforms.uTileCameraPos;
@@ -1094,7 +1094,7 @@ function createGpuDrivenTileMaterial(
     );
 
     // Variation: rotation and mirror based on tile hash (moved up for dirt/sand dither)
-    const tileHash = gridX.mul(374761393).add(gridZ.mul(668265263));
+    const tileHash = gridX.mul(374761393.0).add(gridZ.mul(668265263.0));
 
     // ========== DIRT/SAND CULLING ==========
     // Match LOD0 compute shader terrain checks for consistent appearance

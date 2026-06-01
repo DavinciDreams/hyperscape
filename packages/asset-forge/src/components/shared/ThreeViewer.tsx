@@ -2570,8 +2570,9 @@ const ThreeViewer = forwardRef(
           }
 
           transformControlsRef.current.enabled = enabled;
-          (transformControlsRef.current as unknown as THREE.Object3D).visible =
-            enabled;
+          const transformControlsHelper =
+            transformControlsRef.current.getHelper();
+          transformControlsHelper.visible = enabled;
 
           // Hide/show bone highlight sphere
           if (boneHighlightSphereRef.current) {
@@ -2580,15 +2581,14 @@ const ThreeViewer = forwardRef(
             }
           }
 
-          const tcObj = transformControlsRef.current as any as THREE.Object3D;
           console.log("[bone-edit] TransformControls state:");
           console.log("  - enabled:", transformControlsRef.current.enabled);
-          console.log("  - visible:", tcObj.visible);
+          console.log("  - visible:", transformControlsHelper.visible);
           console.log(
             "  - in scene:",
-            sceneRef.current?.children.includes(tcObj),
+            sceneRef.current?.children.includes(transformControlsHelper),
           );
-          console.log("  - parent:", tcObj.parent?.type);
+          console.log("  - parent:", transformControlsHelper.parent?.type);
 
           // Detach from any object when disabling
           if (!enabled && transformControlsRef.current.object) {
@@ -2798,8 +2798,8 @@ const ThreeViewer = forwardRef(
                     "[selection] ✅ Gizmo attached and should be visible",
                   );
 
-                  const tcObj =
-                    transformControlsRef.current as any as THREE.Object3D;
+                  const transformControlsHelper =
+                    transformControlsRef.current.getHelper();
                   console.log(
                     `[selection] 🎯 3-Axis Gizmo attached to bone "${closestBone.name}"`,
                   );
@@ -2816,11 +2816,13 @@ const ThreeViewer = forwardRef(
                   );
                   console.log(
                     "  - TransformControls in scene:",
-                    sceneRef.current?.children.includes(tcObj),
+                    sceneRef.current?.children.includes(
+                      transformControlsHelper,
+                    ),
                   );
                   console.log(
                     "  - TransformControls parent:",
-                    tcObj.parent?.type,
+                    transformControlsHelper.parent?.type,
                   );
                 } else {
                   console.log(
@@ -3174,7 +3176,9 @@ const ThreeViewer = forwardRef(
       const tControls = new TransformControls(camera, canvas);
       tControls.enabled = false; // Start disabled, enable only when user clicks "Enable Bone Editing"
       tControls.size = 1.0; // Will be scaled based on model size when bone is selected
-      (tControls as unknown as THREE.Object3D).frustumCulled = false;
+      const transformControlsHelper = tControls.getHelper();
+      transformControlsHelper.frustumCulled = false;
+      transformControlsHelper.visible = false;
       tControls.setMode("translate"); // 3-axis gizmo with directional arrows
       tControls.setSpace("local"); // Use local space for bone editing
       // Ensure all 3 axes (X/Y/Z arrows) are enabled
@@ -3349,18 +3353,16 @@ const ThreeViewer = forwardRef(
         }
       });
 
-      // Add TransformControls to scene
-      // CRITICAL: Cast to any first, then to Object3D to satisfy TypeScript
-      // TransformControls extends Object3D but TypeScript doesn't know that
-      const tControlsObj = tControls as any as THREE.Object3D;
-      scene.add(tControlsObj);
+      // Add the TransformControls helper to the scene; the controls object
+      // itself is not an Object3D in current Three.js.
+      scene.add(transformControlsHelper);
       transformControlsRef.current = tControls;
 
       console.log("✅ TransformControls initialized and added to scene");
       console.log("   TransformControls type:", tControls.constructor.name);
       console.log(
         "   TransformControls in scene:",
-        scene.children.includes(tControlsObj),
+        scene.children.includes(transformControlsHelper),
       );
       console.log("   TransformControls enabled:", tControls.enabled);
       console.log("   TransformControls size:", tControls.size);
@@ -3940,7 +3942,9 @@ const ThreeViewer = forwardRef(
 
       // Adjust renderer exposure for light mode
       if (rendererRef.current) {
-        rendererRef.current.toneMappingExposure = isLightBackground ? 0.8 : 1.35;
+        rendererRef.current.toneMappingExposure = isLightBackground
+          ? 0.8
+          : 1.35;
       }
     }, [isLightBackground, currentEnvironment]);
 
@@ -3967,7 +3971,8 @@ const ThreeViewer = forwardRef(
       if (hemisphereLight) {
         hemisphereLight.color = new THREE.Color(env.ambientColor);
         hemisphereLight.groundColor = new THREE.Color(env.bgColor);
-        hemisphereLight.intensity = env.ambientIntensity * lightModeFactor * 0.65;
+        hemisphereLight.intensity =
+          env.ambientIntensity * lightModeFactor * 0.65;
       }
 
       // Update key light
