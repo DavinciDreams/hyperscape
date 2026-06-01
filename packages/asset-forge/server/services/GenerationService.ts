@@ -19,7 +19,10 @@ import path from "path";
 
 import fetch from "node-fetch";
 import { ComfyUITrellisService } from "./ComfyUITrellisService";
-import { Pixel3DGradioService } from "./Pixel3DGradioService";
+import {
+  Pixel3DGradioService,
+  type Pixel3DArtifacts,
+} from "./Pixel3DGradioService";
 import { chatProviderService } from "./ChatProviderService";
 
 // ==================== Type Definitions ====================
@@ -649,16 +652,30 @@ export class GenerationService extends EventEmitter {
           };
           pipeline.results.image3D = pipeline.stages.image3D.result;
           pipeline.progress = 50;
-        } else if (modelProvider === "pixel3d-gradio") {
-          console.log("🧊 Starting Pixel3D Gradio image-to-3D generation...");
+        } else if (
+          modelProvider === "pixel3d-gradio" ||
+          modelProvider === "instantmesh-gradio"
+        ) {
+          console.log(`🧊 Starting ${modelProvider} image-to-3D generation...`);
           const pixel3DMetadata = pipeline.config.metadata as
             | Record<string, unknown>
             | undefined;
           const pixel3DService = new Pixel3DGradioService({
+            baseUrl:
+              modelProvider === "instantmesh-gradio"
+                ? process.env.INSTANTMESH_GRADIO_BASE_URL ||
+                  process.env.PIXEL3D_GRADIO_BASE_URL
+                : undefined,
             apiName:
               typeof pixel3DMetadata?.pixel3DApiName === "string"
                 ? pixel3DMetadata.pixel3DApiName
-                : undefined,
+                : modelProvider === "instantmesh-gradio"
+                  ? "instantmesh"
+                  : undefined,
+            profile:
+              modelProvider === "instantmesh-gradio"
+                ? "instantmesh"
+                : "pixel3d",
           });
           const pixel3DResult = await pixel3DService.generateModel({
             assetId: pipeline.config.assetId,
@@ -678,6 +695,11 @@ export class GenerationService extends EventEmitter {
             `${pipeline.config.assetId}_raw.glb`,
           );
           await fs.writeFile(rawModelPath, pixel3DResult.modelBuffer);
+          const artifactPaths = await this.saveGradioArtifacts(
+            outputDir,
+            pipeline.config.assetId,
+            pixel3DResult.artifacts,
+          );
 
           const normalizedModelPath = path.join(
             outputDir,
@@ -714,11 +736,28 @@ export class GenerationService extends EventEmitter {
             hasConceptArt: true,
             modelPath: baseModelPath,
             conceptArtUrl: "./concept-art.png",
+            processedImageUrl: artifactPaths.processedImage
+              ? `./${artifactPaths.processedImage}`
+              : undefined,
+            spriteSheetPath: artifactPaths.sprites,
+            spriteSheetUrl: artifactPaths.sprites
+              ? `./${artifactPaths.sprites}`
+              : undefined,
+            previewVideoPath: artifactPaths.previewVideo,
+            previewVideoUrl: artifactPaths.previewVideo
+              ? `./${artifactPaths.previewVideo}`
+              : undefined,
+            objModelPath: artifactPaths.objModel,
+            hasSpriteSheet: Boolean(artifactPaths.sprites),
             gddCompliant: true,
-            workflow: "GPT-5 → GPT-Image-1 → Pixel3D Gradio Image-to-3D",
-            generationProvider: "pixel3d-gradio",
+            workflow:
+              modelProvider === "instantmesh-gradio"
+                ? "GPT-5 → GPT-Image-1 → InstantMesh Gradio Image-to-3D"
+                : "GPT-5 → GPT-Image-1 → Pixel3D Gradio Image-to-3D",
+            generationProvider: modelProvider,
             pixel3DJobId: pixel3DResult.jobId,
             pixel3DModelUrl: pixel3DResult.modelUrl,
+            gradioArtifacts: artifactPaths,
             variants: [],
             variantCount: 0,
             lastVariantGenerated: null,
@@ -754,9 +793,10 @@ export class GenerationService extends EventEmitter {
           pipeline.stages.image3D.progress = 100;
           pipeline.stages.image3D.result = {
             taskId: pixel3DResult.jobId,
-            provider: "pixel3d-gradio",
+            provider: modelProvider,
             modelUrl: pixel3DResult.modelUrl,
             localPath: baseModelPath,
+            artifacts: artifactPaths,
           };
           pipeline.results.image3D = pipeline.stages.image3D.result;
           pipeline.progress = 50;
@@ -1508,7 +1548,7 @@ export class GenerationService extends EventEmitter {
 
   private getModelProvider(
     config?: PipelineConfig,
-  ): "meshy" | "comfyui-trellis" | "pixel3d-gradio" {
+  ): "meshy" | "comfyui-trellis" | "pixel3d-gradio" | "instantmesh-gradio" {
     const metadata = config?.metadata as Record<string, unknown> | undefined;
     const requestedProvider =
       typeof metadata?.provider === "string" ? metadata.provider : undefined;
@@ -1528,6 +1568,14 @@ export class GenerationService extends EventEmitter {
     }
 
     if (
+      provider === "instantmesh-gradio" ||
+      provider === "instantmesh" ||
+      provider === "instant-mesh"
+    ) {
+      return "instantmesh-gradio";
+    }
+
+    if (
       provider === "comfyui-trellis" ||
       provider === "trellis" ||
       provider === "comfyui"
@@ -1544,6 +1592,10 @@ export class GenerationService extends EventEmitter {
 
     if (process.env.PIXEL3D_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
       return "pixel3d-gradio";
+    }
+
+    if (process.env.INSTANTMESH_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
+      return "instantmesh-gradio";
     }
 
     return "meshy";
@@ -2065,6 +2117,62 @@ Your task is to enhance the user's description to create better results with ima
       throw new Error(`Failed to download file: ${response.status}`);
     }
     return Buffer.from(await response.arrayBuffer());
+  }
+
+  private async saveGradioArtifacts(
+    outputDir: string,
+    assetId: string,
+    artifacts: Pixel3DArtifacts,
+  ): Promise<{
+    processedImage?: string;
+    sprites?: string;
+    previewVideo?: string;
+    objModel?: string;
+  }> {
+    const saved: {
+      processedImage?: string;
+      sprites?: string;
+      previewVideo?: string;
+      objModel?: string;
+    } = {};
+
+    const artifactWrites: Array<{
+      key: keyof typeof saved;
+      filename: string;
+      buffer: Buffer | undefined;
+    }> = [
+      {
+        key: "processedImage",
+        filename: "instantmesh-processed-image.png",
+        buffer: artifacts.processedImage?.buffer,
+      },
+      {
+        key: "sprites",
+        filename: "instantmesh-multiview-sprites.png",
+        buffer: artifacts.sprites?.buffer,
+      },
+      {
+        key: "previewVideo",
+        filename: "preview.mp4",
+        buffer: artifacts.previewVideo?.buffer,
+      },
+      {
+        key: "objModel",
+        filename: `${assetId}.obj`,
+        buffer: artifacts.objModel?.buffer,
+      },
+    ];
+
+    for (const artifact of artifactWrites) {
+      if (!artifact.buffer) continue;
+      await fs.writeFile(
+        path.join(outputDir, artifact.filename),
+        artifact.buffer,
+      );
+      saved[artifact.key] = artifact.filename;
+    }
+
+    return saved;
   }
 
   /**

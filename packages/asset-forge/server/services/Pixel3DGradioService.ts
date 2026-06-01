@@ -17,6 +17,7 @@ interface Pixel3DGradioConfig {
   timeoutMs?: number;
   pollIntervalMs?: number;
   inputs?: Pixel3DInputName[];
+  profile?: "pixel3d" | "instantmesh";
 }
 
 interface GenerateModelOptions {
@@ -31,6 +32,7 @@ interface GenerateModelResult {
   jobId: string;
   modelUrl: string;
   modelBuffer: Buffer;
+  artifacts: Pixel3DArtifacts;
   rawResult: unknown;
 }
 
@@ -57,12 +59,46 @@ interface FileLikeResult {
   data?: string;
 }
 
+export interface Pixel3DArtifact {
+  url: string;
+  buffer?: Buffer;
+}
+
+export interface Pixel3DArtifacts {
+  processedImage?: Pixel3DArtifact;
+  sprites?: Pixel3DArtifact;
+  previewVideo?: Pixel3DArtifact;
+  objModel?: Pixel3DArtifact;
+  glbModel?: Pixel3DArtifact;
+}
+
+interface GradioInfoResponse {
+  named_endpoints?: Record<string, unknown>;
+  unnamed_endpoints?: Record<
+    string,
+    {
+      parameters?: Array<{ label?: string }>;
+      returns?: Array<{ label?: string }>;
+    }
+  >;
+}
+
+interface LegacyPredictResponse {
+  data?: unknown[];
+  error?: string;
+}
+
+type GradioInvocation =
+  | { kind: "queue"; inputs: Pixel3DInputName[] }
+  | { kind: "legacy-predict"; fnIndex: number; inputs: Pixel3DInputName[] };
+
 export class Pixel3DGradioService {
   private baseUrl: string;
   private apiName: string;
   private timeoutMs: number;
   private pollIntervalMs: number;
   private inputs: Pixel3DInputName[];
+  private profile: "pixel3d" | "instantmesh";
 
   constructor(config: Pixel3DGradioConfig = {}) {
     const baseUrl =
@@ -81,6 +117,9 @@ export class Pixel3DGradioService {
       process.env.PIXEL3D_GRADIO_API_NAME ||
       process.env.PIXEL3D_API_NAME ||
       "/generate_3d";
+    this.profile =
+      config.profile ||
+      (this.normalizedApiName() === "instantmesh" ? "instantmesh" : "pixel3d");
     this.timeoutMs =
       config.timeoutMs ||
       Number(process.env.PIXEL3D_GRADIO_TIMEOUT_MS || 900000);
@@ -96,21 +135,26 @@ export class Pixel3DGradioService {
   async generateModel(
     options: GenerateModelOptions,
   ): Promise<GenerateModelResult> {
-    const eventId = await this.queueGeneration(options);
-    const result = await this.waitForResult(eventId, options.onProgress);
-    const modelUrl = this.extractModelUrl(result);
-    const response = await fetch(modelUrl);
+    const invocation = await this.resolveInvocation();
+    const eventId =
+      invocation.kind === "queue"
+        ? await this.queueGeneration(options, invocation.inputs)
+        : `predict-${Date.now()}`;
+    const result =
+      invocation.kind === "queue"
+        ? await this.waitForResult(eventId, options.onProgress)
+        : await this.runLegacyPredict(options, invocation);
 
-    if (!response.ok) {
-      throw new Error(
-        `Pixel3D model download failed: ${response.status} ${await response.text()}`,
-      );
-    }
+    const artifacts = await this.extractArtifacts(result);
+    const modelUrl = artifacts.glbModel?.url || this.extractModelUrl(result);
+    const modelBuffer =
+      artifacts.glbModel?.buffer || (await this.downloadArtifact(modelUrl));
 
     return {
       jobId: eventId,
       modelUrl,
-      modelBuffer: Buffer.from(await response.arrayBuffer()),
+      modelBuffer,
+      artifacts,
       rawResult: result,
     };
   }
@@ -157,9 +201,10 @@ export class Pixel3DGradioService {
 
   private async queueGeneration(
     options: GenerateModelOptions,
+    inputs: Pixel3DInputName[],
   ): Promise<string> {
     const data = await Promise.all(
-      this.inputs.map((input) => this.inputValue(input, options)),
+      inputs.map((input) => this.inputValue(input, options)),
     );
     const response = await fetch(this.apiUrl("call"), {
       method: "POST",
@@ -196,6 +241,12 @@ export class Pixel3DGradioService {
         return options.prompt;
       case "seed":
         return this.numberEnv("PIXEL3D_SEED", Date.now());
+      case "remove_background":
+        return this.booleanEnv("PIXEL3D_REMOVE_BACKGROUND", true);
+      case "sample_steps":
+      case "steps":
+      case "iterations":
+        return this.numberEnv("PIXEL3D_SAMPLE_STEPS", 30);
       case "quality":
         return options.quality || "standard";
       case "resolution":
@@ -248,6 +299,12 @@ export class Pixel3DGradioService {
     if (!value) return fallback;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private booleanEnv(name: string, fallback: boolean): boolean {
+    const value = process.env[name];
+    if (!value) return fallback;
+    return ["1", "true", "yes", "on"].includes(value.toLowerCase());
   }
 
   private async imageInput(
@@ -368,6 +425,199 @@ export class Pixel3DGradioService {
     return messages;
   }
 
+  private async resolveInvocation(): Promise<GradioInvocation> {
+    const normalizedApiName = this.normalizedApiName();
+    if (
+      this.profile === "instantmesh" ||
+      ["predict", "run/predict", "instantmesh"].includes(normalizedApiName)
+    ) {
+      return this.instantMeshInvocation();
+    }
+
+    const info = await this.fetchInfo();
+    if (info) {
+      const namedEndpoints = info.named_endpoints || {};
+      if (
+        namedEndpoints[normalizedApiName] ||
+        namedEndpoints[`/${normalizedApiName}`]
+      ) {
+        return { kind: "queue", inputs: this.inputs };
+      }
+
+      if (this.profile === "instantmesh") {
+        const instantMeshEndpoint = this.findInstantMeshEndpoint(info);
+        if (instantMeshEndpoint !== null) {
+          return this.instantMeshInvocation(instantMeshEndpoint);
+        }
+      }
+    }
+
+    return { kind: "queue", inputs: this.inputs };
+  }
+
+  private async fetchInfo(): Promise<GradioInfoResponse | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/info`);
+      if (!response.ok) return null;
+      return (await response.json()) as GradioInfoResponse;
+    } catch {
+      return null;
+    }
+  }
+
+  private findInstantMeshEndpoint(info: GradioInfoResponse): number | null {
+    const entries = Object.entries(info.unnamed_endpoints || {});
+    for (const [index, endpoint] of entries) {
+      const labels = (endpoint.parameters || [])
+        .map((parameter) => parameter.label?.toLowerCase() || "")
+        .join(" ");
+      const returns = (endpoint.returns || [])
+        .map((output) => output.label?.toLowerCase() || "")
+        .join(" ");
+      if (
+        labels.includes("input image") &&
+        labels.includes("sample steps") &&
+        returns.includes("glb")
+      ) {
+        return Number(index);
+      }
+    }
+    return null;
+  }
+
+  private instantMeshInvocation(fnIndex?: number): GradioInvocation {
+    return {
+      kind: "legacy-predict",
+      fnIndex: this.numberEnv("PIXEL3D_GRADIO_FN_INDEX", fnIndex ?? 1),
+      inputs: ["image", "remove_background", "sample_steps", "seed"],
+    };
+  }
+
+  private async runLegacyPredict(
+    options: GenerateModelOptions,
+    invocation: Extract<GradioInvocation, { kind: "legacy-predict" }>,
+  ): Promise<unknown[]> {
+    options.onProgress?.(20);
+    const data = await Promise.all(
+      invocation.inputs.map((input) => this.inputValue(input, options)),
+    );
+    const response = await this.fetchWithTimeout(
+      `${this.baseUrl}/run/predict`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data,
+          fn_index: invocation.fnIndex,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Pixel3D predict request failed: ${response.status} ${await response.text()}`,
+      );
+    }
+
+    const body = (await response.json()) as LegacyPredictResponse;
+    if (body.error) {
+      throw new Error(body.error);
+    }
+    if (!body.data) {
+      throw new Error(
+        `Pixel3D predict returned no data: ${JSON.stringify(body)}`,
+      );
+    }
+    options.onProgress?.(100);
+    return body.data;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: Parameters<typeof fetch>[1],
+  ) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async extractArtifacts(result: unknown): Promise<Pixel3DArtifacts> {
+    const outputs = Array.isArray(result) ? result : [];
+    const instantMeshArtifacts: Pixel3DArtifacts = {
+      processedImage: await this.artifactFromOutput(outputs[0]),
+      sprites: await this.artifactFromOutput(outputs[1]),
+      previewVideo: await this.artifactFromOutput(outputs[2]),
+      objModel: await this.artifactFromOutput(outputs[3]),
+      glbModel: await this.artifactFromOutput(outputs[4]),
+    };
+
+    const hasInstantMeshArtifacts =
+      Object.values(instantMeshArtifacts).some(Boolean);
+    if (hasInstantMeshArtifacts) {
+      return instantMeshArtifacts;
+    }
+
+    const candidates = this.collectCandidates(result);
+    return {
+      previewVideo: await this.artifactFromCandidate(
+        candidates.find((value) => /\.(mp4|webm|mov)(\?|$)/i.test(value)),
+      ),
+      sprites: await this.artifactFromCandidate(
+        candidates.find((value) => /\.(png|jpg|jpeg|webp)(\?|$)/i.test(value)),
+      ),
+      objModel: await this.artifactFromCandidate(
+        candidates.find((value) => /\.(obj)(\?|$)/i.test(value)),
+      ),
+      glbModel: await this.artifactFromCandidate(
+        candidates.find((value) => /\.(glb|gltf)(\?|$)/i.test(value)),
+      ),
+    };
+  }
+
+  private async artifactFromOutput(
+    output: unknown,
+  ): Promise<Pixel3DArtifact | undefined> {
+    const candidate = this.collectCandidates(output)[0];
+    return this.artifactFromCandidate(candidate);
+  }
+
+  private async artifactFromCandidate(
+    candidate: string | undefined,
+  ): Promise<Pixel3DArtifact | undefined> {
+    if (!candidate) return undefined;
+    const url = this.resolveCandidateUrl(candidate);
+    return {
+      url,
+      buffer: await this.downloadArtifact(url),
+    };
+  }
+
+  private async downloadArtifact(url: string): Promise<Buffer> {
+    if (url.startsWith("data:")) {
+      return this.bufferFromDataUrl(url);
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `Pixel3D artifact download failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  private bufferFromDataUrl(dataUrl: string): Buffer {
+    const [, payload = ""] = dataUrl.split(",", 2);
+    return Buffer.from(payload, "base64");
+  }
+
   private extractModelUrl(result: unknown): string {
     const candidates = this.collectCandidates(result);
     const candidate = candidates.find((value) =>
@@ -379,7 +629,11 @@ export class Pixel3DGradioService {
       );
     }
 
-    if (/^https?:\/\//i.test(candidate)) {
+    return this.resolveCandidateUrl(candidate);
+  }
+
+  private resolveCandidateUrl(candidate: string): string {
+    if (/^(https?:|data:)/i.test(candidate)) {
       return candidate;
     }
 
