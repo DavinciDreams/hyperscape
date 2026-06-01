@@ -921,31 +921,9 @@ export class ProceduralFlowerSystem extends System {
       console.log("[ProceduralFlowers] Loaded noise texture");
     }
 
-    // Try to load flower atlas (optional)
-    const atlasPromise = new Promise<THREE.Texture>((resolve, reject) => {
-      loader.load(
-        "/textures/edelweiss.png",
-        (tex) => {
-          tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-          resolve(tex);
-        },
-        undefined,
-        () => reject(new Error("Failed to load flower atlas")),
-      );
-    }).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn("[ProceduralFlowers] Atlas texture load failed:", message);
-      return null;
-    });
-
-    const atlas = await atlasPromise;
-    if (atlas) {
-      this.atlasTexture = atlas;
-      flowerAtlasTexture = atlas;
-      console.log("[ProceduralFlowers] Loaded flower atlas texture");
-    } else {
-      console.log("[ProceduralFlowers] Using procedural flower colors");
-    }
+    this.atlasTexture = null;
+    flowerAtlasTexture = null;
+    console.log("[ProceduralFlowers] Using procedural flower colors");
 
     // Load terrain noise texture - SHARED with TerrainShader and ProceduralGrass
     // This ensures flowers respect the EXACT same dirt patches as grass and terrain
