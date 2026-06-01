@@ -1714,11 +1714,13 @@ export class AgentManager {
     try {
       const direct = await callDirectChatCompletion({
         characterSecrets: instance.config.characterConfig?.settings?.secrets,
+        consumer: "hyperscape-npc",
         maxTokens: 360,
         model: instance.config.model,
         preferredProvider: instance.config.modelProvider,
         prompt,
         temperature: 0.55,
+        threadId: `hyperscape:npc:${characterId}:vision`,
       });
       let text = direct?.text || "";
       if (!text) {
@@ -1809,11 +1811,13 @@ export class AgentManager {
       try {
         const direct = await callDirectChatCompletion({
           characterSecrets: instance.config.characterConfig?.settings?.secrets,
+          consumer: "hyperscape-dashboard",
           maxTokens: 520,
           model: instance.config.model,
           preferredProvider: instance.config.modelProvider,
           prompt,
           temperature: 0.7,
+          threadId: `hyperscape:npc:${characterId}:dashboard`,
         });
         if (!direct) {
           throw new Error(

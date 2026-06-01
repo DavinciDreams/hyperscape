@@ -625,6 +625,24 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       desktop: { width: 365, height: 455 },
     },
   },
+  content_hub: {
+    minSize: { width: 520, height: 420 },
+    preferredSize: { width: 760, height: 560 },
+    maxSize: { width: 980, height: 760 },
+    scrollable: false,
+    resizable: true,
+    scaleFactor: { min: 0.75, max: 1.15 },
+    responsive: {
+      mobile: { width: 390, height: 560 },
+      tablet: { width: 680, height: 540 },
+      desktop: { width: 760, height: 560 },
+    },
+    mobileLayout: {
+      drawerType: "modal",
+      drawerHeight: "full",
+      landscapePosition: "modal",
+    },
+  },
   // Quest Detail - separate window for quest details
   "quest-detail": {
     minSize: { width: 420, height: 520 },
@@ -904,6 +922,11 @@ const MapPanel = lazy(() =>
 const FriendsPanel = lazy(() =>
   import("../../game/panels/FriendsPanel").then((m) => ({
     default: m.FriendsPanel,
+  })),
+);
+const ContentHubPanel = lazy(() =>
+  import("../../game/panels/ContentHubPanel").then((m) => ({
+    default: m.ContentHubPanel,
   })),
 );
 /** Panel loading fallback */
@@ -1259,6 +1282,15 @@ export function createPanelRenderer(
           </ScrollablePanelWrapper>
         );
 
+      case "content_hub":
+        return (
+          <ScrollablePanelWrapper scrollable={config.scrollable}>
+            <Suspense fallback={<PanelLoadingFallback />}>
+              <ContentHubPanel />
+            </Suspense>
+          </ScrollablePanelWrapper>
+        );
+
       case "quest-detail":
         return (
           <ScrollablePanelWrapper scrollable={config.scrollable}>
@@ -1337,7 +1369,13 @@ export function getAvailablePanels(): Array<{
     { id: "combat", label: "Combat", icon: "⚔️", implemented: true },
     { id: "settings", label: "Settings", icon: "⚙️", implemented: true },
     { id: "bank", label: "Bank", icon: "🏦", implemented: true },
-    { id: "quests", label: "Quests", icon: "📜", implemented: false },
+    { id: "quests", label: "Quests", icon: "📜", implemented: true },
+    {
+      id: "content_hub",
+      label: "Content Hub",
+      icon: "🤖",
+      implemented: true,
+    },
     { id: "map", label: "World Map", icon: "🗺️", implemented: false },
     { id: "chat", label: "Chat", icon: "💬", implemented: true },
     { id: "action", label: "Action Bar", icon: "⚡", implemented: true },

@@ -43,6 +43,7 @@ export const HealthResponse = t.Object({
   services: t.Object({
     meshy: t.Boolean(),
     openai: t.Boolean(),
+    chatProvider: t.Optional(t.String()),
     database: t.Optional(t.Boolean()),
     comfy: t.Optional(t.Boolean()),
     comfyUrl: t.Optional(t.String()),
