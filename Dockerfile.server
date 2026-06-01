@@ -88,6 +88,11 @@ RUN mkdir -p \
 # Download game asset manifests (bypass CDN reliance on boot).
 RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
 
+# Overlay small in-repo runtime assets that are not present in the manifests-only
+# production asset clone.
+COPY assets/manifests ./packages/server/world/assets/manifests
+COPY packages/server/runtime-assets/textures/terrain-biomes ./packages/server/world/assets/textures/terrain-biomes
+
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
     cd /app/packages/decimation && bun run build && \
