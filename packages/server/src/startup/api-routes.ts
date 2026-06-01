@@ -109,7 +109,7 @@ export function registerApiRoutes(
   registerDataRoutes(fastify);
 
   // In-game speech/text asset conjuring
-  registerConjureRoutes(fastify);
+  registerConjureRoutes(fastify, world);
 
   // Direct OpenAI-compatible model/TTS provider routes without Eliza runtime
   registerDirectProviderRoutes(fastify);

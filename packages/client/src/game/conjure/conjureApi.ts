@@ -30,6 +30,21 @@ export type ConjureStatusResponse = {
   completedAt?: string;
 };
 
+export type ConjurePlaceRequest = {
+  assetId?: string;
+  prompt?: string;
+  position: { x: number; y: number; z: number };
+  modelScale?: number;
+};
+
+export type ConjurePlaceResponse = {
+  entityId: string;
+  conjureId: string;
+  itemId: string;
+  modelUrl: string;
+  position: { x: number; y: number; z: number };
+};
+
 export async function startConjure(
   request: ConjureStartRequest,
 ): Promise<ConjureStartResponse> {
@@ -45,6 +60,27 @@ export async function startConjure(
 
   if (!response.ok || !response.data) {
     throw new Error(response.error || "Failed to start conjure");
+  }
+
+  return response.data;
+}
+
+export async function placeConjure(
+  conjureId: string,
+  request: ConjurePlaceRequest,
+): Promise<ConjurePlaceResponse> {
+  const response = await apiClient.post<ConjurePlaceResponse>(
+    `/api/conjure/${encodeURIComponent(conjureId)}/place`,
+    request,
+    {
+      includeAuth: true,
+      showErrorNotification: true,
+      errorContext: "placing conjure",
+    },
+  );
+
+  if (!response.ok || !response.data) {
+    throw new Error(response.error || "Failed to place conjure");
   }
 
   return response.data;

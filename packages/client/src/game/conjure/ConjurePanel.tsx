@@ -10,6 +10,7 @@ import { EventType } from "@hyperscape/shared";
 import type { ClientWorld } from "../../types";
 import {
   getConjureStatus,
+  placeConjure,
   startConjure,
   type ConjureStatusResponse,
 } from "./conjureApi";
@@ -61,6 +62,7 @@ type ConjurePhase =
   | "listening"
   | "starting"
   | "processing"
+  | "placing"
   | "complete"
   | "failed";
 
@@ -84,6 +86,22 @@ function isFailed(status: string): boolean {
   return ["failed", "error", "cancelled", "canceled"].includes(
     status.toLowerCase(),
   );
+}
+
+function getPlacementPosition(world: ClientWorld): {
+  x: number;
+  y: number;
+  z: number;
+} | null {
+  const player = world.getPlayer?.();
+  const position = player?.getPosition?.() ?? player?.position;
+  if (!position) return null;
+
+  return {
+    x: position.x + 1.5,
+    y: position.y,
+    z: position.z + 1.5,
+  };
 }
 
 export function ConjurePanel({ world }: { world: ClientWorld }) {
@@ -193,9 +211,35 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
         setStatus(next);
 
         if (isFinished(next.status)) {
+          const placementPosition = getPlacementPosition(world);
+          if (!placementPosition) {
+            setError("Player position is not ready for placement.");
+            setPhase("failed");
+            return;
+          }
+
+          try {
+            setPhase("placing");
+            await placeConjure(conjureId, {
+              assetId: assetId || undefined,
+              prompt,
+              position: placementPosition,
+              modelScale: 1,
+            });
+          } catch (caught) {
+            const message =
+              caught instanceof Error
+                ? caught.message
+                : "Unable to place conjure";
+            setError(message);
+            setPhase("failed");
+            return;
+          }
+
+          if (cancelled) return;
           setPhase("complete");
           world.emit(EventType.UI_TOAST, {
-            message: "Conjure complete",
+            message: "Conjure placed",
             type: "success",
           });
           return;
@@ -223,7 +267,7 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
       cancelled = true;
       resetPolling();
     };
-  }, [conjureId, phase, resetPolling, world]);
+  }, [assetId, conjureId, phase, prompt, resetPolling, world]);
 
   useEffect(() => {
     return () => {
@@ -232,7 +276,8 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
     };
   }, [resetPolling, stopListening]);
 
-  const busy = phase === "starting" || phase === "processing";
+  const busy =
+    phase === "starting" || phase === "processing" || phase === "placing";
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
   const statusText =
     phase === "listening"
@@ -241,11 +286,13 @@ export function ConjurePanel({ world }: { world: ClientWorld }) {
         ? "Opening the gate"
         : phase === "processing"
           ? "Conjuring"
-          : phase === "complete"
-            ? "Ready"
-            : phase === "failed"
-              ? "Failed"
-              : "Idle";
+          : phase === "placing"
+            ? "Placing"
+            : phase === "complete"
+              ? "Ready"
+              : phase === "failed"
+                ? "Failed"
+                : "Idle";
 
   return (
     <>
