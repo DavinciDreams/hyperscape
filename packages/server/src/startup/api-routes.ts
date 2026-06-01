@@ -52,6 +52,7 @@ import { registerAssetForgeProxyRoutes } from "./routes/asset-forge-proxy-routes
 import { registerDirectProviderRoutes } from "./routes/direct-provider-routes.js";
 import { registerAgentRuntimeProxyRoutes } from "./routes/agent-runtime-proxy-routes.js";
 import { registerSafierRoutes } from "./routes/safier-routes.js";
+import { registerConjureRoutes } from "./routes/conjure-routes.js";
 import { registerStreamingRoutes } from "../routes/streaming.js";
 
 /**
@@ -110,6 +111,9 @@ export function registerApiRoutes(
 
   // In-game content authoring proxy to Asset Forge
   registerAssetForgeProxyRoutes(fastify);
+
+  // In-game speech/text asset conjuring
+  registerConjureRoutes(fastify, world);
 
   // Direct OpenAI-compatible model/TTS provider routes without Eliza runtime
   registerDirectProviderRoutes(fastify);

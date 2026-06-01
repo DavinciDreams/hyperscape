@@ -34,6 +34,7 @@ services:
       HYADES_LLM_MODEL: ${HYADES_LLM_MODEL:-nemotron3-omni}
       HYADES_LLM_SMALL_MODEL: ${HYADES_LLM_SMALL_MODEL:-nemotron3-omni}
       HYADES_LLM_API_KEY: ${HYADES_LLM_API_KEY:-}
+      GAME_CONJURE_ASSET_FORGE_URL: ${GAME_CONJURE_ASSET_FORGE_URL:-}
     ports:
       - "5555:5555"
     healthcheck:

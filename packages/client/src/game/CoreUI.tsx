@@ -22,6 +22,7 @@ import { XPProgressOrb } from "./hud/XPProgressOrb";
 import { LevelUpNotification } from "./hud/level-up";
 import { EscapeMenu } from "./hud/EscapeMenu";
 import { ConnectionIndicator } from "./hud/ConnectionIndicator";
+import { ConjurePanel } from "./conjure/ConjurePanel";
 import { NotificationContainer } from "@/ui/components";
 import { Disconnected, KickedOverlay, DeathScreen } from "./hud/overlays";
 import {
@@ -460,6 +461,7 @@ function CoreUIContent({ world }: { world: ClientWorld }) {
           {ready && <LevelUpNotification world={world} />}
           {ready && uiVisible && <InterfaceManager world={world} />}
           {ready && uiVisible && <ActionProgressBar world={world} />}
+          {ready && uiVisible && <ConjurePanel world={world} />}
           {ready && uiVisible && isTouch && <TouchBtns world={world} />}
           {ready && <EntityContextMenu world={world} />}
           {ready && <EscapeMenu world={world} />}
