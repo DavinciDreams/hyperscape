@@ -228,13 +228,13 @@ export function registerUserRoutes(
   /**
    * POST /api/users/create
    *
-   * Create a new user account with username and main wallet.
-   * This is called during signup after Privy authentication.
+   * Create a new user account with username and optional main wallet.
+   * This is called during signup after authentication.
    *
    * Body:
    *   - accountId: string - The user's Privy account ID
    *   - username: string - The chosen username (3-16 chars, alphanumeric + underscore)
-   *   - wallet: string - The main HD wallet address (index 0)
+   *   - wallet?: string - The main HD wallet address (index 0), if available
    *
    * Returns:
    *   - success: boolean
@@ -251,10 +251,10 @@ export function registerUserRoutes(
     const { accountId, username, wallet } = request.body;
 
     // Validate input
-    if (!accountId || !username || !wallet) {
+    if (!accountId || !username) {
       return reply.status(400).send({
         success: false,
-        error: "Missing required fields: accountId, username, and wallet",
+        error: "Missing required fields: accountId and username",
       });
     }
 
@@ -328,7 +328,7 @@ export function registerUserRoutes(
       await db.insert(schema.users).values({
         id: accountId,
         name: trimmedUsername,
-        wallet,
+        wallet: wallet || null,
         roles: "",
         createdAt: timestamp,
         avatar: null,
@@ -337,7 +337,9 @@ export function registerUserRoutes(
       });
 
       console.log(
-        `[UserRoutes] ✅ User account created: ${trimmedUsername} with wallet ${wallet}`,
+        `[UserRoutes] ✅ User account created: ${trimmedUsername}${
+          wallet ? ` with wallet ${wallet}` : " without wallet"
+        }`,
       );
 
       return reply.send({
