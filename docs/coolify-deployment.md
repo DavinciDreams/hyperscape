@@ -19,9 +19,16 @@ POSTGRES_PASSWORD=<strong-password>
 MINIO_ROOT_PASSWORD=<strong-password-at-least-8-chars>
 PUBLIC_AUTH0_DOMAIN=<your-auth0-tenant>.us.auth0.com
 PUBLIC_AUTH0_CLIENT_ID=<your-auth0-spa-client-id>
+PUBLIC_AUTH0_AUDIENCE=<your-auth0-api-identifier>
 JWT_SECRET=<random-32-byte-secret>
 ADMIN_CODE=<private-admin-code>
 ```
+
+Create an Auth0 API and use its identifier as `PUBLIC_AUTH0_AUDIENCE` so
+browser access tokens are JWTs the Hyperscape server can verify. Add your
+Coolify app origin, for example `https://hyperscape.flobots.xyz`, to the Auth0
+SPA application's Allowed Callback URLs, Allowed Logout URLs, Allowed Web
+Origins, and Allowed Origins (CORS).
 
 `PUBLIC_API_URL`, `PUBLIC_WS_URL`, and `PUBLIC_CDN_URL` may be left unset for a
 simple same-origin Coolify deployment. The server-generated `/env.js` will infer:

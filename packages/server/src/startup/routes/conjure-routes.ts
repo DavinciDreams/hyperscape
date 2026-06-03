@@ -8,6 +8,7 @@ import {
   ConjurePlacementError,
   ConjurePlacementService,
 } from "../../infrastructure/conjure/ConjurePlacementService.js";
+import { verifyBearerAuthToken } from "../../infrastructure/auth/AuthTokenVerifier.js";
 
 type ConjureRequestBody = {
   prompt?: string;
@@ -39,6 +40,20 @@ function sendConjureError(
 
   const message = error instanceof Error ? error.message : fallbackMessage;
   return reply.code(502).send({ error: message });
+}
+
+async function requireConjureAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  try {
+    const verified = await verifyBearerAuthToken(request.headers.authorization);
+    if (verified) return;
+  } catch (error) {
+    request.log.warn({ error }, "Conjure auth verification failed");
+  }
+
+  await reply.code(401).send({ error: "Authentication required" });
 }
 
 function parsePlacementPosition(
@@ -115,12 +130,10 @@ export function registerConjureRoutes(
   const conjureService = new ConjureService();
   const placementService = new ConjurePlacementService(world);
 
-  fastify.post(
+  fastify.post<{ Body: ConjureRequestBody }>(
     "/api/conjure",
-    async (
-      request: FastifyRequest<{ Body: ConjureRequestBody }>,
-      reply: FastifyReply,
-    ) => {
+    { preHandler: requireConjureAuth },
+    async (request, reply) => {
       try {
         const result = await conjureService.start({
           prompt: request.body?.prompt || "",
@@ -138,12 +151,10 @@ export function registerConjureRoutes(
     },
   );
 
-  fastify.get(
+  fastify.get<{ Params: { conjureId: string } }>(
     "/api/conjure/:conjureId",
-    async (
-      request: FastifyRequest<{ Params: { conjureId: string } }>,
-      reply: FastifyReply,
-    ) => {
+    { preHandler: requireConjureAuth },
+    async (request, reply) => {
       try {
         const result = await conjureService.getStatus(request.params.conjureId);
         return reply.send(result);
@@ -154,15 +165,13 @@ export function registerConjureRoutes(
     },
   );
 
-  fastify.post(
+  fastify.post<{
+    Params: { conjureId: string };
+    Body: ConjurePlacementRequestBody;
+  }>(
     "/api/conjure/:conjureId/place",
-    async (
-      request: FastifyRequest<{
-        Params: { conjureId: string };
-        Body: ConjurePlacementRequestBody;
-      }>,
-      reply: FastifyReply,
-    ) => {
+    { preHandler: requireConjureAuth },
+    async (request, reply) => {
       try {
         const status = await conjureService.getStatus(request.params.conjureId);
         if (!isCompletedStatus(status.status)) {
