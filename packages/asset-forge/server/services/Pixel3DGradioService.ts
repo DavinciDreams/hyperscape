@@ -169,6 +169,10 @@ export class Pixel3DGradioService {
   }
 
   private defaultInputs(): Pixel3DInputName[] {
+    if (this.profile === "instantmesh") {
+      return ["image", "remove_background", "sample_steps", "seed"];
+    }
+
     if (this.normalizedApiName() !== "generate_3d") {
       return ["image", "prompt"];
     }
@@ -448,10 +452,7 @@ export class Pixel3DGradioService {
 
   private async resolveInvocation(): Promise<GradioInvocation> {
     const normalizedApiName = this.normalizedApiName();
-    if (
-      this.profile === "instantmesh" ||
-      ["predict", "run/predict", "instantmesh"].includes(normalizedApiName)
-    ) {
+    if (["predict", "run/predict", "instantmesh"].includes(normalizedApiName)) {
       return this.instantMeshInvocation();
     }
 

@@ -717,7 +717,9 @@ export class GenerationService extends EventEmitter {
               typeof pixel3DMetadata?.pixel3DApiName === "string"
                 ? pixel3DMetadata.pixel3DApiName
                 : modelProvider === "instantmesh-gradio"
-                  ? "instantmesh"
+                  ? process.env.INSTANTMESH_GRADIO_API_NAME ||
+                    process.env.PIXEL3D_GRADIO_API_NAME ||
+                    "/generate_mesh"
                   : undefined,
             profile:
               modelProvider === "instantmesh-gradio"
