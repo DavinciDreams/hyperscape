@@ -252,8 +252,9 @@ interface HillConjureJob {
 
 function getPromptEnhancementProvider(): string {
   return (
-    process.env.PROMPT_ENHANCEMENT_PROVIDER ||
     process.env.ASSET_FORGE_CHAT_PROVIDER ||
+    process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+    process.env.PROMPT_ENHANCEMENT_PROVIDER ||
     ""
   )
     .trim()
@@ -1640,12 +1641,12 @@ export class GenerationService extends EventEmitter {
       return "comfyui-trellis";
     }
 
-    if (process.env.PIXEL3D_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
-      return "pixel3d-gradio";
-    }
-
     if (process.env.INSTANTMESH_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
       return "instantmesh-gradio";
+    }
+
+    if (process.env.PIXEL3D_GRADIO_BASE_URL && !process.env.MESHY_API_KEY) {
+      return "pixel3d-gradio";
     }
 
     return "meshy";

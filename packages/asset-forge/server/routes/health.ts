@@ -8,6 +8,7 @@ import * as Models from "../models";
 import { isDatabaseEnabled, queryClient } from "../db/db";
 import { ComfyUIService } from "../services/ComfyUIService";
 import { HillDGXService } from "../services/HillDGXService";
+import { chatProviderService } from "../services/ChatProviderService";
 
 export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
   "/health",
@@ -40,14 +41,7 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
       services: {
         meshy: !!process.env.MESHY_API_KEY,
         openai: !!process.env.OPENAI_API_KEY,
-        chatProvider:
-          process.env.ASSET_FORGE_CHAT_PROVIDER ||
-          process.env.CHAT_PROVIDER ||
-          (process.env.AI_GATEWAY_API_KEY
-            ? "ai-gateway"
-            : process.env.OPENAI_API_KEY
-              ? "openai"
-              : undefined),
+        chatProvider: chatProviderService.providerName || undefined,
         database,
         comfy: comfyEnabled ? await comfy.health() : false,
         comfyUrl: comfy.baseUrl,
@@ -59,9 +53,10 @@ export const healthRoutes = new Elysia({ prefix: "/api", name: "health" }).get(
           process.env.ASSET_FORGE_GENERATION_PROVIDER ||
           undefined,
         promptProvider:
-          process.env.PROMPT_ENHANCEMENT_PROVIDER ||
-          process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+          chatProviderService.providerName ||
           process.env.ASSET_FORGE_CHAT_PROVIDER ||
+          process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+          process.env.PROMPT_ENHANCEMENT_PROVIDER ||
           undefined,
       },
     };

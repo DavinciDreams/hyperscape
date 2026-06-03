@@ -473,8 +473,24 @@ if (!process.env.MESHY_API_KEY) {
 if (!process.env.TRIPO_API_KEY) {
   console.warn("⚠️  TRIPO_API_KEY not found - Tripo pipeline will fail");
 }
+const configuredChatProvider = (
+  process.env.ASSET_FORGE_CHAT_PROVIDER ||
+  process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+  process.env.PROMPT_ENHANCEMENT_PROVIDER ||
+  ""
+)
+  .trim()
+  .toLowerCase();
+const hasConfiguredLocalChatProvider = [
+  "hyades",
+  "safier",
+  "safier-semantics",
+  "nemotron",
+  "nemo",
+  "local-nemotron",
+].includes(configuredChatProvider);
 if (
-  process.env.ASSET_FORGE_CHAT_PROVIDER !== "nemotron" &&
+  !hasConfiguredLocalChatProvider &&
   !process.env.AI_GATEWAY_API_KEY &&
   !process.env.OPENAI_API_KEY
 ) {

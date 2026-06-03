@@ -82,6 +82,28 @@ function slugifyPrompt(prompt: string): string {
   return slug || "conjure";
 }
 
+function normalizeAssetForgePath(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const gddIndex = trimmed.indexOf("gdd-assets/");
+  if (gddIndex >= 0) {
+    return trimmed.slice(gddIndex);
+  }
+
+  if (trimmed.startsWith("/gdd-assets/")) {
+    return trimmed.slice(1);
+  }
+
+  return null;
+}
+
+function proxiedAssetForgeUrl(value: string | null): string | null {
+  if (!value) return null;
+  const assetPath = normalizeAssetForgePath(value);
+  return assetPath ? `/api/asset-forge/${assetPath}` : null;
+}
+
 async function readAssetForgeJson<T>(
   response: Response,
 ): Promise<T & { error?: string }> {
@@ -163,6 +185,12 @@ export class ConjureService {
       resultRecord.image3D && typeof resultRecord.image3D === "object"
         ? (resultRecord.image3D as Record<string, unknown>)
         : undefined;
+    const rawModelUrl =
+      typeof image3D?.modelUrl === "string" ? image3D.modelUrl : null;
+    const localPath =
+      typeof image3D?.localPath === "string" ? image3D.localPath : null;
+    const publicModelUrl =
+      proxiedAssetForgeUrl(localPath) || proxiedAssetForgeUrl(rawModelUrl);
 
     return {
       conjureId: payload.id || cleanConjureId,
@@ -170,9 +198,8 @@ export class ConjureService {
       progress: typeof payload.progress === "number" ? payload.progress : 0,
       stages: payload.stages,
       results: payload.results || {},
-      modelUrl: typeof image3D?.modelUrl === "string" ? image3D.modelUrl : null,
-      localPath:
-        typeof image3D?.localPath === "string" ? image3D.localPath : null,
+      modelUrl: publicModelUrl || rawModelUrl,
+      localPath,
       error: payload.error,
       createdAt: payload.createdAt,
       completedAt: payload.completedAt,

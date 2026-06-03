@@ -185,8 +185,8 @@ class ChatProviderService {
   private resolveProvider(): ProviderConfig | null {
     const requested = normalizeProviderName(
       process.env.ASSET_FORGE_CHAT_PROVIDER ||
-        process.env.CHAT_PROVIDER ||
-        process.env.LOCAL_CHAT_PROVIDER,
+        process.env.ASSET_FORGE_PROMPT_PROVIDER ||
+        process.env.PROMPT_ENHANCEMENT_PROVIDER,
     );
 
     if (
