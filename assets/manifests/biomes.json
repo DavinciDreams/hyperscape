@@ -41,8 +41,7 @@
           "category": "tree",
           "density": 5,
           "assets": [
-            "tree1",
-            "cherry-tree-lod-test"
+            "tree1"
           ],
           "minSpacing": 12,
           "clustering": true,
@@ -173,8 +172,7 @@
           "category": "tree",
           "density": 35,
           "assets": [
-            "tree1",
-            "cherry-tree-lod-test"
+            "tree1"
           ],
           "minSpacing": 6,
           "clustering": true,
@@ -260,8 +258,7 @@
           "category": "tree",
           "density": 15,
           "assets": [
-            "tree1",
-            "cherry-tree-lod-test"
+            "tree1"
           ],
           "minSpacing": 10,
           "clustering": true,
@@ -374,8 +371,7 @@
           "category": "tree",
           "density": 5,
           "assets": [
-            "tree1",
-            "cherry-tree-lod-test"
+            "tree1"
           ],
           "minSpacing": 20,
           "clustering": false,
@@ -748,8 +744,7 @@
           "category": "tree",
           "density": 20,
           "assets": [
-            "tree1",
-            "cherry-tree-lod-test"
+            "tree1"
           ],
           "minSpacing": 8,
           "clustering": true,
