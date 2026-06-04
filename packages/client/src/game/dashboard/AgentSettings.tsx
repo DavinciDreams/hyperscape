@@ -128,7 +128,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
   React.useEffect(() => {
     const fetchSettings = async () => {
       try {
-        // Use ElizaOS native agent API endpoint
+        // Use Hyperscape's agent runtime bridge endpoint.
         const response = await fetch(`${ELIZAOS_API}/agents/${agent.id}`);
         if (response.ok) {
           const data = await response.json();
@@ -241,7 +241,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
     if (!settings) return;
     setSaving(true);
     try {
-      // Use official ElizaOS API to update agent configuration
+      // Use the agent runtime bridge to update agent configuration.
       const response = await fetch(`${ELIZAOS_API}/agents/${agent.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -293,7 +293,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({
         return;
       }
 
-      // Use ElizaOS API to update agent secrets
+      // Use the agent runtime bridge to update agent secrets.
       const response = await fetch(`${ELIZAOS_API}/agents/${agent.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

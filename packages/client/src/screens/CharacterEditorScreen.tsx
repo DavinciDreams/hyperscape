@@ -1,8 +1,8 @@
 /**
- * CharacterEditorScreen.tsx - ElizaOS Character Template Editor
+ * CharacterEditorScreen.tsx - Agent Character Template Editor
  *
  * Full-featured character editor for creating AI agent personalities
- * Similar to the native ElizaOS character creation UI
+ * Similar to the native agent runtime character creation UI
  */
 
 import { GAME_WS_URL } from "@/lib/api-config";
@@ -214,7 +214,7 @@ export const CharacterEditorScreen: React.FC = () => {
 
             // Merge existing agent data with template defaults (existing data takes priority)
             const loadedAgent: CharacterTemplate = {
-              id: existingAgent.id, // Use ElizaOS-generated UUID (will be undefined if not set)
+              id: existingAgent.id, // Use runtime-generated UUID (will be undefined if not set)
               name: existingAgent.name || name,
               username: existingAgent.username || baseTemplate.username,
               system: existingAgent.system || baseTemplate.system,
@@ -384,7 +384,7 @@ export const CharacterEditorScreen: React.FC = () => {
         );
 
       if (!agentId || !isValidUUID) {
-        // Strip 'id' field - let ElizaOS generate UUID (it expects valid UUID, we have Privy ID)
+        // Strip 'id' field - let the runtime generate UUIDs when needed.
         const { id, ...characterWithoutId } = updatedCharacter;
 
         // Create new agent with POST
@@ -410,7 +410,10 @@ export const CharacterEditorScreen: React.FC = () => {
               : errorData.message ||
                 JSON.stringify(errorData) ||
                 createResponse.statusText;
-          console.error("[CharacterEditor] ElizaOS error response:", errorData);
+          console.error(
+            "[CharacterEditor] Agent runtime error response:",
+            errorData,
+          );
           throw new Error(`Failed to create agent: ${errorMessage}`);
         }
 
@@ -439,7 +442,7 @@ export const CharacterEditorScreen: React.FC = () => {
               mappingError,
             );
 
-            // ROLLBACK: Delete agent from ElizaOS
+            // ROLLBACK: Delete agent from the runtime.
             try {
               await fetch(`${ELIZAOS_API}/agents/${newAgentId}`, {
                 method: "DELETE",
@@ -497,7 +500,10 @@ export const CharacterEditorScreen: React.FC = () => {
             : errorData.message ||
               JSON.stringify(errorData) ||
               updateResponse.statusText;
-        console.error("[CharacterEditor] ElizaOS error response:", errorData);
+        console.error(
+          "[CharacterEditor] Agent runtime error response:",
+          errorData,
+        );
         throw new Error(`Failed to update agent: ${errorMessage}`);
       }
 
@@ -1040,8 +1046,8 @@ const PluginsTab: React.FC<{
     <div className="space-y-6">
       <div className="bg-[#1a1005] border border-[#f2d08a]/20 rounded-lg p-4">
         <p className="text-sm text-[#f2d08a]/60">
-          The Gaia plugin is required and pre-selected. You can add additional
-          ElizaOS plugins if needed.
+          The Gaia runtime bridge is required and pre-selected. You can add
+          additional runtime tools if needed.
         </p>
       </div>
 
@@ -1069,9 +1075,9 @@ const PluginsTab: React.FC<{
                 Plugin Installation Required
               </h3>
               <p className="text-orange-200/80 text-sm leading-relaxed mb-3">
-                Before plugins can be used, they must be installed into your
-                ElizaOS project. Simply adding them to this list is not
-                sufficient.
+                Before plugins can be used, they must be installed into the
+                active agent runtime project. Simply adding them to this list is
+                not sufficient.
               </p>
               <div className="bg-black/40 border border-orange-500/30 rounded p-3 mb-2">
                 <p className="text-orange-200/70 text-xs font-semibold mb-1.5">
@@ -1083,7 +1089,8 @@ const PluginsTab: React.FC<{
               </div>
               <p className="text-orange-200/60 text-xs leading-relaxed">
                 <strong>Note:</strong> Make sure to run this command in your
-                ElizaOS project directory before the agent can use this plugin.
+                agent runtime project directory before the agent can use this
+                plugin.
               </p>
             </div>
           </div>
@@ -1092,7 +1099,7 @@ const PluginsTab: React.FC<{
 
       <ArrayInput
         label="Plugins"
-        description="ElizaOS plugins to load for this character"
+        description="Runtime plugins or tools to load for this character"
         value={character.plugins || []}
         onChange={(plugins) => onChange({ ...character, plugins })}
         onAdd={handlePluginAdd}

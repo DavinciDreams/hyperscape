@@ -130,7 +130,7 @@ export const DashboardScreen: React.FC = () => {
           }
         }
 
-        // Then fetch all agents from ElizaOS
+        // Then fetch all agents from the Hyperscape agent runtime bridge.
         const response = await fetch(`${ELIZAOS_API}/agents`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -322,13 +322,15 @@ export const DashboardScreen: React.FC = () => {
         );
       }
 
-      // STEP 3: Delete from ElizaOS SECOND (expensive operation, slow)
-      const elizaResponse = await fetch(`${ELIZAOS_API}/agents/${agentId}`, {
+      // STEP 3: Delete from agent runtime SECOND (expensive operation, slow)
+      const runtimeResponse = await fetch(`${ELIZAOS_API}/agents/${agentId}`, {
         method: "DELETE",
       });
 
-      if (!elizaResponse.ok) {
-        throw new Error(`ElizaOS DELETE failed: HTTP ${elizaResponse.status}`);
+      if (!runtimeResponse.ok) {
+        throw new Error(
+          `Agent runtime DELETE failed: HTTP ${runtimeResponse.status}`,
+        );
       }
 
       // STEP 4: Clear viewport if this agent's viewport is showing
@@ -346,7 +348,7 @@ export const DashboardScreen: React.FC = () => {
     } catch (error) {
       console.error(`[Dashboard] ❌ Agent deletion failed:`, error);
 
-      // ROLLBACK: Restore mapping if ElizaOS deletion failed
+      // ROLLBACK: Restore mapping if runtime deletion failed.
       if (deletedMapping) {
         try {
           const rollbackResult = await apiClient.post(
@@ -392,7 +394,7 @@ export const DashboardScreen: React.FC = () => {
       const response = await fetch(`${ELIZAOS_API}/agents/${agentId}/panels`);
 
       if (!response.ok) {
-        // Silently handle 404 - panels endpoint may not exist on all ElizaOS versions
+        // Silently handle 404 - panels endpoint may not exist on all runtimes.
         if (response.status !== 404) {
           console.warn(
             `[Dashboard] Failed to fetch panels: HTTP ${response.status}`,

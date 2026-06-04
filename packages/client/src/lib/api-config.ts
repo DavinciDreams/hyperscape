@@ -246,9 +246,10 @@ export function resolveRuntimeAssetUrl(assetPath: string): string {
 // =============================================================================
 // Agent Runtime Server (Hyades, SafierSemantics, or legacy embedded ElizaOS)
 // =============================================================================
-// Agent runtime routes are served from /api/agents in legacy flows. Hyades can
-// provide OpenAI-compatible /v1 and A2A /a2a surfaces through the same base URL.
-// The ELIZAOS_* exports remain as compatibility aliases for existing screens.
+// AGENT_RUNTIME_* points at the external provider surface when one is exposed.
+// In-game dashboard screens should use the Hyperscape server's /api/agents
+// routes, which bridge to Hyades/Safier and preserve auth/mapping state.
+// The ELIZAOS_* exports remain as compatibility aliases for those older screens.
 
 let resolvedApiConfig = getCurrentResolvedApiConfig();
 
@@ -256,9 +257,9 @@ export let AGENT_RUNTIME_URL: string = resolvedApiConfig.agentRuntimeUrl;
 
 export let AGENT_RUNTIME_API: string = `${AGENT_RUNTIME_URL}/api`;
 
-export let ELIZAOS_URL: string = AGENT_RUNTIME_URL;
+export let ELIZAOS_URL: string = resolvedApiConfig.gameApiUrl;
 
-export let ELIZAOS_API: string = AGENT_RUNTIME_API;
+export let ELIZAOS_API: string = `${resolvedApiConfig.gameApiUrl}/api`;
 
 // =============================================================================
 // Hyperscape Game Server
@@ -285,8 +286,8 @@ export function refreshApiConfig(): {
   resolvedApiConfig = getCurrentResolvedApiConfig();
   AGENT_RUNTIME_URL = resolvedApiConfig.agentRuntimeUrl;
   AGENT_RUNTIME_API = `${AGENT_RUNTIME_URL}/api`;
-  ELIZAOS_URL = AGENT_RUNTIME_URL;
-  ELIZAOS_API = AGENT_RUNTIME_API;
+  ELIZAOS_URL = resolvedApiConfig.gameApiUrl;
+  ELIZAOS_API = `${resolvedApiConfig.gameApiUrl}/api`;
   GAME_API_URL = resolvedApiConfig.gameApiUrl;
   GAME_WS_URL = resolvedApiConfig.gameWsUrl;
   CDN_URL = resolvedApiConfig.cdnUrl;

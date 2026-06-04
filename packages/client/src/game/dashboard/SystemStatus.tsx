@@ -38,7 +38,7 @@ export const SystemStatus: React.FC = () => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      // Fetch health status from ElizaOS API
+      // Fetch health status from the Hyperscape agent runtime bridge.
       const healthResponse = await fetch(`${ELIZAOS_API}/server/health`);
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
@@ -231,7 +231,7 @@ export const SystemStatus: React.FC = () => {
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-[#8b4513]/20">
                 <span className="text-sm text-[#f2d08a]/60">
-                  ElizaOS Version
+                  Agent Runtime Version
                 </span>
                 <span className="text-sm font-mono text-[#e8ebf4]">
                   {version.version || "N/A"}
@@ -269,7 +269,7 @@ export const SystemStatus: React.FC = () => {
                 <span className="text-[#e8ebf4]/80 font-mono">
                   {ELIZAOS_URL}
                 </span>
-                <span className="text-[#f2d08a]/40">ElizaOS API</span>
+                <span className="text-[#f2d08a]/40">Agent Runtime API</span>
               </div>
 
               <div className="flex items-center gap-2 py-1">

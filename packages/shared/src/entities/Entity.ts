@@ -1311,10 +1311,14 @@ export class Entity implements IEntity {
   private validateEntityState(): void {
     // Check node is in scene
     if (!this.node.parent) {
-      console.error(
-        `[Entity] ⚠️  WARNING: Entity ${this.name} node has no parent (not in scene)`,
-      );
-      // Don't throw - might be intentional
+      const scene = this.world.stage?.scene;
+      if (scene) {
+        scene.add(this.node);
+      } else {
+        console.warn(
+          `[Entity] Entity ${this.name} node has no parent and no scene is available yet`,
+        );
+      }
     }
 
     const shouldHaveMesh = this.type === "player" || this.type === "mob";

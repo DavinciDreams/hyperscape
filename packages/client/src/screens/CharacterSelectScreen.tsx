@@ -16,7 +16,7 @@ import {
 import React from "react";
 import { CharacterPreview } from "../game/character/CharacterPreview";
 import { useThemeStore } from "@/ui";
-import { ELIZAOS_API, GAME_WS_URL, CDN_URL } from "@/lib/api-config";
+import { GAME_WS_URL, CDN_URL } from "@/lib/api-config";
 import { apiClient } from "@/lib/api-client";
 import { privyAuthManager } from "@/auth/PrivyAuthManager";
 
@@ -33,7 +33,7 @@ type CharacterTemplate = {
   description: string;
   emoji: string;
   templateUrl: string;
-  // Full ElizaOS character configuration stored as JSON string in database
+  // Full agent character configuration stored as JSON string in database
   templateConfig?: string;
 };
 
@@ -286,8 +286,9 @@ export function CharacterSelectScreen({
   const [characterType, setCharacterType] = React.useState<"human" | "agent">(
     createAgentMode ? "agent" : "human",
   );
-  const [elizaOSAvailable, setElizaOSAvailable] = React.useState(false);
-  const [checkingElizaOS, setCheckingElizaOS] = React.useState(true);
+  const [agentRuntimeAvailable, setAgentRuntimeAvailable] =
+    React.useState(false);
+  const [checkingAgentRuntime, setCheckingAgentRuntime] = React.useState(true);
 
   // Character templates
   const [templates, setTemplates] = React.useState<CharacterTemplate[]>([]);
@@ -312,40 +313,39 @@ export function CharacterSelectScreen({
   const selectedTemplateRef = React.useRef(selectedTemplate);
   const userRef = React.useRef(user);
 
-  // Check if ElizaOS is available with Hyperscape plugin
+  // Check if the Hyperscape agent runtime bridge is available.
   React.useEffect(() => {
-    const checkElizaOS = async () => {
+    const checkAgentRuntime = async () => {
       try {
-        // Check if ElizaOS API is running
-        const response = await fetch(`${ELIZAOS_API}/agents`, {
-          method: "GET",
-        });
+        const result = await apiClient.get<{ success?: boolean }>(
+          "/api/agents",
+        );
 
-        if (!response.ok) {
-          setElizaOSAvailable(false);
-          setCheckingElizaOS(false);
+        if (!result.ok) {
+          setAgentRuntimeAvailable(false);
+          setCheckingAgentRuntime(false);
           return;
         }
 
-        // ElizaOS is running - assume Hyperscape plugin is available
-        // (Plugin availability is verified during agent creation)
-        setElizaOSAvailable(true);
-        console.log("[CharacterSelect] ✅ ElizaOS detected and available");
+        setAgentRuntimeAvailable(true);
+        console.log(
+          "[CharacterSelect] ✅ Agent runtime bridge detected and available",
+        );
       } catch (error) {
         console.log(
-          "[CharacterSelect] ℹ️ ElizaOS not detected (AI agents disabled)",
+          "[CharacterSelect] ℹ️ Agent runtime bridge not detected (AI agents disabled)",
         );
         console.warn(
-          "[CharacterSelect] ElizaOS availability check failed:",
+          "[CharacterSelect] Agent runtime availability check failed:",
           error instanceof Error ? error.message : String(error),
         );
-        setElizaOSAvailable(false);
+        setAgentRuntimeAvailable(false);
       } finally {
-        setCheckingElizaOS(false);
+        setCheckingAgentRuntime(false);
       }
     };
 
-    checkElizaOS();
+    checkAgentRuntime();
   }, []);
 
   // Sync refs with current state (allows message handlers to access latest values)
@@ -358,22 +358,26 @@ export function CharacterSelectScreen({
 
   // Auto-open create form if in createAgent mode
   React.useEffect(() => {
-    if (createAgentMode && !showCreate && !checkingElizaOS) {
-      if (elizaOSAvailable) {
+    if (createAgentMode && !showCreate && !checkingAgentRuntime) {
+      if (agentRuntimeAvailable) {
         setShowCreate(true);
       } else {
-        // ElizaOS not available, show error
         setErrorMessage(
-          "ElizaOS is not running. Please start ElizaOS to create AI agents.",
+          "Agent runtime is not available. Check the Hyades/Safier bridge configuration.",
         );
       }
     }
-  }, [createAgentMode, showCreate, checkingElizaOS, elizaOSAvailable]);
+  }, [
+    createAgentMode,
+    showCreate,
+    checkingAgentRuntime,
+    agentRuntimeAvailable,
+  ]);
 
-  // Fetch character templates when ElizaOS is available
+  // Fetch character templates when the agent runtime bridge is available.
   React.useEffect(() => {
     const fetchTemplates = async () => {
-      if (!elizaOSAvailable) return;
+      if (!agentRuntimeAvailable) return;
 
       setLoadingTemplates(true);
       try {
@@ -400,7 +404,7 @@ export function CharacterSelectScreen({
     };
 
     fetchTemplates();
-  }, [elizaOSAvailable]);
+  }, [agentRuntimeAvailable]);
   const preWsRef = React.useRef<WebSocket | null>(null);
   const pendingActionRef = React.useRef<null | {
     type: "create";
@@ -684,14 +688,14 @@ export function CharacterSelectScreen({
           const currentSelectedTemplate = selectedTemplateRef.current;
           const currentSelectedAvatarIndex = selectedAvatarIndexRef.current;
 
-          // AGENT FLOW: Generate JWT, create ElizaOS agent, redirect to character editor
+          // AGENT FLOW: Generate JWT, create runtime agent, redirect to character editor
           // HUMAN FLOW: Show "Enter World" confirmation screen
           if (currentCharacterType === "agent") {
             console.log(
-              "[CharacterSelect] 🤖 Agent character created, generating JWT and creating ElizaOS agent...",
+              "[CharacterSelect] 🤖 Agent character created, generating JWT and creating runtime agent...",
             );
 
-            // Generate JWT and create ElizaOS agent immediately
+            // Generate JWT and create runtime agent immediately.
             const createAgentAndRedirect = async () => {
               try {
                 // Use user.id from Privy hook instead of localStorage to ensure correct Privy DID
@@ -720,7 +724,7 @@ export function CharacterSelectScreen({
                 const credentials = credentialsResult.data;
                 console.log("[CharacterSelect] ✅ JWT generated successfully");
 
-                // Step 2: Get template config and create ElizaOS agent
+                // Step 2: Get template config and create runtime agent
                 if (!currentSelectedTemplate) {
                   throw new Error("No character template selected");
                 }
@@ -766,8 +770,8 @@ export function CharacterSelectScreen({
                   console.log("[CharacterSelect] ✅ Template fetched from URL");
                 }
 
-                // Remove fields that ElizaOS validation doesn't accept
-                // Migration 0006 has 'modelProvider' but ElizaOS schema rejects it
+                // Remove fields that older agent-runtime validation doesn't accept.
+                // Migration 0006 has 'modelProvider' but legacy schemas reject it.
                 delete templateJson.modelProvider;
 
                 // Merge template with character-specific data
@@ -807,36 +811,23 @@ export function CharacterSelectScreen({
                   `[CharacterSelect] 🤖 Creating ${currentSelectedTemplate.name} agent with character-specific data...`,
                 );
 
-                // Create agent in ElizaOS
-                const createAgentResponse = await fetch(
-                  `${ELIZAOS_API}/agents`,
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ characterJson: characterTemplate }),
-                  },
-                );
+                const createAgentResult = await apiClient.post<{
+                  data?: {
+                    agent?: { id?: string };
+                    character?: { id?: string };
+                  };
+                  error?: string;
+                }>("/api/agents", { characterJson: characterTemplate });
 
-                if (!createAgentResponse.ok) {
-                  const errorData = await createAgentResponse
-                    .json()
-                    .catch((parseError) => {
-                      console.warn(
-                        "[CharacterSelect] Failed to parse agent error response:",
-                        parseError instanceof Error
-                          ? parseError.message
-                          : String(parseError),
-                      );
-                      return {};
-                    });
+                if (!createAgentResult.ok || !createAgentResult.data) {
                   throw new Error(
-                    `Failed to create ElizaOS agent: ${errorData.error || createAgentResponse.statusText}`,
+                    `Failed to create runtime agent: ${createAgentResult.error || createAgentResult.status}`,
                   );
                 }
 
-                const agentResult = await createAgentResponse.json();
+                const agentResult = createAgentResult.data;
                 console.log(
-                  "[CharacterSelect] ✅ ElizaOS agent creation response:",
+                  "[CharacterSelect] ✅ Runtime agent creation response:",
                   agentResult,
                 );
 
@@ -1026,27 +1017,46 @@ export function CharacterSelectScreen({
       const character = characters.find((c) => c.id === id);
 
       if (character?.isAgent) {
-        // AI AGENT: Check if agent exists in ElizaOS
+        // AI AGENT: Check if agent exists in the runtime bridge.
         console.log(
-          "[CharacterSelect] 🤖 AI agent selected, checking if agent exists in ElizaOS...",
+          "[CharacterSelect] 🤖 AI agent selected, checking if agent exists in runtime bridge...",
         );
 
         try {
-          // Try to fetch agent from ElizaOS by character ID
-          const response = await fetch(`${ELIZAOS_API}/agents`);
-          if (response.ok) {
-            const data = await response.json();
+          const result = await apiClient.get<{
+            data?: {
+              agents?: Array<{
+                id?: string;
+                name?: string;
+                settings?: {
+                  secrets?: { HYPERSCAPE_CHARACTER_ID?: string };
+                  characterId?: string;
+                };
+                character?: {
+                  settings?: {
+                    secrets?: { HYPERSCAPE_CHARACTER_ID?: string };
+                    characterId?: string;
+                  };
+                };
+              }>;
+            };
+          }>("/api/agents");
+          if (result.ok && result.data) {
+            const data = result.data;
             const agents = data.data?.agents || [];
 
             // Check if agent exists for this character
-            const agentExists = agents.some(
-              (agent: {
-                name?: string;
-                settings?: { secrets?: { HYPERSCAPE_CHARACTER_ID?: string } };
-              }) =>
+            const agentExists = agents.some((agent) => {
+              const settings = agent.settings ?? agent.character?.settings;
+              return (
+                agent.id === id ||
+                settings?.characterId === id ||
                 agent.settings?.secrets?.HYPERSCAPE_CHARACTER_ID === id ||
-                agent.name === character.name,
-            );
+                agent.character?.settings?.secrets?.HYPERSCAPE_CHARACTER_ID ===
+                  id ||
+                agent.name === character.name
+              );
+            });
 
             if (agentExists) {
               // Agent exists - go to dashboard with agent pre-selected
@@ -1084,9 +1094,8 @@ export function CharacterSelectScreen({
               window.location.href = `/?page=character-editor&characterId=${id}&name=${encodeURIComponent(character.name)}&wallet=${encodeURIComponent(character.wallet || "")}&avatar=${encodeURIComponent(avatarUrl)}`;
             }
           } else {
-            // ElizaOS not responding - show error
             setErrorMessage(
-              "ElizaOS is not responding. Please check if it's running.",
+              "Agent runtime is not responding. Check the Hyades/Safier bridge configuration.",
             );
           }
         } catch (error) {
@@ -1094,7 +1103,9 @@ export function CharacterSelectScreen({
             "[CharacterSelect] ❌ Failed to check agent existence:",
             error,
           );
-          setErrorMessage("Failed to connect to ElizaOS. Please try again.");
+          setErrorMessage(
+            "Failed to connect to agent runtime. Please try again.",
+          );
         }
         return;
       }
@@ -1125,10 +1136,9 @@ export function CharacterSelectScreen({
       return;
     }
 
-    // Prevent agent creation if ElizaOS is not available
-    if (characterType === "agent" && !elizaOSAvailable) {
+    if (characterType === "agent" && !agentRuntimeAvailable) {
       setErrorMessage(
-        "Cannot create AI agent: ElizaOS is not running. Please start ElizaOS first.",
+        "Cannot create AI agent: agent runtime is unavailable. Check Hyades/Safier configuration first.",
       );
       return;
     }
@@ -1169,7 +1179,7 @@ export function CharacterSelectScreen({
     characters.length,
     selectedAvatarIndex,
     characterType,
-    elizaOSAvailable,
+    agentRuntimeAvailable,
   ]);
 
   // State for "entering world" loading
@@ -1345,7 +1355,7 @@ export function CharacterSelectScreen({
                   <div className="flex gap-4">
                     {/* Left Column - Name, Type, Preview, Cancel */}
                     <div
-                      className={`space-y-3 ${characterType === "agent" && elizaOSAvailable ? "w-1/2" : "w-full"}`}
+                      className={`space-y-3 ${characterType === "agent" && agentRuntimeAvailable ? "w-1/2" : "w-full"}`}
                     >
                       {/* Name Input Form */}
                       <form
@@ -1391,7 +1401,7 @@ export function CharacterSelectScreen({
                       </form>
 
                       {/* Character Type Selection */}
-                      {!checkingElizaOS && (
+                      {!checkingAgentRuntime && (
                         <div
                           className="w-full rounded bg-black/60 p-3"
                           style={{
@@ -1441,7 +1451,7 @@ export function CharacterSelectScreen({
                                 </div>
                               </div>
                             </label>
-                            {elizaOSAvailable ? (
+                            {agentRuntimeAvailable ? (
                               <label
                                 className="flex-1 flex items-center gap-2 p-2 rounded-lg border-2 bg-black/40 cursor-pointer transition-all hover:bg-black/60"
                                 style={{
@@ -1584,8 +1594,8 @@ export function CharacterSelectScreen({
 
                     {/* Right Column - Template Selection (only for AI agents) */}
                     {characterType === "agent" &&
-                      elizaOSAvailable &&
-                      !checkingElizaOS && (
+                      agentRuntimeAvailable &&
+                      !checkingAgentRuntime && (
                         <div
                           className="w-1/2 rounded bg-black/60 p-3 h-fit"
                           style={{
