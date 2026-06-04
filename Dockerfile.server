@@ -85,8 +85,14 @@ RUN mkdir -p \
     packages/plugin-hyperscape/node_modules \
     packages/client/node_modules
 
-# Download game asset manifests (bypass CDN reliance on boot).
-RUN rm -rf packages/server/world/assets && bun scripts/ensure-assets.mjs
+# Download game assets with Git LFS binaries. This image serves /game-assets
+# directly, so manifest-only LFS pointer files are not sufficient.
+RUN rm -rf packages/server/world/assets && \
+    HYPERSCAPE_ASSETS_MODE=full bun scripts/ensure-assets.mjs
+
+# Overlay small in-repo runtime assets and production manifest overrides.
+COPY assets/manifests ./packages/server/world/assets/manifests
+COPY packages/server/runtime-assets/textures/terrain-biomes ./packages/server/world/assets/textures/terrain-biomes
 
 # Build workspace packages in dependency order.
 RUN cd /app/packages/physx-js-webidl && bun run build && \
