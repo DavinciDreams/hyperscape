@@ -18,7 +18,7 @@ FROM oven/bun:1.1.38-debian AS builder
 RUN apt-get update && apt-get install -y \
     python3 make g++ pkg-config \
     libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
-    ca-certificates git \
+    ca-certificates git git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

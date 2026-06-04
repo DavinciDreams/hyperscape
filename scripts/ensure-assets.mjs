@@ -97,6 +97,10 @@ Note: In CI/production, manifests are committed to the repo.
 }
 
 function isCI() {
+  if (process.env.HYPERSCAPE_ASSETS_MODE === "full") {
+    return false;
+  }
+
   // Check for common CI/deployment environment variables
   return !!(
     process.env.CI ||
