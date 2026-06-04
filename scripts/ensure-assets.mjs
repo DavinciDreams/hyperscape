@@ -14,7 +14,7 @@
  * for populating it.
  */
 
-import { existsSync, readdirSync, rmSync, mkdirSync } from "fs";
+import { existsSync, readdirSync, rmSync, mkdirSync, readFileSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -47,6 +47,25 @@ function hasFullAssets(dir) {
   const hasWorld = dirHasNonHiddenFiles(path.join(dir, "world"));
   const hasModels = dirHasNonHiddenFiles(path.join(dir, "models"));
   return hasWorld && hasModels;
+}
+
+function isLfsPointer(file) {
+  if (!existsSync(file)) return false;
+  const header = readFileSync(file, { encoding: "utf8", flag: "r" }).slice(
+    0,
+    64,
+  );
+  return header.startsWith("version https://git-lfs.github.com/spec/v1");
+}
+
+function hasHydratedBinaryAssets(dir) {
+  const probes = [
+    path.join(dir, "emotes/emote-idle.glb"),
+    path.join(dir, "models/npcs/shopkeeper/shopkeeper.vrm"),
+    path.join(dir, "models/stations/bank-chest/bank-chest.glb"),
+  ];
+
+  return probes.every((file) => existsSync(file) && !isLfsPointer(file));
 }
 
 function isGitRepo(dir) {
@@ -111,16 +130,22 @@ async function main() {
 
   // In dev: check for full assets (models, world data, etc.)
   if (!ci && hasFullAssets(assetsDir)) {
-    console.log("✅ Assets already present (full asset pack found)");
     // Ensure LFS objects are present if this is a git repo (safe no-op if up-to-date)
     if (isGitRepo(assetsDir)) {
-      try {
-        execSync(`git -C "${assetsDir}" lfs pull`, { stdio: "ignore" });
-      } catch {
-        // Non-fatal: some environments may not have LFS filters configured
+      execSync(`git -C "${assetsDir}" lfs pull`, { stdio: "inherit" });
+      if (hasHydratedBinaryAssets(assetsDir)) {
+        console.log("✅ Assets already present (full asset pack found)");
+        return;
       }
+      console.log("🧹 Removing assets directory with unresolved LFS pointers...");
+      rmSync(assetsDir, { recursive: true, force: true });
+    } else if (hasHydratedBinaryAssets(assetsDir)) {
+      console.log("✅ Assets already present (full asset pack found)");
+      return;
+    } else {
+      console.log("🧹 Removing partial assets directory with LFS pointers...");
+      rmSync(assetsDir, { recursive: true, force: true });
     }
-    return;
   }
 
   // Dev environments need git-lfs for binary assets
@@ -167,6 +192,9 @@ async function main() {
     // Dev: pull LFS binary assets (models, audio, textures)
     if (!ci) {
       execSync(`git -C "${assetsDir}" lfs pull`, { stdio: "inherit" });
+      if (!hasHydratedBinaryAssets(assetsDir)) {
+        throw new Error("Downloaded assets still contain Git LFS pointers");
+      }
     }
 
     console.log("✅ Assets downloaded successfully!");
