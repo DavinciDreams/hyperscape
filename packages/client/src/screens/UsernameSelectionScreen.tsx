@@ -71,6 +71,7 @@ export function UsernameSelectionScreen({
         body: JSON.stringify({
           accountId,
           username: trimmedUsername,
+          wallet: `auth0:${accountId}`,
         }),
       });
 
