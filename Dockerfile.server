@@ -15,6 +15,9 @@ FROM node:22-bookworm-slim AS node-build-tools
 
 FROM oven/bun:1.1.38-debian AS builder
 
+ARG HYPERSCAPE_ASSETS_REPO
+ARG HYPERSCAPE_ASSETS_REF
+
 RUN apt-get update && apt-get install -y \
     python3 make g++ pkg-config \
     libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
@@ -25,6 +28,8 @@ WORKDIR /app
 
 ENV CI=true \
     SKIP_ASSETS=true \
+    HYPERSCAPE_ASSETS_REPO=${HYPERSCAPE_ASSETS_REPO} \
+    HYPERSCAPE_ASSETS_REF=${HYPERSCAPE_ASSETS_REF} \
     HYPERSCAPE_SKIP_BROWSER_INSTALL=true
 
 # Vite 8 requires Node 20.19+ or 22.12+. Bun 1.1.38 reports Node 22.6.0 when
