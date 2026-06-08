@@ -45,6 +45,7 @@ const EXEMPT_PATHS = new Set([
   "/status",
   "/env.js",
   "/api/errors/frontend", // Error reporting should work even during CSRF issues
+  "/api/player/disconnect", // navigator.sendBeacon cannot attach X-CSRF-Token
 ]);
 
 /** Safe HTTP methods that don't need CSRF validation */

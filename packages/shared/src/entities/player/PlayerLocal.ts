@@ -1490,6 +1490,13 @@ export class PlayerLocal extends Entity implements HotReloadable {
       return;
     }
 
+    if (!this.base) {
+      console.warn(
+        `[PlayerLocal] Skipping avatar load for ${avatarUrl}: player base is not mounted`,
+      );
+      return;
+    }
+
     // If we already have the correct avatar loaded, just reuse it
     if (this.avatarUrl === avatarUrl && this._avatar) {
       return;
@@ -1534,6 +1541,13 @@ export class PlayerLocal extends Entity implements HotReloadable {
         "avatar",
         avatarUrl,
       )) as LoadedAvatar;
+
+      if (!this.base) {
+        console.warn(
+          `[PlayerLocal] Skipping avatar mount for ${avatarUrl}: player base was removed during load`,
+        );
+        return;
+      }
 
       if (this._avatar && this._avatar.deactivate) {
         this._avatar.deactivate();

@@ -490,16 +490,14 @@ export function CharacterSelectScreen({
       return;
     }
 
-    // Extra validation: ensure localStorage privyUserId matches Privy hook user.id
-    // This catches cases where stale tokens are in localStorage
+    // The SDK user is authoritative. Local storage can contain an older Auth0
+    // style ID from a previous session, so repair the cache instead of looping.
     if (currentUser.id !== privyUserId) {
       console.warn(
-        `[CharacterSelect] ⚠️ Privy user ID mismatch! Hook: ${currentUser.id}, localStorage: ${privyUserId}`,
+        `[CharacterSelect] ⚠️ Cached Privy user ID mismatch; using hook user. Hook: ${currentUser.id}, cached: ${privyUserId}`,
       );
-      localStorage.removeItem("privy_auth_token");
-      localStorage.removeItem("privy_user_id");
-      setAuthToken("");
-      setPrivyUserId("");
+      localStorage.setItem("privy_user_id", currentUser.id);
+      setPrivyUserId(currentUser.id);
       setWsReady(false);
       setConnectionState("disconnected");
       return;

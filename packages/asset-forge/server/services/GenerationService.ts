@@ -27,6 +27,9 @@ import { chatProviderService } from "./ChatProviderService";
 
 // ==================== Type Definitions ====================
 
+const RETEXTURING_ENABLED =
+  process.env.ASSET_FORGE_ENABLE_RETEXTURING === "true";
+
 type MaterialPresetType = Static<typeof MaterialPreset>;
 
 interface ReferenceImage {
@@ -1179,6 +1182,7 @@ export class GenerationService extends EventEmitter {
 
       // Stage 4: Material Variant Generation (Retexturing)
       if (
+        RETEXTURING_ENABLED &&
         this.getModelProvider(pipeline.config) === "meshy" &&
         pipeline.config.enableRetexturing &&
         pipeline.config.materialPresets?.length! > 0

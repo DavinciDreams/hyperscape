@@ -21,7 +21,9 @@ import path from "path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, "..");
 const assetsDir = path.join(rootDir, "packages/server/world/assets");
-const assetsRepo = "https://github.com/HyperscapeAI/assets.git";
+const assetsRepo =
+  process.env.HYPERSCAPE_ASSETS_REPO || "https://github.com/HyperscapeAI/assets.git";
+const assetsRef = process.env.HYPERSCAPE_ASSETS_REF || "";
 
 // Local CDN URL for development
 const LOCAL_CDN_URL = "http://localhost:8080";
@@ -164,7 +166,7 @@ async function main() {
 
   const label = ci ? "manifests" : "full asset pack (~200MB)";
   console.log(`📥 Downloading game assets (${label})...`);
-  console.log(`   From: ${assetsRepo}`);
+  console.log(`   From: ${assetsRepo}${assetsRef ? ` (${assetsRef})` : ""}`);
   console.log(`   To: ${assetsDir}`);
 
   try {
@@ -181,7 +183,8 @@ async function main() {
     if (!existsSync(assetsDir) || !isGitRepo(assetsDir)) {
       // Clone with depth 1 for faster download
       // CI: GIT_LFS_SKIP_SMUDGE=1 skips binary LFS objects (only need manifests)
-      execSync(`git clone --depth 1 ${assetsRepo} "${assetsDir}"`, {
+      const refArgs = assetsRef ? ` --branch "${assetsRef}"` : "";
+      execSync(`git clone --depth 1${refArgs} ${assetsRepo} "${assetsDir}"`, {
         stdio: "inherit",
         cwd: rootDir,
         env: ci ? { ...process.env, GIT_LFS_SKIP_SMUDGE: "1" } : process.env,
