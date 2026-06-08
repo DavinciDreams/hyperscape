@@ -414,6 +414,7 @@ export function CharacterSelectScreen({
   const reconnectTimeoutRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const wsErrorLogCountRef = React.useRef(0);
   const intentionalDisconnectRef = React.useRef(false);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const [connectionState, setConnectionState] = React.useState<
@@ -506,6 +507,7 @@ export function CharacterSelectScreen({
     // Reset reconnection state for fresh connection
     intentionalDisconnectRef.current = false;
     reconnectAttemptsRef.current = 0;
+    wsErrorLogCountRef.current = 0;
 
     // Create WebSocket connection with reconnection support
     const connect = (): void => {
@@ -513,6 +515,7 @@ export function CharacterSelectScreen({
       if (intentionalDisconnectRef.current) return;
 
       let urlWithAuth = wsUrl;
+      let usingUrlAuth = false;
       if (authToken) {
         const queryParts = [`authToken=${encodeURIComponent(authToken)}`];
         if (privyUserId) {
@@ -520,6 +523,7 @@ export function CharacterSelectScreen({
         }
         const separator = wsUrl.includes("?") ? "&" : "?";
         urlWithAuth = `${wsUrl}${separator}${queryParts.join("&")}`;
+        usingUrlAuth = true;
       }
 
       setConnectionState(
@@ -535,7 +539,16 @@ export function CharacterSelectScreen({
       let authCompleted = false;
 
       // Define named handlers for proper cleanup
-      const handleOpen = (): void => {};
+      const handleOpen = (): void => {
+        if (usingUrlAuth) return;
+
+        ws.send(
+          writePacket("authenticate", {
+            authToken,
+            privyUserId,
+          }),
+        );
+      };
 
       // Handle auth result messages - need to intercept authResult before wsReady
       const handleAuthMessage = (event: MessageEvent): void => {
@@ -547,7 +560,7 @@ export function CharacterSelectScreen({
         const [method, data] = packetResult;
 
         // Handle both authResult (first-message auth) and snapshot (URL-based auth)
-        if (method === "onAuthResult") {
+        if (method === "onAuthResult" || method === "authResult") {
           const result = data as { success: boolean; error?: string };
 
           // Remove auth handler since we're done with auth phase
@@ -576,8 +589,12 @@ export function CharacterSelectScreen({
               "[CharacterSelect] ❌ Authentication failed:",
               result.error,
             );
-            setConnectionState("disconnected");
-            // Let the close handler deal with reconnection
+            intentionalDisconnectRef.current = true;
+            setConnectionState("failed");
+            setErrorMessage(result.error || "Authentication failed");
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.close(4001, "Authentication failed");
+            }
           }
         } else if (method === "onSnapshot") {
           // URL-based auth succeeded - snapshot received directly
@@ -610,7 +627,14 @@ export function CharacterSelectScreen({
       ws.addEventListener("message", handleAuthMessage);
 
       const handleError = (err: Event): void => {
-        console.error("[CharacterSelect] ❌ WebSocket ERROR:", err);
+        wsErrorLogCountRef.current++;
+        if (wsErrorLogCountRef.current <= 3) {
+          console.error("[CharacterSelect] ❌ WebSocket error", {
+            readyState: ws.readyState,
+            attempt: reconnectAttemptsRef.current,
+            type: err.type,
+          });
+        }
       };
 
       const handleClose = (event: CloseEvent): void => {
